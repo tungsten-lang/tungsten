@@ -154,7 +154,7 @@
   if v.is_a?(String)
     return js_string_iter(v)
   m = js_get_method(v, SYM_ITERATOR)
-  it = m == nil ? v : js_call(m, v, [])
+  it = m == nil ? v : js_call(m, v, JS_NO_ARGS)
   js_throw_type("not an iterator") if !it.is_a?(JsObject)
   r = JS_REALM[0]
   return it if js_is_proto_of(r.intrinsic("%IteratorPrototype%"), it)
@@ -193,7 +193,7 @@ js_install(->(r) js_install_iter(r))
   hp.define(SYM_TO_STRING_TAG, "Iterator Helper", ATTR_C)
   wp = JsObject.new(ip, "Object")
   r.set_intrinsic("%WrapForValidIteratorPrototype%", wp)
-  r.method(wp, "next", 0, ->(this, args, nt) js_call(this.src.next_fn, this.src.iterator, []))
+  r.method(wp, "next", 0, ->(this, args, nt) js_call(this.src.next_fn, this.src.iterator, JS_NO_ARGS))
   r.method(wp, "return", 0, ->(this, args, nt) js_iter_helper_return(this))
   # array iterator
   aip = JsObject.new(ip, "Object")

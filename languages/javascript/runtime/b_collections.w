@@ -207,7 +207,7 @@ JS_NAN_KEY = JsNanKey.new
   while e != nil
     mine.push(e.key) if !e.dead
     e = e.next
-  theirs = js_to_list_iter(js_call(keys, other, []))
+  theirs = js_to_list_iter(js_call(keys, other, JS_NO_ARGS))
   out = js_set_new_empty()
   od = out.data
   if op == :union

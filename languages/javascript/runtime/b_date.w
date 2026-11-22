@@ -720,7 +720,7 @@ JS_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
   order.each ->(nm)
     f = this.get(nm, this)
     if f.is_a?(JsObject) && f.callable?
-      v = js_call(f, this, [])
+      v = js_call(f, this, JS_NO_ARGS)
       return v if !v.is_a?(JsObject)
   js_throw_type("Cannot convert object to primitive value")
 

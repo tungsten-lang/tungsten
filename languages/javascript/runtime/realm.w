@@ -185,7 +185,7 @@ JS_INSTALLERS = []
     m = js_get_method(v, SYM_ASYNC_ITERATOR)
   m = js_get_method(v, SYM_ITERATOR) if m == nil
   js_throw_type(js_to_display(v) + " is not iterable") if m == nil
-  it = js_call(m, v, [])
+  it = js_call(m, v, JS_NO_ARGS)
   js_throw_type("Result of the Symbol.iterator method is not an object") if !it.is_a?(JsObject)
   JsIterRecord.new(it, it.get("next"))
 
@@ -203,7 +203,7 @@ JS_INSTALLERS = []
 JS_ITER_DONE = JsIterDone.new
 
 -> js_iter_step(rec)
-  r = js_call(rec.next_fn, rec.iterator, [])
+  r = js_call(rec.next_fn, rec.iterator, JS_NO_ARGS)
   js_throw_type("Iterator result is not an object") if !r.is_a?(JsObject)
   if js_to_boolean(r.get("done"))
     rec.done = true
@@ -214,7 +214,7 @@ JS_ITER_DONE = JsIterDone.new
   return nil if rec.done
   rec.done = true
   ret = js_get_method(rec.iterator, "return")
-  js_call(ret, rec.iterator, []) if ret != nil
+  js_call(ret, rec.iterator, JS_NO_ARGS) if ret != nil
   nil
 
 # Iterate a JS iterable with a Tungsten block; the iterator is closed if the block raises.

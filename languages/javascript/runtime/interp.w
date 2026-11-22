@@ -2760,10 +2760,10 @@ JS_NO_ARGS = []
     rec = js_get_iterator(v)
     rec = js_async_from_sync(rec)
   else
-    it = js_call(m, v, [])
+    it = js_call(m, v, JS_NO_ARGS)
     rec = JsIterRecord.new(it, it.get("next"))
   while true
-    res = js_await(c, js_call(rec.next_fn, rec.iterator, []))
+    res = js_await(c, js_call(rec.next_fn, rec.iterator, JS_NO_ARGS))
     js_throw_type("iterator result is not an object") if !res.is_a?(JsObject)
     break if js_to_boolean(res.get("done"))
     x = res.get("value")
@@ -2774,7 +2774,7 @@ JS_NO_ARGS = []
       cc = js_loop_ctl(r, labels)
       if cc != 0
         ret = js_get_method(rec.iterator, "return")
-        js_await(c, js_call(ret, rec.iterator, [])) if ret != nil
+        js_await(c, js_call(ret, rec.iterator, JS_NO_ARGS)) if ret != nil
         return nil if cc == 1
         return r
   nil
@@ -2790,7 +2790,7 @@ JS_NO_ARGS = []
   JsIterRecord.new(o, nx)
 
 -> js_async_from_sync_next(rec)
-  res = js_call(rec.next_fn, rec.iterator, [])
+  res = js_call(rec.next_fn, rec.iterator, JS_NO_ARGS)
   js_throw_type("iterator result is not an object") if !res.is_a?(JsObject)
   done = js_to_boolean(res.get("done"))
   p = js_promise_resolve_value(res.get("value"))

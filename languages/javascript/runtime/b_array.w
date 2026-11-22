@@ -241,7 +241,7 @@
 -> js_arr_to_string(this)
   o = js_to_object(this)
   j = o.get("join", o)
-  return js_call(j, o, []) if j.is_a?(JsObject) && j.callable?
+  return js_call(j, o, JS_NO_ARGS) if j.is_a?(JsObject) && j.callable?
   js_object_to_string(o)
 
 -> js_arr_push(this, args)

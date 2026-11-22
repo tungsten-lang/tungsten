@@ -371,7 +371,7 @@ SYM_SPLIT = JsSymbol.new("Symbol.split")
     if accessor?(k)
       g = getter_of(k)
       return nil if g == nil
-      return js_call(g, receiver, [])
+      return js_call(g, receiver, JS_NO_ARGS)
     @props[k]
 
   # OrdinarySet: false when the assignment is not allowed (strict callers then throw).
@@ -434,7 +434,7 @@ SYM_SPLIT = JsSymbol.new("Symbol.split")
     e = @priv[pn]
     if e.is_a?(JsPrivAccessor)
       js_throw_type("'#" + pn.description + "' was defined without a getter") if e.getter == nil
-      return js_call(e.getter, self, [])
+      return js_call(e.getter, self, JS_NO_ARGS)
     e
 
   -> priv_set(pn, v)
@@ -1217,7 +1217,7 @@ JS_WS = [9, 10, 11, 12, 13, 32]
   order.each ->(name)
     m = v.get(name)
     if m.is_a?(JsFunction)
-      r = js_call(m, v, [])
+      r = js_call(m, v, JS_NO_ARGS)
       return r if !r.is_a?(JsObject)
   js_throw_type("Cannot convert object to primitive value")
 

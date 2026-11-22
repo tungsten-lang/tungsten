@@ -261,7 +261,7 @@ JS_UNHANDLED = JsTlsList.new
   js_invoke(p, "then", [tf, cf])
 
 -> js_finally_then(c, on_fin, v, thrown)
-  res = js_call(on_fin, nil, [])
+  res = js_call(on_fin, nil, JS_NO_ARGS)
   pr = js_promise_resolve_ctor(c, res)
   r = JS_REALM[0]
   k = thrown ? r.native("", 0, ->(this, args, nt) js_throw_value(v)) : r.native("", 0, ->(this, args, nt) v)

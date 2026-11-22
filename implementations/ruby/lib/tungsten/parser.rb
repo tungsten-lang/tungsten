@@ -71,6 +71,19 @@ module Tungsten
       @lexer_adapter.file = path if @lexer_adapter
     end
 
+    # A trailing `## T` hint runs to the end of its line or group, so in
+    # `(e) ## f64 - ~0.5` the `- ~0.5` is hint text. Reject an operator after
+    # the type name rather than dropping it (E_PARSE_TYPE_HINT_OPERATOR).
+    def validate_type_hint_tail!(hint)
+      text = hint.to_s.split("#", 2).first.to_s.strip
+      type_name, rest = text.split(" ", 2)
+      rest = rest.to_s.strip
+      return if rest.empty? || !"+-*/%&|^<>=~!".include?(rest[0])
+
+      error("'#{rest}' after '## #{type_name}' is part of the type hint, not an operation; " \
+            "parenthesize the cast: '((expr) ## #{type_name}) #{rest}'")
+    end
+
     def error(msg)
       return super unless @lexer_adapter
 
@@ -470,6 +483,7 @@ module Tungsten
           # its compact AST::Assign hint below; every other shape gets an
           # explicit node so the interpreter can apply identical wrapping.
           hint = @token.value
+          validate_type_hint_tail!(hint)
           next_token
           # A hint names a value, never `<<` / `<-` (a print's value is nil):
           # bind it to the last printed expression.
@@ -530,6 +544,7 @@ module Tungsten
             hint = nil
             if @token.type?(:TYPE_HINT)
               hint = @token.value
+              validate_type_hint_tail!(hint)
               next_token
               # Memory hints attach to the RHS allocation node. The Ruby
               # interpreter doesn't implement reuse semantics (heap alloc
@@ -1610,6 +1625,12 @@ module Tungsten
       loc_col = @token.col
       next_token_skip_space
       value = parse_assignment_no_control
+      # Two-argument form `raise ExceptionClass, "message"` builds the
+      # instance (`ExceptionClass.new("message")`), as the compiler's parser does.
+      if @token.type?(:",")
+        next_token_skip_whitespace
+        value = Call.new(value, "new", [parse_assignment_no_control])
+      end
       node = Raise.new(value)
       node.set_location(loc_file, loc_row, loc_col)
       node

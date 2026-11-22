@@ -1176,6 +1176,7 @@
           hint = hint.slice(0, comment_pos)
         hint = hint.strip()
         validate_type_hint_spelling(hint)
+        validate_type_hint_tail(hint)
         advance()
         # Memory hints attach to the RHS allocation node, not to the assign
         # as a type annotation. Lowering reads :reuse_safe from the literal.

@@ -175,7 +175,7 @@
         if fa != nil && fa.size() >= 1 && is_ast_node?(fa[0]) && ast_kind(fa[0]) == :string && ccall_nobox_returns_wvalue?(fa[0].value)
           return :value
         return :i64
-      if node.name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch")
+      if node.name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "clz" "clz32" "ctz" "ctz32" "popcount32" "array_load_u64" "array_store_u64" "prefetch")
         return :i64
       if node.name == "ccall_rawargs"
         return :value
@@ -184,6 +184,10 @@
         arg_types = inferred_arg_types(args, var_types, fn_return_types, infer_maps)
         typed_key = typed_call_signature_key(node.name, arg_types)
         typed_rt = fn_return_types[typed_key]
+        if typed_rt == nil && typed_key != node.name
+          wkey = widened_typed_key(fn_return_types, node.name, arg_types, "__widen_rt_index")
+          if wkey != nil
+            typed_rt = fn_return_types[wkey]
         if typed_rt != nil
           return normalize_type_symbol(typed_rt)
       return fn_return_types[node.name]
@@ -299,6 +303,14 @@
       return :int
     if is_array_type?(recv_t) && node.name == "size"
       return :i64
+    # `a.reduce(0 ## i64) -> ...` keeps its accumulator at the ascribed type
+    # (lower_typed_array_iterator); map! answers the receiver.
+    if is_typed_array_type?(recv_t) && node.name == "reduce" && node.block != nil && node.args != nil && node.args.size() == 1 && is_ast_node?(node.args[0]) && ast_kind(node.args[0]) == :type_ascription
+      rh = normalize_type_symbol(node.args[0].type_hint)
+      if is_machine_int64_type(rh) || rh == :f64
+        return rh
+    if is_typed_array_type?(recv_t) && node.name == "map!" && node.block != nil
+      return recv_t
     if is_typed_array_type?(recv_t) && node.name in ("min" "max" "sum")
       if recv_t in (:typed_array_f64 :typed_array_f32 :typed_array_bf16 :typed_array_f16)
         return :float
@@ -392,6 +404,15 @@
         rv = node.right.value
         if lv >= 0 && lv <= 140737488355327 && rv >= 0 && rv <= 46 && lv <= (140737488355327 >> rv)
           return :i64
+        return nil
+      # Inside a typed definition (declared parameter types), a
+      # machine-typed shift amount (`1 << n` with n an i64 parameter or an
+      # i32[] element) is machine context: the shift runs at 64 bits and
+      # wraps, like `one << n` with `one = 1 ## i64`. Elsewhere, and for an
+      # amount of no machine type, the result keeps promoting to BigInt
+      # (`1 << (64 * i - 1)` at top level).
+      if infer_maps[:typed_def] == true && lt == :i64 && rt != :int && infer_maps[:boxed_mode] != true && (is_machine_int64_type(rt) || is_small_int_type(rt) || rt in (:raw_int :raw_i64 :raw_u64))
+        return :i64
       return nil
     if node.op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 62)
       return nil
@@ -424,10 +445,13 @@
         return :float
       if fcmp_ops[node.op] != nil
         return :bool
-    # int op float → float (promotion)
-    if (lt == :float && is_integer_like_type(rt)) || (is_integer_like_type(lt) && rt == :float)
+    # int op float → float (promotion); a raw f64 operand keeps the result
+    # raw f64 (`x * g` with x f64 and g i64, `a[i] * s` over an i32[]).
+    if ((lt == :float || lt == :f64) && is_integer_like_type(rt)) || (is_integer_like_type(lt) && (rt == :float || rt == :f64))
       float_ops = infer_maps[:float_op_map]
       if float_ops[node.op] != nil
+        if lt == :f64 || rt == :f64
+          return :f64
         return :float
   when :in_test
     return :bool
@@ -452,8 +476,16 @@
     elsifs = node.elsif_clauses
     if (elsifs == nil || elsifs.size() == 0) && then_body != nil && then_body.size() == 1 && else_body != nil && else_body.size() == 1
       tt = infer_type(then_body[0], var_types, fn_return_types, infer_maps)
-      if tt in (:i64 :u64) && infer_type(else_body[0], var_types, fn_return_types, infer_maps) == tt
+      et = infer_type(else_body[0], var_types, fn_return_types, infer_maps)
+      if tt in (:i64 :u64) && et == tt
         return tt
+      # Arms of a 64-bit signed or narrower machine type (an i32[] or u16[]
+      # element against a literal) merge as raw i64: every value of those
+      # types fits, so `v = c ? a[i] : 0` stays a machine local.
+      if (tt == :i64 || (is_small_int_type(tt) && tt != :char)) && (et == :i64 || (is_small_int_type(et) && et != :char)) && (tt == :i64 || et == :i64 || tt != et)
+        return :i64
+      if is_small_int_type(tt) && tt != :char && et == tt
+        return :i64
     return nil
   else
     nil

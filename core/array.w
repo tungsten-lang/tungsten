@@ -16,7 +16,9 @@
 #   arr[i] = val      Set element at index
 #   arr.first         First element, or nil if empty
 #   arr.last          Last element, or nil if empty
-#   arr.slice(i, n)   Sub-array of n elements starting at i
+#   arr.slice(i, n)   Sub-array of n elements starting at i: a view that
+#                     shares storage (writes alias the parent) until it grows;
+#                     push/unshift moves it into its own storage first
 #
 # -- Mutation --
 #
@@ -499,6 +501,26 @@
 
   -> fill(value)
     ccall("w_array_fill", self, value)
+
+  # Yield each index, 0...size; answers self.
+  -> each_index(&block)
+    i = 0
+    n = size()
+    while i < n
+      block.call(i)
+      i += 1
+    self
+
+  # Replace each element with the block's value for it, in place; answers
+  # self. On a typed array with a literal block the compiler lowers this to
+  # a raw index loop.
+  -> map!(&block)
+    i = 0
+    n = size()
+    while i < n
+      self[i] = block.call(self[i])
+      i += 1
+    self
 
   -> slice_view(start, length)
     ccall("w_array_view", self, start, length)

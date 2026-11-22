@@ -759,6 +759,9 @@ INTERPRETER_I64_MAX = 9223372036854775807
     if value_type == "Float" && hint in ("u64" "i64" "u128" "i128" "u32" "i32" "u16" "i16" "u8" "i8")
       value = value.to_i()
       value_type = type(value)
+    # A boolean converts to 1 / 0, as compiled code zero-extends a comparison.
+    if value_type == "Boolean" && hint in ("u64" "i64" "u128" "i128" "u32" "i32" "u16" "i16" "u8" "i8")
+      return value ? 1 : 0
     if !(value_type in ("Int" "BigInt"))
       return value
     if hint == "u64"
@@ -1431,6 +1434,28 @@ INTERPRETER_I64_MAX = 9223372036854775807
 
     # Bit-count intrinsics (compiled: llvm.ctpop / llvm.cttz). Plain integer
     # arithmetic keeps the tree-walker exact over the full u64 domain.
+    if name in ("clz" "clz32" "ctz" "ctz32" "popcount32") && args.size() == 1
+      width = name in ("clz32" "ctz32" "popcount32") ? 32 : 64
+      w = args[0] & (width == 32 ? 4294967295 : 18446744073709551615)
+      if name == "popcount32"
+        c = 0
+        while w != 0
+          w = w & (w - 1)
+          c += 1
+        return c
+      if w == 0
+        return width
+      c = 0
+      if name in ("clz" "clz32")
+        top = width - 1
+        while ((w >> top) & 1) == 0
+          w = w << 1
+          c += 1
+        return c
+      while (w & 1) == 0
+        w = w >> 1
+        c += 1
+      return c
     if name in ("popcount" "cttz") && args.size() == 1
       w = args[0] & 18446744073709551615
       if name == "popcount"

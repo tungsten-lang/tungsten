@@ -281,6 +281,7 @@ incremental_core_cache_state = {
   # tuning variables between calls. Include every switch that can affect
   # lowered Core WIRE, its post-pass shape, or its stable symbol names.
   lowering_env = [
+    "TUNGSTEN_BOUNDS_CHECKS",
     "TUNGSTEN_PARAM_INFER",
     "TUNGSTEN_FREE",
     "TUNGSTEN_DEMOTE_TOP_LEVEL",

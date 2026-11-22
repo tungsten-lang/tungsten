@@ -38,7 +38,7 @@
     f[:fp_flags] = fp_flags
     if attr_groups != nil && base_attr_text != nil && f[:embedded_ll] == nil && f[:embedded_asm] == nil
       function_attr_group_id(attr_groups, base_attr_text)
-      attr_text = base_attr_text
+      attr_text = debug_frame_leaf_attr_text(f, base_attr_text)
       if f[:noinline] == true
         attr_text = attr_text + " noinline"
       elsif f[:is_toplevel] == true && f[:blocks] != nil && f[:blocks].size() > 2000

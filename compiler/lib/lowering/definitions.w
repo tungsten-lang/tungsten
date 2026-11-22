@@ -431,6 +431,10 @@
 # is conservative (clearly-int exprs only), so this only marks definitely-int locals.
 # With fn_return_types, a local bound to a typed-signature call whose declared or
 # inferred return is a 64-bit machine int counts too (see typed_call_machine_int_type).
+# The raw-ABI prepass only runs for typed definitions, so shift trees over
+# machine-int leaves count as int-shaped there, as in the promotion walk.
+TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
+
 -> enrich_int_locals(body, base, fn_return_types = nil)
   m = {}
   ks = base.keys()
@@ -455,9 +459,14 @@
   args = node.args
   if args == nil || args.size() == 0
     return nil
-  typed_key = typed_call_signature_key(node.name, inferred_arg_types(args, var_types, fn_return_types, lowering_infer_maps))
+  arg_types = inferred_arg_types(args, var_types, fn_return_types, lowering_infer_maps)
+  typed_key = typed_call_signature_key(node.name, arg_types)
   if typed_key == node.name
     return nil
+  if fn_return_types[typed_key] == nil
+    wkey = widened_typed_key(fn_return_types, node.name, arg_types, "__widen_rt_index")
+    if wkey != nil
+      typed_key = wkey
   rt = normalize_type_symbol(fn_return_types[typed_key])
   if is_machine_int64_type(rt)
     return rt
@@ -484,7 +493,7 @@
           # and the callee to fall back to the boxed ABI.
           if hint_type != nil && is_raw_int_storage_type(hint_type)
             m[name] = hint_type
-          elsif int_shaped_node?(n.value, m)
+          elsif int_shaped_node?(n.value, m, TYPED_INT_SHAPE_CTX)
             m[name] = :i64
           else
             call_rt = typed_call_machine_int_type(n.value, m, fn_return_types)
@@ -931,7 +940,10 @@
           rt = normalize_type_symbol(node.return_type)
         else
           rt = infer_fn_return_type(node, lowering_infer_maps)
+        saved_prepass_typed_def = lowering_infer_maps[:typed_def]
+        lowering_infer_maps[:typed_def] = node.param_types != nil
         flags = definition_raw_abi_flags(node, true, mod[:fn_return_types], rt, child_var_types)
+        lowering_infer_maps[:typed_def] = saved_prepass_typed_def
         if mod[:raw_abi_flags_memo] == nil
           mod[:raw_abi_flags_memo] = {}
         mod[:raw_abi_flags_memo][node] = [rt, flags]
@@ -1048,6 +1060,10 @@
     new_fn[:exit_label] = next_label(new_fn, "blockret.exit")
 
   # Create child context
+  # Typed definitions (declared parameter types) opt into machine semantics
+  # for literal-based shifts (`1 << n`, infer_type's LSHIFT arm).
+  saved_typed_def = lowering_infer_maps[:typed_def]
+  lowering_infer_maps[:typed_def] = node.param_types != nil
   child_var_types = {}
   child_ctx = {
     mod: mod,
@@ -1350,6 +1366,7 @@
     emit_wire_load_i64(new_fn, new_fn[:result_slot], final_reg)
     emit_wire_ret_i64(new_fn, 0, final_reg)
 
+  lowering_infer_maps[:typed_def] = saved_typed_def
   finalize_function(new_fn)
   nil
 
@@ -2343,6 +2360,8 @@
     new_fn[:exit_label] = next_label(new_fn, "blockret.exit")
 
   # Child context with class_name set
+  saved_typed_def = lowering_infer_maps[:typed_def]
+  lowering_infer_maps[:typed_def] = node.param_types != nil
   child_var_types = {}
   # Seed __self type for specialized variants. Drives downstream
   # dispatch (e.g. self[i] → :typed_array_get_inline at the variant's ebits).
@@ -2608,6 +2627,7 @@
     emit_wire_load_i64(new_fn, new_fn[:result_slot], final_reg)
     emit_wire_ret_i64(new_fn, 0, final_reg)
 
+  lowering_infer_maps[:typed_def] = saved_typed_def
   finalize_function(new_fn)
   if raw_abi && wrapper_fn_name != nil && wrapper_fn_name != fn_name
     lower_static_method_boxed_wrapper(ctx, class_name, node, fn_name, wrapper_fn_name, child_var_types)

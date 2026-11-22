@@ -143,7 +143,7 @@
     # exemption here, so operands inside an escape position (e.g. `return
     # wvalue_from_bits(tag | x)`) are not force-boxed. wvalue_bits is NOT
     # exempt: its argument is a boxed WValue read.
-    if node.receiver == nil && node.name in ("ccall_nobox" "ccall_rawargs" "wvalue_from_bits" "raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch" "mulhi" "addcarry" "subborrow")
+    if node.receiver == nil && node.name in ("ccall_nobox" "ccall_rawargs" "wvalue_from_bits" "raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "clz" "clz32" "ctz" "ctz32" "popcount32" "array_load_u64" "array_store_u64" "prefetch" "mulhi" "addcarry" "subborrow")
       return nil
     mark_subtree_escape(node.receiver, records)
     mark_subtree_escape(node.args, records)
@@ -630,6 +630,10 @@
     if declared_types != nil && nargs_list != nil && nargs_list.size() > 0 && mod[:known_calls] != nil && mod[:raw_callable_fns] != nil && !pi_args_have_kwargs?(nargs_list)
       arg_types = inferred_arg_types(nargs_list, declared_types, mod[:fn_return_types], lowering_infer_maps)
       typed_key = typed_call_signature_key(node_name, arg_types)
+      if typed_key != node_name && mod[:known_calls][typed_key] == nil
+        wkey = widened_typed_key(mod[:known_calls], node_name, arg_types, "__widen_call_index")
+        if wkey != nil
+          typed_key = wkey
       if typed_key == node_name || mod[:known_calls][typed_key] == nil
         # lower_call's fallback: an argument of unknown type binds the call
         # to the name's only typed overload of this arity.
@@ -749,7 +753,7 @@
       return true
     # popcount/cttz/array_load_u64/array_store_u64/prefetch return raw i64
     # (calls.w); a local bound to one stays in a raw slot.
-    if name in ("popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
+    if name in ("popcount" "cttz" "clz" "clz32" "ctz" "ctz32" "popcount32" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
       return true
     # mulhi(a,b) returns a raw u64 (high half of a 64x64 product). Mark it
     # int-shaped so a loop-reassigned local `phi = mulhi(...)` stays unboxed and
@@ -764,6 +768,11 @@
       recv = node.receiver
       if ast_kind(recv) == :var && is_typed_array_type?(declared_types[recv.name])
         return int_shaped_node?(node.args[0], declared_types, mod)
+    # `n = a.size` on a typed array is a raw machine int (infer_type's size
+    # rule), so a manual `while i < n` loop compares raw instead of boxing n.
+    if name in ("size" "length") && node.receiver != nil && is_ast_node?(node.receiver) && ast_kind(node.receiver) == :var && (node.args == nil || node.args.size() == 0) && node.block == nil
+      if is_typed_array_type?(declared_types[node.receiver.name])
+        return true
   when :binary_op
     op = node.op
     if op == :LSHIFT
@@ -773,6 +782,11 @@
           rv = node.right.value
           if lv >= 0 && lv <= 140737488355327 && rv >= 0 && rv <= 46 && lv <= (140737488355327 >> rv)
             return true
+          return false
+        # `1 << n` in typed code: a machine-int amount makes it a machine
+        # shift (infer_type's LSHIFT arm), so the local stays raw.
+        if mod != nil && mod[:promote_typed_context] == true && lowering_infer_maps[:typed_def] == true && node.left.format != :dec_big
+          return int_shaped_node?(node.right, declared_types, mod)
         return false
       if node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 46)
         return false
@@ -1053,7 +1067,7 @@
     # used as the pointer or index does NOT escape. Without this, a parser's
     # `data`/`pos` locals un-promoted to boxed, then ensure_raw_machine_int
     # ran w_to_i64 on a raw pointer and died ("expected int, got object").
-    is_raw_load = name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
+    is_raw_load = name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "clz" "clz32" "ctz" "ctz32" "popcount32" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
     args_are_values = is_index_call || is_raw_ccall || is_raw_load || ((name == "mulhi" || name == "addcarry" || name == "subborrow") && node.receiver == nil && node.args != nil && node.args.size() == 2)
     # Receiver of any method call needs WValue at the dispatch boundary,
     # except for 0-arg integer predicates/conversions that lower directly on

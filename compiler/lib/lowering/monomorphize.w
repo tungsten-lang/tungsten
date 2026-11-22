@@ -331,8 +331,14 @@
 
 # Every reference to var_name in the scope must be either its single defining
 # assignment or the receiver of a frozen-safe call ([], []=, size, length).
--> typed_array_var_stack_safe?(scope_body, var_name)
+-> typed_array_var_stack_safe?(scope_body, var_name, top_level = false)
   st = {ok: true, assigns: 0, any_recv_call: false}
+  # A top-level local is a global that functions and methods read too (`TA =
+  # i32[8]` read as `TA ## i32[]` inside a typed fn). Those readers see the
+  # typed-array layout, not the SmallArray one, so any mention inside a nested
+  # definition is an escape.
+  if top_level
+    st[:see_defs] = true
   walk_escape_uses(scope_body, var_name, st)
   st[:ok] && st[:assigns] == 1
 
@@ -383,6 +389,20 @@
     return nil
   # A nested definition opens its own scope and cannot see this frame's locals.
   if k == :method_def || k == :fn_def
+    if st[:see_defs] != true
+      return nil
+    saved_in_def = st[:in_block]
+    st[:in_block] = true
+    dkid = kind_id_table[k]
+    dkeys = dkid == nil ? nil : slab_keys_table[dkid]
+    if dkeys == nil
+      st[:ok] = false
+      return nil
+    dj = 0
+    while dj < dkeys.size()
+      walk_escape_uses(ast_get(node, dkeys[dj]), var_name, st)
+      dj += 1
+    st[:in_block] = saved_in_def
     return nil
   if k == :assign
     tgt = node.target
@@ -439,7 +459,7 @@
   nil
 
 # Entry: process a scope's statement list, then recurse into nested fn bodies.
--> mark_stackable_typed_arrays(scope_body, skip_core = false, skip_paths = nil)
+-> mark_stackable_typed_arrays(scope_body, skip_core = false, skip_paths = nil, top_level = true)
   if scope_body == nil
     return nil
   if type(scope_body) != "Array"
@@ -450,12 +470,12 @@
   ci = 0
   while ci < cands.size()
     c = cands[ci]
-    if typed_array_var_stack_safe?(scope_body, c[:var])
+    if typed_array_var_stack_safe?(scope_body, c[:var], top_level)
       c[:node].stack_safe = true
     ci += 1
   si = 0
   while si < nested_scopes.size()
-    mark_stackable_typed_arrays(nested_scopes[si], false, nil)
+    mark_stackable_typed_arrays(nested_scopes[si], false, nil, false)
     si += 1
   nil
 
@@ -508,6 +528,7 @@
       record_ivar_param_types(method_ast, cname, ivar_types, ivar_conflicts)
       walk_ivar_assigns(method_ast.body, cname, ivar_types, ivar_conflicts, mod)
     ki += 1
+  propagate_accessor_ivar_types(mod, ivar_types, ivar_conflicts, skip_core_methods)
   # Conflicted ivars get nil-marked so the dispatch lookup bails cleanly.
   conflict_keys = ivar_conflicts.keys()
   ck = 0
@@ -760,6 +781,126 @@
             ivar_types[cname][iname] = itype
     pi += 1
 
+# `@b = h.arr`, where `arr` is a field accessor (`ro`/`rw :arr`) that only one
+# class in the program defines and whose ivar has a typed-array type, gives
+# @b that type too. Any method of that name on another class (Core included)
+# leaves the receiver ambiguous, so the ivar stays untyped. Fills only ivars
+# the first pass left untyped and unconflicted.
+-> propagate_accessor_ivar_types(mod, ivar_types, ivar_conflicts, skip_core_methods)
+  owners = {}
+  ast_keys = mod[:class_method_asts].keys()
+  ki = 0
+  while ki < ast_keys.size()
+    key = ast_keys[ki]
+    dot_idx = key.index(".")
+    if dot_idx != nil
+      cname = key.slice(0, dot_idx)
+      mname = key.slice(dot_idx + 1, key.size() - dot_idx - 1)
+      slash = mname.index("/")
+      if slash != nil
+        mname = mname.slice(0, slash)
+      note_accessor_owner(owners, mname, cname)
+    ki += 1
+  ckeys = mod[:known_classes].keys()
+  ci = 0
+  while ci < ckeys.size()
+    cn = ckeys[ci]
+    cnode = mod[:known_classes][cn]
+    if cnode != nil && is_ast_node?(cnode) && ast_kind(cnode) == :class_def && cnode.body != nil
+      bi = 0
+      while bi < cnode.body.size()
+        st = cnode.body[bi]
+        if is_ast_node?(st) && ast_kind(st) == :call && st.receiver == nil && (st.name == "ro" || st.name == "rw") && st.args != nil
+          ai = 0
+          while ai < st.args.size()
+            arg = st.args[ai]
+            if is_ast_node?(arg) && ast_kind(arg) == :symbol
+              note_accessor_owner(owners, arg.value.to_s(), cn)
+              # A typed-array field read through the accessor
+              owners["@field:" + arg.value.to_s()] = cn
+            ai += 1
+        bi += 1
+    ci += 1
+  untyped = mod[:ivar_untyped_writes]
+  if untyped == nil
+    untyped = {}
+  # A target ivar qualifies only if all of its writes are accessor reads of
+  # one typed field: count the writes per ivar, then the resolvable ones.
+  resolved = {}
+  ki = 0
+  while ki < ast_keys.size()
+    key = ast_keys[ki]
+    dot_idx = key.index(".")
+    cname = key.slice(0, dot_idx)
+    method_ast = mod[:class_method_asts][key]
+    if ivar_types[cname] != nil && !(skip_core_methods && definition_from_core?(method_ast))
+      walk_accessor_ivar_assigns(method_ast.body, cname, ivar_types, ivar_conflicts, owners, untyped, resolved)
+    ki += 1
+  rk = resolved.keys()
+  ri = 0
+  while ri < rk.size()
+    entry = resolved[rk[ri]]
+    if entry != :conflict
+      ivar_types[entry[0]][entry[1]] = entry[2]
+      if env("TUNGSTEN_DEBUG_IVAR_PROP") == "1"
+        << "ivar-prop " + entry[0] + " " + entry[1] + " " + entry[2].to_s()
+    ri += 1
+  nil
+
+-> note_accessor_owner(owners, mname, cname)
+  prev = owners[mname]
+  if prev == nil
+    owners[mname] = cname
+  elsif prev != cname
+    owners[mname] = :ambiguous
+  nil
+
+-> walk_accessor_ivar_assigns(node, cname, ivar_types, ivar_conflicts, owners, untyped, resolved)
+  if node == nil
+    return nil
+  if is_ast_node?(node)
+    if ast_kind(node) == :assign && node.target != nil && ast_kind(node.target) == :ivar && node.type_hint == nil
+      iname = node.target.name
+      v = node.value
+      rkey = cname + "#" + iname
+      if ivar_types[cname][iname] == nil && ivar_conflicts[cname][iname] != true
+        ft = nil
+        if v != nil && is_ast_node?(v) && ast_kind(v) == :call && v.receiver != nil && v.block == nil && (v.args == nil || v.args.size() == 0)
+          owner = owners[v.name]
+          fkey = owner == nil || owner == :ambiguous ? nil : owner + "#@" + v.name
+          if fkey != nil && owners["@field:" + v.name] == owner && ivar_types[owner] != nil && untyped[fkey] != true && ivar_conflicts[owner]["@" + v.name] != true
+            ft = ivar_types[owner]["@" + v.name]
+            if ft != nil && !is_typed_array_type?(ft)
+              ft = nil
+        prev = resolved[rkey]
+        if ft == nil
+          resolved[rkey] = :conflict
+        elsif prev == nil
+          resolved[rkey] = [cname, iname, ft]
+        elsif prev != :conflict && prev[2] != ft
+          resolved[rkey] = :conflict
+    children = ast_children(node)
+    ci = 0
+    while ci < children.size()
+      walk_accessor_ivar_assigns(children[ci], cname, ivar_types, ivar_conflicts, owners, untyped, resolved)
+      ci += 1
+  elsif type(node) == "Array"
+    ai = 0
+    while ai < node.size()
+      walk_accessor_ivar_assigns(node[ai], cname, ivar_types, ivar_conflicts, owners, untyped, resolved)
+      ai += 1
+  nil
+
+# `@buf = h.data ## i32[]` states the ivar's type: element reads in the
+# class's methods take the inline typed-array path, as a hinted local does.
+-> ivar_assign_hint_type(hint)
+  if hint == nil
+    return nil
+  etype = array_hint_element_type(hint)
+  if etype != nil
+    return typed_array_etype_to_sym(etype)
+  nil
+
 -> walk_ivar_assigns(node, cname, ivar_types, ivar_conflicts, mod)
   if node == nil
     return nil
@@ -767,7 +908,17 @@
   if is_ast_node?(node)
     if ast_kind(node) == :assign && node.target != nil && ast_kind(node.target) == :ivar
       iname = node.target.name
-      itype = infer_type(node.value, {}, mod[:fn_return_types], lowering_infer_maps)
+      itype = ivar_assign_hint_type(node.type_hint)
+      if itype == nil
+        itype = infer_type(node.value, {}, mod[:fn_return_types], lowering_infer_maps)
+      if itype == nil
+        # Remember writes of unknown type: accessor propagation only trusts
+        # an ivar every write of which is typed.
+        uw = mod[:ivar_untyped_writes]
+        if uw == nil
+          uw = {}
+          mod[:ivar_untyped_writes] = uw
+        uw[cname + "#" + iname] = true
       if itype != nil
         existing = ivar_types[cname][iname]
         if existing != nil && existing != itype

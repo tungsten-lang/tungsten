@@ -14,7 +14,6 @@
 + Object < BlankSlate
   -> ARGF
   -> ARGV
-  -> ENV
   -> STDERR
   -> STDIN
   -> STDOUT

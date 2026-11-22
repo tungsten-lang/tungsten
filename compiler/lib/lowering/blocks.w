@@ -611,6 +611,33 @@
 # alloca to a heap cell (w_closure_cell_new), so the by-reference capture
 # pointer stays valid after the creating frame returns. Trailing iterator
 # blocks keep the plain alloca fast path.
+# Ids minted while lowering a Core function body (a method or function
+# defined in core/, or a block nested in one) come from mod[:next_core_block]
+# and blocks there are named __cblock_N; everything else (Core top-level
+# startup, user code) uses mod[:next_block] and __block_N. The incremental
+# Core cache stores the Core bodies and relowers only the startup, so with
+# one shared counter a warm build handed the startup and user code ids the
+# cached bodies already used: two different closures named __block_N were
+# folded into one function by content hashing and called each other's
+# bodies. Separate counters make the startup's ids independent of whether
+# Core bodies were lowered, and keep them apart from the cached ones.
+-> lowering_in_core_body?(wfn)
+  return false if wfn == nil
+  flag = wfn[:core_body]
+  return flag if flag != nil
+  wfn[:is_toplevel] != true && core_source_path?(wfn[:source_path])
+
+-> lowering_next_block_id(ctx, n)
+  mod = ctx[:mod]
+  if lowering_in_core_body?(ctx[:func])
+    id = mod[:next_core_block]
+    id = 0 if id == nil
+    mod[:next_core_block] = id + n
+    return id
+  id = mod[:next_block]
+  mod[:next_block] = id + n
+  id
+
 -> lower_block_closure(ctx, block, expected_param_types = nil, escaping = false)
   mod = ctx[:mod]
   wfn = ctx[:func]
@@ -632,10 +659,11 @@
     if has_self
       captures.push("__self")
 
-  # Generate block function name
-  block_id = mod[:next_block]
-  mod[:next_block] = block_id + 1
-  fn_name = "__block_" + block_id.to_s()
+  # Generate block function name. Blocks inside Core function bodies draw
+  # from their own counter and namespace (see lowering_next_block_id).
+  core_body = lowering_in_core_body?(wfn)
+  block_id = lowering_next_block_id(ctx, 1)
+  fn_name = (core_body ? "__cblock_" : "__block_") + block_id.to_s()
 
   # Block params — if none declared, auto-bind free variables by order of appearance.
   # `@N` positional refs are NOT block params: they always denote the enclosing
@@ -670,6 +698,7 @@
   new_fn[:source_method] = ctx[:method_name]
   new_fn[:source_class] = ctx[:class_name]
   new_fn[:source_path] = ctx[:source_path]
+  new_fn[:core_body] = core_body
   new_fn[:source_line] = block.line
   mod[:functions].push(new_fn)
 

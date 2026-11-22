@@ -575,7 +575,7 @@ incremental_library_cache_state = {
   nil
 
 -> incremental_library_cache_counter_fields
-  [:next_bigint_literal, :next_block, :next_ic, :next_call_site, :next_reuse_site, :next_fuse_site, :next_inline_block_id, :next_custom_unit_id]
+  [:next_bigint_literal, :next_block, :next_core_block, :next_ic, :next_call_site, :next_reuse_site, :next_fuse_site, :next_inline_block_id, :next_custom_unit_id]
 
 -> incremental_library_cache_capture_boundary(mod)
   counters = {}

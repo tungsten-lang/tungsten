@@ -275,7 +275,7 @@
     else
       sb.append(js_get_substitution(p, s, upos, [], nil, rs))
     st = j + p.size
-    searched = p.size == 0 ? st + 1 : st
+    searched = p.size == 0 ? st + js_utf8_len_at(s, st) : st
     break if !all
     break if searched > s.size
   sb.append(s.slice(st, s.size - st)) if st <= s.size
@@ -421,18 +421,82 @@
       i += 1
   js_from_units(out)
 
--> js_string_ctor(args, nt)
-  v = args.size == 0 ? "" : args[0]
-  s = (nt == nil && v.is_a?(JsSymbol)) ? v.to_s : js_to_string(v)
-  return s if nt == nil
-  o = JsObject.new(JS_REALM[0].proto_from(nt, "String"), "String")
+# String exotic objects (§10.4.3): new String(s) / Object(s) expose "0"…len-1 as
+# non-writable, enumerable, non-configurable own properties ahead of "length".
++ JsStringObj < JsObject
+  -> str_index(k)
+    return nil if !k.is_a?(String) || k.size == 0 || k.byte_at(0) < 48 || k.byte_at(0) > 57 || !js_array_index?(k)
+    i = k.to_i
+    i < js_len(@internal) ? i : nil
+
+  -> has_own?(k)
+    return true if str_index(k) != nil
+    super(k)
+
+  -> has_own_slot?(k)
+    has_own?(k)
+
+  -> own_value(k, receiver)
+    i = str_index(k)
+    return js_char_at(@internal, i) if i != nil
+    super(k, receiver)
+
+  -> get(k, receiver = nil)
+    i = str_index(k)
+    return js_char_at(@internal, i) if i != nil
+    ord_get(k, receiver)
+
+  -> set(k, v, receiver = nil)
+    return false if str_index(k) != nil && (receiver == nil || receiver == self)
+    ord_set(k, v, receiver)
+
+  -> has_property?(k)
+    return true if str_index(k) != nil
+    super(k)
+
+  -> get_own_property(k)
+    i = str_index(k)
+    return JsPropDesc.data(js_char_at(@internal, i), ATTR_E) if i != nil
+    super(k)
+
+  -> define_own_property(k, desc)
+    i = str_index(k)
+    if i != nil
+      # only a compatible redefinition succeeds (ValidateAndApplyPropertyDescriptor)
+      return false if desc.configurable == true || desc.enumerable == false || desc.accessor? || desc.writable == true
+      return false if desc.has_value && !js_same_value(desc.value, js_char_at(@internal, i))
+      return true
+    super(k, desc)
+
+  -> delete_own(k)
+    return false if str_index(k) != nil
+    super(k)
+
+  -> own_keys
+    out = []
+    n = js_len(@internal)
+    i = 0
+    while i < n
+      out.push(i.to_s)
+      i += 1
+    super().each ->(k) out.push(k)
+    out
+
+-> js_string_object(proto, s)
+  o = JsStringObj.new(proto, "String")
   o.internal = s
   o.define("length", js_len(s) + ~0.0, 0)
   o
 
+-> js_string_ctor(args, nt)
+  v = args.size == 0 ? "" : args[0]
+  s = (nt == nil && v.is_a?(JsSymbol)) ? v.to_s : js_to_string(v)
+  return s if nt == nil
+  js_string_object(JS_REALM[0].proto_from(nt, "String"), s)
+
 -> js_str_concat(this, args)
   s = js_this_str(this, "concat")
-  args.each ->(a) s = s + js_to_string(a)
+  args.each ->(a) s = js_str_cat(s, js_to_string(a))
   s
 
 -> js_str_match(this, rx, all)
@@ -538,3 +602,12 @@ js_install(->(r) js_install_string(r))
   s = js_this_str(this, "indexOf")
   sub = js_to_string(js_arg(args, 0))
   js_str_index_of(s, sub, js_clamp_int(js_arg(args, 1), 0, js_len(s), 0)) + ~0.0
+
+# Bytes in the UTF-8 sequence starting at byte i (1 past the end).
+-> js_utf8_len_at(s, i)
+  return 1 if i >= s.size
+  b = s.byte_at(i)
+  return 1 if b < 128
+  return 2 if b < 224
+  return 3 if b < 240
+  4

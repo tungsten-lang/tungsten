@@ -43,7 +43,7 @@ CONTINUE_PLAIN = JsCompletion.new(C_CONTINUE, nil, nil)
 
 # One compiled function: everything the interpreter needs to activate it.
 + JsCode
-  rw :name, :length, :nslots, :binder, :body, :strict, :kind, :expr_body, :src, :pos, :fin, :is_class, :derived, :args_slot, :method, :lazy_kind, :self_slot, :url, :builtin
+  rw :name, :length, :nslots, :binder, :body, :strict, :kind, :expr_body, :src, :pos, :fin, :is_class, :derived, :args_slot, :method, :lazy_kind, :self_slot, :url, :builtin, :pending, :native, :unit, :aot_src, :calls, :aot_map, :aot_lex, :aot_hoist
 
   -> new(@name)
     @length = 0
@@ -62,6 +62,14 @@ CONTINUE_PLAIN = JsCompletion.new(C_CONTINUE, nil, nil)
     @method = false
     @lazy_kind = 0
     @self_slot = -1
+    @pending = nil
+    @native = nil
+    @unit = nil
+    @aot_src = nil
+    @calls = 0
+    @aot_map = nil
+    @aot_lex = nil
+    @aot_hoist = nil
 
   -> arrow?
     @kind == :arrow || @kind == :async_arrow
@@ -77,14 +85,16 @@ CONTINUE_PLAIN = JsCompletion.new(C_CONTINUE, nil, nil)
     @items = []
     @privs = []
 
-JS_DEPTH = [0]
-JS_STACK = Array.new(1000, nil)
+# per thread (blade/js/tls)
+JS_DEPTH = JsTlsCell.new(1, 0)
+JS_STACK = JsTlsCell.new(1000, nil)
 # The source position of the call (or `new`) each frame is executing; [0] is global code.
-JS_POS = Array.new(1001, -1)
+JS_POS = JsTlsCell.new(1001, -1)
 # The running top-level script: [src, url].
-JS_TOP = ["", ""]
-JS_MAX_DEPTH = [900]
-JS_LAST_ENV = [nil]
+JS_TOP = JsTlsCell.new(2, "")
+# Interpreted frames allowed (main stack and 16 MB goroutine stacks both hold this many).
+JS_MAX_DEPTH = [6000]
+JS_LAST_ENV = JsTlsCell.new(1, nil)
 
 # ---- frames ----
 
@@ -306,6 +316,7 @@ JS_WATCH = [Env.get("BLADE_JS_WATCH", "")]
 
 # Allocate and fill a function frame, bind parameters; returns the frame.
 -> js_activation(f, code, this, args, nt)
+  js_code_ready(code) if code.pending != nil
   env = Array.new(code.nslots, nil)
   env[0] = f.scope
   if !code.arrow?
@@ -329,13 +340,25 @@ JS_WATCH = [Env.get("BLADE_JS_WATCH", "")]
     JS_STACK[d] = code
     JS_POS[d] = -1
   js_watchdog() if ((JS_TICKS[0] += 1) & 4095) == 0
+  if code.unit != nil
+    if code.native != nil && nt == nil
+      JS_DEPTH[0] = d - 1
+      return js_native_exec(f, code, this, args)
+    code.calls += 1
+    js_aot_note_hot(code) if code.calls == JS_AOT_HOT[0]
   env = js_activation(f, code, this, args, nt)
-  if JS_FN_PROFILE[0]
-    t0 = clock_ms()
-    r = code.body.call(env)
-    js_fn_profile_add(code, clock_ms() - t0)
-  else
-    r = code.body.call(env)
+  r = nil
+  begin
+    if JS_FN_PROFILE[0]
+      t0 = clock_ms()
+      r = code.body.call(env)
+      js_fn_profile_add(code, clock_ms() - t0)
+    else
+      r = code.body.call(env)
+  rescue e
+    # a throw unwinds this frame too (catchers anywhere see the right depth)
+    JS_DEPTH[0] = d - 1
+    raise e
   JS_DEPTH[0] = d - 1
   JS_LAST_ENV[0] = env
   return r if code.expr_body
@@ -465,15 +488,94 @@ JS_DEBUG = [false]
     a.define("callee", callee, ATTR_W + ATTR_C)
   a
 
+# Mapped arguments (§10.4.4): a sloppy function with simple parameters aliases arguments[i]
+# and its i-th parameter both ways while the index stays mapped.
++ JsArgumentsObj < JsObject
+  rw :env, :map
+
+  -> slot_for(k)
+    return nil if !k.is_a?(String) || @map == nil
+    s = @map[k]
+    s
+
+  -> unmap(k)
+    @map.delete(k) if @map != nil
+    nil
+
+  -> own_value(k, receiver)
+    s = slot_for(k)
+    return @env[s] if s != nil
+    super(k, receiver)
+
+  -> get(k, receiver = nil)
+    s = slot_for(k)
+    return @env[s] if s != nil
+    ord_get(k, receiver)
+
+  -> set(k, v, receiver = nil)
+    s = slot_for(k)
+    if s != nil && (receiver == nil || receiver == self)
+      @env[s] = v
+      @props[k] = v
+      return true
+    ord_set(k, v, receiver)
+
+  -> get_own_property(k)
+    d = super(k)
+    s = slot_for(k)
+    d.value = @env[s] if d != nil && s != nil
+    d
+
+  -> define_own_property(k, desc)
+    s = slot_for(k)
+    if s != nil && !desc.accessor? && !desc.has_value && desc.writable == false
+      # freezing a mapped index keeps its current value
+      desc.value = @env[s]
+      desc.has_value = true
+    ok = super(k, desc)
+    return ok if !ok || s == nil
+    if desc.accessor?
+      unmap(k)
+    else
+      @env[s] = desc.value if desc.has_value
+      unmap(k) if desc.writable == false
+    true
+
+  -> delete_own(k)
+    ok = super(k)
+    unmap(k) if ok
+    ok
+
+-> js_mapped_arguments(args, callee, env, idx)
+  r = JS_REALM[0]
+  a = JsArgumentsObj.new(r.object_proto, "Arguments")
+  a.env = env
+  m = {}
+  used = {}
+  i = idx.size - 1
+  while i >= 0
+    # with duplicate parameter names the last one is the binding
+    if i < args.size && !used.has_key?(idx[i])
+      m[i.to_s] = idx[i]
+    used[idx[i]] = true
+    i -= 1
+  a.map = m
+  i = 0
+  while i < args.size
+    a.props[i.to_s] = args[i]
+    i += 1
+  a.define("length", args.size + ~0.0, ATTR_W + ATTR_C)
+  a.define(SYM_ITERATOR, r.intrinsic("%ArrayProto_values%"), ATTR_W + ATTR_C)
+  a.define("callee", callee, ATTR_W + ATTR_C)
+  a
+
 # ---- spread / rest ----
 
 -> js_spread_into(out, v)
   if v.is_a?(JsArray) && js_array_iter_pristine?(v)
-    el = v.elems
     i = 0
-    while i < el.size
-      x = el[i]
-      out.push(x == JS_HOLE ? nil : x)
+    while i < v.length
+      out.push(js_arr_elem(v, i))
       i += 1
     return out
   if v.is_a?(String) && js_ascii?(v) && js_string_iter_pristine?()
@@ -516,13 +618,13 @@ JS_DEBUG = [false]
   g
 
 JS_GOROUTINE_INIT = [false]
-JS_CORO_LIVE = [0]
-JS_CORO_TOTAL = [0]
+JS_CORO_LIVE = JsTlsCell.new(1, 0)
+JS_CORO_TOTAL = JsTlsCell.new(1, 0)
 
 -> js_coro_spawn(c)
   if !JS_GOROUTINE_INIT[0]
     JS_GOROUTINE_INIT[0] = true
-    n = (4194304 ## int)
+    n = (16777216 ## int)
     ccall("w_goroutine_stack_size_hint", n)
   JS_CORO_LIVE[0] += 1
   JS_CORO_TOTAL[0] += 1
@@ -538,7 +640,7 @@ JS_CORO_TOTAL = [0]
 # Only the main stack ever hands control to a coroutine (TODO(tungsten): two goroutines
 # rendezvousing on unbuffered channels while main waits deadlocks the scheduler; repro
 # nested_go2.w). A coroutine that wants to resume another asks main to do it with :call.
-JS_CUR_CORO = [nil]
+JS_CUR_CORO = JsTlsCell.new(1, nil)
 JS_CORO_TRACE = [Env.get("BLADE_CORO_TRACE", "") == "1"]
 
 -> js_coro_resume(c, msg, first)
@@ -551,11 +653,15 @@ JS_CORO_TRACE = [Env.get("BLADE_CORO_TRACE", "") == "1"]
 -> js_coro_drive(c, msg, first)
   ccall("w_eputs", "drive first=" + first.to_s + " msg=" + msg.to_s) if JS_CORO_TRACE[0]
   JS_CUR_CORO[0] = c
+  d0 = JS_DEPTH[0]
   if first
     js_coro_spawn(c)
   else
     c.to.send(msg)
-  js_coro_wait(c)
+  m = js_coro_wait(c)
+  # the caller's depth is unchanged by whatever ran (and suspended) on the coroutine
+  JS_DEPTH[0] = d0
+  m
 
 -> js_coro_wait(c)
   while true
@@ -824,15 +930,29 @@ JS_CORO_TRACE = [Env.get("BLADE_CORO_TRACE", "") == "1"]
 
 -> js_src_linecol(src, p)
   return [1, 1] if src == nil
-  if JS_LINE_CACHE[0] == nil || !(JS_LINE_CACHE[0] == src)
+  # perf: newline indexes of the last 8 sources (an Error's stack walks frames from several
+  # scripts; one entry rebuilt the index of a 300 KB script per frame)
+  srcs = JS_LINE_CACHE[0]
+  if srcs == nil
+    srcs = []
+    JS_LINE_CACHE[0] = srcs
+    JS_LINE_CACHE[1] = []
+  nls = nil
+  ci = 0
+  while ci < srcs.size && nls == nil
+    nls = JS_LINE_CACHE[1][ci] if srcs[ci] == src
+    ci += 1
+  if nls == nil
     nls = []
     k = src.index("\n", 0)
     while k != nil
       nls.push(k)
       k = src.index("\n", k + 1)
-    JS_LINE_CACHE[0] = src
-    JS_LINE_CACHE[1] = nls
-  nls = JS_LINE_CACHE[1]
+    if srcs.size >= 8
+      srcs.shift
+      JS_LINE_CACHE[1].shift
+    srcs.push(src)
+    JS_LINE_CACHE[1].push(nls)
   lo = 0
   hi = nls.size
   while lo < hi
@@ -843,31 +963,12 @@ JS_CORO_TRACE = [Env.get("BLADE_CORO_TRACE", "") == "1"]
       hi = mid
   [lo + 1, lo == 0 ? p + 1 : p - nls[lo - 1]]
 
-JS_LINE_CACHE = [nil, nil]
+JS_LINE_CACHE = JsTlsCell.new(2, nil)
 
 -> js_code_location(c)
   return "native" if c.src == nil
-  src = c.src
-  if JS_LINE_CACHE[0] == nil || !(JS_LINE_CACHE[0] == src)
-    nls = []
-    k = src.index("\n", 0)
-    while k != nil
-      nls.push(k)
-      k = src.index("\n", k + 1)
-    JS_LINE_CACHE[0] = src
-    JS_LINE_CACHE[1] = nls
-  nls = JS_LINE_CACHE[1]
-  p = c.pos
-  lo = 0
-  hi = nls.size
-  while lo < hi
-    mid = (lo + hi) / 2
-    if nls[mid] < p
-      lo = mid + 1
-    else
-      hi = mid
-  col = lo == 0 ? p + 1 : p - nls[lo - 1]
-  "script:" + (lo + 1).to_s + ":" + col.to_s
+  lc = js_src_linecol(c.src, c.pos)
+  "script:" + lc[0].to_s + ":" + lc[1].to_s
 
 # BLADE_JS_PROFILE=2: calls and inclusive milliseconds per function.
 JS_FN_PROFILE = [false]
@@ -895,13 +996,14 @@ JS_FN_STATS = {}
 
 # A task (script, timer, event callback) that runs longer than JS_TASK_MS is stopped with
 # an error, as browsers stop unresponsive scripts. The embedder calls js_task_begin per task.
-JS_TICKS = [0]
+JS_TICKS = JsTlsCell.new(1, 0)
 JS_TASK_MS = [10000]
-JS_DEADLINE = [0]
+JS_DEADLINE = JsTlsCell.new(1, 0)
 
-JS_TASK_SEQ = [0]
+JS_TASK_SEQ = JsTlsCell.new(1, 0)
 
 -> js_task_begin
+  js_aot_poll() if JS_AOT_UNITS.size > 0
   JS_DEADLINE[0] = clock_ms() + JS_TASK_MS[0]
   JS_TASK_SEQ[0] += 1
   nil

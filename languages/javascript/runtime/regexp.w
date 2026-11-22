@@ -740,7 +740,7 @@ JS_GC_LONG = {"Letter" => "L", "Cased_Letter" => "LC", "Uppercase_Letter" => "Lu
 
 # ---- compile ----
 
-JS_RX_CACHE = {}
+JS_RX_CACHE = JsTlsHash.new
 
 -> js_rx_compile(source, flags)
   key = flags + "/" + source
@@ -1094,11 +1094,14 @@ JS_RX_CACHE = {}
       @ends.push(i)
       saved_loops = @loops
       @loops = []
-      j = i
-      while j >= 0 && !ok
+      # leftmost start first: the longest body match ending at i, which is what backward
+      # evaluation (§22.2.2.4.1) gives for greedy bodies. TODO: lazy bodies need a
+      # right-to-left matcher.
+      j = 0
+      while j <= i && !ok
         r = run(n.body, j)
         ok = true if r >= 0
-        j -= 1
+        j += 1
       @loops = saved_loops
       @ends.pop
     if n.negate_look
@@ -1148,7 +1151,7 @@ JS_RX_CACHE = {}
   [lo, hi]
 
 # Simple case folding for /i: ECMAScript Canonicalize (uppercase in non-unicode mode).
-JS_RX_CANON_CACHE = {}
+JS_RX_CANON_CACHE = JsTlsHash.new
 
 -> js_rx_canon(c, uni)
   if c < 128

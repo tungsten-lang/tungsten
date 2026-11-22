@@ -15,7 +15,7 @@
   rw :cap, :kind, :handler
   -> new(@cap, @kind, @handler)
 
-JS_UNHANDLED = []
+JS_UNHANDLED = JsTlsList.new
 
 -> js_promise_alloc(proto)
   p = JsPromise.new(proto, "Promise")
@@ -58,9 +58,11 @@ JS_UNHANDLED = []
     r.enqueue_job(->() js_promise_adopt(p, x))
     return nil
   th = nil
+  dd = JS_DEPTH[0]
   begin
     th = x.get("then", x)
   rescue e
+    JS_DEPTH[0] = dd
     js_promise_reject(p, js_error_value(e))
     return nil
   if !(th.is_a?(JsObject) && th.callable?)
@@ -80,9 +82,11 @@ JS_UNHANDLED = []
 
 -> js_thenable_job(p, x, th)
   fns = js_resolving_functions(p)
+  dd = JS_DEPTH[0]
   begin
     js_call(th, x, [fns[0], fns[1]])
   rescue e
+    JS_DEPTH[0] = dd
     js_call(fns[1], nil, [js_error_value(e)])
   nil
 
@@ -118,12 +122,14 @@ JS_UNHANDLED = []
     result = v
     failed = rx.kind == :reject
   else
+    dd = JS_DEPTH[0]
     begin
       if h.is_a?(JsObject)
         result = js_call(h, nil, [v])
       else
         result = h.call(v)
     rescue e
+      JS_DEPTH[0] = dd
       result = js_error_value(e)
       failed = true
   return nil if cap == nil
@@ -189,9 +195,11 @@ JS_UNHANDLED = []
   js_throw_type("Promise resolver " + js_to_display(ex) + " is not a function") if !(ex.is_a?(JsObject) && ex.callable?)
   p = js_promise_alloc(JS_REALM[0].proto_from(nt, "Promise"))
   fns = js_resolving_functions(p)
+  dd = JS_DEPTH[0]
   begin
     js_call(ex, nil, [fns[0], fns[1]])
   rescue e
+    JS_DEPTH[0] = dd
     js_call(fns[1], nil, [js_error_value(e)])
   p
 
@@ -232,9 +240,8 @@ JS_UNHANDLED = []
 
 # Attach Tungsten lambdas to any value (resolved as a promise). Used by await and the host.
 -> js_promise_then_native(v, on_ok, on_err)
-  p = v.is_a?(JsPromise) ? v : js_promise_resolve_value(v)
-  if !v.is_a?(JsPromise) || v.get("constructor", v) != JS_REALM[0].intrinsic("Promise")
-    p = js_promise_resolve_value(v)
+  # PromiseResolve once (a thenable's `then` must be called only once)
+  p = js_promise_resolve_value(v)
   js_perform_then(p, JsReaction.new(nil, :fulfill, on_ok), JsReaction.new(nil, :reject, on_err))
   nil
 
@@ -267,12 +274,14 @@ JS_UNHANDLED = []
 
 -> js_promise_combinator(c, iterable, mode)
   cap = js_new_capability_from(c)
+  dd = JS_DEPTH[0]
   begin
     resolve_fn = js_getv(c, "resolve")
     js_throw_type("Promise resolve is not a function") if !(resolve_fn.is_a?(JsObject) && resolve_fn.callable?)
     items = js_to_list(iterable)
     js_combinator_run(c, cap, resolve_fn, items, mode)
   rescue e
+    JS_DEPTH[0] = dd
     js_call(cap.reject, nil, [js_error_value(e)])
   cap.promise
 
@@ -340,10 +349,12 @@ JS_UNHANDLED = []
 
 -> js_promise_try(c, args)
   cap = js_new_capability_from(c)
+  dd = JS_DEPTH[0]
   begin
     v = js_call(js_arg(args, 0), nil, args.size > 1 ? args.slice(1, args.size - 1) : [])
     js_call(cap.resolve, nil, [v])
   rescue e
+    JS_DEPTH[0] = dd
     js_call(cap.reject, nil, [js_error_value(e)])
   cap.promise
 

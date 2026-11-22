@@ -25,11 +25,11 @@ TWO32 = ~4294967296.0
   if a.is_a?(Float) && b.is_a?(Float)
     return a + b
   if a.is_a?(String) && b.is_a?(String)
-    return a + b
+    return js_str_cat(a, b)
   pa = js_to_primitive(a)
   pb = js_to_primitive(b)
   if pa.is_a?(String) || pb.is_a?(String)
-    return js_to_string(pa) + js_to_string(pb)
+    return js_str_cat(js_to_string(pa), js_to_string(pb))
   na = js_numeric_value(pa)
   nb = js_numeric_value(pb)
   if na.is_a?(JsBigInt) || nb.is_a?(JsBigInt)
@@ -160,14 +160,14 @@ TWO32 = ~4294967296.0
     return nil if a != a || b != b
     return a < b
   if a.is_a?(String) && b.is_a?(String)
-    return a < b
+    return js_str_cmp(a, b) < 0
   if left_first
     pa = js_to_primitive(a, "number")
     pb = js_to_primitive(b, "number")
   else
     pb = js_to_primitive(b, "number")
     pa = js_to_primitive(a, "number")
-  return pa < pb if pa.is_a?(String) && pb.is_a?(String)
+  return js_str_cmp(pa, pb) < 0 if pa.is_a?(String) && pb.is_a?(String)
   if pa.is_a?(JsBigInt) && pb.is_a?(String)
     nb = js_string_to_bigint(pb)
     return nil if nb == nil
@@ -282,3 +282,51 @@ TWO32 = ~4294967296.0
   return "undefined" if v.is_a?(JsObject) && v.htmldda?
   return "function" if v.is_a?(JsObject) && v.callable?
   js_typeof(v)
+
+# String concatenation on WTF-8: a lone high surrogate at the end of a and a lone low
+# surrogate at the start of b join into one code point (4-byte UTF-8), so the result is
+# the same string as the one literals and fromCharCode produce.
+-> js_str_cat(a, b)
+  na = a.size
+  if na >= 3 && b.size >= 3 && a.byte_at(na - 3) == 237 && b.byte_at(0) == 237
+    h2 = a.byte_at(na - 2)
+    l2 = b.byte_at(1)
+    if h2 >= 160 && h2 <= 175 && l2 >= 176 && l2 <= 191
+      hi = 55296 + ((h2 & 15) << 6) + (a.byte_at(na - 1) & 63)
+      lo = 56320 + ((l2 & 15) << 6) + (b.byte_at(2) & 63)
+      cp = 65536 + ((hi - 55296) << 10) + (lo - 56320)
+      return a.slice(0, na - 3) + js_chr(cp) + b.slice(3, b.size - 3)
+  a + b
+
+# Compare strings by UTF-16 code units (-1, 0, 1). UTF-8 byte order is code point order,
+# which differs only where a supplementary character meets a BMP one at or above U+E000.
+-> js_str_cmp(a, b)
+  na = a.size
+  nb = b.size
+  n = na < nb ? na : nb
+  i = 0
+  while i < n && a.byte_at(i) == b.byte_at(i)
+    i += 1
+  if i == n
+    return na < nb ? -1 : (na > nb ? 1 : 0)
+  # back up to the start of the differing code point (the prefix is shared)
+  while i > 0 && (a.byte_at(i) & 192) == 128
+    i -= 1
+  ua = js_first_unit_at(a, i)
+  ub = js_first_unit_at(b, i)
+  if ua[0] != ub[0]
+    return ua[0] < ub[0] ? -1 : 1
+  ua[1] < ub[1] ? -1 : (ua[1] > ub[1] ? 1 : 0)
+
+# [first UTF-16 unit, second unit or -1] of the code point starting at byte i.
+-> js_first_unit_at(s, i)
+  b0 = s.byte_at(i)
+  cp = b0
+  if b0 >= 240 && i + 3 <= s.size - 1
+    cp = ((b0 & 7) << 18) | ((s.byte_at(i + 1) & 63) << 12) | ((s.byte_at(i + 2) & 63) << 6) | (s.byte_at(i + 3) & 63)
+  elsif b0 >= 224 && i + 2 <= s.size - 1
+    cp = ((b0 & 15) << 12) | ((s.byte_at(i + 1) & 63) << 6) | (s.byte_at(i + 2) & 63)
+  elsif b0 >= 192 && i + 1 <= s.size - 1
+    cp = ((b0 & 31) << 6) | (s.byte_at(i + 1) & 63)
+  return [cp, -1] if cp < 65536
+  [55296 + ((cp - 65536) >> 10), 56320 + ((cp - 65536) & 1023)]

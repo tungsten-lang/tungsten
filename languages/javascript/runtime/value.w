@@ -109,7 +109,7 @@ SYM_SPLIT = JsSymbol.new("Symbol.split")
 
 
 + JsObject
-  rw :proto, :props, :attrs, :getters, :setters, :extensible, :cls, :internal, :priv, :priv_handlers
+  rw :proto, :props, :attrs, :getters, :setters, :extensible, :cls, :internal, :priv, :priv_handlers, :seq
 
   # [[IsHTMLDDA]] (Annex B, document.all): typeof "undefined", falsy, == null.
   -> htmldda?
@@ -122,6 +122,7 @@ SYM_SPLIT = JsSymbol.new("Symbol.split")
     @setters = nil
     @extensible = true
     @internal = nil
+    @seq = nil
 
   -> proxy?
     false
@@ -154,6 +155,8 @@ SYM_SPLIT = JsSymbol.new("Symbol.split")
   # these rather than `super` (TODO(tungsten): super(...) from an override with a default
   # parameter is dropped by the compiled engine; repro in the js-runtime README).
   -> ord_define(k, v, flags)
+    js_note_proto_index(self, k)
+    note_key(k) if @seq != nil
     if @getters != nil
       @getters.delete(k)
     if @setters != nil
@@ -171,6 +174,9 @@ SYM_SPLIT = JsSymbol.new("Symbol.split")
     ord_define_accessor(k, g, s, flags)
 
   -> ord_define_accessor(k, g, s, flags)
+    js_note_proto_index(self, k)
+    start_seq()
+    note_key(k)
     @props.delete(k)
     @getters = {} if @getters == nil
     @setters = {} if @setters == nil
@@ -196,7 +202,26 @@ SYM_SPLIT = JsSymbol.new("Symbol.split")
     @getters.delete(k) if @getters != nil
     @setters.delete(k) if @setters != nil
     @attrs.delete(k) if @attrs != nil
+    @seq.delete(k) if @seq != nil
     true
+
+  # Insertion order across data and accessor properties, kept once an object has an accessor
+  # (accessors live in their own tables): key -> creation number.
+  -> note_key(k)
+    if @seq != nil && !@seq.has_key?(k)
+      n = @seq[:next]
+      @seq[k] = n
+      @seq[:next] = n + 1
+    nil
+
+  -> start_seq
+    return nil if @seq != nil
+    @seq = {}
+    @seq[:next] = 0
+    @props.keys.each ->(k) note_key(k)
+    @getters.keys.each(->(k) note_key(k)) if @getters != nil
+    @setters.keys.each(->(k) note_key(k)) if @setters != nil
+    nil
 
   # Own keys in spec order: integer indices ascending, then strings in insertion order, then symbols.
   -> own_keys
@@ -231,6 +256,10 @@ SYM_SPLIT = JsSymbol.new("Symbol.split")
             syms.push(k)
           else
             strs.push(k)
+    if @seq != nil
+      sq = @seq
+      strs = strs.sort_by(->(k) sq.has_key?(k) ? sq[k] : 0) if strs.size > 1
+      syms = syms.sort_by(->(k) sq.has_key?(k) ? sq[k] : 0) if syms != nil && syms.size > 1
     return strs if ints == nil && syms == nil
     out = []
     if ints != nil
@@ -378,6 +407,8 @@ SYM_SPLIT = JsSymbol.new("Symbol.split")
       @props[k] = v
       return true
     return false if !@extensible
+    js_note_proto_index(self, k)
+    note_key(k) if @seq != nil
     @props[k] = v
     true
 
@@ -539,6 +570,8 @@ ARRAY_GAP = 65536
         return false if @elems[i] == JS_HOLE && !@extensible
         @elems[i] = v
         return true
+      # an existing sparse element is an ordinary property (attributes apply; no growth)
+      return super(k, v) if @slen != nil && @props.has_key?(k)
       return false if !@extensible
       return false if @len_ro && i >= length()
       if i == @elems.size && @slen == nil
@@ -605,6 +638,25 @@ ARRAY_GAP = 65536
       @elems.pop
     @slen = n
 
+  # Leave sparse mode when the array is small again and its elements are plain data.
+  -> densify
+    return nil if @slen == nil || @slen >= ARRAY_GAP || !@extensible || @len_ro
+    idx = []
+    plain = true
+    @props.keys.each ->(pk)
+      if pk.is_a?(String) && js_array_index?(pk)
+        idx.push(pk)
+        plain = false if (@attrs != nil && @attrs[pk] != nil && @attrs[pk] != ATTR_ALL) || (@getters != nil && @getters.has_key?(pk)) || (@setters != nil && @setters.has_key?(pk))
+    return nil if !plain
+    n = @slen
+    while @elems.size < n
+      @elems.push(JS_HOLE)
+    idx.each ->(pk)
+      @elems[pk.to_i] = @props[pk]
+      @props.delete(pk)
+    @slen = nil
+    nil
+
   -> delete_own(k)
     i = index_of_key(k)
     if i >= 0 && i < @elems.size
@@ -659,10 +711,16 @@ ARRAY_GAP = 65536
     len = n.to_i
     raise JsThrow.new(js_range_error("Invalid array length")) if len < 0 || n != len + ~0.0 || len > 4294967295
     if @slen != nil
+      # ArraySetLength stops above the highest non-configurable element (§10.4.2.4)
+      @props.keys.each ->(pk)
+        if pk.is_a?(String) && js_array_index?(pk) && pk.to_i >= len && @attrs != nil && @attrs[pk] != nil && (@attrs[pk] & ATTR_C) == 0
+          len = pk.to_i + 1 if pk.to_i + 1 > len
       @props.keys.each ->(pk)
         if pk.is_a?(String) && js_array_index?(pk) && pk.to_i >= len
           @props.delete(pk)
+          @attrs.delete(pk) if @attrs != nil
       @slen = len
+      densify()
     while @elems.size > len
       @elems.pop
     if @slen == nil && len - @elems.size < ARRAY_GAP
@@ -781,7 +839,8 @@ ARRAY_GAP = 65536
 # The interpreter installs these: how to call an interpreted function, and the current realm.
 JS_CALL_HOOK = [nil]
 JS_CONSTRUCT_HOOK = [nil]
-JS_REALM = [nil]
+# per thread (blade/js/tls): each Web Worker thread has its own realm
+JS_REALM = JsTlsCell.new(1, nil)
 
 -> js_call(f, this, args)
   if f.is_a?(JsFunction)
@@ -864,7 +923,7 @@ JS_REALM = [nil]
 
 # UTF-16 code units of s, as an Array of Ints. The last few conversions are cached, so a
 # loop over charCodeAt(i) of one non-ASCII string converts it once.
-JS_UNITS_CACHE = [nil, nil, nil, nil]
+JS_UNITS_CACHE = JsTlsCell.new(4, nil)
 
 -> js_units(s)
   c = JS_UNITS_CACHE
@@ -1301,6 +1360,23 @@ JS_WS = [9, 10, 11, 12, 13, 32]
     return false if n != n || n == ~1.0 / ~0.0 || n == ~-1.0 / ~0.0
     return n == Math.floor(n) && bi.v == n.to_i
   false
+
+# Element i of an array as its iterator reads it: the dense slot, else [[Get]] (holes read
+# through the prototype chain; sparse-mode elements live in props).
+-> js_arr_elem(v, i)
+  if v.slen == nil && i < v.elems.size
+    x = v.elems[i]
+    return x if x != JS_HOLE
+  v.get(i.to_s, v)
+
+# Array fast paths assume no indexed properties on Array.prototype / Object.prototype;
+# the first one defined there turns that assumption off (realm.array_proto_indexed).
+-> js_note_proto_index(o, k)
+  r = JS_REALM[0]
+  return nil if r == nil || r.array_proto_indexed
+  return nil if !(o == r.array_proto || o == r.object_proto)
+  r.array_proto_indexed = true if k.is_a?(String) && k.size > 0 && k.byte_at(0) >= 48 && k.byte_at(0) <= 57 && js_array_index?(k)
+  nil
 
 # One code point as UTF-8 (WTF-8 for lone surrogates).
 -> js_chr(cp)

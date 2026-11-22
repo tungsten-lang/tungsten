@@ -96,15 +96,15 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
   # ToObject for primitives: Number/String/Boolean/Symbol/BigInt wrappers.
   -> wrap_primitive(v)
     kind = v.is_a?(Float) ? "Number" : (v.is_a?(String) ? "String" : ((v == true || v == false) ? "Boolean" : (v.is_a?(JsSymbol) ? "Symbol" : "BigInt")))
+    return js_string_object(intrinsic("String.prototype"), v) if v.is_a?(String)
     o = JsObject.new(intrinsic(kind + ".prototype"), kind)
     o.internal = v
-    if v.is_a?(String)
-      o.define("length", js_len(v) + ~0.0, 0)
     o
 
   # ---- defining builtins ----
 
   -> native(name, arity, fun, ctor = false)
+    fun = js_trace_native_wrap(name, fun) if JS_TRACE_NATIVE[0] != nil
     JsFunction.new(function_proto(), fun, name, arity, ctor)
 
   -> method(obj, name, arity, fun)
@@ -146,9 +146,13 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
 
   # Run queued jobs until none remain (HTML's "perform a microtask checkpoint").
   -> run_jobs
+    # every job starts at the depth of the checkpoint (a job that threw cannot leak depth)
+    d = JS_DEPTH[0]
     while @jobs.size > 0
       j = @jobs.shift
+      JS_DEPTH[0] = d
       j.call()
+    JS_DEPTH[0] = d
     nil
 
   # ---- symbols ----
@@ -218,9 +222,8 @@ JS_ITER_DONE = JsIterDone.new
   # fast path: plain arrays whose iterator is the intrinsic one
   if v.is_a?(JsArray) && JS_REALM[0] != nil && v.get(SYM_ITERATOR) == JS_REALM[0].intrinsic("%ArrayProto_values%")
     i = 0
-    while i < v.elems.size
-      e = v.elems[i]
-      f.call(e == JS_HOLE ? nil : e)
+    while i < v.length
+      f.call(js_arr_elem(v, i))
       i += 1
     return nil
   rec = js_get_iterator(v)
@@ -268,3 +271,52 @@ JS_ITER_DONE = JsIterDone.new
 
   -> perf_now
     clock_ms() + ~0.0
+
+# Debugging aid (BLADE_JS_TRACE=native): log every native function (builtin or host API)
+# called by script that has no URL (eval / new Function code, e.g. an obfuscated VM): the
+# caller's column, the function, its receiver and arguments, and the result (stderr).
+# The builtins a bytecode loop calls per step are left out; BLADE_JS_TRACE=native-all logs
+# those too. Receivers and arguments are shown without reading any property.
+JS_TRACE_NATIVE = [Env.get("BLADE_JS_TRACE", "") == "native" ? :quiet : (Env.get("BLADE_JS_TRACE", "") == "native-all" ? :all : nil)]
+JS_TRACE_NATIVE_BUSY = [false]
+JS_TRACE_NATIVE_SKIP = {"charCodeAt" => true, "push" => true, "pop" => true, "fromCharCode" => true, "join" => true, "toString" => true, "valueOf" => true, "slice" => true, "create" => true, "call" => true, "random" => true, "floor" => true, "now" => true, "Number" => true, "" => true}
+
+-> js_trace_show(v)
+  if v.is_a?(String)
+    return "\"" + (v.size > 160 ? v.slice(0, 160) + "...(" + v.size.to_s + ")" : v) + "\""
+  if v.is_a?(JsArray)
+    parts = []
+    i = 0
+    while i < v.elems.size && i < 6
+      e = v.elems[i]
+      parts.push(e.is_a?(String) ? "\"" + e.slice(0, 40) + "\"" : js_to_display(e))
+      i += 1
+    return "\[" + parts.join(", ") + (v.elems.size > 6 ? ", ..." + v.elems.size.to_s : "") + "]"
+  js_to_display(v)
+
+-> js_trace_native_wrap(name, fun)
+  return fun if JS_TRACE_NATIVE[0] == :quiet && JS_TRACE_NATIVE_SKIP[name.to_s] == true
+  ->(this, args, nt) js_trace_native_call(name, fun, [this, args, nt])
+
+# Is the running script one without a URL? (Checked before anything is formatted: the line
+# and column of a caller in a large script cost a pass over its source.)
+-> js_trace_urlless?
+  k = JS_DEPTH[0]
+  u = JS_TOP[1]
+  u = JS_STACK[k].url if k > 0 && k < 1000 && JS_STACK[k] != nil
+  u == nil || u == ""
+
+-> js_trace_native_call(name, fun, c)
+  return fun.call(c[0], c[1], c[2]) if JS_TRACE_NATIVE_BUSY[0] || !js_trace_urlless?()
+  loc = js_top_location()
+  JS_TRACE_NATIVE_BUSY[0] = true
+  head = "\[js native] @" + loc[2].to_s + " " + js_trace_show(c[0]) + " . " + name.to_s + "(" + c[1].map(->(a) js_trace_show(a)).join(", ") + ")"
+  JS_TRACE_NATIVE_BUSY[0] = false
+  res = nil
+  begin
+    res = fun.call(c[0], c[1], c[2])
+  rescue e
+    ccall("w_eputs", head + " !! threw")
+    raise e
+  ccall("w_eputs", head + " => " + js_trace_show(res))
+  res

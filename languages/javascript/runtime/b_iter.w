@@ -101,13 +101,13 @@
     c = h.count
     h.count += 1 if m != :drop
     if m == :map
-      return js_iter_result(js_call(h.fun, nil, [x, c + ~0.0]), false)
+      return js_iter_result(js_helper_cb(h, [x, c + ~0.0]), false)
     if m == :filter
-      return js_iter_result(x, false) if js_truthy(js_call(h.fun, nil, [x, c + ~0.0]))
+      return js_iter_result(x, false) if js_truthy(js_helper_cb(h, [x, c + ~0.0]))
     elsif m == :take || m == :drop
       return js_iter_result(x, false)
     elsif m == :flat_map
-      h.inner = js_get_iterator(js_call(h.fun, nil, [x, c + ~0.0]))
+      h.inner = js_get_iterator(js_helper_cb(h, [x, c + ~0.0]))
   nil
 
 -> js_iter_reduce_like(this, mode, f, init, has_init)
@@ -123,17 +123,17 @@
     if mode == :to_array
       out.push(x)
     elsif mode == :for_each
-      js_call(f, nil, [x, i + ~0.0])
+      js_rec_cb(rec, f, [x, i + ~0.0])
     elsif mode == :some
-      if js_truthy(js_call(f, nil, [x, i + ~0.0]))
+      if js_truthy(js_rec_cb(rec, f, [x, i + ~0.0]))
         js_iter_close(rec)
         return true
     elsif mode == :every
-      if !js_truthy(js_call(f, nil, [x, i + ~0.0]))
+      if !js_truthy(js_rec_cb(rec, f, [x, i + ~0.0]))
         js_iter_close(rec)
         return false
     elsif mode == :find
-      if js_truthy(js_call(f, nil, [x, i + ~0.0]))
+      if js_truthy(js_rec_cb(rec, f, [x, i + ~0.0]))
         js_iter_close(rec)
         return x
     elsif mode == :reduce
@@ -141,7 +141,7 @@
         acc = x
         started = true
       else
-        acc = js_call(f, nil, [acc, x, i + ~0.0])
+        acc = js_rec_cb(rec, f, [acc, x, i + ~0.0])
     i += 1
   return JS_REALM[0].new_array(out) if mode == :to_array
   return false if mode == :some
@@ -270,3 +270,25 @@ js_install(->(r) js_install_iter(r))
 -> js_req_gen(g)
   js_throw_type("next method called on incompatible receiver " + js_to_display(g)) if !g.is_a?(JsGenerator)
   g
+
+# IfAbruptCloseIterator: a callback that throws ends the helper and closes its sources.
+-> js_helper_cb(h, args)
+  r = nil
+  begin
+    r = js_call(h.fun, nil, args)
+  rescue e
+    h.done = true
+    js_iter_close_quiet(h.inner) if h.inner != nil
+    h.inner = nil
+    js_iter_close_quiet(h.src)
+    raise e
+  r
+
+-> js_rec_cb(rec, f, args)
+  r = nil
+  begin
+    r = js_call(f, nil, args)
+  rescue e
+    js_iter_close_quiet(rec)
+    raise e
+  r

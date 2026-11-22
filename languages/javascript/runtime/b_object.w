@@ -451,7 +451,14 @@ js_install(->(r) js_install_object(r))
   return [] if js_nullish?(v)
   js_throw_type("CreateListFromArrayLike called on non-object") if !v.is_a?(JsObject)
   if v.is_a?(JsArray) && v.slen == nil
-    return v.elems.map(->(x) x == JS_HOLE ? nil : x)
+    # holes read through the prototype chain ([[Get]])
+    return v.elems.map(->(x) x) if !v.elems.include?(JS_HOLE)
+    out0 = []
+    i0 = 0
+    while i0 < v.length
+      out0.push(js_arr_elem(v, i0))
+      i0 += 1
+    return out0
   n = js_to_length(v.get("length", v))
   out = Array.new(n, nil)
   i = 0
@@ -531,11 +538,14 @@ js_install(->(r) js_install_object(r))
   return src if !src.is_a?(String)
   prog = js_parse_or_throw(src, false)
   comp = JsCompiler.new(src)
+  comp.lazy = src.size >= JS_LAZY_MIN[0]
   run = comp.compile_script(prog)
   run.call(nil)
 
 # Run a script source in the realm (the embedder's entry point). Returns the completion value.
 JS_PHASES = [~0.0, ~0.0, ~0.0]
+# BLADE_JS_PHASES=1: one stderr line per script with its parse / compile / run milliseconds.
+JS_PHASE_LOG = [Env.get("BLADE_JS_PHASES", "") == "1"]
 
 # Builtins written in JavaScript: their functions print as native code and their
 # frames show as [native code], like the engine's own.
@@ -553,6 +563,8 @@ JS_PHASES = [~0.0, ~0.0, ~0.0]
   t1 = (clock_ms() * 1000000)
   comp = JsCompiler.new(src)
   comp.url = name == "script" ? "" : name
+  comp.lazy = src.size >= JS_LAZY_MIN[0]
+  comp.unit = js_aot_unit_for(src, comp.url) if src.size >= JS_AOT_MIN[0]
   run = comp.compile_script(prog)
   t2 = (clock_ms() * 1000000)
   JS_PHASES[0] = JS_PHASES[0] + (t1 - t0) / ~1000000.0
@@ -575,7 +587,11 @@ JS_PHASES = [~0.0, ~0.0, ~0.0]
   JS_TOP[0] = otop0
   JS_TOP[1] = otop1
   JS_POS[0] = opos
-  JS_PHASES[2] = JS_PHASES[2] + ((clock_ms() * 1000000) - t2) / ~1000000.0
+  t3 = (clock_ms() * 1000000)
+  JS_PHASES[2] = JS_PHASES[2] + (t3 - t2) / ~1000000.0
+  if JS_PHASE_LOG[0] && src.size > 2000
+    ccall("w_eputs", "\[js lazy] so far: " + JS_LAZY_STATS[1].to_s + " bodies compiled in " + (JS_LAZY_T[0] * 1000).round.to_s + " ms (parse " + (JS_LAZY_T[1] * 1000).round.to_s + " ms), " + JS_LAZY_STATS[0].to_s + " deferred; aot " + JS_AOT_STATS.to_s)
+    ccall("w_eputs", "\[js phases] parse " + ((t1 - t0) / 1000000).to_s + " compile " + ((t2 - t1) / 1000000).to_s + " run " + ((t3 - t2) / 1000000).to_s + " ms  " + src.size.to_s + " B  " + name.slice(0, 90))
   v
 
 # ---- global functions ----

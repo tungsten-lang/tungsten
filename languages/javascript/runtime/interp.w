@@ -87,13 +87,17 @@ F_CL_YES = 2097152
 
 
 + JsCompiler
-  rw :src, :completion_slot, :url, :builtin
+  rw :src, :completion_slot, :url, :builtin, :lazy, :unit
 
   -> new(@src)
     @url = ""
     @builtin = false
     @completion_slot = -1
     @fn_depth = 0
+    @lazy = false
+    @unit = nil
+    @aot_map = nil
+    @cur_block_node = nil
 
   # ---- scope helpers ----
 
@@ -293,8 +297,9 @@ F_CL_YES = 2097152
     fns = []
     stmts.each ->(s)
       if s.kind == :function_decl
-        if sc.strict
-          sc.declare(s.str, :let_fn)
+        # block-local in both modes; sloppy code also copies it to the var at the
+        # declaration (Annex B.3.3, compile_annexb_fn)
+        sc.declare(s.str, :let_fn)
         fns.push(s)
     fns
 
@@ -307,6 +312,8 @@ F_CL_YES = 2097152
     r = JS_REALM[0]
     early_check(prog.list, sc.strict, true)
     vn = var_names(prog.list, [], sc.strict, true)
+    ln0 = lex_decls(prog.list, sc.strict).map(->(d) d[0])
+    vn = vn.select(->(nm) !ln0.include?(nm)) if ln0.size > 0
     vn.each ->(nm)
       b = JsBinding.new(nm, :var, sc, -1)
       b.global = true
@@ -348,14 +355,14 @@ F_CL_YES = 2097152
         b = JsBinding.new(nm, :var, sc, -1)
         b.global = true
         sc.names[nm] = b
-      else
+      elsif sc.strict || !eval_var_outer?(nm, parent_sc)
         sc.declare(nm, :var)
     fns.each ->(f)
       if global_vars
         b = JsBinding.new(f.str, :var, sc, -1)
         b.global = true
         sc.names[f.str] = b
-      else
+      elsif sc.strict || !eval_var_outer?(f.str, parent_sc)
         sc.declare(f.str, :var)
     lex_decls(prog.list, sc.strict).each ->(d) sc.declare(d[0], d[1])
     @completion_slot = sc.alloc()
@@ -366,6 +373,22 @@ F_CL_YES = 2097152
     run = ->(env)
       js_eval_run(sc, body, hoist, lex, cslot, env)
     run
+
+  # Sloppy direct eval: a var/function name the caller's function already declares binds to
+  # that variable (EvalDeclarationInstantiation uses the caller's variable environment). A
+  # lexical binding of the name in between is a SyntaxError. Names new to the caller stay
+  # local to the eval (TODO: add them to the caller's environment dynamically).
+  -> eval_var_outer?(nm, parent_sc)
+    sc = parent_sc
+    while sc != nil
+      b = sc.names[nm]
+      if b != nil
+        return true if b.kind == :var || b.kind == :param || b.kind == :let_fn
+        early_dup(nm) if b.kind == :let || b.kind == :const || b.kind == :class
+        return false
+      break if sc == sc.fnc
+      sc = sc.parent
+    false
 
   # ---- statements ----
 
@@ -409,10 +432,11 @@ F_CL_YES = 2097152
     when :var_decl
       compile_var_decl(n, sc)
     when :function_decl
-      nil
+      compile_annexb_fn(n, sc)
     when :class_decl
       compile_class_decl(n, sc)
     when :block
+      @cur_block_node = n
       compile_block(n.list, sc)
     when :empty, :debugger
       nil
@@ -505,12 +529,15 @@ F_CL_YES = 2097152
 
   # A block: its own scope; a frame only if a closure might capture its bindings.
   -> compile_block(stmts, sc)
+    bnode = @cur_block_node
+    @cur_block_node = nil
     needs_scope = false
     stmts.each ->(s)
       needs_scope = true if (s.kind == :var_decl && s.str != "var") || s.kind == :class_decl || s.kind == :function_decl
     return compile_list(stmts, sc) if !needs_scope
     owner = any_closure?(stmts)
     bs = JsScope.new(:block, sc, owner)
+    @aot_map[bnode] = bs if @aot_map != nil && bnode != nil
     fns = declare_block(stmts, bs)
     body = compile_list(stmts, bs)
     enter = compile_hoist(fns, bs)
@@ -555,16 +582,45 @@ F_CL_YES = 2097152
     raise JsThrow.new(js_syntax_error("Lexical declaration cannot appear in a single-statement context")) if bad
     nil
 
+  # Annex B.3.3: evaluating a sloppy block-level function declaration copies the block
+  # binding to the function's var of the same name, unless a lexical declaration of the
+  # name in an enclosing block would make that var statement an error.
+  -> compile_annexb_fn(n, sc)
+    return nil if sc.strict || n.has?(F_ASYNC) || n.has?(F_GENERATOR) || sc == sc.fnc
+    nm = n.str
+    s2 = sc.parent
+    while s2 != nil && s2 != sc.fnc
+      b2 = s2.names[nm]
+      return nil if b2 != nil && (b2.kind == :let || b2.kind == :const || b2.kind == :class)
+      s2 = s2.parent
+    vb = sc.fnc.names[nm]
+    return nil if vb == nil || !(vb.kind == :var || vb.kind == :param)
+    g = compile_ident_get(nm, sc)
+    if vb.global || vb.index < 0
+      return ->(env) js_annexb_global(nm, g.call(env))
+    h = hops_between(sc.frame, vb.frame)
+    i = vb.index
+    ->(env) js_annexb_set(js_up(env, h), i, g.call(env))
+
   -> compile_if(n, sc)
     check_sub(n.b, sc, true)
     check_sub(n.c, sc, true)
     t = cx_bool(n.a, sc)
+    # if (x) function f() {} behaves as if (x) { function f() {} } (Annex B.3.4)
+    return compile_if_wrapped(n, sc, t) if (n.b != nil && n.b.kind == :function_decl) || (n.c != nil && n.c.kind == :function_decl)
     c = cs(n.b, sc, nil)
     c = js_nop_stmt(c)
     if n.c == nil
       return ->(env) t.call(env) ? c.call(env) : nil
     a = cs(n.c, sc, nil)
     a = js_nop_stmt(a)
+    ->(env) t.call(env) ? c.call(env) : a.call(env)
+
+  -> compile_if_wrapped(n, sc, t)
+    c = js_nop_stmt(n.b.kind == :function_decl ? compile_block([n.b], sc) : cs(n.b, sc, nil))
+    if n.c == nil
+      return ->(env) t.call(env) ? c.call(env) : nil
+    a = js_nop_stmt(n.c.kind == :function_decl ? compile_block([n.c], sc) : cs(n.c, sc, nil))
     ->(env) t.call(env) ? c.call(env) : a.call(env)
 
   -> compile_while(n, sc, labels)
@@ -602,6 +658,7 @@ F_CL_YES = 2097152
     if lexical
       owner = has_closure?(n)
       ls = JsScope.new(:block, sc, owner)
+      @aot_map[n] = ls if @aot_map != nil
       bound = []
       init.list.each ->(d) bound_names(d.a, bound)
       for_bound_check(bound, n.d)
@@ -636,6 +693,10 @@ F_CL_YES = 2097152
     b = js_nop_stmt(b)
     lex = ls == sc ? [] : ls.lex
     size_of = ls
+    if n.a.kind == :var_decl && n.a.str == "var" && n.a.list[0].b != nil
+      # Annex B.3.5: for (var x = init in obj) assigns init before the object is evaluated
+      ivc = cx(n.a.list[0].b, sc)
+      return ->(env) js_run_for_in_init(target, ivc, rhs, b, labels, owner, size_of, lex, env)
     ->(env) js_run_for_in(rhs.call(env), target, b, labels, owner, size_of, lex, env)
 
   -> compile_for_of(n, sc, labels)
@@ -715,6 +776,12 @@ F_CL_YES = 2097152
         else
           h2 = ->(env, v) js_catch_inline(bind, hb, env, v)
           handler = h2
+    if handler != nil && @completion_slot >= 0 && @fn_depth == 0
+      # the catch clause's completion replaces the try's (UpdateEmpty(C, undefined))
+      ch = hops_between(sc.frame, completion_frame(sc))
+      cslot2 = @completion_slot
+      hh = handler
+      handler = ->(env, v) js_cpl_catch(env, ch, cslot2, hh, v)
     fin = n.d == nil ? nil : compile_block(n.d.list, sc)
     if fin != nil && @completion_slot >= 0 && @fn_depth == 0
       # a finally block that completes normally does not change the completion value
@@ -755,12 +822,12 @@ F_CL_YES = 2097152
     raise JsThrow.new(js_syntax_error("In strict mode code, functions can only be declared at top level or inside a block.")) if body.kind == :function_decl && (sc.strict || body.has?(F_ASYNC) || body.has?(F_GENERATOR))
     raise JsThrow.new(js_syntax_error("Lexical declaration cannot appear in a single-statement context")) if (body.kind == :var_decl && body.str != "var") || body.kind == :class_decl
     k = body.kind
-    if k == :for || k == :for_in || k == :for_of || k == :while || k == :do_while || k == :labeled
+    if k == :for || k == :for_in || k == :for_of || k == :while || k == :do_while || k == :labeled || k == :switch
       return cs(body, sc, ls)
     b = cs(body, sc, nil)
     return nil if b == nil
-    lbl = n.str
-    ->(env) js_run_labeled(b, lbl, env)
+    # every label of a chain (outer: inner: { … }) is a target of this statement
+    ->(env) js_run_labeled(b, ls, env)
 
   -> compile_with(n, sc)
     check_sub(n.b, sc, false)
@@ -947,9 +1014,10 @@ F_CL_YES = 2097152
       return ->(env) js_gget_undefined()
     ->(env) js_gget(nm)
 
+  # withs[0] is the innermost with; it is consulted first.
   -> wrap_with_get(withs, name, g)
-    w = withs[withs.size - 1]
-    inner = withs.size > 1 ? wrap_with_get(withs.slice(0, withs.size - 1), name, g) : g
+    w = withs[0]
+    inner = withs.size > 1 ? wrap_with_get(withs.slice(1, withs.size - 1), name, g) : g
     h = w[0]
     i = w[1]
     ->(env) js_with_get(js_up(env, h)[i], name, inner, env)
@@ -991,8 +1059,8 @@ F_CL_YES = 2097152
     ->(env, v) js_gset(nm, v, strict)
 
   -> wrap_with_set(withs, name, s, strict)
-    w = withs[withs.size - 1]
-    inner = withs.size > 1 ? wrap_with_set(withs.slice(0, withs.size - 1), name, s, strict) : s
+    w = withs[0]
+    inner = withs.size > 1 ? wrap_with_set(withs.slice(1, withs.size - 1), name, s, strict) : s
     h = w[0]
     i = w[1]
     ->(env, v) js_with_set(js_up(env, h)[i], name, inner, env, v, strict)
@@ -1313,11 +1381,23 @@ F_CL_YES = 2097152
       s = compile_ident_set(t.str, sc, :assign)
       v = cx_named(n.b, sc, t.str)
       return ->(env) js_logical_assign_var(kind, g, s, v, env)
+    if t.kind == :member && t.a.kind != :super && t.b.kind == :private_name
+      # this.#x ||= v reads and writes the private element, not a public property
+      o = cx(t.a, sc)
+      pr = private_ref(t.b.str, sc)
+      v = cx(n.b, sc)
+      return ->(env) js_logical_assign_priv(kind, o.call(env), pr.call(env), v, env)
     if t.kind == :member && t.a.kind != :super
       o = cx(t.a, sc)
       kf = member_key(t, sc)
       v = cx(n.b, sc)
       return ->(env) js_logical_assign_member(kind, o.call(env), kf.call(env), v, env, strict)
+    if t.kind == :member && t.a.kind == :super
+      sr = super_base(sc)
+      th = compile_this(sc)
+      kf = member_key(t, sc)
+      v = cx(n.b, sc)
+      return ->(env) js_logical_assign_super(kind, sr.call(env), th.call(env), kf.call(env), v, env, strict)
     raise JsThrow.new(js_syntax_error("Invalid left-hand side in assignment"))
 
   -> compile_member_assign(t, v, sc)
@@ -1425,7 +1505,7 @@ F_CL_YES = 2097152
     if callee.kind == :super
       fs = this_scope(sc)
       h = hops_between(sc.frame, fs.frame)
-      return ->(env) js_super_call(js_up(env, h), args.call(env))
+      return ->(env) js_super_call_l(js_up(env, h), args, env)
     if callee.kind == :member && callee.a.kind != :super
       o = cx(callee.a, sc)
       oopt = callee.has?(F_OPTIONAL)
@@ -1439,18 +1519,15 @@ F_CL_YES = 2097152
       if oopt || opt
         return ->(env) js_call_method_opt(o.call(env), key, args, env, oopt, opt)
       cp = n.pos
-      cm = ->(env)
-        ov = o.call(env)
-        av = args.call(env)
-        JS_POS[JS_DEPTH[0]] = cp
-        js_call_method(ov, key, av)
-      return cm
+      # the callee is fetched before the arguments are evaluated (§13.3.6.1)
+      return ->(env) js_call_dotted(o.call(env), key, args, env, cp)
     if callee.kind == :member
       # super.m(...)
       kf = member_key(callee, sc)
       sr = super_base(sc)
       th = compile_this(sc)
-      return ->(env) js_super_method_call(sr.call(env), kf.call(env), th.call(env), args.call(env))
+      # GetThisBinding, then the key, then the method, then the arguments (§13.3.7)
+      return ->(env) js_super_method_call_l(sr.call(env), th.call(env), kf, args, env)
     if callee.kind == :ident && callee.str == "eval"
       r = resolve("eval", sc)
       if r.kind == :global
@@ -1458,6 +1535,15 @@ F_CL_YES = 2097152
         f = compile_ident_get("eval", sc)
         csc = sc
         return ->(env) js_direct_eval(f.call(env), args.call(env), csc, env, strict)
+    if callee.kind == :ident && !opt
+      rw = resolve(callee.str, sc)
+      if rw.withs != nil
+        # f() inside with: the object that has f is the call's this (§9.1.1.2.6 WithBaseObject)
+        ws = rw.withs.map(->(w) [w[0], w[1]])
+        g0 = ident_get_ref(rw)
+        nm0 = callee.str
+        cp0 = n.pos
+        return ->(env) js_with_call(env, ws, nm0, g0, args, cp0)
     f = cx(callee, sc)
     what = callee.kind == :ident ? callee.str : "expression"
     if opt
@@ -1566,18 +1652,39 @@ F_CL_YES = 2097152
       return ->(env, v) js_throw_ref("Invalid left-hand side in assignment")
     raise JsThrow.new(js_syntax_error("Invalid destructuring target " + k.to_s))
 
-  # [kind, setter]: kind 0 element, 1 hole, 2 rest.
-  -> compile_array_item(e, sc, mode)
-    return [1, nil] if e == nil
-    return [2, compile_pattern(e.a, sc, mode)] if e.kind == :rest
-    [0, compile_pattern(e, sc, mode)]
+  # A member target (o.k, o[k], optionally with a default) as [prep, set_ref]: prep(env)
+  # evaluates the reference before the value is read (§13.15.5.3-5); set_ref(env, ref, v)
+  # stores into it. nil for other targets.
+  -> compile_target_ref(p, sc)
+    if p.kind == :assign_pattern && p.a.kind == :member
+      inner = compile_target_ref(p.a, sc)
+      return nil if inner == nil
+      d = cx(p.b, sc)
+      st = inner[1]
+      return [inner[0], ->(env, ref, v) st.call(env, ref, v == nil ? d.call(env) : v)]
+    return nil if p.kind != :member || p.a.kind == :super || p.b.kind == :private_name
+    strict = sc.strict
+    o = cx(p.a, sc)
+    kf = member_key(p, sc)
+    [->(env) [o.call(env), kf.call(env)], ->(env, ref, v) js_setv_k(ref[0], ref[1], v, strict)]
 
-  # [key fn or nil for rest, setter, static key]
+  # [kind, setter, prep, set_ref]: kind 0 element, 1 hole, 2 rest.
+  -> compile_array_item(e, sc, mode)
+    return [1, nil, nil, nil] if e == nil
+    t = e.kind == :rest ? e.a : e
+    ref = mode == :assign ? compile_target_ref(t, sc) : nil
+    [e.kind == :rest ? 2 : 0, compile_pattern(t, sc, mode), ref == nil ? nil : ref[0], ref == nil ? nil : ref[1]]
+
+  # [key fn or nil for rest, setter, static key, prep, set_ref]
   -> compile_object_item(e, sc, mode)
+    t = e.kind == :rest ? e.a : e.b
+    ref = mode == :assign ? compile_target_ref(t, sc) : nil
+    prep = ref == nil ? nil : ref[0]
+    sref = ref == nil ? nil : ref[1]
     if e.kind == :rest
-      return [nil, compile_pattern(e.a, sc, mode), nil]
+      return [nil, compile_pattern(e.a, sc, mode), nil, prep, sref]
     kf = prop_key(e.a, e.has?(F_COMPUTED), sc)
-    [kf, compile_pattern(e.b, sc, mode), nil]
+    [kf, compile_pattern(e.b, sc, mode), nil, prep, sref]
 
   # ---- functions ----
 
@@ -1608,7 +1715,38 @@ F_CL_YES = 2097152
     else
       code.kind = :normal
       code.lazy_kind = 1
+    len = 0
+    seen_default = false
+    n.list.each ->(p)
+      if p.kind == :assign_pattern || p.kind == :rest
+        seen_default = true
+      len += 1 if !seen_default
+    code.length = len
+    if @unit != nil
+      # tier 1 (aot.w) translates this function again from its node and scope when hot
+      code.unit = @unit
+      code.aot_src = JsPending.new(n, sc, derived, @src, @url, @builtin)
+      @aot_map[n] = code if @aot_map != nil
+    if @lazy
+      # Lazy compilation: the body becomes closures on the first call (js_code_ready).
+      code.pending = JsPending.new(n, sc, derived, @src, @url, @builtin)
+      JS_LAZY_STATS[0] += 1
+      return code
+    compile_function_body(code, n, sc, derived)
+    code
+
+  # The scope, binder and body closures of a function (eagerly, or on its first call).
+  -> compile_function_body(code, n, sc, derived)
+    arrow = n.kind == :arrow
+    async = n.has?(F_ASYNC)
+    gen = n.has?(F_GENERATOR)
+    js_lazy_parse_body(n, @src) if n.b == nil && n.c != nil
     fsc = JsScope.new(arrow ? :arrow : :function, sc, true)
+    if @unit != nil
+      # tier 1 reuses these scopes (and the inner functions' codes) to keep frame layouts
+      @aot_map = {} if @aot_map == nil
+      @aot_map[n] = fsc
+      code.aot_map = @aot_map
     fsc.strict = sc.strict || n.has?(F_STRICT)
     fsc.is_async = async
     fsc.is_gen = gen
@@ -1620,19 +1758,13 @@ F_CL_YES = 2097152
       fsc.names[n.str] = b
     params = n.list
     simple = true
-    len = 0
-    seen_default = false
     params.each ->(p)
       if p.kind != :ident
         simple = false
-      if p.kind == :assign_pattern || p.kind == :rest
-        seen_default = true
-      len += 1 if !seen_default
-    code.length = len
     pnames = []
     params.each ->(p) bound_names(p, pnames)
     pnames.each ->(nm) fsc.declare(nm, :param)
-    if !arrow && n.has?(F_USES_ARGS) && !pnames.include?("arguments")
+    if !arrow && (n.has?(F_USES_ARGS) || n.has?(F_HAS_EVAL)) && !pnames.include?("arguments")
       ab = fsc.declare("arguments", :var)
       code.args_slot = ab.index
     body = n.b
@@ -1648,17 +1780,34 @@ F_CL_YES = 2097152
     else
       early_check(body, fsc.strict, true, pnames)
       vn = var_names(body, [], fsc.strict, true)
-      vn.each ->(nm) fsc.declare(nm, :var)
+      # Annex B names that a top-level let/const/class already declares are not vars
+      ln = lex_decls(body, fsc.strict).map(->(d) d[0])
+      vn = vn.select(->(nm) !ln.include?(nm)) if ln.size > 0
+      # With a non-simple parameter list the body's declarations get their own scope (same
+      # frame, distinct slots); a var named like a parameter starts with its value
+      # (FunctionDeclarationInstantiation step 28).
+      bsc = simple ? fsc : JsScope.new(:block, fsc, false)
+      copies = []
+      vn.each ->(nm)
+        if !simple && pnames.include?(nm)
+          copies.push([fsc.names[nm].index, bsc.declare(nm, :var).index])
+        else
+          bsc.declare(nm, :var)
       fns = []
       body.each ->(s)
         if s.kind == :function_decl
-          fsc.declare(s.str, :var)
+          bsc.declare(s.str, :var)
           fns.push(s)
-      lex_decls(body, fsc.strict).each ->(d) fsc.declare(d[0], d[1])
+      lex_decls(body, fsc.strict).each ->(d) bsc.declare(d[0], d[1])
       code.binder = compile_binder(params, simple, fsc, code)
-      hoist = compile_hoist(fns, fsc)
-      stmts = compile_list(body, fsc)
-      lex = fsc.lex
+      hoist = compile_hoist(fns, bsc)
+      if copies.size > 0
+        h0 = hoist
+        hoist = ->(env) js_param_var_copy(env, copies, h0)
+      stmts = compile_list(body, bsc)
+      lex = simple ? fsc.lex : fsc.lex + bsc.lex
+      code.aot_lex = lex
+      code.aot_hoist = hoist
       if hoist == nil && lex.size == 0
         code.body = stmts
       else
@@ -1799,6 +1948,43 @@ F_CL_YES = 2097152
     [:block, true, nil, run, -1]
 
 
+# ---- lazy compilation ----
+#
+# A function's body is compiled to closures on its first call: what compile_function
+# needs from its static context (the scope chain, which stays alive through JsScope
+# parents) is kept in a JsPending. Most functions on a heavy page are never called.
+
+JS_LAZY_STATS = [0, 0, 0, 0]
+# Seconds spent compiling bodies on first call (parse included) and parsing them.
+JS_LAZY_T = [~0.0, ~0.0]
+JS_LAZY_DEBUG = [Env.get("BLADE_JS_LAZY_DEBUG", "") == "1"]
+# Scripts at least this long compile lazily (BLADE_JS_LAZY=0 turns it off, =all forces it).
+JS_LAZY_MIN = [Env.get("BLADE_JS_LAZY", "") == "0" ? 1000000000000 : (Env.get("BLADE_JS_LAZY", "") == "all" ? 0 : 4096)]
+
++ JsPending
+  rw :node, :sc, :derived, :src, :url, :builtin
+  -> new(@node, @sc, @derived, @src, @url, @builtin)
+
+-> js_code_ready(code)
+  p = code.pending
+  return code if p == nil
+  code.pending = nil
+  comp = JsCompiler.new(p.src)
+  comp.url = p.url
+  comp.builtin = p.builtin
+  comp.lazy = true
+  comp.unit = code.unit
+  t0 = clock()
+  begin
+    comp.compile_function_body(code, p.node, p.sc, p.derived)
+  rescue e
+    code.pending = p
+    raise e
+  JS_LAZY_STATS[1] += 1
+  JS_LAZY_T[0] = JS_LAZY_T[0] + (clock() - t0)
+  js_aot_from_cache(code) if code.unit != nil
+  code
+
 # ---- run-time helpers for the compiled closures ----
 
 -> js_run_list(fs, env)
@@ -1897,6 +2083,11 @@ F_CL_YES = 2097152
   else
     g.set(name, f, g)
 
+-> js_param_var_copy(env, copies, hoist)
+  copies.each ->(c) env[c[1]] = env[c[0]]
+  hoist.call(env) if hoist != nil
+  nil
+
 -> js_fn_prologue(env, lex, hoist, stmts)
   js_tdz_fill(env, lex) if lex.size > 0
   hoist.call(env) if hoist != nil
@@ -1929,16 +2120,14 @@ F_CL_YES = 2097152
   e[cslot]
 
 -> js_run_template(quasis, exprs, env)
-  sb = StringBuffer()
-  sb.append(quasis[0])
+  out = quasis[0]
   i = 0
   while i < exprs.size
     v = exprs[i].call(env)
     js_throw_type("Cannot convert a Symbol value to a string") if v.is_a?(JsSymbol)
-    sb.append(v.is_a?(String) ? v : js_to_string(v))
-    sb.append(quasis[i + 1])
+    out = js_str_cat(js_str_cat(out, v.is_a?(String) ? v : js_to_string(v)), quasis[i + 1])
     i += 1
-  sb.to_s
+  out
 
 # The frozen template object for a tagged template site (cached per site).
 -> js_template_object(site)
@@ -2182,6 +2371,30 @@ F_CL_YES = 2097152
   js_setv(o, k, nv, strict)
   nv
 
+-> js_logical_assign_priv(kind, o, pn, v, env)
+  cur = js_priv_get(o, pn)
+  if kind == 1
+    return cur if !js_truthy(cur)
+  elsif kind == 2
+    return cur if js_truthy(cur)
+  else
+    return cur if !js_nullish?(cur)
+  nv = v.call(env)
+  js_priv_set(o, pn, nv)
+  nv
+
+-> js_logical_assign_super(kind, home, this, k, v, env, strict)
+  cur = js_super_get(home, k, this)
+  if kind == 1
+    return cur if !js_truthy(cur)
+  elsif kind == 2
+    return cur if js_truthy(cur)
+  else
+    return cur if !js_nullish?(cur)
+  nv = v.call(env)
+  js_super_set(home, k, nv, this, strict)
+  nv
+
 # ---- member reads (string-keyed fast paths) ----
 
 -> js_getv_s(o, k)
@@ -2248,6 +2461,16 @@ JS_TRACE_MISS = [false]
     return js_call_code(f, o, args)
   js_call_named(f, o, args, js_callee_desc(o, key))
 
+-> js_call_dotted(o, key, args, env, cp)
+  return JS_SHORT if o == JS_SHORT
+  f = o.is_a?(JsObject) ? o.get(key, o) : js_getv(o, key)
+  av = args.call(env)
+  JS_POS[JS_DEPTH[0]] = cp
+  if f.is_a?(JsFunction)
+    return f.native.call(o, av, nil) if f.native != nil
+    return js_call_code(f, o, av)
+  js_call_named(f, o, av, js_callee_desc(o, key))
+
 -> js_callee_desc(o, key)
   base = o.is_a?(JsFunction) ? o.fname.to_s : (o.is_a?(JsObject) ? (o.cls == "Object" ? "object" : o.cls) : js_typeof(o))
   base + "." + js_key_display(key).to_s
@@ -2289,7 +2512,7 @@ JS_TRACE_MISS = [false]
 
 -> js_bind_simple_args(env, args, idx, aslot, strict)
   js_bind_simple(env, args, idx)
-  env[aslot] = js_arguments(args, env[FS_FUNC], strict)
+  env[aslot] = strict ? js_arguments(args, env[FS_FUNC], strict) : js_mapped_arguments(args, env[FS_FUNC], env, idx)
   nil
 
 -> js_bind_params(env, args, items, aslot, strict)
@@ -2309,37 +2532,36 @@ JS_TRACE_MISS = [false]
 
 -> js_destructure_array(env, v, items)
   if v.is_a?(JsArray) && js_array_iter_pristine?(v)
-    el = v.elems
     i = 0
     while i < items.size
       it = items[i]
+      ref = it[2] == nil ? nil : it[2].call(env)
       if it[0] == 2
         rest = []
         j = i
-        while j < el.size
-          x = el[j]
-          rest.push(x == JS_HOLE ? nil : x)
+        while j < v.length
+          rest.push(js_arr_elem(v, j))
           j += 1
-        it[1].call(env, JS_REALM[0].new_array(rest))
+        js_destr_store(env, it[1], it[3], ref, JS_REALM[0].new_array(rest))
       elsif it[0] == 0
-        x = i < el.size ? el[i] : nil
-        it[1].call(env, x == JS_HOLE ? nil : x)
+        js_destr_store(env, it[1], it[3], ref, i < v.length ? js_arr_elem(v, i) : nil)
       i += 1
     return nil
   js_throw_type(js_to_display(v) + " is not iterable") if js_nullish?(v)
   rec = js_get_iterator(v)
   begin
     items.each ->(it)
+      ref = it[2] == nil ? nil : it[2].call(env)
       if it[0] == 2
         rest = []
         while !rec.done
           x = js_iter_step(rec)
           rest.push(x) if x != JS_ITER_DONE
-        it[1].call(env, JS_REALM[0].new_array(rest))
+        js_destr_store(env, it[1], it[3], ref, JS_REALM[0].new_array(rest))
       else
         x = rec.done ? nil : js_iter_step(rec)
         x = nil if x == JS_ITER_DONE
-        it[1].call(env, x) if it[0] == 0
+        js_destr_store(env, it[1], it[3], ref, x) if it[0] == 0
   rescue e
     js_iter_close_quiet(rec) if !rec.done
     raise e
@@ -2359,14 +2581,24 @@ JS_TRACE_MISS = [false]
   used = nil
   items.each ->(it)
     if it[0] == nil
+      ref = it[3] == nil ? nil : it[3].call(env)
       r = JsObject.new(JS_REALM[0].object_proto, "Object")
       js_copy_data_props(r, v, used == nil ? [] : used)
-      it[1].call(env, r)
+      js_destr_store(env, it[1], it[4], ref, r)
     else
       k = it[0].call(env)
       used = [] if used == nil
       used.push(k)
-      it[1].call(env, js_getv(v, k))
+      ref = it[3] == nil ? nil : it[3].call(env)
+      js_destr_store(env, it[1], it[4], ref, js_getv(v, k))
+  nil
+
+# Store a destructured value: into a reference prepared before the read, or via the setter.
+-> js_destr_store(env, setter, set_ref, ref, v)
+  if set_ref != nil
+    set_ref.call(env, ref, v)
+  else
+    setter.call(env, v)
   nil
 
 # ---- loops ----
@@ -2420,6 +2652,8 @@ JS_TRACE_MISS = [false]
   e[0] = env
   js_tdz_fill(e, lex)
   ic.call(e) if ic != nil
+  # CreatePerIterationEnvironment also runs before the first test (§14.7.4.4)
+  e = e.dup
   while t == nil || t.call(e)
     r = b.call(e)
     if r != nil
@@ -2430,10 +2664,15 @@ JS_TRACE_MISS = [false]
     u.call(e) if u != nil
   nil
 
+-> js_run_for_in_init(target, ivc, rhs, b, labels, owner, size_of, lex, env)
+  target.call(env, ivc.call(env))
+  js_run_for_in(rhs.call(env), target, b, labels, owner, size_of, lex, env)
+
 -> js_iter_frame(owner, size_of, lex, env)
   return env if !owner
   e = Array.new(size_of.size, nil)
   e[0] = env
+  js_tdz_fill(e, lex)
   e
 
 -> js_run_for_in(obj, target, b, labels, owner, size_of, lex, env)
@@ -2458,8 +2697,7 @@ JS_TRACE_MISS = [false]
   if v.is_a?(JsArray) && js_array_iter_pristine?(v)
     i = 0
     while i < v.length
-      x = v.at(i)
-      x = v.get(i.to_s) if x == nil && i >= v.elems.size
+      x = js_arr_elem(v, i)
       e = js_iter_frame(owner, size_of, lex, env)
       target.call(e, x)
       r = b.call(e)
@@ -2566,9 +2804,9 @@ JS_TRACE_MISS = [false]
     j += 1
   nil
 
--> js_run_labeled(b, lbl, env)
+-> js_run_labeled(b, labels, env)
   r = b.call(env)
-  return nil if r != nil && r.kind == C_BREAK && r.label == lbl
+  return nil if r != nil && r.kind == C_BREAK && r.label != nil && labels.include?(r.label)
   r
 
 -> js_run_with(o, idx, b, env)
@@ -2580,6 +2818,22 @@ JS_TRACE_MISS = [false]
   u = o.get(SYM_UNSCOPABLES, o)
   return true if !u.is_a?(JsObject)
   !js_to_boolean(u.get(name, u))
+
+-> js_with_call(env, ws, name, g0, args, cp)
+  base = nil
+  f = nil
+  found = false
+  ws.each ->(w)
+    if !found
+      o = js_up(env, w[0])[w[1]]
+      if js_with_has?(o, name)
+        found = true
+        base = o
+        f = o.get(name, o)
+  f = g0.call(env) if !found
+  av = args.call(env)
+  JS_POS[JS_DEPTH[0]] = cp
+  js_call_named(f, base, av, name)
 
 -> js_with_get(o, name, inner, env)
   return o.get(name, o) if js_with_has?(o, name)
@@ -2609,12 +2863,24 @@ JS_TRACE_MISS = [false]
   js_up(env, h)[slot] = nil
   inner.call(env)
 
+-> js_cpl_catch(env, h, slot, handler, v)
+  js_up(env, h)[slot] = nil
+  handler.call(env, v)
+
 -> js_cpl_keep(env, h, slot, fin)
   fr = js_up(env, h)
   saved = fr[slot]
   r = fin.call(env)
   fr[slot] = saved if r == nil
   r
+
+-> js_annexb_set(fr, i, v)
+  fr[i] = v
+  nil
+
+-> js_annexb_global(nm, v)
+  js_gset(nm, v, false)
+  nil
 
 -> js_run_try_finally(block, fin, env)
   d = JS_DEPTH[0]
@@ -2692,6 +2958,25 @@ JS_TRACE_MISS = [false]
 -> js_super_method_call(home, k, this, args)
   f = js_super_get(home, k, this)
   js_call_named(f, this, args, "(intermediate value)." + js_key_display(k).to_s)
+
+-> js_super_method_call_l(home, this, kf, args, env)
+  k = kf.call(env)
+  f = js_super_get(home, k, this)
+  js_call_named(f, this, args.call(env), "(intermediate value)." + js_key_display(k).to_s)
+
+# super(...) with GetSuperConstructor before the arguments are evaluated (§13.3.7.1).
+-> js_super_call_l(frame, args, env)
+  f = frame[FS_FUNC]
+  parent = f.get_prototype_of
+  js_throw_type("Super constructor " + js_to_display(parent) + " of anonymous class is not a constructor") if !(parent.is_a?(JsObject) && js_is_constructor?(parent))
+  js_super_call_with(frame, f, parent, args.call(env))
+
+-> js_super_call_with(frame, f, parent, args)
+  obj = js_construct(parent, args, frame[FS_NT])
+  raise JsThrow.new(js_reference_error("Super constructor may only be called once")) if !frame[FS_THIS].is_a?(JsTdz)
+  frame[FS_THIS] = obj
+  js_init_fields(f, obj)
+  obj
 
 # super(...args) in a derived constructor; frame is the constructor's frame.
 -> js_super_call(frame, args)
@@ -2887,10 +3172,21 @@ JS_TRACE_MISS = [false]
   return src if !src.is_a?(String)
   prog = js_parse_or_throw(src, false)
   comp = JsCompiler.new(src)
+  comp.lazy = src.size >= JS_LAZY_MIN[0]
   run = comp.compile_eval(prog, sc, strict)
   run.call(env)
 
 -> js_parse_or_throw(src, mod)
+  if src.size >= JS_LAZY_MIN[0]
+    # lazy parsing: function bodies are skipped now and parsed on their first call; on
+    # any error parse again eagerly, so errors (and any skipper mistake) match eager mode
+    lp = JsParser.new(src, mod)
+    lp.lazy = true
+    begin
+      return lp.parse_program()
+    rescue e
+      JS_LAZY_STATS[3] += 1
+      ccall("w_eputs", "\[js lazy] eager reparse: " + (lp.error == nil ? e.message.to_s : lp.error.to_s)) if JS_LAZY_DEBUG[0]
   p = JsParser.new(src, mod)
   prog = nil
   begin
@@ -2937,3 +3233,22 @@ JS_TRACE_CATCH = [false]
   if JS_NOP[0] == nil
     JS_NOP[0] = ->(env) nil
   JS_NOP[0]
+
+# Parse a lazily-skipped function body (see JsLazyBody in the parser).
+-> js_lazy_parse_body(n, src)
+  lz = n.c
+  t0 = clock()
+  p = JsParser.new(src, lz.module)
+  p.lazy = true
+  body = nil
+  begin
+    body = p.parse_lazy_body(lz)
+  rescue e
+    err = p.error
+    raise JsThrow.new(js_syntax_error(err == nil ? e.message.to_s : err.msg))
+  n.b = body
+  n.c = nil
+  n.flags = n.flags | p.lazy_flags
+  JS_LAZY_STATS[2] += 1
+  JS_LAZY_T[1] = JS_LAZY_T[1] + (clock() - t0)
+  nil

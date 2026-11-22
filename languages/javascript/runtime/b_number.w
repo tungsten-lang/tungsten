@@ -43,15 +43,43 @@ JS_DIGITS36 = "0123456789abcdefghijklmnopqrstuvwxyz"
       d = radix - 1 if d >= radix
       ds = JS_DIGITS36.slice(d, 1) + ds
       t = Math.floor(t / radix)
+  # shortest fraction digits that round-trip (V8/JSC DoubleToRadixCString): stop once the
+  # remainder is below half the distance to the next double, rounding the last digit
   if fp > ~0.0
-    ds = ds + "."
-    k = 0
-    while fp > ~0.0 && k < 52
-      fp = fp * radix
-      d = Math.floor(fp).to_i
-      ds = ds + JS_DIGITS36.slice(d, 1)
-      fp = fp - d
-      k += 1
+    delta = ~0.5 * (js_float_from_bits(a.js_bits + 1) - a)
+    tiny = js_float_from_bits(1)
+    delta = tiny if delta < tiny
+    if fp >= delta
+      fd = []
+      carry = false
+      done = false
+      while !done
+        fp = fp * radix
+        delta = delta * radix
+        d = Math.floor(fp).to_i
+        fd.push(d)
+        fp = fp - d
+        if fp > ~0.5 || (fp == ~0.5 && (d & 1) == 1)
+          if fp + delta > ~1.0
+            # round up, propagating the carry through the digits (and into the integer part)
+            j = fd.size - 1
+            while j >= 0 && fd[j] + 1 >= radix
+              fd.pop
+              j -= 1
+            if j < 0
+              carry = true
+            else
+              fd[j] = fd[j] + 1
+            done = true
+        done = true if fp < delta
+      if carry
+        return js_num_to_radix(neg ? ~0.0 - (ip + ~1.0) : ip + ~1.0, radix)
+      if fd.size > 0
+        ds = ds + "."
+        q = 0
+        while q < fd.size
+          ds = ds + JS_DIGITS36.slice(fd[q], 1)
+          q += 1
   neg ? "-" + ds : ds
 
 -> js_num_to_string(this, rv)
@@ -238,31 +266,26 @@ JS_DIGITS36 = "0123456789abcdefghijklmnopqrstuvwxyz"
 
 # ---- Math ----
 
-JS_RNG = [0, 0]
+JS_RNG = JsTlsCell.new(2, 0)
 
+# Two xorshift32 generators (every intermediate stays below 2^45: Tungsten integers past
+# 47 bits become BigInts, and the old 64-bit xorshift128+ here grew its state by 23 bits
+# per call — a page calling Math.random in a loop ran out of memory).
 -> js_math_random
   s = JS_RNG
-  if s[0] == 0 && s[1] == 0
-    b = Random.bytes(16)
-    a0 = 0
-    a1 = 0
-    i = 0
-    while i < 8
-      a0 = (a0 << 8) | b[i]
-      a1 = (a1 << 8) | b[i + 8]
-      i += 1
-    s[0] = a0 | 1
-    s[1] = a1 | 2
-  # xorshift128+
-  x = s[0]
-  y = s[1]
-  s[0] = y
-  x = x ^ (x << 23)
-  x = x ^ ((x >> 17) & 0x00007FFFFFFFFFFF)
-  x = x ^ y ^ ((y >> 26) & 0x0000003FFFFFFFFF)
-  s[1] = x
-  r = (x + y) & 0x1FFFFFFFFFFFFF
-  r / ~9007199254740992.0
+  if s[0] == 0 || s[1] == 0
+    b = Random.bytes(8)
+    s[0] = ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) | 1
+    s[1] = ((b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7]) | 2
+  s[0] = js_xorshift32(s[0])
+  s[1] = js_xorshift32(s[1])
+  # 26 + 27 bits → a double in [0, 1)
+  ((s[0] >> 6).to_f * ~134217728.0 + (s[1] >> 5).to_f) / ~9007199254740992.0
+
+-> js_xorshift32(x)
+  x = x ^ ((x << 13) & 0xFFFFFFFF)
+  x = x ^ (x >> 17)
+  x ^ ((x << 5) & 0xFFFFFFFF)
 
 -> js_math_round(x)
   return x if x != x || x == INF || x == NEG_INF

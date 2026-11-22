@@ -132,9 +132,9 @@
     i += 1
   parts.join(" ")
 
-JS_CONSOLE_COUNTS = {}
-JS_CONSOLE_TIMERS = {}
-JS_CONSOLE_INDENT = [""]
+JS_CONSOLE_COUNTS = JsTlsHash.new
+JS_CONSOLE_TIMERS = JsTlsHash.new
+JS_CONSOLE_INDENT = JsTlsCell.new(1, "")
 
 -> js_console_out(level, args)
   h = JS_REALM[0].host

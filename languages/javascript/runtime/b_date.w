@@ -337,7 +337,13 @@ JS_TZ = [nil]
 -> js_date_valid?(v)
   v.is_a?(JsObject) && v.cls == "Date" && v.internal == v.internal
 
+# Date.now's clock: nil for the system clock, else a closure answering ms (Blade's
+# deterministic rendering mode installs a virtual clock here: blade/determinism).
+JS_CLOCK_HOOK = [nil]
+
 -> js_date_now
+  h = JS_CLOCK_HOOK[0]
+  return h.call() if h != nil
   Instant.now.unix_ms + ~0.0
 
 -> js_date_ctor(args, nt)

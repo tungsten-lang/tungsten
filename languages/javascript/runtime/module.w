@@ -6,7 +6,7 @@
 #   resolve(specifier, base_url) -> absolute URL String (raise for a bad specifier)
 #   load(url)                    -> source String
 
-JS_MODULE_HOST = [nil]
+JS_MODULE_HOST = JsTlsCell.new(1, nil)
 
 + JsModule
   rw :url, :exports, :stars, :status, :run, :ns, :error, :meta, :deps, :defaults
@@ -57,7 +57,7 @@ JS_MODULE_HOST = [nil]
   m.ns = ns
   ns
 
-JS_MODULES = {}
+JS_MODULES = JsTlsHash.new
 
 # Get (load, link and compile) the module at url; evaluation is separate.
 -> js_module_get(url)
@@ -75,6 +75,7 @@ JS_MODULES = {}
   prog = js_parse_or_throw(src, true)
   comp = JsCompiler.new(src)
   comp.url = url.to_s
+  comp.lazy = src.size >= JS_LAZY_MIN[0]
   m.status = :linking
   comp.compile_module(prog, m)
   m.status = :linked
@@ -112,7 +113,7 @@ JS_MODULES = {}
     js_call(cap.reject, nil, [js_error_value(e)])
   cap.promise
 
-JS_CURRENT_MODULE = [nil]
+JS_CURRENT_MODULE = JsTlsCell.new(1, nil)
 
 -> js_import_meta
   m = JS_CURRENT_MODULE[0]

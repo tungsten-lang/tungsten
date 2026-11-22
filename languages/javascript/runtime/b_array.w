@@ -80,21 +80,17 @@
   js_throw_type(js_to_display(mapfn) + " is not a function") if mapfn != nil && !(mapfn.is_a?(JsObject) && mapfn.callable?)
   usable = js_get_method(items, SYM_ITERATOR) if !js_nullish?(items)
   out = []
+  # the mapper runs as each value is read (it may change the source)
   if usable != nil
-    i = 0
-    js_for_of(items, ->(x) out.push(x))
+    js_for_of(items, ->(x) out.push(mapfn == nil ? x : js_call(mapfn, this_arg, [x, out.size + ~0.0])))
   else
     o = js_to_object(items)
     n = js_len_of(o)
     k = 0
     while k < n
-      out.push(js_el(o, k))
+      x = js_el(o, k)
+      out.push(mapfn == nil ? x : js_call(mapfn, this_arg, [x, k + ~0.0]))
       k += 1
-  if mapfn != nil
-    j = 0
-    while j < out.size
-      out[j] = js_call(mapfn, this_arg, [out[j], j + ~0.0])
-      j += 1
   if this.is_a?(JsFunction) && this != r.intrinsic("Array") && js_is_constructor?(this)
     a = js_construct(this, [], nil)
     j = 0
@@ -267,8 +263,9 @@
 -> js_arr_pop(this)
   if js_dense?(this) && this.extensible && !this.len_ro
     return nil if this.elems.size == 0
-    v = this.elems.pop
-    return v == JS_HOLE ? nil : v
+    v = js_arr_elem(this, this.elems.size - 1)
+    this.elems.pop
+    return v
   o = js_to_object(this)
   n = js_len_of(o)
   if n == 0
@@ -282,8 +279,9 @@
 -> js_arr_shift(this)
   if js_dense?(this) && this.extensible && !this.len_ro
     return nil if this.elems.size == 0
-    v = this.elems.shift
-    return v == JS_HOLE ? nil : v
+    v = js_arr_elem(this, 0)
+    this.elems.shift
+    return v
   o = js_to_object(this)
   n = js_len_of(o)
   if n == 0
@@ -358,19 +356,21 @@
     dc = d > (n - start) + ~0.0 ? n - start : d.to_i
   items = args.size > 2 ? args.slice(2, args.size - 2) : []
   r = JS_REALM[0]
-  if js_dense?(o) && o.extensible && !o.len_ro && o.proto == r.array_proto && o.class_name == "JsArray"
+  if js_dense?(o) && o.extensible && !o.len_ro && o.proto == r.array_proto && !r.array_proto_indexed && o.class_name == "JsArray"
     el = o.elems
-    removed = el.slice(start, dc)
-    tail = el.slice(start + dc, el.size - start - dc)
+    # copies: slices may share el's storage, which the pushes below overwrite
+    removed = el.slice(start, dc).dup
+    tail = el.slice(start + dc, el.size - start - dc).dup
     while el.size > start
       el.pop
     items.each ->(x) el.push(x)
     tail.each ->(x) el.push(x)
-    return r.new_array(removed.map(->(x) x == JS_HOLE ? nil : x))
-  removed = r.new_array([])
+    # holes stay holes in the result (only present elements are copied)
+    return r.new_array(removed)
+  removed = r.new_array(Array.new(dc, JS_HOLE))
   k = 0
   while k < dc
-    removed.elems.push(js_el(o, start + k)) if js_has_el?(o, start + k)
+    removed.elems[k] = js_el(o, start + k) if js_has_el?(o, start + k)
     k += 1
   ic = items.size
   if ic < dc
@@ -510,13 +510,12 @@
 
 -> js_sort_cmp(a, b, cmp)
   if cmp == nil
-    if a.is_a?(String) && b.is_a?(String)
-      return a < b ? -1 : (a > b ? 1 : 0)
+    return js_str_cmp(a, b) if a.is_a?(String) && b.is_a?(String)
     if a.is_a?(Float) && b.is_a?(Float) && js_int_like?(a) && js_int_like?(b) && a >= ~0.0 && b >= ~0.0 && js_digits_eq(a, b)
       return a < b ? -1 : (a > b ? 1 : 0)
     sa = js_to_string(a)
     sb = js_to_string(b)
-    return sa < sb ? -1 : (sa > sb ? 1 : 0)
+    return js_str_cmp(sa, sb)
   v = js_to_number(js_call(cmp, nil, [a, b]))
   return 0 if v != v
   v < ~0.0 ? -1 : (v > ~0.0 ? 1 : 0)

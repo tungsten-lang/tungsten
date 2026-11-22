@@ -3303,8 +3303,10 @@ bit_file_sha_memo = {}
   "built"
 
 # ── macOS .app targets: `app "Name", executable: "exe", id: "org.example.name", icon: "res/icon.png",
-#    documents: "ext1 ext2", version: "0.1", photos_usage: "why it adds to Photos", resources: "res/fonts res/x.dat"`
-#    in a Bitfile (2026-11-04; resources: 2026-11-21) ─────────
+#    documents: "ext1 ext2", version: "0.1", photos_usage: "why it adds to Photos", resources: "res/fonts res/x.dat",
+#    sign: "Developer ID Application: Name (TEAMID)", entitlements: "res/app.entitlements",
+#    provisioning_profile: "res/app.provisionprofile"`
+#    in a Bitfile (2026-11-04; resources: 2026-11-21; signing: 2026-11-22) ─────────
 -> bit_apps(bit_root)
   apps = []
   manifest = read_file(bit_root + "/Bitfile")
@@ -3351,7 +3353,23 @@ bit_file_sha_memo = {}
         build = capture("date +%Y%m%d.%H%M").strip
       if !bit_relative_path?(exe) || (icon != "" && !bit_relative_path?(icon))
         die("App executable and icon must be package-relative paths in " + bit_root + "/Bitfile")
-      apps.push({name: name, exe: exe, id: id, icon: icon, documents: docs, version: version, build: build, explicit_build: explicit_build, resources: resources})
+      photos = bit_option_value(line, "photos_usage")
+      # Code signing: sign: names a keychain identity ("Developer ID Application: ..." or
+      # "Apple Development: ..."; default "-", ad hoc), entitlements: a package-relative .plist and
+      # provisioning_profile: a package-relative .provisionprofile embedded as
+      # Contents/embedded.provisionprofile (2026-11-22)
+      sign = bit_option_value(line, "sign")
+      if sign == nil || sign == ""
+        sign = "-"
+      ents = bit_option_value(line, "entitlements")
+      if ents == nil
+        ents = ""
+      prof = bit_option_value(line, "provisioning_profile")
+      if prof == nil
+        prof = ""
+      if (ents != "" && !bit_relative_path?(ents)) || (prof != "" && !bit_relative_path?(prof))
+        die("App entitlements and provisioning_profile must be package-relative paths in " + bit_root + "/Bitfile")
+      apps.push({name: name, exe: exe, id: id, icon: icon, documents: docs, version: version, build: build, explicit_build: explicit_build, resources: resources, photos: photos, sign: sign, entitlements: ents, profile: prof})
   apps
 
 -> plist_escape(s)
@@ -3500,14 +3518,69 @@ bit_file_sha_memo = {}
     ri = ri + 1
   atomic_write(app_info_plist(app, has_icon), contents + "/Info.plist")
   atomic_write("APPL????", contents + "/PkgInfo")
-  if !codesign_ok(bundle)
-    eputs(RED + "codesign failed for " + bundle + RESET)
+  if !sign_app_bundle(bit_root, app, bundle)
     return false
   # an app with document types tells Launch Services at once (its Info.plist's types, not the copy it cached at the last
   # launch), so Finder's double-click routes the files to it; harmless when it fails (it registers at its next launch)
   if app[:documents] != ""
     sh_ok("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f " + shq(bundle) + " >/dev/null 2>&1")
   << "    " + GREEN + "built" + RESET + "   " + project_relative_path(bundle) + " " + DIM + ms(clock_ms() - t_app) + RESET
+  true
+
+# Entitlements macOS honours only in a signature backed by a provisioning profile. AMFI kills an ad hoc
+# signed process that claims one at launch ("The file is adhoc signed but contains restricted
+# entitlements", AppleMobileFileIntegrityError -424), so an ad hoc build leaves them out.
+-> restricted_entitlement?(key)
+  key.starts_with?("com.apple.developer.") || key == "com.apple.application-identifier" || key == "application-identifier" || key == "keychain-access-groups" || key == "com.apple.security.application-groups"
+
+-> entitlement_keys(text)
+  keys = []
+  rest = text
+  while true
+    k = rest.index("<key>")
+    if k == nil
+      return keys
+    e = rest.index("</key>", k)
+    if e == nil
+      return keys
+    keys.push(rest.slice(k + 5, e - k - 5).strip)
+    rest = rest.slice(e + 6, rest.size - e - 6)
+  keys
+
+# Sign bin/<Name>.app: ad hoc by default; with the Bitfile's sign: identity, hardened runtime and a
+# secure timestamp, its entitlements: and the provisioning_profile: embedded first. An ad hoc
+# signature drops entitlements that need a profile (and says so) instead of building an app that
+# cannot launch.
+-> sign_app_bundle(bit_root, app, bundle)
+  if !IS_DARWIN
+    return true
+  identity = app[:sign] == nil ? "-" : app[:sign]
+  if app[:profile] != nil && app[:profile] != ""
+    src = bit_root + "/" + app[:profile]
+    if !regular_file?(src) || !atomic_copy(src, bundle + "/Contents/embedded.provisionprofile")
+      eputs(RED + "app " + app[:name] + ": no provisioning profile " + app[:profile] + RESET)
+      return false
+  else
+    sh_ok("rm -f " + shq(bundle + "/Contents/embedded.provisionprofile"))
+  ents_arg = ""
+  if app[:entitlements] != nil && app[:entitlements] != ""
+    src = bit_root + "/" + app[:entitlements]
+    text = read_file(src)
+    if text == nil
+      eputs(RED + "app " + app[:name] + ": no entitlements file " + app[:entitlements] + RESET)
+      return false
+    restricted = []
+    entitlement_keys(text).each ->(k)
+      if restricted_entitlement?(k)
+        restricted.push(k)
+    if identity == "-" && restricted.size > 0
+      << "    " + DIM + "note" + RESET + "    " + app[:name] + ".app signed ad hoc without " + app[:entitlements] + DIM + " (" + restricted.join(", ") + " need sign: and provisioning_profile:)" + RESET
+    else
+      ents_arg = " --entitlements " + shq(src)
+  opts = identity == "-" ? "" : " --options runtime --timestamp"
+  if !sh_ok("codesign --force -s " + shq(identity) + opts + ents_arg + " " + shq(bundle) + " >/dev/null 2>&1")
+    eputs(RED + "codesign failed for " + bundle + (identity == "-" ? "" : " (identity " + identity + ")") + RESET)
+    return false
   true
 
 -> bit_short_name(bit_path)

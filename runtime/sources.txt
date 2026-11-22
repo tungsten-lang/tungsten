@@ -61,6 +61,7 @@ quartz.c             tests,companion:quartz                      any
 sci_io_native.c      companion:sci_io                            any
 media/media.c        companion:media                             any
 media/media_avf.m    companion:media                             darwin
+credentials.m        companion:credentials                       darwin
 metal.m              compiler,tests,companion:bridges            darwin
 graphics.m           tests,companion:bridges                     darwin
 hid_bridge.m         compiler,tests,companion:bridges            darwin

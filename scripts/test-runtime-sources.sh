@@ -57,6 +57,8 @@ expect "metal.m graphics.m hid_bridge.m" darwin companion:bridges
 expect "" linux companion:bridges
 expect "openblas_bridge.c" linux companion:blas
 expect "media/media.c media/media_avf.m" darwin companion:media
+expect "credentials.m" darwin companion:credentials
+expect "" linux companion:credentials
 [ "$(sh "$SOURCES" -f darwin companion:blas)" = "$(printf 'blas_bridge.c\t-fno-finite-math-only')" ] ||
   fail "sources.sh -f does not carry blas_bridge.c's extra cflags"
 if sh "$SOURCES" darwin >/dev/null 2>&1; then fail "sources.sh without a set must fail"; fi

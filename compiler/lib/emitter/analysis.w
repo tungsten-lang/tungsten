@@ -1631,6 +1631,8 @@ emitter_last_artifact_state = {
     feat[:quartz_needed] = true
   if sym.starts_with?("w_media_")
     feat[:media_needed] = true
+  if sym.starts_with?("w_cred_")
+    feat[:credentials_needed] = true
   if sym.starts_with?("w_sci_")
     feat[:sci_io_needed] = true
   if sym.starts_with?("w_tensor_")
@@ -1656,6 +1658,7 @@ emitter_last_artifact_state = {
     sparse_needed: false,
     quartz_needed: false,
     media_needed: false,
+    credentials_needed: false,
     sci_io_needed: false,
     wtensor_needed: false,
     cuda_needed: false,
@@ -1692,6 +1695,8 @@ emitter_last_artifact_state = {
       feat[:quartz_needed] = true
     if embedded_ir_str.index("@w_media_") != nil
       feat[:media_needed] = true
+    if embedded_ir_str.index("@w_cred_") != nil
+      feat[:credentials_needed] = true
     if embedded_ir_str.index("@w_sci_") != nil
       feat[:sci_io_needed] = true
     if embedded_ir_str.index("@w_tensor_") != nil

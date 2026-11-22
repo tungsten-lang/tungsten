@@ -122,7 +122,9 @@ HARNESS = {}
       js_run_script(full)
       js_run_script(strict ? "\"use strict\";\n" + src : src)
     elsif neg != nil && neg[0] == "parse"
-      js_parse_or_throw(strict ? "\"use strict\";\n" + src : src, false)
+      # parse phase = parsing plus early errors (found while compiling); nothing runs
+      ps = strict ? "\"use strict\";\n" + src : src
+      JsCompiler.new(ps).compile_script(js_parse_or_throw(ps, false))
     else
       js_run_script(full) if !raw
       js_run_script(strict ? "\"use strict\";\n" + src : src)

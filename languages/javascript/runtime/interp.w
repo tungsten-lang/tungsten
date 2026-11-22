@@ -87,9 +87,11 @@ F_CL_YES = 2097152
 
 
 + JsCompiler
-  rw :src, :completion_slot
+  rw :src, :completion_slot, :url, :builtin
 
   -> new(@src)
+    @url = ""
+    @builtin = false
     @completion_slot = -1
     @fn_depth = 0
 
@@ -244,9 +246,48 @@ F_CL_YES = 2097152
         out.push([s.str, :class])
     out
 
+  # ---- early errors (static semantics) ----
+
+  -> early_dup(nm)
+    raise JsThrow.new(js_syntax_error("Identifier '" + nm + "' has already been declared"))
+
+  # A statement list's LexicallyDeclaredNames must be unique and must not occur in its
+  # VarDeclaredNames (or in extra, e.g. parameters). top: function/script body, where
+  # function declarations are var-scoped; in a block they are lexical (sloppy duplicates
+  # of functions are allowed, Annex B.3.2.4).
+  -> early_check(stmts, strict, top, extra = nil)
+    seen = {}
+    fn_only = {}
+    stmts.each ->(s0)
+      s = s0
+      s = s.a if s.kind == :export_named && s.a != nil
+      s = s.a if s.kind == :export_default && s.a != nil && (s.a.kind == :class_decl || s.a.kind == :function_decl)
+      names = []
+      is_fn = false
+      if s.kind == :var_decl && s.str != "var"
+        s.list.each ->(d) bound_names(d.a, names)
+      elsif s.kind == :class_decl && s.str != nil
+        names.push(s.str)
+      elsif s.kind == :function_decl && !top && s.str != nil
+        names.push(s.str)
+        is_fn = !strict && !s.has?(F_ASYNC) && !s.has?(F_GENERATOR)
+      names.each ->(nm)
+        if seen[nm]
+          early_dup(nm) if !(is_fn && fn_only[nm])
+        seen[nm] = true
+        fn_only[nm] = is_fn && (fn_only[nm] == nil || fn_only[nm])
+    return nil if seen.size == 0
+    vars = var_names(stmts, [], true, top)
+    if top
+      stmts.each ->(s) vars.push(s.str) if s.kind == :function_decl && s.str != nil
+    vars.each ->(nm) early_dup(nm) if seen[nm]
+    extra.each(->(nm) early_dup(nm) if seen[nm]) if extra != nil
+    nil
+
   # Block-level instantiation for a list (block, switch body, catch body): declares
   # let/const/class and (strict) functions in sc; returns the function decls to hoist.
   -> declare_block(stmts, sc)
+    early_check(stmts, sc.strict, false)
     lex_decls(stmts, sc.strict).each ->(d)
       sc.declare(d[0], d[1])
     fns = []
@@ -264,6 +305,7 @@ F_CL_YES = 2097152
     sc = JsScope.new(:script, nil, true)
     sc.strict = prog.has?(F_STRICT)
     r = JS_REALM[0]
+    early_check(prog.list, sc.strict, true)
     vn = var_names(prog.list, [], sc.strict, true)
     vn.each ->(nm)
       b = JsBinding.new(nm, :var, sc, -1)
@@ -347,7 +389,19 @@ F_CL_YES = 2097152
     ->(env) js_run_list(fs, env)
 
   # Compile one statement; labels is the label set of an enclosing labeled statement.
+  # Completion values (eval / script result): if/loops/switch/try/with produce undefined
+  # unless their body produces a value (UpdateEmpty(C, undefined)).
   -> cs(n, sc, labels)
+    st = cs_raw(n, sc, labels)
+    k = n.kind
+    if @completion_slot >= 0 && @fn_depth == 0 && (k == :if || k == :while || k == :do_while || k == :for || k == :for_in || k == :for_of || k == :switch || k == :try || k == :with)
+      h = hops_between(sc.frame, completion_frame(sc))
+      slot = @completion_slot
+      inner = js_nop_stmt(st)
+      return ->(env) js_cpl_reset(env, h, slot, inner)
+    st
+
+  -> cs_raw(n, sc, labels)
     k = n.kind
     case k
     when :expr_stmt
@@ -482,7 +536,28 @@ F_CL_YES = 2097152
     items = fns.map(->(f) [resolve(f.str, sc), compile_function(f, sc, f.str)])
     ->(env) js_hoist(items, env)
 
+  # A Statement position (if/loop/with/label bodies) cannot hold a declaration; sloppy
+  # if-bodies may hold a plain function declaration (Annex B.3.4).
+  -> check_sub(s, sc, if_body)
+    return nil if s == nil
+    k = s.kind
+    bad = false
+    if k == :var_decl && s.str != "var"
+      bad = true
+    elsif k == :class_decl
+      bad = true
+    elsif k == :function_decl
+      bad = !(if_body && !sc.strict && !s.has?(F_ASYNC) && !s.has?(F_GENERATOR))
+    elsif k == :labeled
+      b = s.a
+      b = b.a while b != nil && b.kind == :labeled
+      bad = b != nil && (b.kind == :function_decl || (b.kind == :var_decl && b.str != "var") || b.kind == :class_decl)
+    raise JsThrow.new(js_syntax_error("Lexical declaration cannot appear in a single-statement context")) if bad
+    nil
+
   -> compile_if(n, sc)
+    check_sub(n.b, sc, true)
+    check_sub(n.c, sc, true)
     t = cx_bool(n.a, sc)
     c = cs(n.b, sc, nil)
     c = js_nop_stmt(c)
@@ -493,18 +568,33 @@ F_CL_YES = 2097152
     ->(env) t.call(env) ? c.call(env) : a.call(env)
 
   -> compile_while(n, sc, labels)
+    check_sub(n.b, sc, false)
     t = cx_bool(n.a, sc)
     b = cs(n.b, sc, nil)
     b = js_nop_stmt(b)
     ->(env) js_run_while(t, b, labels, env)
 
   -> compile_do_while(n, sc, labels)
+    check_sub(n.a, sc, false)
     b = cs(n.a, sc, nil)
     b = js_nop_stmt(b)
     t = cx_bool(n.b, sc)
     ->(env) js_run_do_while(t, b, labels, env)
 
+  # for (let/const …): bound names unique, not "let", not var-declared in the body.
+  -> for_bound_check(bound, body)
+    seen = {}
+    bound.each ->(nm)
+      raise JsThrow.new(js_syntax_error("let is disallowed as a lexically bound name")) if nm == "let"
+      early_dup(nm) if seen[nm]
+      seen[nm] = true
+    vs = []
+    var_names_stmt(body, vs, true, false)
+    vs.each ->(nm) early_dup(nm) if seen[nm]
+    nil
+
   -> compile_for(n, sc, labels)
+    check_sub(n.d, sc, false)
     init = n.a
     lexical = init != nil && init.kind == :var_decl && init.str != "var"
     ls = sc
@@ -514,6 +604,7 @@ F_CL_YES = 2097152
       ls = JsScope.new(:block, sc, owner)
       bound = []
       init.list.each ->(d) bound_names(d.a, bound)
+      for_bound_check(bound, n.d)
       bound.each ->(nm) ls.declare(nm, init.str == "const" ? :const : :let)
     ic = nil
     if init != nil
@@ -538,6 +629,7 @@ F_CL_YES = 2097152
     ->(env) js_run_for(lex, ic, t, u, b, labels, env)
 
   -> compile_for_in(n, sc, labels)
+    check_sub(n.d, sc, false)
     ls, target, owner = for_head(n, sc)
     rhs = cx(n.b, sc)
     b = cs(n.d, ls, nil)
@@ -547,6 +639,7 @@ F_CL_YES = 2097152
     ->(env) js_run_for_in(rhs.call(env), target, b, labels, owner, size_of, lex, env)
 
   -> compile_for_of(n, sc, labels)
+    check_sub(n.d, sc, false)
     ls, target, owner = for_head(n, sc)
     rhs = cx(n.b, sc)
     b = cs(n.d, ls, nil)
@@ -565,7 +658,9 @@ F_CL_YES = 2097152
     if left.kind == :var_decl && left.str != "var"
       owner = has_closure?(n.d) || any_closure?(left.list)
       ls = JsScope.new(:block, sc, owner)
-      bound_names(left.list[0].a, []).each ->(nm) ls.declare(nm, left.str == "const" ? :const : :let)
+      fb = bound_names(left.list[0].a, [])
+      for_bound_check(fb, n.d)
+      fb.each ->(nm) ls.declare(nm, left.str == "const" ? :const : :let)
       return [ls, compile_pattern(left.list[0].a, ls, :init), owner]
     if left.kind == :var_decl
       d = left.list[0]
@@ -600,7 +695,15 @@ F_CL_YES = 2097152
       else
         owner = has_closure?(n.c) || has_closure?(param)
         cs2 = JsScope.new(:catch, sc, owner)
-        bound_names(param, []).each ->(nm) cs2.declare(nm, :let_catch)
+        cp = bound_names(param, [])
+        cseen = {}
+        cp.each ->(nm)
+          early_dup(nm) if cseen[nm]
+          cseen[nm] = true
+        if n.c != nil && n.c.kind == :block
+          lex_decls(n.c.list, sc.strict).each ->(d) early_dup(d[0]) if cseen[d[0]]
+          n.c.list.each ->(st) early_dup(st.str) if st.kind == :function_decl && cseen[st.str]
+        cp.each ->(nm) cs2.declare(nm, :let_catch)
         bind = compile_pattern(param, cs2, :init)
         hb = compile_block(n.c.list, cs2)
         size_of = cs2
@@ -613,6 +716,12 @@ F_CL_YES = 2097152
           h2 = ->(env, v) js_catch_inline(bind, hb, env, v)
           handler = h2
     fin = n.d == nil ? nil : compile_block(n.d.list, sc)
+    if fin != nil && @completion_slot >= 0 && @fn_depth == 0
+      # a finally block that completes normally does not change the completion value
+      fh = hops_between(sc.frame, completion_frame(sc))
+      fslot = @completion_slot
+      fin0 = js_nop_stmt(fin)
+      fin = ->(env) js_cpl_keep(env, fh, fslot, fin0)
     if fin == nil
       return ->(env) js_run_try_catch(block, handler, env)
     if handler == nil
@@ -623,6 +732,8 @@ F_CL_YES = 2097152
     d = cx(n.a, sc)
     all = []
     n.list.each ->(c) c.list.each ->(s) all.push(s)
+    raise JsThrow.new(js_syntax_error("More than one default clause in switch statement")) if n.list.select(->(c) c.a == nil).size > 1
+    early_check(all, sc.strict, false)
     owner = any_closure?(all)
     needs = false
     all.each ->(s)
@@ -641,6 +752,8 @@ F_CL_YES = 2097152
   -> compile_labeled(n, sc, labels)
     ls = labels == nil ? [n.str] : labels + [n.str]
     body = n.a
+    raise JsThrow.new(js_syntax_error("In strict mode code, functions can only be declared at top level or inside a block.")) if body.kind == :function_decl && (sc.strict || body.has?(F_ASYNC) || body.has?(F_GENERATOR))
+    raise JsThrow.new(js_syntax_error("Lexical declaration cannot appear in a single-statement context")) if (body.kind == :var_decl && body.str != "var") || body.kind == :class_decl
     k = body.kind
     if k == :for || k == :for_in || k == :for_of || k == :while || k == :do_while || k == :labeled
       return cs(body, sc, ls)
@@ -650,6 +763,7 @@ F_CL_YES = 2097152
     ->(env) js_run_labeled(b, lbl, env)
 
   -> compile_with(n, sc)
+    check_sub(n.b, sc, false)
     o = cx(n.a, sc)
     ws = JsScope.new(:with, sc, false)
     ws.with_index = sc.alloc()
@@ -1324,7 +1438,13 @@ F_CL_YES = 2097152
       key = callee.b.str
       if oopt || opt
         return ->(env) js_call_method_opt(o.call(env), key, args, env, oopt, opt)
-      return ->(env) js_call_method(o.call(env), key, args.call(env))
+      cp = n.pos
+      cm = ->(env)
+        ov = o.call(env)
+        av = args.call(env)
+        JS_POS[JS_DEPTH[0]] = cp
+        js_call_method(ov, key, av)
+      return cm
     if callee.kind == :member
       # super.m(...)
       kf = member_key(callee, sc)
@@ -1345,13 +1465,23 @@ F_CL_YES = 2097152
     if callee.kind == :chain
       # (a?.b)() keeps a?.b's this
       return ->(env) js_call_named(f.call(env), nil, args.call(env), what)
-    ->(env) js_call_named(f.call(env), nil, args.call(env), what)
+    cp = n.pos
+    ->(env)
+      fv = f.call(env)
+      av = args.call(env)
+      JS_POS[JS_DEPTH[0]] = cp
+      js_call_named(fv, nil, av, what)
 
   -> compile_new(n, sc)
     f = cx(n.a, sc)
     args = compile_args(n.list, sc)
     what = n.a.kind == :ident ? n.a.str : (n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.a.b.kind == :ident ? n.a.b.str : "expression")
-    ->(env) js_construct_named(f.call(env), args.call(env), what)
+    cp = n.pos
+    ->(env)
+      fv = f.call(env)
+      av = args.call(env)
+      JS_POS[JS_DEPTH[0]] = cp
+      js_construct_named(fv, av, what)
 
   # ---- super ----
 
@@ -1458,6 +1588,8 @@ F_CL_YES = 2097152
     gen = n.has?(F_GENERATOR)
     code = JsCode.new(name == nil ? "" : name)
     code.src = @src
+    code.url = @url
+    code.builtin = @builtin
     code.pos = n.pos
     code.fin = n.fin
     code.method = is_method || n.has?(F_METHOD)
@@ -1514,6 +1646,7 @@ F_CL_YES = 2097152
         code.expr_body = false
         code.body = ->(env) JsCompletion.new(C_RETURN, nil, e.call(env))
     else
+      early_check(body, fsc.strict, true, pnames)
       vn = var_names(body, [], fsc.strict, true)
       vn.each ->(nm) fsc.declare(nm, :var)
       fns = []
@@ -1581,6 +1714,8 @@ F_CL_YES = 2097152
       ccode = compile_ctor(ctor_node.b, csc, name, derived)
     else
       ccode = JsCode.new(name == nil ? "" : name)
+      ccode.url = @url
+      ccode.builtin = @builtin
       ccode.kind = derived ? :default_derived : :default_base
       ccode.strict = true
       ccode.src = @src
@@ -2469,6 +2604,17 @@ JS_TRACE_MISS = [false]
     js_trace_catch(v) if JS_TRACE_CATCH[0]
     return handler.call(env, v)
   nil
+
+-> js_cpl_reset(env, h, slot, inner)
+  js_up(env, h)[slot] = nil
+  inner.call(env)
+
+-> js_cpl_keep(env, h, slot, fin)
+  fr = js_up(env, h)
+  saved = fr[slot]
+  r = fin.call(env)
+  fr[slot] = saved if r == nil
+  r
 
 -> js_run_try_finally(block, fin, env)
   d = JS_DEPTH[0]

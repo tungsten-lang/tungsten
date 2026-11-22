@@ -806,8 +806,17 @@ JS_REALM = [nil]
   proto = r == nil ? JS_NULL : r.proto_of(kind)
   e = JsObject.new(proto, "Error")
   e.define("message", msg, ATTR_W + ATTR_C)
-  e.define("stack", kind + ": " + msg + "\n" + js_stack_lines(), ATTR_W + ATTR_C)
+  js_error_locate(e)
   e
+
+# JSC's own properties on a new Error: line, column, sourceURL (enumerable), stack.
+-> js_error_locate(e)
+  loc = js_top_location()
+  e.define("line", loc[1] + ~0.0, ATTR_ALL)
+  e.define("column", loc[2] + ~0.0, ATTR_ALL)
+  e.define("sourceURL", loc[0], ATTR_ALL) if loc[0] != ""
+  e.define("stack", js_stack_lines(), ATTR_W + ATTR_C)
+  nil
 
 -> js_type_error(msg)
   js_make_error("TypeError", msg)

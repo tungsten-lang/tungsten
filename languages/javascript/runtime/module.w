@@ -74,6 +74,7 @@ JS_MODULES = {}
   JS_MODULES[url] = m
   prog = js_parse_or_throw(src, true)
   comp = JsCompiler.new(src)
+  comp.url = url.to_s
   m.status = :linking
   comp.compile_module(prog, m)
   m.status = :linked

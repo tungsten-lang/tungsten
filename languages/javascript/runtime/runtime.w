@@ -43,7 +43,7 @@ CONTINUE_PLAIN = JsCompletion.new(C_CONTINUE, nil, nil)
 
 # One compiled function: everything the interpreter needs to activate it.
 + JsCode
-  rw :name, :length, :nslots, :binder, :body, :strict, :kind, :expr_body, :src, :pos, :fin, :is_class, :derived, :args_slot, :method, :lazy_kind, :self_slot
+  rw :name, :length, :nslots, :binder, :body, :strict, :kind, :expr_body, :src, :pos, :fin, :is_class, :derived, :args_slot, :method, :lazy_kind, :self_slot, :url, :builtin
 
   -> new(@name)
     @length = 0
@@ -67,7 +67,7 @@ CONTINUE_PLAIN = JsCompletion.new(C_CONTINUE, nil, nil)
     @kind == :arrow || @kind == :async_arrow
 
   -> source_text
-    return "function " + @name.to_s + "() { \[native code] }" if @src == nil
+    return "function " + @name.to_s + "() { \[native code] }" if @src == nil || @builtin
     @src.slice(@pos, @fin - @pos)
 
 # Per-class instance field list, captured when the class is evaluated.
@@ -79,6 +79,10 @@ CONTINUE_PLAIN = JsCompletion.new(C_CONTINUE, nil, nil)
 
 JS_DEPTH = [0]
 JS_STACK = Array.new(1000, nil)
+# The source position of the call (or `new`) each frame is executing; [0] is global code.
+JS_POS = Array.new(1001, -1)
+# The running top-level script: [src, url].
+JS_TOP = ["", ""]
 JS_MAX_DEPTH = [900]
 JS_LAST_ENV = [nil]
 
@@ -321,7 +325,9 @@ JS_WATCH = [Env.get("BLADE_JS_WATCH", "")]
   if d > JS_MAX_DEPTH[0]
     raise JsThrow.new(js_range_error("Maximum call stack size exceeded"))
   JS_DEPTH[0] = d
-  JS_STACK[d] = code if d < 1000
+  if d < 1000
+    JS_STACK[d] = code
+    JS_POS[d] = -1
   js_watchdog() if ((JS_TICKS[0] += 1) & 4095) == 0
   env = js_activation(f, code, this, args, nt)
   if JS_FN_PROFILE[0]
@@ -403,7 +409,7 @@ JS_WATCH = [Env.get("BLADE_JS_WATCH", "")]
 
 # Function.prototype.toString
 -> js_function_source(f)
-  return "function " + f.fname.to_s + "() { \[native code] }" if f.code == nil
+  return "function " + f.fname.to_s + "() { \[native code] }" if f.code == nil || f.code.builtin
   f.code.source_text
 
 # ---- errors: Tungsten exceptions → JS values ----
@@ -781,18 +787,61 @@ JS_CORO_TRACE = [Env.get("BLADE_CORO_TRACE", "") == "1"]
   raise JsGenReturn.new(js_await(c, msg[1]))
 
 # "    at name (url:line:col)" lines for the current call stack (Error.stack).
+# The stack in JavaScriptCore's format (Blade presents as Safari): one "name@url:line:col"
+# line per frame, innermost first, ending with "global code@url:line:col".
 -> js_stack_lines
   out = []
   k = JS_DEPTH[0]
   k = 999 if k > 999
-  while k > 0 && out.size < 10
+  while k > 0 && out.size < 100
     c = JS_STACK[k]
     if c != nil
-      nm = c.name.to_s
-      out.push("    at " + (nm == "" ? "<anonymous>" : nm) + " (" + js_code_location(c) + ")" + (JS_DEBUG[0] && c.src != nil ? "  " + c.src.slice(c.pos, 700).gsub("\n", " ") : ""))
+      p = JS_POS[k] >= 0 ? JS_POS[k] : c.pos
+      out.push(c.name.to_s + "@" + js_src_location(c.builtin ? nil : c.src, c.url, p) + (JS_DEBUG[0] && c.src != nil ? "  " + c.src.slice(p, 300).gsub("\n", " ") : ""))
     k -= 1
-  out.push("    at <anonymous>") if out.size == 0
+  if JS_TOP[0].size > 0 || JS_TOP[1].size > 0
+    out.push("global code@" + js_src_location(JS_TOP[0], JS_TOP[1], JS_POS[0] < 0 ? 0 : JS_POS[0]))
   out.join("\n")
+
+# The top frame's [url, line, column] (JSC's Error line/column/sourceURL).
+-> js_top_location
+  k = JS_DEPTH[0]
+  src = JS_TOP[0]
+  url = JS_TOP[1]
+  p = JS_POS[0]
+  if k > 0 && k < 1000 && JS_STACK[k] != nil
+    c = JS_STACK[k]
+    src = c.src
+    url = c.url
+    p = JS_POS[k] >= 0 ? JS_POS[k] : c.pos
+  lc = js_src_linecol(src, p < 0 ? 0 : p)
+  [url == nil ? "" : url, lc[0], lc[1]]
+
+-> js_src_location(src, url, p)
+  return "\[native code]" if src == nil
+  lc = js_src_linecol(src, p)
+  (url == nil || url == "" ? "" : url) + ":" + lc[0].to_s + ":" + lc[1].to_s
+
+-> js_src_linecol(src, p)
+  return [1, 1] if src == nil
+  if JS_LINE_CACHE[0] == nil || !(JS_LINE_CACHE[0] == src)
+    nls = []
+    k = src.index("\n", 0)
+    while k != nil
+      nls.push(k)
+      k = src.index("\n", k + 1)
+    JS_LINE_CACHE[0] = src
+    JS_LINE_CACHE[1] = nls
+  nls = JS_LINE_CACHE[1]
+  lo = 0
+  hi = nls.size
+  while lo < hi
+    mid = (lo + hi) / 2
+    if nls[mid] < p
+      lo = mid + 1
+    else
+      hi = mid
+  [lo + 1, lo == 0 ? p + 1 : p - nls[lo - 1]]
 
 JS_LINE_CACHE = [nil, nil]
 

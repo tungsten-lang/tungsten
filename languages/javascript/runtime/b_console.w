@@ -4,7 +4,9 @@
   return "undefined" if v == nil
   return "null" if v == JS_NULL
   return (v ? "true" : "false") if v == true || v == false
-  return js_number_to_s(v) if v.is_a?(Float)
+  if v.is_a?(Float)
+    return "-0" if v == ~0.0 && ~1.0 / v < ~0.0
+    return js_number_to_s(v)
   return (depth == 0 ? v : js_json_quote(v)) if v.is_a?(String)
   return v.to_s if v.is_a?(JsSymbol)
   return v.v.to_s + "n" if v.is_a?(JsBigInt)
@@ -15,9 +17,13 @@
     cls = v.is_a?(JsFunction) && v.code != nil && v.code.is_class
     return (cls ? "\[class " : "\[Function: ") + (n == "" ? "(anonymous)" : n) + "]"
   c = v.cls
-  if c == "Error"
+  if (c == "Error") || (c == "DOMException") || js_inherits_error?(v)
     st = v.get("stack", v)
-    return st.is_a?(String) ? st : js_error_to_string(v)
+    hd = js_error_to_string(v)
+    return hd if !st.is_a?(String) || st.size == 0
+    # JSC stacks carry no "Name: message" header; show it like Safari's console does
+    return st if st.starts_with?(hd)
+    return hd + "\n    " + st.gsub("\n", "\n    ")
   return "\[Promise]" if v.is_a?(JsPromise)
   if c == "RegExp"
     return js_to_string(js_call_method(v, "toString", []))
@@ -198,3 +204,16 @@ js_install(->(r) js_install_console(r))
   return nil if t == nil
   JS_CONSOLE_TIMERS.delete(k) if remove
   js_console_out("log", [k + ": " + (clock_ms() - t).to_s + " ms"])
+
+-> js_inherits_error?(v)
+  r = JS_REALM[0]
+  return false if r == nil
+  ep = r.proto_of("Error")
+  return false if !ep.is_a?(JsObject)
+  p = v.proto
+  n = 0
+  while p.is_a?(JsObject) && n < 50
+    return true if p == ep
+    p = p.proto
+    n += 1
+  false

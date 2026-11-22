@@ -322,7 +322,7 @@ js_install(->(r) js_install_object(r))
   ep.define("message", "", BUILTIN_ATTRS)
   r.method(ep, "toString", 0, ->(this, args, nt) js_error_to_string(this))
   r.method(ec, "captureStackTrace", 1, ->(this, args, nt) js_capture_stack(js_arg(args, 0)))
-  ec.define("stackTraceLimit", ~10.0, ATTR_ALL)
+  ec.define("stackTraceLimit", ~100.0, ATTR_ALL)
   ["TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError"].each ->(nm)
     js_install_error_kind(r, nm, ec, ep)
   agp = JsObject.new(ep, "Object")
@@ -414,7 +414,7 @@ js_install(->(r) js_install_object(r))
   opts = js_arg(args, 1)
   if opts.is_a?(JsObject) && opts.has_property?("cause")
     e.define("cause", opts.get("cause"), ATTR_W + ATTR_C)
-  js_capture_stack(e)
+  js_error_locate(e)
   e
 
 -> js_aggregate_error_ctor(args, nt)
@@ -424,12 +424,7 @@ js_install(->(r) js_install_object(r))
 
 -> js_capture_stack(o)
   return nil if !o.is_a?(JsObject)
-  head = "Error"
-  begin
-    head = js_error_to_string(o)
-  rescue e
-    head = "Error"
-  o.define("stack", head + "\n" + js_stack_lines(), ATTR_W + ATTR_C)
+  o.define("stack", js_stack_lines(), ATTR_W + ATTR_C)
   nil
 
 -> js_error_to_string(this)
@@ -526,17 +521,44 @@ js_install(->(r) js_install_object(r))
 # Run a script source in the realm (the embedder's entry point). Returns the completion value.
 JS_PHASES = [~0.0, ~0.0, ~0.0]
 
+# Builtins written in JavaScript: their functions print as native code and their
+# frames show as [native code], like the engine's own.
+-> js_run_builtin(src, name)
+  comp = JsCompiler.new(src)
+  comp.url = name
+  comp.builtin = true
+  run = comp.compile_script(js_parse_or_throw(src, false))
+  JS_DEPTH[0] = 0
+  run.call(nil)
+
 -> js_run_script(src, name = "script")
   t0 = (clock_ms() * 1000000)
   prog = js_parse_or_throw(src, false)
   t1 = (clock_ms() * 1000000)
   comp = JsCompiler.new(src)
+  comp.url = name == "script" ? "" : name
   run = comp.compile_script(prog)
   t2 = (clock_ms() * 1000000)
   JS_PHASES[0] = JS_PHASES[0] + (t1 - t0) / ~1000000.0
   JS_PHASES[1] = JS_PHASES[1] + (t2 - t1) / ~1000000.0
   JS_DEPTH[0] = 0
-  v = run.call(nil)
+  otop0 = JS_TOP[0]
+  otop1 = JS_TOP[1]
+  opos = JS_POS[0]
+  JS_TOP[0] = src
+  JS_TOP[1] = comp.url
+  JS_POS[0] = -1
+  v = nil
+  begin
+    v = run.call(nil)
+  rescue e
+    JS_TOP[0] = otop0
+    JS_TOP[1] = otop1
+    JS_POS[0] = opos
+    raise e
+  JS_TOP[0] = otop0
+  JS_TOP[1] = otop1
+  JS_POS[0] = opos
   JS_PHASES[2] = JS_PHASES[2] + ((clock_ms() * 1000000) - t2) / ~1000000.0
   v
 

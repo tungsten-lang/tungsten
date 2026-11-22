@@ -1800,6 +1800,20 @@ static CTFontRef cg_font_one(const char *name, double weight, int italic, double
     return cg_font_weighted(font, weight, size);
 }
 
+/* The next name in a CSS font-family list at p (quotes and spaces trimmed) into
+ * name ("" when empty or too long); returns where the following name starts. */
+static const char *cg_next_family(const char *p, const char *end, char *name, size_t cap) {
+    const char *q = memchr(p, ',', (size_t)(end - p));
+    if (!q) q = end;
+    const char *a = p, *b = q;
+    while (a < b && (*a == ' ' || *a == '"' || *a == '\'')) a++;
+    while (b > a && (b[-1] == ' ' || b[-1] == '"' || b[-1] == '\'')) b--;
+    size_t n = (size_t)(b - a);
+    name[0] = 0;
+    if (n > 0 && n < cap) { memcpy(name, a, n); name[n] = 0; }
+    return q < end ? q + 1 : end;
+}
+
 /* families: a CSS font-family list ("Helvetica Neue, Helvetica, Arial,
  * sans-serif"). Cached by (list, weight, italic, size). Returns a +1
  * reference: the caller releases it (the cache keeps its own). */
@@ -1821,19 +1835,43 @@ static CTFontRef cg_font_lookup(const char *families, size_t flen, double weight
     CTFontRef font = NULL;
     const char *p = families, *end = families + flen;
     while (p < end && !font) {
-        const char *q = memchr(p, ',', (size_t)(end - p));
-        if (!q) q = end;
         char name[256];
-        const char *a = p, *b = q;
-        while (a < b && (*a == ' ' || *a == '"' || *a == '\'')) a++;
-        while (b > a && (b[-1] == ' ' || b[-1] == '"' || b[-1] == '\'')) b--;
-        size_t n = (size_t)(b - a);
-        if (n > 0 && n < sizeof name) {
-            memcpy(name, a, n);
-            name[n] = 0;
-            font = cg_font_one(name, weight, italic, size);
+        p = cg_next_family(p, end, name, sizeof name);
+        if (name[0]) font = cg_font_one(name, weight, italic, size);
+    }
+    /* CSS falls back per character through the rest of the list: hand the
+     * remaining families to CoreText as the font's cascade list (CoreText
+     * tries them, in order, for characters the font lacks, before the system
+     * cascade). */
+    if (font && p < end) {
+        CFMutableArrayRef cascade = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+        CFStringRef first = CTFontCopyPostScriptName(font);
+        while (p < end && CFArrayGetCount(cascade) < 8) {
+            char name[256];
+            p = cg_next_family(p, end, name, sizeof name);
+            if (!name[0] || cg_eq(name, "system-ui") || cg_eq(name, "-apple-system") || cg_eq(name, "ui-sans-serif")) continue;
+            CTFontRef f = cg_font_one(name, weight, italic, size);
+            if (!f) continue;
+            CFStringRef ps = CTFontCopyPostScriptName(f);
+            int dup = ps && first && CFStringCompare(ps, first, 0) == kCFCompareEqualTo;
+            if (ps) CFRelease(ps);
+            if (!dup) {
+                CTFontDescriptorRef d = CTFontCopyFontDescriptor(f);
+                if (d) { CFArrayAppendValue(cascade, d); CFRelease(d); }
+            }
+            CFRelease(f);
         }
-        p = q + 1;
+        if (first) CFRelease(first);
+        if (CFArrayGetCount(cascade) > 0) {
+            const void *ak[] = {kCTFontCascadeListAttribute};
+            const void *av[] = {cascade};
+            CFDictionaryRef attrs = CFDictionaryCreate(NULL, ak, av, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+            CTFontDescriptorRef d = CTFontDescriptorCreateWithAttributes(attrs);
+            CTFontRef f = CTFontCreateCopyWithAttributes(font, size, NULL, d);
+            CFRelease(d); CFRelease(attrs);
+            if (f) { CFRelease(font); font = f; }
+        }
+        CFRelease(cascade);
     }
     if (!font) font = cg_font_one("Helvetica", weight, italic, size);
     if (!font) font = CTFontCreateWithName(CFSTR("Helvetica"), size, NULL);

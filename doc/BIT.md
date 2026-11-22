@@ -117,6 +117,18 @@ TUNGSTEN BUILD
     to apps in temporary folders such as /tmp: check the routing with a bundle
     elsewhere.)
 
+    The executable an app line names also carries a smaller Info.plist of
+    its own, linked in as its `__TEXT,__info_plist` section (the compiler's
+    `--info-plist PATH`, macOS targets only): the name, identifier and
+    version, without the icon or document types. Run bare, `bin/arranger`
+    then shows "Arranger" in the menu bar and its application menu, as the
+    bundle does, and `[NSBundle mainBundle]` answers the app's
+    `CFBundleIdentifier`. Its `CFBundleVersion` is `build:`, else the
+    version (never the time of the build: the plist is part of the
+    executable's build-store key, so it must not change between builds of
+    the same sources). Renaming the app relinks the executable; an
+    executable no app line names has no such section.
+
     An executable line can ask for the compiler's debug information without
     giving up its profile's optimization:
 

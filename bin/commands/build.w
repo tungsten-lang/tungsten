@@ -3018,7 +3018,7 @@ bit_file_sha_memo = {}
 -> bit_location_tag(bit_path)
   Digest.sha256(ROOT + "\n" + bit_path).slice(0, 16)
 
--> bit_static_key(bit_path, entry, name, runtime_key_arg, link_flags_arg, link_libs_arg, bit_clang_opt_arg, compiler_flags_arg)
+-> bit_static_key(bit_path, entry, name, runtime_key_arg, link_flags_arg, link_libs_arg, bit_clang_opt_arg, compiler_flags_arg, info_plist_text = "")
   buf = StringBuffer(1024)
   buf << BIT_STORE_SCHEMA
   buf << "\n"
@@ -3051,6 +3051,10 @@ bit_file_sha_memo = {}
   buf << "\n"
   buf << join_tab(compiler_flags_arg)
   buf << "\n"
+  # the Info.plist embedded for an `app` line (bit_app_info_plist), by its contents
+  # (absent, the key is what it was before this line existed)
+  if info_plist_text != ""
+    buf << "info-plist:" + Digest.sha256(info_plist_text) + "\n"
   buf << probe_env_kv
   buf << "\n"
   buf << env_or_empty("TUNGSTEN_MARCH_ARGS")
@@ -3205,8 +3209,9 @@ bit_file_sha_memo = {}
   if renew_mtime
     sh_ok("touch " + shq(out_bin) + " " + shq(out_bin + ".deps") + " 2>/dev/null")
 
--> bit_compile_command(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile, log_path, extra_env = "")
+-> bit_compile_command(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile, log_path, extra_env = "", info_plist_path = "")
   includes = bitfile_includes(this_bit_root)
+  plist_flag = info_plist_path == "" ? "" : " --info-plist " + shq(info_plist_path)
   common_env = probe_env_prefix + toolchain_prefix + extra_env + "TUNGSTEN_CLANG_OPT=" + shq(bit_clang_opt_arg) + " TUNGSTEN_INCREMENTAL=0 TUNGSTEN_LINK_CACHE=1 TUNGSTEN_DEPFILE=" + shq(depfile) + " "
   sh_ok("rm -f " + shq(depfile))
   if bit_inside_toolchain?(this_bit_root)
@@ -3218,11 +3223,11 @@ bit_file_sha_memo = {}
         rel_includes.push(project_relative_path(includes[ri]))
         ri = ri + 1
       build_env = build_env + "TUNGSTEN_C_INCLUDES=" + shq(rel_includes.join(":")) + " "
-    return STAGE_CD + build_env + shq(COMPILER_BIN) + " compile " + shq(project_relative_path(entry)) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + " > " + shq(log_path) + " 2>&1"
+    return STAGE_CD + build_env + shq(COMPILER_BIN) + " compile " + shq(project_relative_path(entry)) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + plist_flag + " > " + shq(log_path) + " 2>&1"
   build_env = common_env + "TUNGSTEN_ROOT=" + shq(ROOT) + " BIT_HOME=" + shq(ROOT + "/bits") + " "
   if includes.size > 0
     build_env = build_env + "TUNGSTEN_C_INCLUDES=" + shq(includes.join(":")) + " "
-  "cd " + shq(ROOT) + " && " + build_env + shq(COMPILER_BIN) + " compile " + shq(entry) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + " > " + shq(log_path) + " 2>&1"
+  "cd " + shq(ROOT) + " && " + build_env + shq(COMPILER_BIN) + " compile " + shq(entry) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + plist_flag + " > " + shq(log_path) + " 2>&1"
 
 -> finish_bit_compile_result(this_bit_root, out_bin, log_path, ok, t_bit)
   bit_name = basename_of(this_bit_root)
@@ -3244,12 +3249,12 @@ bit_file_sha_memo = {}
   << "    " + GREEN + "built" + RESET + "   " + project_relative_path(out_bin) + " " + DIM + ms(clock_ms() - t_bit) + RESET
   true
 
--> compile_bit(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile)
+-> compile_bit(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile, info_plist_path = "")
   t_bit = clock_ms()
   bit_name = basename_of(this_bit_root)
   log_path = BUILD_SCRATCH_DIR + "/bit-" + bit_name + "-" + basename_of(out_bin) + ".log"
   extra_env = FORCE_BUILD ? "TUNGSTEN_SHARD_CACHE=0 " : ""
-  cmd = bit_compile_command(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile, log_path, extra_env)
+  cmd = bit_compile_command(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile, log_path, extra_env, info_plist_path)
   ok = sh_ok(cmd)
   finish_bit_compile_result(this_bit_root, out_bin, log_path, ok, t_bit)
 
@@ -3265,7 +3270,8 @@ bit_file_sha_memo = {}
   entry_clang_opt = bit_cflags_opt(entry_clang_opt, rec[:cflags], rec[:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), RELEASE_MODE, DEBUG_REQUESTED)
   if !regular_file?(entry)
     return "missing"
-  key = bit_static_key(bit_path, entry, rec[:name], BIT_RUNTIME_KEY, BIT_LINK_FLAGS, BIT_LINK_LIBS, entry_clang_opt, entry_flags)
+  plist_text = bit_app_info_plist(bit_path, rec[:name])
+  key = bit_static_key(bit_path, entry, rec[:name], BIT_RUNTIME_KEY, BIT_LINK_FLAGS, BIT_LINK_LIBS, entry_clang_opt, entry_flags, plist_text)
   dir = BIT_STORE_DIR + "/" + basename_of(rec[:name]) + "-" + key
   make_dirs(dirname_of(out_bin))
   if !FORCE_BUILD
@@ -3281,7 +3287,10 @@ bit_file_sha_memo = {}
         << "    " + GREEN + "CACHED" + RESET + "  " + project_relative_path(out_bin) + " " + DIM + "(" + key.slice(0, 16) + ")" + RESET
         return "store"
   depfile = BUILD_SCRATCH_DIR + "/bit-" + basename_of(bit_path) + "-" + basename_of(rec[:name]) + ".deps"
-  if !compile_bit(bit_path, entry, out_bin, entry_clang_opt, entry_flags, toolchain_prefix, depfile)
+  plist_path = write_bit_info_plist(bit_path, rec[:name], plist_text)
+  if plist_path == nil
+    return "failed"
+  if !compile_bit(bit_path, entry, out_bin, entry_clang_opt, entry_flags, toolchain_prefix, depfile, plist_path)
     sh_ok("rm -f " + shq(depfile))
     return "failed"
   stored = bit_store_publish(dir, bit_path, entry, out_bin, depfile)
@@ -3327,28 +3336,39 @@ bit_file_sha_memo = {}
         version = "0.1"
       # CFBundleVersion (the About panel's build): the Bitfile's build:, else the time of this build
       build = bit_option_value(line, "build")
+      explicit_build = build == nil ? "" : build
       if build == nil || build == ""
         build = capture("date +%Y%m%d.%H%M").strip
       if !bit_relative_path?(exe) || (icon != "" && !bit_relative_path?(icon))
         die("App executable and icon must be package-relative paths in " + bit_root + "/Bitfile")
-      apps.push({name: name, exe: exe, id: id, icon: icon, documents: docs, version: version, build: build})
+      apps.push({name: name, exe: exe, id: id, icon: icon, documents: docs, version: version, build: build, explicit_build: explicit_build})
   apps
 
 -> plist_escape(s)
   s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
--> app_info_plist(app, has_icon)
+# The bundle's Info.plist, or (embedded) the one linked into the bare executable as its __TEXT,__info_plist section.
+# The embedded one names the app (CFBundleName is what the menu bar shows for a bare executable) and has no icon,
+# document types or package type, and its contents must not change between builds of the same sources: they key the
+# bits store (bit_static_key), so its CFBundleVersion is the Bitfile's build:, else the version, never the build time.
+-> app_info_plist(app, has_icon, embedded = false)
   b = StringBuffer(2048)
   b << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
   b << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
   b << "<plist version=\"1.0\">\n<dict>\n"
   keys = ["CFBundleName", "CFBundleDisplayName", "CFBundleIdentifier", "CFBundleExecutable", "CFBundlePackageType", "CFBundleShortVersionString", "CFBundleVersion", "CFBundleInfoDictionaryVersion", "LSMinimumSystemVersion"]
   vals = [app[:name], app[:name], app[:id], basename_of(app[:exe]), "APPL", app[:version], app[:build], "6.0", "13.0"]
+  if embedded
+    keys = ["CFBundleName", "CFBundleDisplayName", "CFBundleIdentifier", "CFBundleExecutable", "CFBundleShortVersionString", "CFBundleVersion", "CFBundleInfoDictionaryVersion", "LSMinimumSystemVersion"]
+    vals = [app[:name], app[:name], app[:id], basename_of(app[:exe]), app[:version], app[:explicit_build] != "" ? app[:explicit_build] : app[:version], "6.0", "13.0"]
   i = 0
   while i < keys.size
     b << "  <key>" + keys[i] + "</key><string>" + plist_escape(vals[i]) + "</string>\n"
     i = i + 1
   b << "  <key>NSHighResolutionCapable</key><true/>\n"
+  if embedded
+    b << "</dict>\n</plist>\n"
+    return b.to_s
   if has_icon
     b << "  <key>CFBundleIconFile</key><string>" + plist_escape(app[:name]) + "</string>\n"
   # each document extension: a document type the app owns (Editor, LSHandlerRank Owner) and an exported type
@@ -3385,6 +3405,29 @@ bit_file_sha_memo = {}
     b << "  </array>\n"
   b << "</dict>\n</plist>\n"
   b.to_s
+
+# The Info.plist to embed in the executable <name> of a bit, or "" when no `app` line names it (or off macOS). Running
+# the bare executable then shows the app's name in the menu bar, as bin/<Name>.app does (2026-11-21).
+-> bit_app_info_plist(bit_path, name)
+  if !IS_DARWIN
+    return ""
+  apps = bit_apps(bit_path)
+  i = 0
+  while i < apps.size
+    if basename_of(apps[i][:exe]) == basename_of(name)
+      return app_info_plist(apps[i], false, true)
+    i = i + 1
+  ""
+
+# Write that plist into this build's scratch directory for --info-plist: its path, "" for none, nil when it could not.
+-> write_bit_info_plist(bit_path, name, text)
+  if text == ""
+    return ""
+  path = BUILD_SCRATCH_DIR + "/info-plist-" + basename_of(bit_path) + "-" + basename_of(name) + ".plist"
+  if !atomic_write(text, path)
+    eputs(RED + "could not write " + path + RESET)
+    return nil
+  path
 
 # bin/<Name>.app: Contents/MacOS/<exe> (the built executable), Contents/Info.plist, Contents/Resources/<Name>.icns (from a
 # PNG with sips + iconutil), signed ad hoc. The app links the system frameworks it uses (AppKit, Metal, QuartzCore, …), which
@@ -3504,7 +3547,8 @@ else
           bits_skipped = bits_skipped + 1
           bits_failed = bits_failed + 1
         else
-          key = bit_static_key(bit_path, entry, rec[:name], BIT_RUNTIME_KEY, BIT_LINK_FLAGS, BIT_LINK_LIBS, entry_clang_opt, entry_flags)
+          plist_text = bit_app_info_plist(bit_path, rec[:name])
+          key = bit_static_key(bit_path, entry, rec[:name], BIT_RUNTIME_KEY, BIT_LINK_FLAGS, BIT_LINK_LIBS, entry_clang_opt, entry_flags, plist_text)
           dir = BIT_STORE_DIR + "/" + basename_of(rec[:name]) + "-" + key
           make_dirs(dirname_of(out_bin))
           cached_done = false
@@ -3525,7 +3569,12 @@ else
           if !cached_done
             depfile = BUILD_SCRATCH_DIR + "/bit-" + basename_of(bit_path) + "-" + basename_of(rec[:name]) + ".deps"
             log_path = BUILD_SCRATCH_DIR + "/bit-" + basename_of(bit_path) + "-" + basename_of(out_bin) + ".log"
-            pending_bits.push({bit_path: bit_path, entry: entry, out_bin: out_bin, entry_clang_opt: entry_clang_opt, entry_flags: entry_flags, dir: dir, depfile: depfile, log_path: log_path})
+            plist_path = write_bit_info_plist(bit_path, rec[:name], plist_text)
+            if plist_path == nil
+              bits_skipped = bits_skipped + 1
+              bits_failed = bits_failed + 1
+            else
+              pending_bits.push({bit_path: bit_path, entry: entry, out_bin: out_bin, entry_clang_opt: entry_clang_opt, entry_flags: entry_flags, dir: dir, depfile: depfile, log_path: log_path, info_plist: plist_path})
 
   if pending_bits.size > 0
     max_bit_jobs = 4
@@ -3539,7 +3588,7 @@ else
     while next_retire < pending_bits.size
       while next_launch < pending_bits.size && (next_launch - next_retire) < max_bit_jobs
         jb = pending_bits[next_launch]
-        bcmd = bit_compile_command(jb[:bit_path], jb[:entry], jb[:out_bin], jb[:entry_clang_opt], jb[:entry_flags], toolchain_env_prefix, jb[:depfile], jb[:log_path], bit_extra_env)
+        bcmd = bit_compile_command(jb[:bit_path], jb[:entry], jb[:out_bin], jb[:entry_clang_opt], jb[:entry_flags], toolchain_env_prefix, jb[:depfile], jb[:log_path], bit_extra_env, jb[:info_plist])
         bit_starts[next_launch] = clock_ms()
         bit_procs[next_launch] = Process.spawn(["/bin/sh", "-c", bcmd])
         next_launch = next_launch + 1

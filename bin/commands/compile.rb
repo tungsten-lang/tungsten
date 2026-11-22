@@ -81,6 +81,7 @@ end
 CPU_NAME = take_value_flag.call("--cpu")
 TARGET_TRIPLE = take_value_flag.call("--target")
 TARGET_SYSROOT = take_value_flag.call("--sysroot")
+INFO_PLIST = take_value_flag.call("--info-plist")
 DEBUG_REQUESTED = !!ARGV.delete("--debug")
 NO_DEBUG_REQUESTED = !!ARGV.delete("--no-debug")
 if DEBUG_REQUESTED && NO_DEBUG_REQUESTED
@@ -129,6 +130,8 @@ end
 # that runs on that target and is tuned for that CPU.
 MATH_MODE_FLAGS.concat(["--target", TARGET_TRIPLE]) if TARGET_TRIPLE
 MATH_MODE_FLAGS.concat(["--sysroot", TARGET_SYSROOT]) if TARGET_SYSROOT
+# An Info.plist the compiled backend embeds at the final link (macOS targets).
+MATH_MODE_FLAGS.concat(["--info-plist", INFO_PLIST]) if INFO_PLIST
 require File.join(ROOT, "implementations/ruby/lib/tungsten/build_flags")
 begin
   MARCH_FLAGS = Tungsten::BuildFlags.march_for(

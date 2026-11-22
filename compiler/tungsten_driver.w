@@ -93,6 +93,10 @@ batch_link_worker = false
 batch_out_dir = nil
 cross_target   = ""
 cross_sysroot  = ""
+# `--info-plist PATH`: an Info.plist the final link embeds as the Mach-O
+# __TEXT,__info_plist section (macOS targets only), so a bare executable has a
+# bundle name, identifier and version (the menu bar shows its CFBundleName).
+info_plist_path = ""
 ast_stats      = false
 g_ast_stats_counts = {}
 g_ast_stats_varnames = {}
@@ -157,6 +161,7 @@ while i < args.size()
     << "  --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)"
     << "  --native         Shorthand for --cpu native"
     << "  --target TRIPLE  Generate code for a different target triple"
+    << "  --info-plist P   Embed Info.plist P in the executable (macOS targets; ignored elsewhere)"
     << "  --dev            Fast edit-test builds: clang -O0 (~2.8x faster link; binary ~2x slower)"
     << "  --fast, -fast    Fast FP: FMA + reassociation + reciprocals + nnan/ninf"
     << "  --strict-math    Strict IEEE 754: no FMA, no contraction"
@@ -256,6 +261,11 @@ while i < args.size()
     cross_sysroot = args[i]
   elsif arg.starts_with?("--sysroot=")
     cross_sysroot = arg.slice(10, arg.size() - 10)
+  elsif arg == "--info-plist"
+    i += 1
+    info_plist_path = args[i]
+  elsif arg.starts_with?("--info-plist=")
+    info_plist_path = arg.slice(13, arg.size() - 13)
   elsif arg == "--ll"
     keep_ll = true
   elsif arg == "--emit-ll"
@@ -407,6 +417,15 @@ if cross_target != "" && !cpu_name_safe?(cross_target)
   exit 1
 if cross_sysroot != "" && cross_target == ""
   ccall("w_eputs", "--sysroot requires --target")
+  exit 1
+if info_plist_path == nil
+  ccall("w_eputs", "--info-plist requires a path")
+  exit 1
+if info_plist_path != "" && command == "compile-batch"
+  ccall("w_eputs", "--info-plist names one program's bundle; it does not apply to compile-batch")
+  exit 1
+if info_plist_path != "" && !file?(info_plist_path)
+  ccall("w_eputs", "--info-plist: no such file: " + info_plist_path)
   exit 1
 
 # Configure the process/daily target cache before resolving `--native`: the

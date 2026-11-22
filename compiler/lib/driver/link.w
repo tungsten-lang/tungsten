@@ -443,6 +443,13 @@
     # symbol would break the link.
     clang_cmd << "-fveclib=Darwin_libsystem_m "
     clang_cmd << "-Wl,-dead_strip -Wl,-stack_size,0x8000000 "
+    # --info-plist: the bundle keys of a bare executable (CFBundleName names
+    # it in the menu bar). The plist's contents are in incremental_identity,
+    # which keys both the irbin and the link-artifact caches.
+    if info_plist_path != ""
+      clang_cmd << "-Wl,-sectcreate,__TEXT,__info_plist,"
+      clang_cmd << dev_runtime_shell_quote(incremental_abs_path(info_plist_path))
+      clang_cmd << " "
     if dynamic_exports_needed
       clang_cmd << "-Wl,-export_dynamic "
     else

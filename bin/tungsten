@@ -517,7 +517,7 @@ resolve_bitfile_env() {
     fi
     case "$arg" in
       --) break ;;
-      -o|--out|-e|--eval|--cpu|--target|--sysroot|--intern|--runtime|-j|--jobs|-I|--include|-F|--field|--explain|--dump-cache)
+      -o|--out|-e|--eval|--cpu|--target|--sysroot|--info-plist|--intern|--runtime|-j|--jobs|-I|--include|-F|--field|--explain|--dump-cache)
         skip_next=1
         ;;
       -*|--*) ;;
@@ -708,7 +708,7 @@ case "$1" in
         -c|--check|--ast|--parse|--canonical-ast|--lex|--tags|--wire|--emit-wire|--optimizations|--optimizations-json|--perf-inspect|--perf-inspect-json)
           _compile_mode=1
           ;;
-        --cpu|--target|--sysroot|--intern|--runtime|-j|--jobs)
+        --cpu|--target|--sysroot|--info-plist|--intern|--runtime|-j|--jobs)
           _skip=1
           ;;
       esac

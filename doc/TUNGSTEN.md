@@ -225,6 +225,14 @@ OPTIONS
         Generate code for another target triple. It can be combined with
         --cpu: the output runs on TRIPLE and is optimized for that CPU variant.
 
+        --info-plist PATH
+        Embed the Info.plist at PATH in the executable as its Mach-O
+        __TEXT,__info_plist section, so a bare executable has a bundle name,
+        identifier and version (the menu bar shows its CFBundleName). macOS
+        targets only; ignored elsewhere. The plist's contents are part of the
+        compile and link cache keys. `tungsten build` passes it for the
+        executable a Bitfile `app` line names (doc/BIT.md).
+
         --portable
         With build/bootstrap, generate the documented x86-64-v2 and x86-64-v3
         release binaries under build/releases/<triple>/<cpu>/.

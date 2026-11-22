@@ -223,6 +223,26 @@
     pop
     removed
 
+  # Remove every element == val, keeping the rest in order; returns val when
+  # anything was removed, else nil — Ruby's Array#delete (without a block).
+  -> delete(val)
+    n = $size ## i64
+    j = 0 ## i64
+    i = 0 ## i64
+    found = false
+    while i < n
+      x = self[i]
+      if x == val
+        found = true
+      else
+        self[j] = x if j != i
+        j += 1
+      i += 1
+    while n > j
+      pop
+      n -= 1
+    found ? val : nil
+
   # Insert val before index idx, shifting the tail up by one, and return
   # self — Ruby's Array#insert for one value. A negative idx counts from the
   # end and inserts after that element (insert(-1, v) appends); an idx past

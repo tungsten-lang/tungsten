@@ -2883,7 +2883,7 @@ JS_TRACE_MISS = [false]
   r = JS_REALM[0]
   if f != r.intrinsic("eval")
     return js_call_named(f, nil, args, "eval")
-  src = args.size > 0 ? args[0] : nil
+  src = args.size > 0 ? js_eval_source(args[0]) : nil
   return src if !src.is_a?(String)
   prog = js_parse_or_throw(src, false)
   comp = JsCompiler.new(src)

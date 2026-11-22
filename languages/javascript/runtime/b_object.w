@@ -511,7 +511,23 @@ js_install(->(r) js_install_object(r))
   f.define("name", "anonymous", ATTR_C) if f.is_a?(JsObject)
   f
 
+# Trusted Types: eval of a TrustedScript compiles its text (PerformEval with a trusted value).
+-> js_eval_source(v)
+  return v if !v.is_a?(JsObject)
+  r = JS_REALM[0]
+  c = r.global.get_own("TrustedScript")
+  return v if !c.is_a?(JsObject)
+  p = c.get("prototype", c)
+  o = v.proto
+  n = 0
+  while o.is_a?(JsObject) && n < 20
+    return js_to_string(v) if o == p
+    o = o.proto
+    n += 1
+  v
+
 -> js_indirect_eval(src)
+  src = js_eval_source(src)
   return src if !src.is_a?(String)
   prog = js_parse_or_throw(src, false)
   comp = JsCompiler.new(src)

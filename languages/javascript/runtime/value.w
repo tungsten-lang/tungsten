@@ -111,6 +111,10 @@ SYM_SPLIT = JsSymbol.new("Symbol.split")
 + JsObject
   rw :proto, :props, :attrs, :getters, :setters, :extensible, :cls, :internal, :priv, :priv_handlers
 
+  # [[IsHTMLDDA]] (Annex B, document.all): typeof "undefined", falsy, == null.
+  -> htmldda?
+    false
+
   -> new(@proto = JS_NULL, @cls = "Object")
     @props = {}
     @attrs = nil
@@ -830,7 +834,7 @@ JS_REALM = [nil]
   v.is_a?(JsObject)
 
 -> js_typeof(v)
-  return "undefined" if v == nil
+  return "undefined" if v == nil || (v.is_a?(JsObject) && v.htmldda?)
   return "object" if v == JS_NULL
   return "boolean" if v == true || v == false
   return "number" if v.is_a?(Float)
@@ -1141,6 +1145,7 @@ JS_WS = [9, 10, 11, 12, 13, 32]
   return !(v == ~0.0 || v != v) if v.is_a?(Float)
   return v.size > 0 if v.is_a?(String)
   return v.v != 0 if v.is_a?(JsBigInt)
+  return false if v.is_a?(JsObject) && v.htmldda?
   true
 
 -> js_to_number(v)
@@ -1262,6 +1267,7 @@ JS_WS = [9, 10, 11, 12, 13, 32]
   a == b
 
 -> js_loose_eq(a, b)
+  return true if (js_nullish?(a) && b.is_a?(JsObject) && b.htmldda?) || (js_nullish?(b) && a.is_a?(JsObject) && a.htmldda?)
   ta = js_typeof(a)
   tb = js_typeof(b)
   ta = "object" if ta == "function"

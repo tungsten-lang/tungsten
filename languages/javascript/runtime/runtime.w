@@ -203,7 +203,20 @@ JS_LAST_ENV = [nil]
   js_getv(o, js_to_property_key(k))
 
 # o.k = v; strict: a failed assignment throws.
+# Debugging aid (BLADE_JS_WATCH=name): report every assignment to a property with that name.
+JS_WATCH = [Env.get("BLADE_JS_WATCH", "")]
+
+-> js_watch_hit(k, v)
+  ccall("w_eputs", "\[js watch] " + k.to_s + " = " + js_inspect(v, 0, []).slice(0, 80))
+  ls = js_stack_lines().split("\n")
+  i = 0
+  while i < ls.size && i < 4
+    ccall("w_eputs", "      " + ls[i].slice(0, 160))
+    i += 1
+  nil
+
 -> js_setv(o, k, v, strict)
+  js_watch_hit(k, v) if JS_WATCH[0].size > 0 && k == JS_WATCH[0]
   if o.is_a?(JsObject)
     ok = o.set(k, v, o)
     js_set_failed(o, k) if !ok && strict

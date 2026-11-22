@@ -279,5 +279,6 @@ TWO32 = ~4294967296.0
 
 # typeof for any value, objects that are callable report "function".
 -> js_typeof_v(v)
+  return "undefined" if v.is_a?(JsObject) && v.htmldda?
   return "function" if v.is_a?(JsObject) && v.callable?
   js_typeof(v)

@@ -146,6 +146,9 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
     kind = nil
     if producers != nil && producers[arg] != nil && kinds != nil && rets != nil
       kind = heap_producer_kind(producers[arg][:instruction], mod)
+    # kind_stored_escs covers the core containers; a fresh source instance
+    # (:object) is judged by the plain per-parameter summary below.
+    kind = nil if kind == :object
     if kind != nil
       ks = kinds[kind]
       if ks == nil || pi >= ks.size() || ks[pi] == true || pi >= rets.size() || rets[pi] == true
@@ -557,6 +560,8 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
           if !is_producer && op == :call_method_i64
             producer_class = construct_producer_class(inst, mod, class_temps)
             is_producer = producer_class != nil
+          elsif is_producer && op == :call_direct_i64 && mod != nil && mod[:fresh_heap_classes] != nil
+            producer_class = mod[:fresh_heap_classes][wire_get(inst, :name)]
           if is_producer
             has_heap_producer = true
             producers[wire_get(inst, :temp)] = {op: op, block: bi, class: producer_class, instruction: inst}
@@ -658,7 +663,7 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
 # the same escape proof that inserts the release; `TUNGSTEN_FREE=0` therefore
 # retains ordinary allocation as well as omitting release calls.
 -> release_dead_producer(temp, producer)
-  if producer[:class] != nil && producer[:instruction] != nil
+  if producer[:class] != nil && producer[:instruction] != nil && wire_kind(producer[:instruction]) == :call_method_i64
     wire_set(producer[:instruction], :construct_recycle, true)
     return wire_make_recycle_object(temp)
   wire_make_free_value(temp)
@@ -2458,8 +2463,10 @@ int_temp_reader_map = init_int_temp_reader_map()
 # new array or string and returns it, and the caller drops it -- but only
 # known runtime constructors counted as producers, so every such result was
 # kept until exit.  A source function returns a fresh heap value when every
-# ret_i64 returns either a known constructor's result (is_heap_producer) or
-# the result of another such function, and nothing in the function other
+# ret_i64 returns either a known constructor's result (is_heap_producer), a
+# guarded `Cls.new(...)` whose initializer never stores self
+# (construct_producer_class; kind :object, its class in
+# mod[:fresh_heap_classes]), or the result of another such function, and nothing in the function other
 # than the return lets that value escape (mark_escapes over every other
 # instruction, with the escape summaries).  Callers then treat its result as
 # a producer: freed at scope end when it does not escape there, or owned by
@@ -2467,6 +2474,21 @@ int_temp_reader_map = init_int_temp_reader_map()
 # nothing, so recursion without a base case never qualifies.  Memoized calls
 # go through memo_call_*, never a direct call.  Sets mod[:fresh_heap_fns].
 # ---------------------------------------------------------------------------
+# load_class temp -> class name, for construct_producer_class.
+-> fresh_heap_class_temps(blocks)
+  class_temps = {}
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      if wire_kind(inst) == :load_class && wire_get(inst, :temp) != nil
+        class_temps[wire_get(inst, :temp)] = wire_get(inst, :class_name)
+      ii += 1
+    bi += 1
+  class_temps
+
 -> fresh_heap_quick_callees(func, mod)
   blocks = func[:blocks]
   has_ret = false
@@ -2491,6 +2513,10 @@ int_temp_reader_map = init_int_temp_reader_map()
         while pi >= 0
           pinst = instrs[pi]
           if wire_get(pinst, :temp) == rv
+            if wire_kind(pinst) == :call_method_i64 && wire_get(pinst, :construct_fn) != nil
+              # a guarded `Cls.new(...)`: fresh_heap_candidate checks it
+              found = true
+              break
             if wire_kind(pinst) != :call_direct_i64
               return nil
             if !is_heap_producer(pinst)
@@ -2512,8 +2538,10 @@ int_temp_reader_map = init_int_temp_reader_map()
 -> fresh_heap_returns(mod)
   fresh = {}
   kinds = {}
+  classes = {}
   mod[:fresh_heap_fns] = fresh
   mod[:fresh_heap_kinds] = kinds
+  mod[:fresh_heap_classes] = classes
   return fresh if env("TUNGSTEN_FREE") == "0" || env("TUNGSTEN_FRESH_HEAP") == "0"
   cands = []
   funcs = mod[:functions]
@@ -2582,6 +2610,10 @@ int_temp_reader_map = init_int_temp_reader_map()
             kind = :mixed
           ki += 1
         kinds[c[:name]] = kind if kind != nil && kind != :mixed
+        # one source class for every return: a guarded call on the result
+        # whose guard names that class takes its direct arm
+        if kind == :object && c[:callees].size() == 0 && c[:own_class] != nil && c[:own_class] != :mixed
+          classes[c[:name]] = c[:own_class]
   fresh
 
 -> fresh_heap_candidate(func, mod)
@@ -2605,6 +2637,8 @@ int_temp_reader_map = init_int_temp_reader_map()
         while pi >= 0
           pinst = instrs[pi]
           if wire_get(pinst, :temp) == rv
+            if wire_kind(pinst) == :call_method_i64 && wire_get(pinst, :construct_fn) != nil
+              break
             if wire_kind(pinst) != :call_direct_i64
               return nil
             if !is_heap_producer(pinst)
@@ -2628,7 +2662,7 @@ int_temp_reader_map = init_int_temp_reader_map()
         rets.push(wire_get(inst, :value))
       elsif k in (:ret_void :ret_i32 :setjmp)
         return nil
-      elsif k == :call_direct_i64
+      elsif k == :call_direct_i64 || (k == :call_method_i64 && wire_get(inst, :construct_fn) != nil)
         t = wire_get(inst, :temp)
         defs[t] = inst if t != nil
       ii += 1
@@ -2636,12 +2670,31 @@ int_temp_reader_map = init_int_temp_reader_map()
   return nil if rets.size() == 0
   callees = []
   own_kind = nil
+  own_class = nil
   mixed = false
+  class_temps = nil
   ri = 0
   while ri < rets.size()
     d = defs[rets[ri]]
     ri += 1
-    return nil if d == nil || wire_kind(d) != :call_direct_i64
+    return nil if d == nil
+    if wire_kind(d) == :call_method_i64
+      # A guarded construct whose slow arm cannot run (its receiver is the
+      # load of the guarded class) and whose initializer never stores self:
+      # a fresh instance nothing else holds (construct_producer_class).
+      class_temps = fresh_heap_class_temps(blocks) if class_temps == nil
+      cls = construct_producer_class(d, mod, class_temps)
+      return nil if cls == nil
+      if own_kind == nil
+        own_kind = :object
+      elsif own_kind != :object
+        mixed = true
+      if own_class == nil
+        own_class = cls
+      elsif own_class != cls
+        own_class = :mixed
+      next
+    return nil if wire_kind(d) != :call_direct_i64
     if is_heap_producer(d)
       k = heap_producer_kind(d)
       if own_kind == nil
@@ -2676,7 +2729,7 @@ int_temp_reader_map = init_int_temp_reader_map()
     return nil if escaped[rets[ri]] == true
     ri += 1
   own_kind = :mixed if mixed
-  {name: func[:name], callees: callees, own_kind: own_kind}
+  {name: func[:name], callees: callees, own_kind: own_kind, own_class: own_class}
 
 # Globals some function stores and no function ever loads.  A top-level
 # variable is a module global mirrored into a local slot of main, which then

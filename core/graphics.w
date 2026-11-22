@@ -94,8 +94,30 @@ GFX_LAYER_TEX_STRAIGHT = 4   # unpremultiplied RGBA/BGRA texture quad
 -> gfx_tex_free(window, tex_id)
   ccall("w_gfx_tex_free", window, tex_id)
 
+# A planar Y'CbCr texture: luma width x height, chroma cw x ch; 8-bit planes
+# (u8[]) or, with sixteen, 9..16-bit planes (u16[]). Drawn by present_layers
+# like an RGBA texture (GFX_LAYER_TEX); the compositor's fragment shader
+# converts to RGB while sampling (bilinear). Fill it with gfx_tex_upload_yuv;
+# core/codec/video/yuv_gpu (YuvTexture) does both from a VideoFrame.
+-> gfx_tex_new_yuv(window, width, height, cw, ch, sixteen = false)
+  ccall("w_gfx_tex_new_yuv", window, width, height, cw, ch, sixteen)
+
+# planes [y, cb, cr]; params (15 numbers): [y_stride, c_stride, x0, y0, cx0,
+# cy0, scale, ys, yo, co, crr, cbg, crg, cbb, kind] (see runtime/graphics.m).
+-> gfx_tex_upload_yuv(window, tex_id, planes, params)
+  ccall("w_gfx_tex_upload_yuv", window, tex_id, planes, params)
+
 -> gfx_present_layers(window, bg_u32, cmds, n_cmds, wait_done = false)
   ccall("w_gfx_present_layers", window, bg_u32, cmds, n_cmds, wait_done)
+
+# Tests and headless checks: keep a copy of the next present_layers frame;
+# gfx_capture_take → [width, height, ByteArray of pixels in the layer's order
+# (RGBA8, BGRA8 for GFX_BGRA)] or nil.
+-> gfx_capture_next(window)
+  ccall("w_gfx_capture_next", window)
+
+-> gfx_capture_take(window)
+  ccall("w_gfx_capture_take", window)
 
 # ---- Editor-style windows: flags, events, menus, panels ----
 #

@@ -430,6 +430,18 @@ typedef struct WGfxWindow {
     void    *tex[GFX_MAX_TEX];
     uint64_t tex_used_seq[GFX_MAX_TEX];
     uint8_t  tex_bgra[GFX_MAX_TEX];
+    /* planar Y'CbCr video textures (w_gfx_tex_new_yuv): tex[slot] is the luma
+     * plane, tex_cb/tex_cr the chroma planes; tex_yuv the shader's conversion
+     * parameters (GfxYuv); tex_fmt the plane pixel format (0 R8, 1 R16). */
+    void    *tex_cb[GFX_MAX_TEX];
+    void    *tex_cr[GFX_MAX_TEX];
+    float    tex_yuv[GFX_MAX_TEX][24];
+    uint8_t  tex_planar[GFX_MAX_TEX];
+    uint8_t  tex_fmt[GFX_MAX_TEX];
+    void    *sampler_lin;      /* id<MTLSamplerState> bilinear clamp (video planes) */
+    bool     capture_next;     /* w_gfx_capture_next: copy the next present_layers frame back */
+    void    *capture_buf;      /* id<MTLBuffer> the captured frame (drawable pixel format) */
+    int32_t  capture_w, capture_h;
     GfxInput input;
 } WGfxWindow;
 
@@ -982,6 +994,9 @@ WValue w_gfx_close(WValue window_v) {
             [(id<MTLTexture>)gw->tex[i] release];
             gw->tex[i] = NULL;
         }
+        if (gw->tex_cb[i]) { [(id<MTLTexture>)gw->tex_cb[i] release]; gw->tex_cb[i] = NULL; }
+        if (gw->tex_cr[i]) { [(id<MTLTexture>)gw->tex_cr[i] release]; gw->tex_cr[i] = NULL; }
+        gw->tex_planar[i] = 0;
     }
     [win setDelegate:nil];
     [win orderOut:nil];
@@ -2084,6 +2099,66 @@ static NSString * const kGfxLayerMSL =
      "    float4 col;\n"
      "    float4 aux;\n"
      "};\n"
+     "struct GfxYuv {\n"
+     "    float4 a;   /* code scale (255 or 65535), ys, yo, co */\n"
+     "    float4 b;   /* crr, cbg, crg, cbb (0..255 output units per code) */\n"
+     "    float4 c;   /* kind (0 Y'CbCr, 1 grey, 2 GBR planes), CICP transfer (0: output is sRGB already), hdr */\n"
+     "    float4 m0;  /* source-primaries linear RGB -> linear sRGB, row-major */\n"
+     "    float4 m1;\n"
+     "    float4 m2;\n"
+     "};\n"
+     "static inline float gfx_eotf(float tr, float v) {\n"
+     "    v = max(v, 0.0f);\n"
+     "    if (tr == 13.0f) return v <= 0.04045f ? v / 12.92f : pow((v + 0.055f) / 1.055f, 2.4f);\n"
+     "    if (tr == 1.0f || tr == 6.0f || tr == 14.0f || tr == 15.0f) return v < 0.081f ? v / 4.5f : pow((v + 0.099f) / 1.099f, 1.0f / 0.45f);\n"
+     "    if (tr == 4.0f) return pow(v, 2.2f);\n"
+     "    if (tr == 5.0f) return pow(v, 2.8f);\n"
+     "    if (tr == 8.0f) return v;\n"
+     "    if (tr == 16.0f) {\n"
+     "        float p = pow(v, 1.0f / 78.84375f);\n"
+     "        float num = max(p - 0.8359375f, 0.0f);\n"
+     "        return pow(num / (18.8515625f - 18.6875f * p), 1.0f / 0.1593017578125f) * (10000.0f / 203.0f);\n"
+     "    }\n"
+     "    float lin = v <= 0.5f ? (v * v) / 3.0f : (exp((v - 0.55991073f) / 0.17883277f) + 0.28466892f) / 12.0f;\n"
+     "    return lin * 3.7743f;\n"
+     "}\n"
+     "static inline float gfx_srgb_oetf(float l) {\n"
+     "    l = clamp(l, 0.0f, 1.0f);\n"
+     "    return l <= 0.0031308f ? l * 12.92f : 1.055f * pow(l, 1.0f / 2.4f) - 0.055f;\n"
+     "}\n"
+     "static inline float3 gfx_yuv_rgb(float2 uv, texture2d<float> ty, texture2d<float> tu,\n"
+     "                                 texture2d<float> tv, sampler lin, constant GfxYuv &p) {\n"
+     "    float y = ty.sample(lin, uv).r * p.a.x;\n"
+     "    float u = tu.sample(lin, uv).r * p.a.x;\n"
+     "    float v = tv.sample(lin, uv).r * p.a.x;\n"
+     "    float3 rgb;\n"
+     "    if (p.c.x == 2.0f) {\n"
+     "        rgb = float3(v, y, u) * p.a.y;\n"
+     "    } else {\n"
+     "        float l = p.a.y * (y - p.a.z);\n"
+     "        if (p.c.x == 1.0f) {\n"
+     "            rgb = float3(l);\n"
+     "        } else {\n"
+     "            u -= p.a.w;\n"
+     "            v -= p.a.w;\n"
+     "            rgb = float3(l + p.b.x * v, l - p.b.y * u - p.b.z * v, l + p.b.w * u);\n"
+     "        }\n"
+     "    }\n"
+     "    rgb = clamp(rgb * (1.0f / 255.0f), 0.0f, 1.0f);\n"
+     "    if (p.c.y != 0.0f) {\n"
+     "        float3 li = float3(gfx_eotf(p.c.y, rgb.r), gfx_eotf(p.c.y, rgb.g), gfx_eotf(p.c.y, rgb.b));\n"
+     "        float3 o = float3(dot(p.m0.xyz, li), dot(p.m1.xyz, li), dot(p.m2.xyz, li));\n"
+     "        if (p.c.z != 0.0f) {\n"
+     "            float mx = max(o.r, max(o.g, o.b));\n"
+     "            if (mx > 0.8f) {\n"
+     "                float t = mx - 0.8f;\n"
+     "                o *= (0.8f + 0.2f * t / (t + 0.2f)) / mx;\n"
+     "            }\n"
+     "        }\n"
+     "        rgb = float3(gfx_srgb_oetf(o.r), gfx_srgb_oetf(o.g), gfx_srgb_oetf(o.b));\n"
+     "    }\n"
+     "    return rgb;\n"
+     "}\n"
      "struct VSOut {\n"
      "    float4 pos [[position]];\n"
      "    float2 uv;\n"
@@ -2106,10 +2181,17 @@ static NSString * const kGfxLayerMSL =
      "}\n"
      "fragment float4 gfx_layer_fs_tile(VSOut in [[stage_in]],\n"
      "                                  texture2d<float> tex [[texture(0)]],\n"
+     "                                  texture2d<float> tex_u [[texture(1)]],\n"
+     "                                  texture2d<float> tex_v [[texture(2)]],\n"
      "                                  sampler smp [[sampler(0)]],\n"
+     "                                  sampler lin [[sampler(1)]],\n"
+     "                                  constant GfxYuv &yuv [[buffer(0)]],\n"
      "                                  float4 dst [[color(0)]]) {\n"
      "    int mode = int(rint(in.aux.w));\n"
-     "    if (mode == 0) {\n"
+     "    if (mode == 5) {\n"
+     "        float3 rgb = gfx_yuv_rgb(in.uv, tex, tex_u, tex_v, lin, yuv);\n"
+     "        return float4(mix(dst.rgb, rgb, in.col.a), 1.0f);\n"
+     "    } else if (mode == 0) {\n"
      "        float4 s = tex.sample(smp, in.uv) * in.col.a;\n"
      "        return float4(s.rgb + dst.rgb * (1.0f - s.a), 1.0f);\n"
      "    } else if (mode == 1) {\n"
@@ -2129,9 +2211,16 @@ static NSString * const kGfxLayerMSL =
      "}\n"
      "fragment float4 gfx_layer_fs_alpha(VSOut in [[stage_in]],\n"
      "                                   texture2d<float> tex [[texture(0)]],\n"
-     "                                   sampler smp [[sampler(0)]]) {\n"
+     "                                   texture2d<float> tex_u [[texture(1)]],\n"
+     "                                   texture2d<float> tex_v [[texture(2)]],\n"
+     "                                   sampler smp [[sampler(0)]],\n"
+     "                                   sampler lin [[sampler(1)]],\n"
+     "                                   constant GfxYuv &yuv [[buffer(0)]]) {\n"
      "    int mode = int(rint(in.aux.w));\n"
-     "    if (mode == 0) {\n"
+     "    if (mode == 5) {\n"
+     "        float3 rgb = gfx_yuv_rgb(in.uv, tex, tex_u, tex_v, lin, yuv);\n"
+     "        return float4(rgb * in.col.a, in.col.a);\n"
+     "    } else if (mode == 0) {\n"
      "        return tex.sample(smp, in.uv) * in.col.a;\n"
      "    } else if (mode == 1) {\n"
      "        float4 s = tex.sample(smp, in.uv);\n"
@@ -2160,6 +2249,9 @@ static void gfx_ensure_compositor(WGfxWindow *gw) {
         sd.sAddressMode = MTLSamplerAddressModeClampToEdge;
         sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
         gw->sampler = (void *)[dev newSamplerStateWithDescriptor:sd];
+        sd.minFilter = MTLSamplerMinMagFilterLinear;
+        sd.magFilter = MTLSamplerMinMagFilterLinear;
+        gw->sampler_lin = (void *)[dev newSamplerStateWithDescriptor:sd];
         [sd release];
     }
     if (!gw->dummy_tex) {
@@ -2318,8 +2410,176 @@ WValue w_gfx_tex_free(WValue window_v, WValue tex_id_v) {
         [(id<MTLTexture>)gw->tex[slot] release];
         gw->tex[slot] = NULL;
         gw->tex_used_seq[slot] = 0;
+        if (gw->tex_cb[slot]) { [(id<MTLTexture>)gw->tex_cb[slot] release]; gw->tex_cb[slot] = NULL; }
+        if (gw->tex_cr[slot]) { [(id<MTLTexture>)gw->tex_cr[slot] release]; gw->tex_cr[slot] = NULL; }
+        gw->tex_planar[slot] = 0;
     }
     return w_bool(1);
+}
+
+/* ---- planar Y'CbCr video textures ----
+ * A video frame goes to the GPU as its three planes (R8Unorm, or R16Unorm for
+ * 9..16-bit samples) and is converted to RGB by the compositor's fragment
+ * shader while it is drawn (bilinear chroma upsampling and scaling for free):
+ * no CPU RGBA, no CPU colour conversion, one memcpy per plane per frame.
+ * A yuv texture id is drawn by the same present_layers kinds as an RGBA one
+ * (0 premultiplied / 4 straight: the frame is opaque, param0 is its alpha). */
+
+static id<MTLTexture> gfx_make_plane(id<MTLDevice> dev, int w, int h, int fmt16) {
+    MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(fmt16 ? MTLPixelFormatR16Unorm : MTLPixelFormatR8Unorm)
+                                                                                  width:(NSUInteger)w
+                                                                                 height:(NSUInteger)h
+                                                                              mipmapped:NO];
+    td.usage = MTLTextureUsageShaderRead;
+    td.storageMode = MTLStorageModeShared;
+    return [dev newTextureWithDescriptor:td];
+}
+
+/* w_gfx_tex_new_yuv(window, width, height, chroma_w, chroma_h, sixteen) -> id */
+WValue w_gfx_tex_new_yuv(WValue window_v, WValue width_v, WValue height_v,
+                         WValue cw_v, WValue ch_v, WValue sixteen_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.tex_new_yuv");
+    int w = (int)gfx_int(width_v), h = (int)gfx_int(height_v);
+    int cw = (int)gfx_int(cw_v), ch = (int)gfx_int(ch_v);
+    if (w <= 0 || h <= 0 || w > 16384 || h > 16384 || cw <= 0 || ch <= 0 || cw > w || ch > h)
+        w_raise(w_string("gfx.tex_new_yuv: bad plane sizes"));
+    int fmt16 = (sixteen_v != W_NIL && sixteen_v != W_FALSE && !(w_is_int(sixteen_v) && w_as_int(sixteen_v) == 0)) ? 1 : 0;
+    int slot = -1;
+    for (int i = 0; i < GFX_MAX_TEX; i++) {
+        if (!gw->tex[i]) { slot = i; break; }
+    }
+    if (slot < 0) w_raise(w_string("gfx.tex_new_yuv: texture table full (1024)"));
+    @autoreleasepool {
+        id<MTLDevice> dev = (id<MTLDevice>)gw->device;
+        id<MTLTexture> ty = gfx_make_plane(dev, w, h, fmt16);
+        id<MTLTexture> tu = gfx_make_plane(dev, cw, ch, fmt16);
+        id<MTLTexture> tv = gfx_make_plane(dev, cw, ch, fmt16);
+        if (!ty || !tu || !tv) {
+            [ty release]; [tu release]; [tv release];
+            w_raise(w_string("gfx.tex_new_yuv: Metal texture allocation failed"));
+        }
+        gw->tex[slot] = (void *)ty;
+        gw->tex_cb[slot] = (void *)tu;
+        gw->tex_cr[slot] = (void *)tv;
+        gw->tex_used_seq[slot] = 0;
+        gw->tex_bgra[slot] = 0;
+        gw->tex_planar[slot] = 1;
+        gw->tex_fmt[slot] = (uint8_t)fmt16;
+        memset(gw->tex_yuv[slot], 0, sizeof gw->tex_yuv[slot]);
+    }
+    return w_int(slot + 1);
+}
+
+static const uint8_t *gfx_plane_ptr(WValue v, size_t esize, size_t need, const char *what) {
+    if (!w_is_array(v)) w_raise(w_string("gfx.tex_upload_yuv: planes must be u8[] / u16[] arrays"));
+    WArray *a = w_as_array(v);
+    size_t elem = (a->ebits == 8 || a->ebits == 108) ? 1 : ((a->ebits == 16 || a->ebits == 116) ? 2 : 0);
+    if (elem != esize) w_raise(w_string("gfx.tex_upload_yuv: plane element size does not match the texture (u8[] for 8-bit, u16[] otherwise)"));
+    if ((size_t)a->size < need) {
+        char buf[160];
+        snprintf(buf, sizeof buf, "gfx.tex_upload_yuv: %s plane has %lld samples, need %zu", what, (long long)a->size, need);
+        w_raise(w_string(buf));
+    }
+    return (const uint8_t *)a->slots + (size_t)a->start * elem;
+}
+
+/* w_gfx_tex_upload_yuv(window, id, planes, params):
+ *   planes  [y, cb, cr] (u8[] for an R8 texture, u16[] for R16; cb/cr ignored
+ *           for grey frames but must be present)
+ *   params  f64[] / Array: [y_stride, c_stride, x0, y0, cx0, cy0,
+ *           scale, ys, yo, co, crr, cbg, crg, cbb, kind
+ *           (, transfer, m00 m01 m02 m10 m11 m12 m20 m21 m22)]
+ *           the optional 10 a CICP conversion to sRGB after the matrix
+ *           (core/codec/cicp: transfer code, linear primaries matrix);
+ *           strides in samples; (x0, y0) / (cx0, cy0) the top-left visible
+ *           sample of the luma / chroma planes (crop); scale the code value of
+ *           a sample of 1.0 (255 or 65535); the rest as GfxYuv.
+ * Returns true. A texture an in-flight frame still samples is replaced by
+ * fresh planes (the CPU never writes what the GPU is reading). */
+WValue w_gfx_tex_upload_yuv(WValue window_v, WValue tex_id_v, WValue planes_v, WValue params_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.tex_upload_yuv");
+    int slot = (int)gfx_int(tex_id_v) - 1;
+    if (slot < 0 || slot >= GFX_MAX_TEX || !gw->tex[slot] || !gw->tex_planar[slot]) return w_bool(0);
+    if (!w_is_array(planes_v) || w_as_array(planes_v)->size < 3) w_raise(w_string("gfx.tex_upload_yuv: planes must be [y, cb, cr]"));
+    if (!w_is_array(params_v) || w_as_array(params_v)->size < 15) w_raise(w_string("gfx.tex_upload_yuv: params needs 15 numbers"));
+    double pr[25] = {0};
+    int npr = w_as_array(params_v)->size >= 25 ? 25 : 15;
+    for (int i = 0; i < npr; i++) pr[i] = gfx_num(w_array_get(params_v, w_int(i)), "param");
+    id<MTLTexture> ty = (id<MTLTexture>)gw->tex[slot];
+    id<MTLTexture> tu = (id<MTLTexture>)gw->tex_cb[slot];
+    id<MTLTexture> tv = (id<MTLTexture>)gw->tex_cr[slot];
+    size_t es = gw->tex_fmt[slot] ? 2 : 1;
+    size_t w = ty.width, h = ty.height, cw = tu.width, ch = tu.height;
+    size_t ys = (size_t)pr[0], cs = (size_t)pr[1];
+    size_t x0 = (size_t)pr[2], y0 = (size_t)pr[3], cx0 = (size_t)pr[4], cy0 = (size_t)pr[5];
+    if (ys < x0 + w || (pr[14] != 1.0 && cs < cx0 + cw)) w_raise(w_string("gfx.tex_upload_yuv: stride smaller than the visible width"));
+    const uint8_t *py = gfx_plane_ptr(w_array_get(planes_v, w_int(0)), es, (y0 + h - 1) * ys + x0 + w, "luma");
+    const uint8_t *pu = NULL, *pv = NULL;
+    if (pr[14] != 1.0) {
+        pu = gfx_plane_ptr(w_array_get(planes_v, w_int(1)), es, (cy0 + ch - 1) * cs + cx0 + cw, "cb");
+        pv = gfx_plane_ptr(w_array_get(planes_v, w_int(2)), es, (cy0 + ch - 1) * cs + cx0 + cw, "cr");
+    }
+    @autoreleasepool {
+        uint64_t done = __atomic_load_n(&gw->done_cb_seq, __ATOMIC_ACQUIRE);
+        if (gw->tex_used_seq[slot] > done) {
+            id<MTLDevice> dev = (id<MTLDevice>)gw->device;
+            id<MTLTexture> ny = gfx_make_plane(dev, (int)w, (int)h, gw->tex_fmt[slot]);
+            id<MTLTexture> nu = gfx_make_plane(dev, (int)cw, (int)ch, gw->tex_fmt[slot]);
+            id<MTLTexture> nv = gfx_make_plane(dev, (int)cw, (int)ch, gw->tex_fmt[slot]);
+            if (ny && nu && nv) {
+                [ty release]; [tu release]; [tv release];
+                ty = ny; tu = nu; tv = nv;
+                gw->tex[slot] = (void *)ty;
+                gw->tex_cb[slot] = (void *)tu;
+                gw->tex_cr[slot] = (void *)tv;
+                gw->tex_used_seq[slot] = 0;
+            } else {
+                [ny release]; [nu release]; [nv release];
+            }
+        }
+        [ty replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0
+                withBytes:py + (y0 * ys + x0) * es bytesPerRow:ys * es];
+        if (pu) {
+            [tu replaceRegion:MTLRegionMake2D(0, 0, cw, ch) mipmapLevel:0
+                    withBytes:pu + (cy0 * cs + cx0) * es bytesPerRow:cs * es];
+            [tv replaceRegion:MTLRegionMake2D(0, 0, cw, ch) mipmapLevel:0
+                    withBytes:pv + (cy0 * cs + cx0) * es bytesPerRow:cs * es];
+        }
+        float *p = gw->tex_yuv[slot];
+        memset(p, 0, sizeof gw->tex_yuv[slot]);
+        for (int i = 0; i < 8; i++) p[i] = (float)pr[6 + i];
+        p[8] = (float)pr[14];
+        p[9] = (float)pr[15];                                   /* transfer (0: none) */
+        p[10] = (pr[15] == 16.0 || pr[15] == 18.0) ? 1.0f : 0.0f;  /* hdr shoulder */
+        for (int r = 0; r < 3; r++)
+            for (int k = 0; k < 3; k++) p[12 + r * 4 + k] = (float)pr[16 + r * 3 + k];
+    }
+    return w_bool(1);
+}
+
+/* Tests: w_gfx_capture_next(window) makes the next present_layers frame wait
+ * for the GPU and keep a copy; w_gfx_capture_take(window) returns it as
+ * [width, height, ByteArray] in the layer's pixel order (RGBA, or BGRA for a
+ * GFX_BGRA window), or nil when nothing was captured. */
+WValue w_gfx_capture_next(WValue window_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.capture_next");
+    gw->capture_next = true;
+    return W_NIL;
+}
+
+WValue w_gfx_capture_take(WValue window_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.capture_take");
+    if (!gw->capture_buf) return W_NIL;
+    id<MTLBuffer> b = (id<MTLBuffer>)gw->capture_buf;
+    size_t n = (size_t)gw->capture_w * (size_t)gw->capture_h * 4;
+    WValue bytes = w_bytes_from_data((const uint8_t *)[b contents], (int64_t)n);
+    [b release];
+    gw->capture_buf = NULL;
+    WValue out = w_array_new_empty();
+    out = w_array_push(out, w_int(gw->capture_w));
+    out = w_array_push(out, w_int(gw->capture_h));
+    out = w_array_push(out, bytes);
+    return out;
 }
 
 /* w_gfx_present_layers(window, bg_u32, cmds_f64, n_cmds, wait_flag):
@@ -2451,7 +2711,7 @@ WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue 
                     q.col[0] = q.col[1] = q.col[2] = 1.0f;
                     q.col[3] = a;
                     q.aux[0] = q.aux[1] = q.aux[2] = 0.0f;
-                    q.aux[3] = (kind == 4) ? 1.0f : 0.0f;
+                    q.aux[3] = gw->tex_planar[slot] ? 5.0f : ((kind == 4) ? 1.0f : 0.0f);
                 }
             } else {
                 q.uv[0] = 0.0f; q.uv[1] = 0.0f; q.uv[2] = 1.0f; q.uv[3] = 1.0f;
@@ -2499,6 +2759,13 @@ WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue 
 
         id<MTLTexture> cur_tex = (id<MTLTexture>)gw->dummy_tex;
         [enc setFragmentTexture:cur_tex atIndex:0];
+        [enc setFragmentTexture:cur_tex atIndex:1];
+        [enc setFragmentTexture:cur_tex atIndex:2];
+        [enc setFragmentSamplerState:(id<MTLSamplerState>)gw->sampler_lin atIndex:1];
+        {
+            float zero_yuv[24] = {0};
+            [enc setFragmentBytes:zero_yuv length:sizeof zero_yuv atIndex:0];
+        }
         MTLScissorRect cur_sc = { 0, 0, dw, dh };
         [enc setScissorRect:cur_sc];
 
@@ -2521,6 +2788,11 @@ WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue 
             if (want_tex != cur_tex) {
                 cur_tex = want_tex;
                 [enc setFragmentTexture:cur_tex atIndex:0];
+                if (ts >= 0 && gw->tex_planar[ts]) {
+                    [enc setFragmentTexture:(id<MTLTexture>)gw->tex_cb[ts] atIndex:1];
+                    [enc setFragmentTexture:(id<MTLTexture>)gw->tex_cr[ts] atIndex:2];
+                    [enc setFragmentBytes:gw->tex_yuv[ts] length:sizeof gw->tex_yuv[ts] atIndex:0];
+                }
             }
             if (sc.x != cur_sc.x || sc.y != cur_sc.y || sc.width != cur_sc.width || sc.height != cur_sc.height) {
                 cur_sc = sc;
@@ -2535,6 +2807,24 @@ WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue 
         }
 
         [enc endEncoding];
+        bool capturing = gw->capture_next;
+        if (capturing) {
+            /* tests: read the composited frame back (the layer is not framebufferOnly) */
+            gw->capture_next = false;
+            if (gw->capture_buf) { [(id<MTLBuffer>)gw->capture_buf release]; gw->capture_buf = NULL; }
+            id<MTLBuffer> cbuf = [(id<MTLDevice>)gw->device newBufferWithLength:dw * dh * 4 options:MTLResourceStorageModeShared];
+            if (cbuf) {
+                id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
+                [bl copyFromTexture:drawable.texture sourceSlice:0 sourceLevel:0
+                       sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(dw, dh, 1)
+                           toBuffer:cbuf destinationOffset:0 destinationBytesPerRow:dw * 4
+                destinationBytesPerImage:dw * dh * 4];
+                [bl endEncoding];
+                gw->capture_buf = (void *)cbuf;
+                gw->capture_w = (int32_t)dw;
+                gw->capture_h = (int32_t)dh;
+            }
+        }
         [cb presentDrawable:drawable];
 
         WGfxWindow *gw_ptr = gw;
@@ -2547,7 +2837,7 @@ WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue 
             if (sig_sem) dispatch_semaphore_signal(sem);
         }];
         [cb commit];
-        if (wait_done) [cb waitUntilCompleted];
+        if (wait_done || capturing) [cb waitUntilCompleted];
         if (meta != stack_meta) free(meta);
     }
     return w_bool(1);

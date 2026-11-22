@@ -119,21 +119,103 @@ ACODECS = {}
 -> acodec_supported?(id)
   ACODECS.has_key?(id)
 
+# ---- system decoders (core/codec/system registers them) ----
+# One maker per kind for the operating system's decoders. The registry uses
+# ours unless the codec id is in the system preference list
+# (Codec.prefer_system / TUNGSTEN_CODEC_SYSTEM, see core/codec/system); a
+# preferred system decoder that fails to open falls back to ours, and a codec
+# only the system has goes to the system.
+SYS_MAKERS = [nil, nil]       # [video maker, audio maker]
+SYS_PREFER = [nil]            # nil: read TUNGSTEN_CODEC_SYSTEM on first use
+
+
+-> vcodec_system_register(make)
+  SYS_MAKERS[0] = make
+
+-> acodec_system_register(make)
+  SYS_MAKERS[1] = make
+
+-> codec_id4(id)
+  return id + " " if id == "mp3" || id == "pcm"
+  id
+
+# The system decoder's default formats (core/codec/system registers its table).
+SYS_DEFAULTS = [[]]
+
+-> codec_system_defaults(list)
+  SYS_DEFAULTS[0] = list
+
+# Codec ids and image names the system decoders handle (see core/codec/system):
+# the default table, or TUNGSTEN_CODEC_SYSTEM / BLADE_CODEC: "own" / "0" none,
+# "system" / "all" / "1" every format the system has, "patent" the table, or
+# a comma-separated list.
+-> codec_system_list
+  if SYS_PREFER[0] == nil
+    v = env("TUNGSTEN_CODEC_SYSTEM")
+    v = env("BLADE_CODEC") if v == nil || v == ""
+    l = SYS_DEFAULTS[0] + []
+    if v == "own" || v == "0"
+      l = []
+    elsif v == "system" || v == "all" || v == "1"
+      l = SYS_DEFAULTS[0] + ["usac", "mp3 ", "alac", "flac", "opus", "jpeg", "webp", "jp2", "png", "gif", "tiff", "bmp"]
+    elsif v == "patent" || v == nil || v == ""
+      l = SYS_DEFAULTS[0] + []
+    else
+      l = []
+      v.split(",").each ->(id)
+        l.push(codec_id4(id.strip))
+    SYS_PREFER[0] = l
+  SYS_PREFER[0]
+
+-> codec_new_with(table, kind, cfg)
+  ours = table.has_key?(cfg.codec)
+  if SYS_MAKERS[kind] != nil && (!ours || codec_system_list().include?(cfg.codec))
+    d = codec_try_system(kind, cfg, !ours)
+    if d != nil
+      codec_log(kind, cfg, d)
+      return d
+  raise MediaError.new("unsupported " + (kind == 0 ? "video" : "audio") + " codec " + cfg.codec) if !ours
+  d = codec_call_maker(table[cfg.codec], cfg)
+  codec_log(kind, cfg, d)
+  d
+
+# TUNGSTEN_CODEC_LOG=1: one line per decoder created, saying which one runs.
+CODEC_LOG = [nil]
+
+-> codec_log(kind, cfg, d)
+  CODEC_LOG[0] = env("TUNGSTEN_CODEC_LOG") == "1" if CODEC_LOG[0] == nil
+  return nil if !CODEC_LOG[0]
+  who = d.class.to_s
+  who = (d.backend == "system" ? "system" : "own (system decoder failed)") + (kind == 0 && d.backend == "system" ? (d.hw? ? " (hardware)" : " (software)") : "") if who == "SysFallback"
+  << "codec: " + (kind == 0 ? "video " : "audio ") + cfg.codec + " -> " + who
+  nil
+
+# the system decoder, or nil when it cannot open (raises when it is the only one)
+-> codec_try_system(kind, cfg, only)
+  d = nil
+  begin
+    d = codec_call_maker(SYS_MAKERS[kind], cfg)
+  rescue e
+    raise e if only
+    d = nil
+  d
+
+-> codec_call_maker(make, cfg)
+  make.call(cfg)
+
 -> vcodec_new(cfg)
-  m = VCODECS[cfg.codec]
-  raise MediaError.new("unsupported video codec " + cfg.codec) if m == nil
-  m.call(cfg)
+  codec_new_with(VCODECS, 0, cfg)
 
 -> acodec_new(cfg)
-  m = ACODECS[cfg.codec]
-  raise MediaError.new("unsupported audio codec " + cfg.codec) if m == nil
-  m.call(cfg)
+  codec_new_with(ACODECS, 1, cfg)
 
 # ==== core API ====
 # Codec — the registries above, as one class:
 #   Codec.video(cfg) / Codec.audio(cfg) → a decoder (raises MediaError)
 #   Codec.video?(id) / Codec.audio?(id) → registered?
 #   Codec.register_video(id, make) / Codec.register_audio(id, make)
+#   Codec.prefer_system(ids) / Codec.system_preferred — use the OS decoders
+#     (core/codec/system: VideoToolbox / AudioToolbox) for these codec ids
 # vcodec_* / acodec_* are the same registries under their codec-facing names.
 + Codec
   -> .video(cfg)
@@ -153,6 +235,14 @@ ACODECS = {}
 
   -> .register_audio(id, make)
     acodec_register(id, make)
+
+  # Prefer the operating system's decoder (core/codec/system) for these
+  # codec ids; replaces the list. [] goes back to ours for everything.
+  -> .prefer_system(ids)
+    SYS_PREFER[0] = ids.map ->(id) codec_id4(id)
+
+  -> .system_preferred
+    codec_system_list()
 
 # ---- elementary-stream parsers (MP3, ADTS AAC, native FLAC, raw AC-3 files) ----
 # A codec file registers its *_es_parse here; the container layer's EsDemuxer looks it up.

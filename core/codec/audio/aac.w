@@ -1,7 +1,7 @@
 # core/codec/audio/aac — an AAC decoder (ISO/IEC 14496-3): AAC-LC, HE-AAC v1 (SBR) and
 # HE-AAC v2 (Parametric Stereo), in pure Tungsten.
 #
-#   acodec_register("mp4a", ->(cfg) AacDec.new(cfg))
+#   acodec_register("mp4a", ->(cfg) AacDec.new(cfg))   # (AOT 42 configs go to UsacDec)
 #   dec.decode(sample) -> AudioBlock (1024 frames, or 2048 with SBR)
 #   aac_es_parse(bytes) -> {cfg:, samples:, duration:} for ADTS files
 #
@@ -32,6 +32,7 @@ use core/codec/media
 use aac_tables
 use aac_sbr
 use aac_ps
+use usac
 
 AAC_PI = ~3.141592653589793
 AAC_RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]
@@ -1690,7 +1691,21 @@ AAC_END = 7
     i += 1
   0
 
-acodec_register("mp4a", ->(cfg) AacDec.new(cfg))
+# AudioSpecificConfig audioObjectType 42 (USAC / xHE-AAC) goes to UsacDec
+-> aac_config_aot(cfg)
+  x = cfg.extra
+  return 0 if x == nil || x.size == 0
+  if x.is_a?(String)
+    x = ccall("w_string_bytes_view", x) ## u8[]
+  aot = x[0] >> 3
+  aot = 32 + (((x[0] & 7) << 3) | (x[1] >> 5)) if aot == 31 && x.size > 1
+  aot
+
+-> aac_make_decoder(cfg)
+  return UsacDec.new(cfg) if aac_config_aot(cfg) == 42
+  AacDec.new(cfg)
+
+acodec_register("mp4a", ->(cfg) aac_make_decoder(cfg))
 
 # ---- ADTS elementary streams ----
 

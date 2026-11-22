@@ -61,8 +61,27 @@ IMG_DECODERS = []
     i += 1
   nil
 
+# The operating system's image decoder (core/codec/system: ImageIO), used
+# for the formats in codec_system_list(), falling back to ours per file.
+IMG_SYSTEM = [nil]
+
+-> img_system_register(dec)
+  IMG_SYSTEM[0] = dec
+
+-> img_call(dec, bytes)
+  dec.call(bytes)
+
 # Decode with whichever registered decoder recognises the bytes.
 -> img_decode(bytes)
+  if IMG_SYSTEM[0] != nil
+    k = img_sniff(bytes)
+    if k != nil && codec_system_list().include?(k) && !img_animated_head?(k, bytes)
+      bm = nil
+      begin
+        bm = img_call(IMG_SYSTEM[0], bytes)
+      rescue e
+        bm = nil
+      return bm if bm != nil
   i = 0
   while i < IMG_DECODERS.size
     d = IMG_DECODERS[i]
@@ -76,6 +95,20 @@ IMG_DECODERS = []
       return bm
     i += 1
   raise ImageError.new("unrecognised image format")
+
+# Animated WebP / AVIF sequences stay with our decoders (ImageIO gives only
+# the first frame).
+-> img_animated_head?(kind, bytes)
+  return false if kind != "webp" && kind != "avif"
+  n = bytes.size < 1024 ? bytes.size : 1024
+  i = 0
+  while i + 4 <= n
+    if kind == "webp" && bytes[i] == 65 && bytes[i + 1] == 78 && bytes[i + 2] == 73 && bytes[i + 3] == 77
+      return true
+    if kind == "avif" && bytes[i] == 97 && bytes[i + 1] == 118 && bytes[i + 2] == 105 && bytes[i + 3] == 115
+      return true
+    i += 1
+  false
 
 # ---------------------------------------------------------------------------
 # Shared helpers for decoders (added with the Tungsten decoders; all typed so

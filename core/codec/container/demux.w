@@ -261,8 +261,16 @@
   return :flac if b[0] == 0x66 && b[1] == 0x4C && b[2] == 0x61 && b[3] == 0x43
   return :mp3 if b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33
   return :adts if b[0] == 0xFF && (b[1] & 0xF6) == 0xF0
+  return :loas if b[0] == 0x56 && (b[1] & 0xE0) == 0xE0 && n >= 3 && demux_loas_next?(b)
   return :mp3 if b[0] == 0xFF && (b[1] & 0xE0) == 0xE0
   return demux_sniff_more(b)
+
+# A LOAS sync word followed, one frame later, by another (or the end).
+-> demux_loas_next?(b)
+  len = ((b[1] & 0x1F) << 8) | b[2]
+  nx = 3 + len
+  return true if nx + 2 > b.size
+  b[nx] == 0x56 && (b[nx + 1] & 0xE0) == 0xE0
 
 # Containers added later (MPEG-TS, AIFF, CAF), tried after the ones above.
 -> demux_sniff_more(b)
@@ -286,6 +294,7 @@
   return :wav if m == "audio/wav" || m == "audio/wave" || m == "audio/x-wav" || m == "audio/vnd.wave"
   return :mp3 if m == "audio/mpeg" || m == "audio/mp3"
   return :adts if m == "audio/aac" || m == "audio/aacp" || m == "audio/x-aac"
+  return :loas if m == "audio/mp4a-latm" || m == "audio/usac"
   return :flac if m == "audio/flac" || m == "audio/x-flac"
   return :ts if m == "video/mp2t" || m == "audio/mp2t" || m == "video/mpeg2-ts"
   return :aiff if m == "audio/aiff" || m == "audio/x-aiff"
@@ -299,7 +308,7 @@
   return WebmDemuxer.new if kind == :webm
   return OggDemuxer.new if kind == :ogg
   return WavDemuxer.new if kind == :wav
-  return EsDemuxer.new(kind) if kind == :mp3 || kind == :adts || kind == :flac || kind == :ac3
+  return EsDemuxer.new(kind) if kind == :mp3 || kind == :adts || kind == :flac || kind == :ac3 || kind == :loas
   return TsDemuxer.new if kind == :ts
   return AiffDemuxer.new(kind) if kind == :aiff || kind == :caf
   nil

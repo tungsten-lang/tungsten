@@ -22,6 +22,9 @@
 #                                  elementary-stream demuxers
 #   codec/text/webvtt.w            WebVTT and SRT parsing, cue layout
 #
+#   codec/system.w                 the OS decoders (VideoToolbox / AudioToolbox /
+#                                  ImageIO) and the per-format default table
+#
 # Each directory's all.w loads all of it; this file loads everything.
 
 use core/codec/image/all
@@ -30,3 +33,4 @@ use core/codec/container/all
 use core/codec/audio/all
 use core/codec/text/webvtt
 use core/codec/video/all
+use core/codec/system

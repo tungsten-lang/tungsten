@@ -802,7 +802,7 @@ JS_REALM = [nil]
   proto = r == nil ? JS_NULL : r.proto_of(kind)
   e = JsObject.new(proto, "Error")
   e.define("message", msg, ATTR_W + ATTR_C)
-  e.define("stack", kind + ": " + msg + "\n    at <blade>", ATTR_W + ATTR_C)
+  e.define("stack", kind + ": " + msg + "\n" + js_stack_lines(), ATTR_W + ATTR_C)
   e
 
 -> js_type_error(msg)

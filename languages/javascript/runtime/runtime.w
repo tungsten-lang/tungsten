@@ -78,6 +78,7 @@ CONTINUE_PLAIN = JsCompletion.new(C_CONTINUE, nil, nil)
     @privs = []
 
 JS_DEPTH = [0]
+JS_STACK = Array.new(1000, nil)
 JS_MAX_DEPTH = [900]
 JS_LAST_ENV = [nil]
 
@@ -146,6 +147,7 @@ JS_LAST_ENV = [nil]
 
 -> js_getv(o, k)
   return o.get(k, o) if o.is_a?(JsObject)
+  return JS_SHORT if o == JS_SHORT
   if o.is_a?(String)
     return js_len(o) + ~0.0 if k == "length"
     if k.is_a?(String) && k.size > 0 && k.byte_at(0) >= 48 && k.byte_at(0) <= 57 && js_array_index?(k)
@@ -254,6 +256,7 @@ JS_LAST_ENV = [nil]
 # ---- calls ----
 
 -> js_call_named(f, this, args, what)
+  return JS_SHORT if f == JS_SHORT
   if !f.is_a?(JsFunction) && !(f.is_a?(JsObject) && f.callable?)
     raise JsThrow.new(js_type_error(what + " is not a function"))
   js_call(f, this, args)
@@ -305,8 +308,15 @@ JS_LAST_ENV = [nil]
   if d > JS_MAX_DEPTH[0]
     raise JsThrow.new(js_range_error("Maximum call stack size exceeded"))
   JS_DEPTH[0] = d
+  JS_STACK[d] = code if d < 1000
+  js_watchdog() if ((JS_TICKS[0] += 1) & 4095) == 0
   env = js_activation(f, code, this, args, nt)
-  r = code.body.call(env)
+  if JS_FN_PROFILE[0]
+    t0 = clock_ms()
+    r = code.body.call(env)
+    js_fn_profile_add(code, clock_ms() - t0)
+  else
+    r = code.body.call(env)
   JS_DEPTH[0] = d - 1
   JS_LAST_ENV[0] = env
   return r if code.expr_body
@@ -389,9 +399,15 @@ JS_DEBUG = [false]
 
 -> js_error_value(e)
   return e.value if e.is_a?(JsThrow)
-  msg = e.message.to_s
+  msg = e.is_a?(String) ? e : e.message.to_s
   if JS_DEBUG[0]
-    STDERR.puts("\[js internal] " + msg)
+    where = []
+    k = JS_DEPTH[0]
+    while k > 0 && where.size < 8
+      c = JS_STACK[k]
+      where.push(c.name.to_s + "@" + c.pos.to_s) if c != nil && k < 1000
+      k -= 1
+    ccall("w_eputs", "\[js internal] " + (e.is_a?(String) ? "String" : e.class_name) + ": " + msg + " in " + where.join(" < "))
   if msg.index("stack") != nil && msg.index("overflow") != nil
     return js_range_error("Maximum call stack size exceeded")
   js_type_error("internal: " + msg)
@@ -481,16 +497,58 @@ JS_DEBUG = [false]
   g
 
 JS_GOROUTINE_INIT = [false]
+JS_CORO_LIVE = [0]
+JS_CORO_TOTAL = [0]
 
 -> js_coro_spawn(c)
   if !JS_GOROUTINE_INIT[0]
     JS_GOROUTINE_INIT[0] = true
     n = (4194304 ## int)
     ccall("w_goroutine_stack_size_hint", n)
+  JS_CORO_LIVE[0] += 1
+  JS_CORO_TOTAL[0] += 1
+  if JS_CORO_LIVE[0] > 9000
+    JS_CORO_LIVE[0] -= 1
+    raise JsThrow.new(js_range_error("Too many suspended generators and async functions"))
   c.to = Channel.new(0)
   c.from = Channel.new(0)
   go ->
     js_coro_body(c)
+  nil
+
+# Only the main stack ever hands control to a coroutine (TODO(tungsten): two goroutines
+# rendezvousing on unbuffered channels while main waits deadlocks the scheduler; repro
+# nested_go2.w). A coroutine that wants to resume another asks main to do it with :call.
+JS_CUR_CORO = [nil]
+JS_CORO_TRACE = [Env.get("BLADE_CORO_TRACE", "") == "1"]
+
+-> js_coro_resume(c, msg, first)
+  cur = JS_CUR_CORO[0]
+  return js_coro_drive(c, msg, first) if cur == nil
+  cur.from.send([:call, c, msg, first])
+  reply = cur.to.receive
+  reply[1]
+
+-> js_coro_drive(c, msg, first)
+  ccall("w_eputs", "drive first=" + first.to_s + " msg=" + msg.to_s) if JS_CORO_TRACE[0]
+  JS_CUR_CORO[0] = c
+  if first
+    js_coro_spawn(c)
+  else
+    c.to.send(msg)
+  js_coro_wait(c)
+
+-> js_coro_wait(c)
+  while true
+    m = c.from.receive
+    ccall("w_eputs", "got " + m[0].to_s) if JS_CORO_TRACE[0]
+    JS_CUR_CORO[0] = nil
+    if m[0] == :call
+      res = js_coro_drive(m[1], m[2], m[3])
+      JS_CUR_CORO[0] = c
+      c.to.send([:ret, res])
+    else
+      return m
   nil
 
 -> js_coro_body(c)
@@ -506,6 +564,7 @@ JS_GOROUTINE_INIT = [false]
     else
       msg = [:throw, js_error_value(e)]
   JS_DEPTH[0] = depth
+  JS_CORO_LIVE[0] -= 1
   c.from.send(msg)
   nil
 
@@ -527,11 +586,10 @@ JS_GOROUTINE_INIT = [false]
       c.state = :done
       raise JsThrow.new(v)
     c.state = :running
-    js_coro_spawn(c)
+    msg = js_coro_resume(c, nil, true)
   else
     c.state = :running
-    c.to.send([kind, v])
-  msg = c.from.receive
+    msg = js_coro_resume(c, [kind, v], false)
   k = msg[0]
   if k == :yield
     c.state = :suspended
@@ -594,8 +652,7 @@ JS_GOROUTINE_INIT = [false]
   c = JsCoro.new(code, env)
   env[FS_GEN] = c
   c.state = :running
-  js_coro_spawn(c)
-  js_async_step(c, cap, c.from.receive)
+  js_async_step(c, cap, js_coro_resume(c, nil, true))
   cap.promise
 
 -> js_async_step(c, cap, msg)
@@ -616,8 +673,7 @@ JS_GOROUTINE_INIT = [false]
 
 -> js_async_resume(c, cap, kind, v)
   c.state = :running
-  c.to.send([kind, v])
-  js_async_step(c, cap, c.from.receive)
+  js_async_step(c, cap, js_coro_resume(c, [kind, v], false))
   nil
 
 # Inside an async body's goroutine.
@@ -669,13 +725,9 @@ JS_GOROUTINE_INIT = [false]
         js_call(req[2].resolve, nil, [js_iter_result(kind == :return ? v : nil, true)])
     else
       g.busy = true
-      if c.state == :start
-        c.state = :running
-        js_coro_spawn(c)
-      else
-        c.state = :running
-        c.to.send([kind, v])
-      js_async_gen_step(g, c.from.receive)
+      first = c.state == :start
+      c.state = :running
+      js_async_gen_step(g, js_coro_resume(c, first ? nil : [kind, v], first))
   nil
 
 -> js_async_gen_step(g, msg)
@@ -702,8 +754,7 @@ JS_GOROUTINE_INIT = [false]
 
 -> js_async_gen_resume(g, kind, v)
   c = g.coro
-  c.to.send([kind, v])
-  js_async_gen_step(g, c.from.receive)
+  js_async_gen_step(g, js_coro_resume(c, [kind, v], false))
   nil
 
 # yield inside an async generator: await the value, then hand it out.
@@ -715,3 +766,87 @@ JS_GOROUTINE_INIT = [false]
   return msg[1] if k == :next
   raise JsThrow.new(msg[1]) if k == :throw
   raise JsGenReturn.new(js_await(c, msg[1]))
+
+# "    at name (url:line:col)" lines for the current call stack (Error.stack).
+-> js_stack_lines
+  out = []
+  k = JS_DEPTH[0]
+  k = 999 if k > 999
+  while k > 0 && out.size < 10
+    c = JS_STACK[k]
+    if c != nil
+      nm = c.name.to_s
+      out.push("    at " + (nm == "" ? "<anonymous>" : nm) + " (" + js_code_location(c) + ")" + (JS_DEBUG[0] && c.src != nil ? "  " + c.src.slice(c.pos, 700).gsub("\n", " ") : ""))
+    k -= 1
+  out.push("    at <anonymous>") if out.size == 0
+  out.join("\n")
+
+JS_LINE_CACHE = [nil, nil]
+
+-> js_code_location(c)
+  return "native" if c.src == nil
+  src = c.src
+  if JS_LINE_CACHE[0] == nil || !(JS_LINE_CACHE[0] == src)
+    nls = []
+    k = src.index("\n", 0)
+    while k != nil
+      nls.push(k)
+      k = src.index("\n", k + 1)
+    JS_LINE_CACHE[0] = src
+    JS_LINE_CACHE[1] = nls
+  nls = JS_LINE_CACHE[1]
+  p = c.pos
+  lo = 0
+  hi = nls.size
+  while lo < hi
+    mid = (lo + hi) / 2
+    if nls[mid] < p
+      lo = mid + 1
+    else
+      hi = mid
+  col = lo == 0 ? p + 1 : p - nls[lo - 1]
+  "script:" + (lo + 1).to_s + ":" + col.to_s
+
+# BLADE_JS_PROFILE=2: calls and inclusive milliseconds per function.
+JS_FN_PROFILE = [false]
+JS_FN_STATS = {}
+
+-> js_fn_profile_add(code, ms)
+  e = JS_FN_STATS[code]
+  if e == nil
+    e = [0, 0]
+    JS_FN_STATS[code] = e
+  e[0] += 1
+  e[1] += ms
+  nil
+
+-> js_fn_profile_report(n)
+  rows = JS_FN_STATS.keys.map(->(c) [c, JS_FN_STATS[c]])
+  rows = rows.sort_by(->(r) 0 - r[1][1])
+  k = 0
+  while k < n && k < rows.size
+    c = rows[k][0]
+    st = rows[k][1]
+    ccall("w_eputs", "  " + st[1].to_s + " ms  " + st[0].to_s + " calls  " + c.name.to_s + " " + js_code_location(c) + " " + (c.src == nil ? "" : c.src.slice(c.pos, 90).gsub("\n", " ")))
+    k += 1
+  nil
+
+# A task (script, timer, event callback) that runs longer than JS_TASK_MS is stopped with
+# an error, as browsers stop unresponsive scripts. The embedder calls js_task_begin per task.
+JS_TICKS = [0]
+JS_TASK_MS = [10000]
+JS_DEADLINE = [0]
+
+JS_TASK_SEQ = [0]
+
+-> js_task_begin
+  JS_DEADLINE[0] = clock_ms() + JS_TASK_MS[0]
+  JS_TASK_SEQ[0] += 1
+  nil
+
+-> js_watchdog
+  return nil if JS_DEADLINE[0] == 0 || clock_ms() < JS_DEADLINE[0]
+  JS_DEADLINE[0] = 0
+  where = js_stack_lines()
+  ccall("w_eputs", "\[js] script timed out:\n" + where) if JS_DEBUG[0]
+  raise JsThrow.new(js_range_error("Script timed out (busy for more than " + (JS_TASK_MS[0] / 1000).to_s + " s)"))

@@ -153,7 +153,8 @@ JS_UNHANDLED = []
     js_trigger(fr, p.value)
   else
     if !p.handled
-      JS_UNHANDLED.delete(p)
+      i = JS_UNHANDLED.index(p)
+      JS_UNHANDLED.delete_at(i) if i != nil
     js_trigger(rr, p.value)
   p.handled = true
   nil

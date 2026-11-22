@@ -43,6 +43,9 @@ in place with a TODO(tungsten) note):
   is typed as returning Float; returning an object then dies with "expected numeric type".
 - `field_reopen.w`: reopening a parent class to add a field after a subclass declared fields makes the
   two fields share storage.
+- `Array#slice` returns a borrowed view; pushing onto it (or onto anything that stored it) raises
+  "typed array push: cannot grow a borrowed view" at run time, far from the slice. `new_array` now
+  copies its argument (`elems.dup`).
 - `0.chr` is "" in toolchains before 6423288b (chr-nul).
 - No local time-zone offset primitive (Date reads /etc/localtime itself), and no stdout flush or stderr
   write except `ccall("w_flush")` / `ccall("w_eputs", …)`.

@@ -529,7 +529,8 @@ F_CL_YES = 2097152
     u = n.c == nil ? nil : cx(n.c, ls)
     b = cs(n.d, ls, nil)
     b = js_nop_stmt(b)
-    lex = ls.lex
+    # only the loop's own let/const bindings start uninitialized (not the enclosing block's)
+    lex = lexical ? ls.lex : []
     if owner
       size_of = ls
       per_iter = ->(env) js_run_for_owner(size_of, lex, ic, t, u, b, labels, env)
@@ -1831,7 +1832,7 @@ F_CL_YES = 2097152
     f = fs[i]
     out[i] = f == nil ? JS_HOLE : f.call(env)
     i += 1
-  JS_REALM[0].new_array(out)
+  JsArray.new(JS_REALM[0].array_proto, out)
 
 -> js_array_lit_spread_raw(parts, env)
   out = []
@@ -1853,7 +1854,7 @@ F_CL_YES = 2097152
       js_spread_into(out, p[0].call(env))
     else
       out.push(p.call(env))
-  JS_REALM[0].new_array(out)
+  JsArray.new(JS_REALM[0].array_proto, out)
 
 -> js_eval_args(fs, env)
   out = Array.new(fs.size, nil)
@@ -2064,6 +2065,7 @@ JS_TRACE_MISS = [false]
   nil
 
 -> js_get_length(o)
+  return JS_SHORT if o == JS_SHORT
   if o.is_a?(JsArray)
     return o.elems.size + ~0.0 if o.slen == nil
     return o.length + ~0.0
@@ -2072,6 +2074,7 @@ JS_TRACE_MISS = [false]
 
 -> js_getidx_s(o, k)
   return o.get(k, o) if k.is_a?(String) && o.is_a?(JsObject) && (k.size == 0 || k.byte_at(0) > 57)
+  return JS_SHORT if o == JS_SHORT
   js_getidx(o, k)
 
 -> js_unshort(v)
@@ -2102,6 +2105,7 @@ JS_TRACE_MISS = [false]
   if o.is_a?(JsObject)
     f = o.get(key, o)
   else
+    return JS_SHORT if o == JS_SHORT
     f = js_getv(o, key)
   if f.is_a?(JsFunction)
     return f.native.call(o, args, nil) if f.native != nil
@@ -2243,6 +2247,7 @@ JS_TRACE_MISS = [false]
 
 -> js_run_while(t, b, labels, env)
   while t.call(env)
+    js_watchdog() if ((JS_TICKS[0] += 1) & 65535) == 0
     r = b.call(env)
     if r != nil
       c = js_loop_ctl(r, labels)
@@ -2264,6 +2269,7 @@ JS_TRACE_MISS = [false]
   js_tdz_fill(env, lex) if lex.size > 0
   ic.call(env) if ic != nil
   while t == nil || t.call(env)
+    js_watchdog() if ((JS_TICKS[0] += 1) & 65535) == 0
     r = b.call(env)
     if r != nil
       c = js_loop_ctl(r, labels)

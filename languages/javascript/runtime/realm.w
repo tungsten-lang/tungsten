@@ -89,8 +89,9 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
   -> new_object
     JsObject.new(object_proto(), "Object")
 
+  # (copied: a Tungsten slice is a borrowed view that cannot grow)
   -> new_array(elems = [])
-    JsArray.new(@array_proto, elems)
+    JsArray.new(@array_proto, elems.dup)
 
   # ToObject for primitives: Number/String/Boolean/Symbol/BigInt wrappers.
   -> wrap_primitive(v)

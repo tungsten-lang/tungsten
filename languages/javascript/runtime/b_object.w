@@ -429,7 +429,7 @@ js_install(->(r) js_install_object(r))
     head = js_error_to_string(o)
   rescue e
     head = "Error"
-  o.define("stack", head + "\n    at <anonymous>", ATTR_W + ATTR_C)
+  o.define("stack", head + "\n" + js_stack_lines(), ATTR_W + ATTR_C)
   nil
 
 -> js_error_to_string(this)
@@ -524,12 +524,21 @@ js_install(->(r) js_install_object(r))
   run.call(nil)
 
 # Run a script source in the realm (the embedder's entry point). Returns the completion value.
+JS_PHASES = [~0.0, ~0.0, ~0.0]
+
 -> js_run_script(src, name = "script")
+  t0 = (clock_ms() * 1000000)
   prog = js_parse_or_throw(src, false)
+  t1 = (clock_ms() * 1000000)
   comp = JsCompiler.new(src)
   run = comp.compile_script(prog)
+  t2 = (clock_ms() * 1000000)
+  JS_PHASES[0] = JS_PHASES[0] + (t1 - t0) / ~1000000.0
+  JS_PHASES[1] = JS_PHASES[1] + (t2 - t1) / ~1000000.0
   JS_DEPTH[0] = 0
-  run.call(nil)
+  v = run.call(nil)
+  JS_PHASES[2] = JS_PHASES[2] + ((clock_ms() * 1000000) - t2) / ~1000000.0
+  v
 
 # ---- global functions ----
 

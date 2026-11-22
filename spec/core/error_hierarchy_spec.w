@@ -74,4 +74,24 @@ check("runtime.no_method", no_method(), "no method: true")
     "name error family"
 check("runtime.no_method_parent", no_method_is_name_error(), "name error family")
 
+# --- StandardError: Ruby's name, a real Error subclass ---
++ PortedError < StandardError
+
+check("standard_error.is_error", StandardError.new("x").is_a?(Error), "true")
+check("standard_error.subclass_constructor", PortedError.new("ported").message, "ported")
+
+-> raise_ported
+  begin
+    raise PortedError, "from raise"
+  rescue e: PortedError
+    "own class: " + e.message
+check("standard_error.raise_and_rescue", raise_ported(), "own class: from raise")
+
+-> rescue_ported_as_error
+  begin
+    raise PortedError.new("as error")
+  rescue e: Error
+    "Error family: " + e.is_a?(StandardError).to_s
+check("standard_error.rescued_as_error", rescue_ported_as_error(), "Error family: true")
+
 << "error_hierarchy_spec: all checks passed"

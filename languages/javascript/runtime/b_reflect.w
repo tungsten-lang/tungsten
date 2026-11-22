@@ -227,7 +227,7 @@
   p = js_proxy_create(target, handler, true)
   res = r.new_object
   res.put_own("proxy", p)
-  rv = r.native("", 0, ->(this, args, nt) js_proxy_revoke(p))
+  rv = js_keep(r.native("", 0, ->(this, args, nt) js_proxy_revoke(p)), [p])
   res.put_own("revoke", rv)
   res
 

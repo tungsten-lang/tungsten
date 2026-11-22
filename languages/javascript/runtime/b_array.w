@@ -131,7 +131,9 @@
   while i < n
     if js_has_el?(o, i)
       v = js_el(o, i)
-      res = js_call(f, t, [v, i + ~0.0, o])
+      av = [v, i + ~0.0, o]
+      res = js_call(f, t, av)
+      js_args_done(f, av) if f.is_a?(JsFunction)
       if mode == :map
         out[i] = res
       elsif mode == :filter
@@ -141,7 +143,7 @@
       elsif mode == :every
         return false if !js_truthy(res)
     i += 1
-  return r.new_array(out) if mode == :map || mode == :filter
+  return r.adopt_array(out) if mode == :map || mode == :filter
   return false if mode == :some
   return true if mode == :every
   nil
@@ -154,7 +156,10 @@
   i = from_end ? n - 1 : 0
   while from_end ? i >= 0 : i < n
     v = js_el(o, i)
-    if js_truthy(js_call(f, t, [v, i + ~0.0, o]))
+    av = [v, i + ~0.0, o]
+    hit = js_truthy(js_call(f, t, av))
+    js_args_done(f, av) if f.is_a?(JsFunction)
+    if hit
       return want_index ? i + ~0.0 : v
     i += from_end ? -1 : 1
   want_index ? ~-1.0 : nil
@@ -177,7 +182,9 @@
     js_throw_type("Reduce of empty array with no initial value") if !found
   while right ? i >= 0 : i < n
     if js_has_el?(o, i)
-      acc = js_call(f, nil, [acc, js_el(o, i), i + ~0.0, o])
+      av = [acc, js_el(o, i), i + ~0.0, o]
+      acc = js_call(f, nil, av)
+      js_args_done(f, av) if f.is_a?(JsFunction)
     i += right ? -1 : 1
   acc
 

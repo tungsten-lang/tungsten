@@ -486,7 +486,9 @@ ARRAY_GAP = 65536
 + JsArray < JsObject
   rw :elems, :slen, :len_ro
 
-  -> new(@proto, @elems = [])
+  # (no `= []` default: Tungsten evaluates a default list even when the argument is given,
+  # leaking one empty array per array created)
+  -> new(@proto, @elems)
     @cls = "Array"
     @props = {}
     @attrs = nil
@@ -770,9 +772,11 @@ ARRAY_GAP = 65536
 # interpreted functions carry their code and scope in @code / @scope for the interpreter.
 # @lazy: the "prototype" object is made on first use (1 ordinary, 2 generator, 3 async generator).
 + JsFunction < JsObject
-  rw :native, :code, :scope, :fname, :arity, :ctor, :this_mode, :home, :fields, :bound, :lazy, :cls_kind
+  rw :native, :code, :scope, :fname, :arity, :ctor, :this_mode, :home, :fields, :bound, :lazy, :cls_kind, :keep, :gc_trusted
 
   -> new(@proto, @native, @fname = "", @arity = 0, @ctor = false)
+    @keep = nil
+    @gc_trusted = false
     @cls = "Function"
     @props = {}
     @attrs = nil
@@ -858,7 +862,7 @@ JS_REALM = JsTlsCell.new(1, nil)
 
 -> js_call(f, this, args)
   if f.is_a?(JsFunction)
-    return f.native.call(this, args, nil) if f.native != nil
+    return js_native_call(f, this, args, nil) if f.native != nil
     return js_call_code(f, this, args)
   return f.call_obj(this, args) if f.is_a?(JsObject) && f.callable?
   raise JsThrow.new(js_type_error(js_typeof(f) == "undefined" ? "undefined is not a function" : js_to_display(f) + " is not a function"))
@@ -868,7 +872,7 @@ JS_REALM = JsTlsCell.new(1, nil)
   return f.construct_obj(args, new_target) if f.is_a?(JsObject) && f.proxy? && f.is_constructor?
   raise JsThrow.new(js_type_error(js_to_display(f) + " is not a constructor")) if !f.is_a?(JsFunction) || !f.ctor
   if f.native != nil
-    return f.native.call(nil, args, new_target)
+    return js_native_call(f, nil, args, new_target)
   js_construct_code(f, args, new_target)
 
 

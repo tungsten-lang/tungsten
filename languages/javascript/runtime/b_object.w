@@ -96,7 +96,7 @@
   o = js_to_object(v)
   r = JS_REALM[0]
   if kind == :keys && !o.proxy? && !(o.is_a?(JsArray)) && o.attrs == nil && o.getters == nil && o.class_name == "JsObject"
-    return r.new_array(o.own_keys.select(->(k) k.is_a?(String)))
+    return r.adopt_array(o.own_keys.select(->(k) k.is_a?(String)))
   out = []
   js_own_enum_keys(o).each ->(k)
     if kind == :keys
@@ -104,8 +104,8 @@
     elsif kind == :values
       out.push(o.get(k, o))
     else
-      out.push(r.new_array([k, o.get(k, o)]))
-  r.new_array(out)
+      out.push(r.adopt_array([k, o.get(k, o)]))
+  r.adopt_array(out)
 
 -> js_object_assign(target, sources)
   to = js_to_object(target)
@@ -286,9 +286,10 @@ js_install(->(r) js_install_object(r))
   fc = r.constructor("Function", 1, ->(this, args, nt) js_function_ctor(args, :normal), fp)
   fp.define("name", "", ATTR_C)
   fp.define("length", ~0.0, ATTR_C)
-  r.method(fp, "call", 1, ->(this, args, nt) js_call_named(this, js_arg(args, 0), args.size > 1 ? args.slice(1, args.size - 1) : [], "Function.prototype.call"))
+  # (copies, not slices: a slice borrows the caller's argument list, which may be collected)
+  r.method(fp, "call", 1, ->(this, args, nt) js_call_named(this, js_arg(args, 0), args.size > 1 ? args.slice(1, args.size - 1).dup : [], "Function.prototype.call"))
   r.method(fp, "apply", 2, ->(this, args, nt) js_call_named(this, js_arg(args, 0), js_list_from_array_like(js_arg(args, 1)), "Function.prototype.apply"))
-  r.method(fp, "bind", 1, ->(this, args, nt) js_bind(this, js_arg(args, 0), args.size > 1 ? args.slice(1, args.size - 1) : []))
+  r.method(fp, "bind", 1, ->(this, args, nt) js_bind(this, js_arg(args, 0), args.size > 1 ? args.slice(1, args.size - 1).dup : []))
   r.method(fp, "toString", 0, ->(this, args, nt) js_fn_to_string(this))
   hi = r.native("\[Symbol.hasInstance]", 1, ->(this, args, nt) js_ordinary_has_instance(this, js_arg(args, 0)))
   fp.define(SYM_HAS_INSTANCE, hi, 0)
@@ -540,7 +541,7 @@ js_install(->(r) js_install_object(r))
   comp = JsCompiler.new(src)
   comp.lazy = src.size >= JS_LAZY_MIN[0]
   run = comp.compile_script(prog)
-  run.call(nil)
+  js_gc_eval_run(run, nil)
 
 # Run a script source in the realm (the embedder's entry point). Returns the completion value.
 JS_PHASES = [~0.0, ~0.0, ~0.0]
@@ -569,6 +570,8 @@ JS_PHASE_LOG = [Env.get("BLADE_JS_PHASES", "") == "1"]
   t2 = (clock_ms() * 1000000)
   JS_PHASES[0] = JS_PHASES[0] + (t1 - t0) / ~1000000.0
   JS_PHASES[1] = JS_PHASES[1] + (t2 - t1) / ~1000000.0
+  # a script inserted by running JavaScript runs nested: restore the caller's depth after
+  odepth = JS_DEPTH[0]
   JS_DEPTH[0] = 0
   otop0 = JS_TOP[0]
   otop1 = JS_TOP[1]
@@ -577,13 +580,19 @@ JS_PHASE_LOG = [Env.get("BLADE_JS_PHASES", "") == "1"]
   JS_TOP[1] = comp.url
   JS_POS[0] = -1
   v = nil
+  # only the outermost script's top level has safepoints (js/gc.w)
+  JS_GC_SCRIPTS[0] += 1
   begin
     v = run.call(nil)
   rescue e
+    JS_GC_SCRIPTS[0] -= 1
+    JS_DEPTH[0] = odepth
     JS_TOP[0] = otop0
     JS_TOP[1] = otop1
     JS_POS[0] = opos
     raise e
+  JS_GC_SCRIPTS[0] -= 1
+  JS_DEPTH[0] = odepth
   JS_TOP[0] = otop0
   JS_TOP[1] = otop1
   JS_POS[0] = opos

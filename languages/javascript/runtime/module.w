@@ -50,7 +50,7 @@ JS_MODULE_HOST = JsTlsCell.new(1, nil)
   names.each ->(k)
     c = js_module_resolve_export(m, k, [])
     if c != nil
-      g = r.native(k, 0, ->(this, args, nt) js_tdz_check(c.v, k))
+      g = js_keep(r.native(k, 0, ->(this, args, nt) js_tdz_check(c.v, k)), [c])
       ns.define_accessor(k, g, nil, ATTR_E)
   ns.define(SYM_TO_STRING_TAG, "Module", 0)
   ns.extensible = false
@@ -126,7 +126,7 @@ JS_CURRENT_MODULE = JsTlsCell.new(1, nil)
   o = JsObject.new(JS_NULL, "Object")
   o.put_own("url", m.url)
   mm = m
-  o.put_own("resolve", r.native("resolve", 1, ->(this, args, nt) js_module_resolve(js_to_string(js_arg(args, 0)), mm.url)))
+  o.put_own("resolve", js_keep(r.native("resolve", 1, ->(this, args, nt) js_module_resolve(js_to_string(js_arg(args, 0)), mm.url)), [mm]))
   m.meta = o
   o
 

@@ -495,7 +495,7 @@ F_CL_YES = 2097152
         h0 = r0.hops
         i0 = r0.index
         v0 = cx(rhs0, sc)
-        return ->(env) js_sb_append(js_up(env, h0), i0, v0, env)
+        return ->(env) js_rope_append(js_up(env, h0), i0, v0, env)
     e = cx(n.a, sc)
     if @completion_slot >= 0 && @fn_depth == 0
       h = hops_between(sc.frame, completion_frame(sc))
@@ -558,7 +558,7 @@ F_CL_YES = 2097152
     if owner
       size_of = bs
       ob = ->(env)
-        e = Array.new(size_of.size, nil)
+        e = js_gc_reg(Array.new(size_of.size, nil))
         e[0] = env
         js_tdz_fill(e, lex)
         enter.call(e) if enter != nil
@@ -2168,8 +2168,9 @@ JS_LAZY_MIN = [Env.get("BLADE_JS_LAZY", "") == "0" ? 1000000000000 : (Env.get("B
 -> js_template_object(site)
   return site[2] if site[2] != nil
   r = JS_REALM[0]
-  cooked = r.new_array(site[0].map(->(s) s))
-  raw = r.new_array(site[1].map(->(s) s))
+  # (not collectable: the site caches it)
+  cooked = JsArray.new(r.array_proto, site[0].map(->(s) s))
+  raw = JsArray.new(r.array_proto, site[1].map(->(s) s))
   js_freeze(raw)
   cooked.define("raw", raw, 0)
   js_freeze(cooked)
@@ -2192,7 +2193,7 @@ JS_LAZY_MIN = [Env.get("BLADE_JS_LAZY", "") == "0" ? 1000000000000 : (Env.get("B
     f = fs[i]
     out[i] = f == nil ? JS_HOLE : f.call(env)
     i += 1
-  JsArray.new(JS_REALM[0].array_proto, out)
+  js_gc_reg(JsArray.new(JS_REALM[0].array_proto, out))
 
 -> js_array_lit_spread_raw(parts, env)
   out = []
@@ -2214,7 +2215,7 @@ JS_LAZY_MIN = [Env.get("BLADE_JS_LAZY", "") == "0" ? 1000000000000 : (Env.get("B
       js_spread_into(out, p[0].call(env))
     else
       out.push(p.call(env))
-  JsArray.new(JS_REALM[0].array_proto, out)
+  js_gc_reg(JsArray.new(JS_REALM[0].array_proto, out))
 
 -> js_eval_args(fs, env)
   out = Array.new(fs.size, nil)
@@ -2225,7 +2226,7 @@ JS_LAZY_MIN = [Env.get("BLADE_JS_LAZY", "") == "0" ? 1000000000000 : (Env.get("B
   out
 
 -> js_object_lit(ops, env)
-  o = JsObject.new(JS_REALM[0].object_proto, "Object")
+  o = js_gc_reg(JsObject.new(JS_REALM[0].object_proto, "Object"))
   i = 0
   while i < ops.size
     ops[i].call(env, o)
@@ -2492,7 +2493,7 @@ JS_TRACE_MISS = [false]
     return JS_SHORT if o == JS_SHORT
     f = js_getv(o, key)
   if f.is_a?(JsFunction)
-    return f.native.call(o, args, nil) if f.native != nil
+    return js_native_call(f, o, args, nil) if f.native != nil
     return js_call_code(f, o, args)
   js_call_named(f, o, args, js_callee_desc(o, key))
 
@@ -2502,7 +2503,10 @@ JS_TRACE_MISS = [false]
   av = args.call(env)
   JS_POS[JS_DEPTH[0]] = cp
   if f.is_a?(JsFunction)
-    return f.native.call(o, av, nil) if f.native != nil
+    if f.native != nil
+      r0 = js_native_call(f, o, av, nil)
+      js_gc_args(f, av)
+      return r0
     r = js_call_code(f, o, av)
     js_args_done(f, av)
     return r
@@ -2527,7 +2531,9 @@ JS_NO_ARGS = []
     r = js_call_code(fv, nil, av)
     js_args_done(fv, av)
     return r
-  js_call_named(fv, nil, av, what)
+  r1 = js_call_named(fv, nil, av, what)
+  js_gc_args(fv, av)
+  r1
 
 -> js_callee_desc(o, key)
   base = o.is_a?(JsFunction) ? o.fname.to_s : (o.is_a?(JsObject) ? (o.cls == "Object" ? "object" : o.cls) : js_typeof(o))
@@ -2640,7 +2646,7 @@ JS_NO_ARGS = []
   items.each ->(it)
     if it[0] == nil
       ref = it[3] == nil ? nil : it[3].call(env)
-      r = JsObject.new(JS_REALM[0].object_proto, "Object")
+      r = js_gc_reg(JsObject.new(JS_REALM[0].object_proto, "Object"))
       js_copy_data_props(r, v, used == nil ? [] : used)
       js_destr_store(env, it[1], it[4], ref, r)
     else
@@ -2679,6 +2685,7 @@ JS_NO_ARGS = []
       c = js_loop_ctl(r, labels)
       return nil if c == 1
       return r if c == 2
+    js_gc_backedge(env, nil, nil) if JS_GC_HEAP.size >= JS_GC_NEXT[0]
   nil
 
 -> js_run_do_while(t, b, labels, env)
@@ -2688,6 +2695,7 @@ JS_NO_ARGS = []
       c = js_loop_ctl(r, labels)
       return nil if c == 1
       return r if c == 2
+    js_gc_backedge(env, nil, nil) if JS_GC_HEAP.size >= JS_GC_NEXT[0]
     break if !t.call(env)
   nil
 
@@ -2701,24 +2709,26 @@ JS_NO_ARGS = []
       c = js_loop_ctl(r, labels)
       return nil if c == 1
       return r if c == 2
+    js_gc_backedge(env, nil, nil) if JS_GC_HEAP.size >= JS_GC_NEXT[0]
     u.call(env) if u != nil
   nil
 
 # for (let ...) whose body has closures: a fresh copy of the loop frame each iteration.
 -> js_run_for_owner(size_of, lex, ic, t, u, b, labels, env)
-  e = Array.new(size_of.size, nil)
+  e = js_gc_reg(Array.new(size_of.size, nil))
   e[0] = env
   js_tdz_fill(e, lex)
   ic.call(e) if ic != nil
   # CreatePerIterationEnvironment also runs before the first test (§14.7.4.4)
-  e = e.dup
+  e = js_gc_reg(e.dup)
   while t == nil || t.call(e)
     r = b.call(e)
     if r != nil
       c = js_loop_ctl(r, labels)
       return nil if c == 1
       return r if c == 2
-    e = e.dup
+    js_gc_backedge(e, nil, nil) if JS_GC_HEAP.size >= JS_GC_NEXT[0]
+    e = js_gc_reg(e.dup)
     u.call(e) if u != nil
   nil
 
@@ -2728,7 +2738,7 @@ JS_NO_ARGS = []
 
 -> js_iter_frame(owner, size_of, lex, env)
   return env if !owner
-  e = Array.new(size_of.size, nil)
+  e = js_gc_reg(Array.new(size_of.size, nil))
   e[0] = env
   js_tdz_fill(e, lex)
   e
@@ -2746,6 +2756,7 @@ JS_NO_ARGS = []
         c = js_loop_ctl(r, labels)
         return nil if c == 1
         return r if c == 2
+      js_gc_backedge(e, o, keys) if JS_GC_HEAP.size >= JS_GC_NEXT[0]
   nil
 
 -> js_still_has?(o, k)
@@ -2763,6 +2774,7 @@ JS_NO_ARGS = []
         c = js_loop_ctl(r, labels)
         return nil if c == 1
         return r if c == 2
+      js_gc_backedge(e, v, nil) if JS_GC_HEAP.size >= JS_GC_NEXT[0]
       i += 1
     return nil
   rec = js_get_iterator(v)
@@ -2776,6 +2788,7 @@ JS_NO_ARGS = []
         js_iter_close(rec)
         return nil if c == 1
         return r
+    js_gc_backedge(env, rec, v) if JS_GC_HEAP.size >= JS_GC_NEXT[0]
   nil
 
 # One for-of iteration; closes the iterator if the body throws.
@@ -2819,7 +2832,7 @@ JS_NO_ARGS = []
 -> js_async_from_sync(rec)
   r = JS_REALM[0]
   o = r.new_object
-  nx = r.native("next", 0, ->(this, args, nt) js_async_from_sync_next(rec))
+  nx = js_keep(r.native("next", 0, ->(this, args, nt) js_async_from_sync_next(rec)), [rec])
   o.define("next", nx, BUILTIN_ATTRS)
   ret = js_get_method(rec.iterator, "return")
   o.define("return", ret, BUILTIN_ATTRS) if ret != nil
@@ -2831,12 +2844,12 @@ JS_NO_ARGS = []
   done = js_to_boolean(res.get("done"))
   p = js_promise_resolve_value(res.get("value"))
   on_ok = ->(x) js_iter_result(x, done)
-  js_promise_then_value(p, on_ok)
+  js_promise_then_value(p, on_ok, [done])
 
 -> js_run_switch(d, tests, bodies, labels, owner, size_of, lex, enter, env)
   e = env
   if owner
-    e = Array.new(size_of.size, nil)
+    e = js_gc_reg(Array.new(size_of.size, nil))
     e[0] = env
   js_tdz_fill(e, lex) if lex.size > 0
   enter.call(e) if enter != nil
@@ -2984,7 +2997,7 @@ JS_NO_ARGS = []
   r
 
 -> js_catch_owner(size_of, bind, hb, env, v)
-  e = Array.new(size_of.size, nil)
+  e = js_gc_reg(Array.new(size_of.size, nil))
   e[0] = env
   bind.call(e, v)
   hb.call(e)
@@ -3093,7 +3106,7 @@ JS_NO_ARGS = []
 
 -> js_class_create(env, size_of, fsize, privs, sup, derived, ccode, members, self_slot, cname)
   r = JS_REALM[0]
-  ce = Array.new(size_of.size, nil)
+  ce = js_gc_reg(Array.new(size_of.size, nil))
   ce[0] = env
   privs.each ->(p)
     pn = JsPrivateName.new(p[0])
@@ -3218,7 +3231,7 @@ JS_NO_ARGS = []
   nil
 
 -> js_static_block_run(ce, size_of, lex, hoist, body, f)
-  e = Array.new(size_of.size, nil)
+  e = js_gc_reg(Array.new(size_of.size, nil))
   e[0] = ce
   e[FS_THIS] = f
   e[FS_FUNC] = f
@@ -3240,7 +3253,7 @@ JS_NO_ARGS = []
   comp = JsCompiler.new(src)
   comp.lazy = src.size >= JS_LAZY_MIN[0]
   run = comp.compile_eval(prog, sc, strict)
-  run.call(env)
+  js_gc_eval_run(run, env)
 
 -> js_parse_or_throw(src, mod)
   if src.size >= JS_LAZY_MIN[0]
@@ -3334,7 +3347,7 @@ JS_SB_MIN = 256
   v.cache = v.sb.to_s if v.cache == nil
   v.cache
 
--> js_sb_append(fr, i, rhs, env)
+-> js_rope_append(fr, i, rhs, env)
   cur = fr[i]
   v = rhs.call(env)
   if fr[i] != cur

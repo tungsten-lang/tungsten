@@ -334,6 +334,7 @@ JS_WATCH = [Env.get("BLADE_JS_WATCH", "")]
 -> js_activation(f, code, this, args, nt)
   js_code_ready(code) if code.pending != nil
   env = Array.new(code.nslots, nil)
+  js_gc_reg(env) if !code.frame_free
   env[0] = f.scope
   if !code.arrow?
     if !code.strict && (this == nil || this == JS_NULL)
@@ -408,7 +409,7 @@ JS_WATCH = [Env.get("BLADE_JS_WATCH", "")]
     return th
   proto = nt.get("prototype")
   proto = JS_REALM[0].object_proto if !proto.is_a?(JsObject)
-  obj = JsObject.new(proto, "Object")
+  obj = js_gc_reg(JsObject.new(proto, "Object"))
   js_init_fields(f, obj) if f.fields != nil
   return obj if code.kind == :default_base
   r = js_exec(f, code, obj, args, nt)
@@ -450,6 +451,7 @@ JS_WATCH = [Env.get("BLADE_JS_WATCH", "")]
   f = JsFunction.new(proto, nil, code.name, code.length, k == :normal && !code.method)
   f.code = code
   f.scope = env
+  js_gc_reg(f)
   f.lazy = code.lazy_kind
   f
 
@@ -497,7 +499,7 @@ JS_DEBUG = [false]
 
 -> js_arguments(args, callee, strict)
   r = JS_REALM[0]
-  a = JsObject.new(r.object_proto, "Arguments")
+  a = js_gc_reg(JsObject.new(r.object_proto, "Arguments"))
   i = 0
   while i < args.size
     a.props[i.to_s] = args[i]
@@ -571,7 +573,7 @@ JS_DEBUG = [false]
 
 -> js_mapped_arguments(args, callee, env, idx)
   r = JS_REALM[0]
-  a = JsArgumentsObj.new(r.object_proto, "Arguments")
+  a = js_gc_reg(JsArgumentsObj.new(r.object_proto, "Arguments"))
   a.env = env
   m = {}
   used = {}
@@ -620,8 +622,9 @@ JS_DEBUG = [false]
 # ---- generators on goroutines ----
 
 + JsCoro
-  rw :to, :from, :state, :code, :env, :f
+  rw :to, :from, :state, :code, :env, :f, :pins
   -> new(@code, @env)
+    @pins = nil
     @to = nil
     @from = nil
     @state = :start
@@ -678,8 +681,11 @@ JS_CORO_TRACE = [Env.get("BLADE_CORO_TRACE", "") == "1"]
   JS_CUR_CORO[0] = c
   d0 = JS_DEPTH[0]
   if first
+    js_gc_coro_start(c)
     js_coro_spawn(c)
   else
+    # what the coroutine is resumed with may stay on its stack only (pinned to it)
+    js_gc_coro_resumed(c, msg[1]) if msg.is_a?(Array) && msg.size > 1
     c.to.send(msg)
   m = js_coro_wait(c)
   # the caller's depth is unchanged by whatever ran (and suspended) on the coroutine
@@ -713,6 +719,7 @@ JS_CORO_TRACE = [Env.get("BLADE_CORO_TRACE", "") == "1"]
       msg = [:throw, js_error_value(e)]
   JS_DEPTH[0] = depth
   JS_CORO_LIVE[0] -= 1
+  js_gc_coro_done(c)
   c.from.send(msg)
   nil
 
@@ -809,7 +816,7 @@ JS_CORO_TRACE = [Env.get("BLADE_CORO_TRACE", "") == "1"]
     c.state = :suspended
     on_ok = ->(x) js_async_resume(c, cap, :next, x)
     on_err = ->(x) js_async_resume(c, cap, :throw, x)
-    js_promise_then_native(msg[1], on_ok, on_err)
+    js_promise_then_native(msg[1], on_ok, on_err, [c, cap])
     return nil
   c.state = :done
   c.env = nil
@@ -884,7 +891,7 @@ JS_CORO_TRACE = [Env.get("BLADE_CORO_TRACE", "") == "1"]
   if k == :await
     on_ok = ->(x) js_async_gen_resume(g, :next, x)
     on_err = ->(x) js_async_gen_resume(g, :throw, x)
-    js_promise_then_native(msg[1], on_ok, on_err)
+    js_promise_then_native(msg[1], on_ok, on_err, [g])
     return nil
   req = g.queue.shift
   g.busy = false

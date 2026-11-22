@@ -19,7 +19,7 @@
 BUILTIN_ATTRS = ATTR_W + ATTR_C
 
 + JsRealm
-  rw :global, :intrinsics, :jobs, :host, :symbol_registry, :template_cache, :glex, :array_proto, :array_proto_indexed, :modules, :join_guard
+  rw :global, :intrinsics, :jobs, :host, :symbol_registry, :template_cache, :glex, :array_proto, :array_proto_indexed, :modules, :join_guard, :job_keep, :jobs_opaque
 
   -> new
     @glex = {}
@@ -29,6 +29,8 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
     @join_guard = []
     @intrinsics = {}
     @jobs = []
+    @job_keep = []
+    @jobs_opaque = [0]   # (a cell: frames share their parent's queue)
     @host = nil
     @symbol_registry = {}
     @template_cache = {}
@@ -39,7 +41,15 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
     @global = JsObject.new(op, "global")
     JS_REALM[0] = self
     # every builtin file registers an installer; they run in registration order
-    JS_INSTALLERS.each ->(inst) inst.call(self)
+    # the engine's builtins are trusted by the collector; installers other modules added
+    # (after the engine's) create untrusted natives (js/gc.w)
+    k = 0
+    JS_INSTALLERS.each ->(inst)
+      # 2: an engine builtin (its fresh objects are collectable), false: untrusted
+      JS_GC_TRUST[0] = k < JS_GC_ENGINE_INSTALLERS[0] ? 2 : false
+      inst.call(self)
+      k += 1
+    JS_GC_TRUST[0] = false
     @array_proto = @intrinsics["Array.prototype"]
     @global.define("globalThis", @global, BUILTIN_ATTRS)
 
@@ -87,11 +97,19 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
 
   # A new ordinary object inheriting from %Object.prototype%.
   -> new_object
-    JsObject.new(object_proto(), "Object")
+    o = JsObject.new(object_proto(), "Object")
+    JS_GC_IN_ENGINE[0] ? js_gc_reg(o) : o
 
   # (copied: a Tungsten slice is a borrowed view that cannot grow)
-  -> new_array(elems = [])
-    JsArray.new(@array_proto, elems.dup)
+  # (collectable when made by an engine builtin; others may be held where the collector cannot see)
+  # Like new_array, taking ownership of a fresh Tungsten list (no copy).
+  -> adopt_array(elems)
+    a = JsArray.new(@array_proto, elems)
+    JS_GC_IN_ENGINE[0] ? js_gc_reg(a) : a
+
+  -> new_array(elems = nil)
+    a = JsArray.new(@array_proto, elems == nil ? [] : elems.dup)
+    JS_GC_IN_ENGINE[0] ? js_gc_reg(a) : a
 
   # ToObject for primitives: Number/String/Boolean/Symbol/BigInt wrappers.
   -> wrap_primitive(v)
@@ -105,7 +123,10 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
 
   -> native(name, arity, fun, ctor = false)
     fun = js_trace_native_wrap(name, fun) if JS_TRACE_NATIVE[0] != nil
-    JsFunction.new(function_proto(), fun, name, arity, ctor)
+    f = JsFunction.new(function_proto(), fun, name, arity, ctor)
+    f.gc_trusted = JS_GC_TRUST[0]
+    # made by a builtin at run time (promise resolving functions, ...): collectable
+    JS_GC_IN_ENGINE[0] ? js_gc_reg(f) : f
 
   -> method(obj, name, arity, fun)
     f = native(name.is_a?(JsSymbol) ? "\[" + name.description + "]" : name, arity, fun)
@@ -141,8 +162,11 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
 
   # ---- jobs (microtasks) ----
 
-  -> enqueue_job(job)
+  # keep: the values the job lambda captures (lets the collector run between jobs)
+  -> enqueue_job(job, keep = nil)
     @jobs.push(job)
+    @job_keep.push(keep)
+    @jobs_opaque[0] += 1 if keep == nil
 
   # Run queued jobs until none remain (HTML's "perform a microtask checkpoint").
   -> run_jobs
@@ -150,8 +174,11 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
     d = JS_DEPTH[0]
     while @jobs.size > 0
       j = @jobs.shift
+      k = @job_keep.shift
+      @jobs_opaque[0] -= 1 if k == nil
       JS_DEPTH[0] = d
       j.call()
+      js_gc_between_jobs(self) if @jobs.size > 0 && JS_GC_ON[0]
     JS_DEPTH[0] = d
     nil
 

@@ -12,8 +12,10 @@
 
 # A reaction: handler is a JsFunction, a Tungsten lambda ->(v), or nil (pass through).
 + JsReaction
-  rw :cap, :kind, :handler
+  # keep: values the handler lambda captures (traced by js/gc.w)
+  rw :cap, :kind, :handler, :keep
   -> new(@cap, @kind, @handler)
+    @keep = nil
 
 JS_UNHANDLED = JsTlsList.new
 
@@ -23,14 +25,14 @@ JS_UNHANDLED = JsTlsList.new
   p.value = nil
   p.reactions = []
   p.handled = false
-  p
+  js_gc_eng(p)
 
 # CreateResolvingFunctions
 -> js_resolving_functions(p)
   r = JS_REALM[0]
   done = [false]
-  res = r.native("", 1, ->(this, args, nt) js_resolve_once(p, done, js_arg(args, 0)))
-  rej = r.native("", 1, ->(this, args, nt) js_reject_once(p, done, js_arg(args, 0)))
+  res = js_keep(r.native("", 1, ->(this, args, nt) js_resolve_once(p, done, js_arg(args, 0))), [p, done])
+  rej = js_keep(r.native("", 1, ->(this, args, nt) js_reject_once(p, done, js_arg(args, 0))), [p, done])
   [res, rej]
 
 -> js_resolve_once(p, done, x)
@@ -55,7 +57,7 @@ JS_UNHANDLED = JsTlsList.new
   # fast path: a native promise with the intrinsic then
   if x.is_a?(JsPromise) && x.proto == JS_REALM[0].intrinsic("Promise.prototype") && !x.has_own?("then") && js_promise_then_pristine?()
     r = JS_REALM[0]
-    r.enqueue_job(->() js_promise_adopt(p, x))
+    r.enqueue_job(->() js_gc_ctx(true, ->() js_promise_adopt(p, x)), [p, x])
     return nil
   th = nil
   dd = JS_DEPTH[0]
@@ -68,7 +70,7 @@ JS_UNHANDLED = JsTlsList.new
   if !(th.is_a?(JsObject) && th.callable?)
     js_promise_fulfill(p, x)
     return nil
-  JS_REALM[0].enqueue_job(->() js_thenable_job(p, x, th))
+  JS_REALM[0].enqueue_job(->() js_gc_ctx(true, ->() js_thenable_job(p, x, th)), [p, x, th])
   nil
 
 -> js_promise_then_pristine?
@@ -77,7 +79,11 @@ JS_UNHANDLED = JsTlsList.new
 
 -> js_promise_adopt(p, x)
   fns = js_resolving_functions(p)
-  js_perform_then(x, JsReaction.new(nil, :fulfill, ->(v) js_call(fns[0], nil, [v])), JsReaction.new(nil, :reject, ->(v) js_call(fns[1], nil, [v])))
+  a = js_gc_eng(JsReaction.new(nil, :fulfill, ->(v) js_call(fns[0], nil, [v])))
+  a.keep = fns
+  b = js_gc_eng(JsReaction.new(nil, :reject, ->(v) js_call(fns[1], nil, [v])))
+  b.keep = fns
+  js_perform_then(x, a, b)
   nil
 
 -> js_thenable_job(p, x, th)
@@ -110,7 +116,7 @@ JS_UNHANDLED = JsTlsList.new
   nil
 
 -> js_trigger(rx, v)
-  JS_REALM[0].enqueue_job(->() js_reaction_job(rx, v))
+  JS_REALM[0].enqueue_job(->() js_gc_ctx(true, ->() js_reaction_job(rx, v)), [rx, v])
   nil
 
 -> js_reaction_job(rx, v)
@@ -127,7 +133,8 @@ JS_UNHANDLED = JsTlsList.new
       if h.is_a?(JsObject)
         result = js_call(h, nil, [v])
       else
-        result = h.call(v)
+        # a host handler (runs outside engine allocation context)
+        result = js_gc_ctx(false, ->() h.call(v))
     rescue e
       JS_DEPTH[0] = dd
       result = js_error_value(e)
@@ -170,7 +177,7 @@ JS_UNHANDLED = JsTlsList.new
   r = JS_REALM[0]
   p = js_promise_alloc(r.intrinsic("Promise.prototype"))
   fns = js_resolving_functions(p)
-  JsCapability.new(p, fns[0], fns[1])
+  js_gc_eng(JsCapability.new(p, fns[0], fns[1]))
 
 # NewPromiseCapability(C)
 -> js_new_capability_from(c)
@@ -178,7 +185,7 @@ JS_UNHANDLED = JsTlsList.new
   return js_new_capability() if c == r.intrinsic("Promise") || c == nil
   js_throw_type("Promise resolve or reject function is not callable") if !(c.is_a?(JsObject) && js_is_constructor?(c))
   slots = [nil, nil]
-  ex = r.native("", 2, ->(this, args, nt) js_capability_executor(slots, args))
+  ex = js_keep(r.native("", 2, ->(this, args, nt) js_capability_executor(slots, args)), [slots])
   p = js_construct(c, [ex], nil)
   js_throw_type("Promise resolve or reject function is not callable") if !(slots[0].is_a?(JsObject) && slots[0].callable?) || !(slots[1].is_a?(JsObject) && slots[1].callable?)
   JsCapability.new(p, slots[0], slots[1])
@@ -209,7 +216,7 @@ JS_UNHANDLED = JsTlsList.new
   cap = js_new_capability_from(c)
   f = (on_f.is_a?(JsObject) && on_f.callable?) ? on_f : nil
   rj = (on_r.is_a?(JsObject) && on_r.callable?) ? on_r : nil
-  js_perform_then(p, JsReaction.new(cap, :fulfill, f), JsReaction.new(cap, :reject, rj))
+  js_perform_then(p, js_gc_eng(JsReaction.new(cap, :fulfill, f)), js_gc_eng(JsReaction.new(cap, :reject, rj)))
   cap.promise
 
 -> js_species_ctor(o, dflt)
@@ -239,16 +246,22 @@ JS_UNHANDLED = JsTlsList.new
   cap.promise
 
 # Attach Tungsten lambdas to any value (resolved as a promise). Used by await and the host.
--> js_promise_then_native(v, on_ok, on_err)
+-> js_promise_then_native(v, on_ok, on_err, keep = nil)
   # PromiseResolve once (a thenable's `then` must be called only once)
   p = js_promise_resolve_value(v)
-  js_perform_then(p, JsReaction.new(nil, :fulfill, on_ok), JsReaction.new(nil, :reject, on_err))
+  a = JsReaction.new(nil, :fulfill, on_ok)
+  a.keep = keep
+  b = JsReaction.new(nil, :reject, on_err)
+  b.keep = keep
+  js_perform_then(p, a, b)
   nil
 
 # p.then(f) where f is a Tungsten lambda; returns the derived promise.
--> js_promise_then_value(p, f)
+-> js_promise_then_value(p, f, keep = nil)
   cap = js_new_capability()
-  js_perform_then(p, JsReaction.new(cap, :fulfill, f), JsReaction.new(cap, :reject, nil))
+  a = JsReaction.new(cap, :fulfill, f)
+  a.keep = keep
+  js_perform_then(p, a, JsReaction.new(cap, :reject, nil))
   cap.promise
 
 -> js_promise_finally(p, on_fin)
@@ -256,15 +269,15 @@ JS_UNHANDLED = JsTlsList.new
   c = js_species_ctor(p, JS_REALM[0].intrinsic("Promise"))
   return js_invoke(p, "then", [on_fin, on_fin]) if !(on_fin.is_a?(JsObject) && on_fin.callable?)
   r = JS_REALM[0]
-  tf = r.native("", 1, ->(this, args, nt) js_finally_then(c, on_fin, js_arg(args, 0), false))
-  cf = r.native("", 1, ->(this, args, nt) js_finally_then(c, on_fin, js_arg(args, 0), true))
+  tf = js_keep(r.native("", 1, ->(this, args, nt) js_finally_then(c, on_fin, js_arg(args, 0), false)), [c, on_fin])
+  cf = js_keep(r.native("", 1, ->(this, args, nt) js_finally_then(c, on_fin, js_arg(args, 0), true)), [c, on_fin])
   js_invoke(p, "then", [tf, cf])
 
 -> js_finally_then(c, on_fin, v, thrown)
   res = js_call(on_fin, nil, JS_NO_ARGS)
   pr = js_promise_resolve_ctor(c, res)
   r = JS_REALM[0]
-  k = thrown ? r.native("", 0, ->(this, args, nt) js_throw_value(v)) : r.native("", 0, ->(this, args, nt) v)
+  k = js_keep(thrown ? r.native("", 0, ->(this, args, nt) js_throw_value(v)) : r.native("", 0, ->(this, args, nt) v), [v])
   js_invoke(pr, "then", [k])
 
 -> js_invoke(o, k, args)
@@ -315,14 +328,14 @@ JS_UNHANDLED = JsTlsList.new
   r = JS_REALM[0]
   done = [false]
   if mode == :all
-    ok = r.native("", 1, ->(this, args, nt) js_comb_settle(cap, values, remaining, i, done, js_arg(args, 0), :value))
+    ok = js_keep(r.native("", 1, ->(this, args, nt) js_comb_settle(cap, values, remaining, i, done, js_arg(args, 0), :value)), [cap, values, remaining, done])
     js_invoke(p, "then", [ok, cap.reject])
   elsif mode == :all_settled
-    ok = r.native("", 1, ->(this, args, nt) js_comb_settle(cap, values, remaining, i, done, js_settled_obj("fulfilled", "value", js_arg(args, 0)), :value))
-    bad = r.native("", 1, ->(this, args, nt) js_comb_settle(cap, values, remaining, i, done, js_settled_obj("rejected", "reason", js_arg(args, 0)), :value))
+    ok = js_keep(r.native("", 1, ->(this, args, nt) js_comb_settle(cap, values, remaining, i, done, js_settled_obj("fulfilled", "value", js_arg(args, 0)), :value)), [cap, values, remaining, done])
+    bad = js_keep(r.native("", 1, ->(this, args, nt) js_comb_settle(cap, values, remaining, i, done, js_settled_obj("rejected", "reason", js_arg(args, 0)), :value)), [cap, values, remaining, done])
     js_invoke(p, "then", [ok, bad])
   elsif mode == :any
-    bad = r.native("", 1, ->(this, args, nt) js_comb_settle(cap, values, remaining, i, done, js_arg(args, 0), :error))
+    bad = js_keep(r.native("", 1, ->(this, args, nt) js_comb_settle(cap, values, remaining, i, done, js_arg(args, 0), :error)), [cap, values, remaining, done])
     js_invoke(p, "then", [cap.resolve, bad])
   else
     js_invoke(p, "then", [cap.resolve, cap.reject])
@@ -359,7 +372,7 @@ JS_UNHANDLED = JsTlsList.new
   cap = js_new_capability_from(c)
   dd = JS_DEPTH[0]
   begin
-    v = js_call(js_arg(args, 0), nil, args.size > 1 ? args.slice(1, args.size - 1) : [])
+    v = js_call(js_arg(args, 0), nil, args.size > 1 ? args.slice(1, args.size - 1).dup : [])
     js_call(cap.resolve, nil, [v])
   rescue e
     JS_DEPTH[0] = dd

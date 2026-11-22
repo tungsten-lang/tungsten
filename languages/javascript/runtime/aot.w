@@ -194,8 +194,9 @@ JS_AOT_H = [nil]
   h[H_NEWA] = ->(f, w, arr) js_construct_named(f, arr, w)
   h[H_TARR] = ->() []
   h[H_TPUSH] = ->(arr, v) js_aot_push(arr, v)
-  h[H_JSARR] = ->(arr) JsArray.new(JS_REALM[0].array_proto, arr)
-  h[H_NEWOBJ] = ->() JsObject.new(JS_REALM[0].object_proto, "Object")
+  # (js_gc_reg: collectable; compiled frames never span a collector safepoint, which is at depth 0)
+  h[H_JSARR] = ->(arr) js_gc_reg(JsArray.new(JS_REALM[0].array_proto, arr))
+  h[H_NEWOBJ] = ->() js_gc_reg(JsObject.new(JS_REALM[0].object_proto, "Object"))
   h[H_LITPUT] = ->(o, k, v) js_lit_put(o, k, v)
   h[H_THROW] = ->(v) js_throw_value(v)
   h[H_REGEX] = ->(p, fl) js_regexp_create(p, fl)
@@ -215,7 +216,7 @@ JS_AOT_H = [nil]
   (k.is_a?(Float) || k.is_a?(String) || k.is_a?(JsSymbol)) ? k : js_to_property_key(k)
 
 -> js_aot_frame(n, parent)
-  e = Array.new(n.to_i, nil)
+  e = js_gc_reg(Array.new(n.to_i, nil))
   e[0] = parent
   e
 
@@ -225,7 +226,7 @@ JS_AOT_H = [nil]
   while i < args.size
     out.push(args[i])
     i += 1
-  JsArray.new(JS_REALM[0].array_proto, out)
+  js_gc_reg(JsArray.new(JS_REALM[0].array_proto, out))
 
 -> js_aot_cell_init(c, v)
   c.v = v

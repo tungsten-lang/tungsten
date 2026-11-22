@@ -35,8 +35,13 @@ use b_reflect
 use b_typed
 use module
 use aot
+use gc
 
 -> js_new_realm(host)
   r = JsRealm.new
   r.host = host
+  js_gc_add_realm(r) if js_gc_main_thread?
   r
+
+# installers registered so far are the engine's own (trusted by the collector)
+JS_GC_ENGINE_INSTALLERS = [JS_INSTALLERS.size]

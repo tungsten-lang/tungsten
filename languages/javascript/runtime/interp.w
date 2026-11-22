@@ -17,7 +17,7 @@ F_CL_DONE = 1048576
 F_CL_YES = 2097152
 
 + JsBinding
-  rw :name, :kind, :frame, :index, :tdz, :global, :cell, :is_const
+  rw :name, :kind, :frame, :index, :tdz, :global, :cell, :is_const, :sbuild
   -> new(@name, @kind, @frame, @index)
     @tdz = false
     @global = false
@@ -483,6 +483,19 @@ F_CL_YES = 2097152
       raise JsThrow.new(js_syntax_error("Unsupported statement " + k.to_s))
 
   -> compile_expr_stmt(n, sc)
+    a0 = n.a
+    rhs0 = nil
+    if a0.kind == :assign && a0.a.kind == :ident
+      rhs0 = a0.b if a0.str == "+="
+      rhs0 = a0.b.b if a0.str == "=" && a0.b.kind == :binary && a0.b.str == "+" && a0.b.a.kind == :ident && a0.b.a.str == a0.a.str
+    if rhs0 != nil && (@completion_slot < 0 || @fn_depth > 0)
+      r0 = resolve(a0.a.str, sc)
+      if r0.kind == :slot && r0.withs == nil && r0.binding.sbuild
+        # statement `s += v` / `s = s + v`: append to the slot's string builder
+        h0 = r0.hops
+        i0 = r0.index
+        v0 = cx(rhs0, sc)
+        return ->(env) js_sb_append(js_up(env, h0), i0, v0, env)
     e = cx(n.a, sc)
     if @completion_slot >= 0 && @fn_depth == 0
       h = hops_between(sc.frame, completion_frame(sc))
@@ -980,6 +993,23 @@ F_CL_YES = 2097152
 
   # ---- identifiers ----
 
+  # Names assigned with += anywhere in a body (nested functions included).
+  -> plus_assign_names(x, out)
+    return nil if x == nil
+    if x.is_a?(Array)
+      x.each(->(y) plus_assign_names(y, out) if y != nil && y.is_a?(JsNode))
+      return nil
+    return nil if !x.is_a?(JsNode)
+    out[x.a.str] = true if x.kind == :assign && x.str == "+=" && x.a != nil && x.a.kind == :ident
+    # s = s + e
+    out[x.a.str] = true if x.kind == :assign && x.str == "=" && x.a != nil && x.a.kind == :ident && x.b != nil && x.b.kind == :binary && x.b.str == "+" && x.b.a.kind == :ident && x.b.a.str == x.a.str
+    plus_assign_names(x.a, out) if x.a.is_a?(JsNode)
+    plus_assign_names(x.b, out) if x.b.is_a?(JsNode)
+    plus_assign_names(x.c, out) if x.c.is_a?(JsNode)
+    plus_assign_names(x.d, out) if x.d.is_a?(JsNode)
+    plus_assign_names(x.list, out) if x.list != nil
+    nil
+
   -> compile_ident_get(name, sc)
     r = resolve(name, sc)
     g = ident_get_ref(r)
@@ -992,6 +1022,8 @@ F_CL_YES = 2097152
       i = r.index
       h = r.hops
       nm = r.name
+      if b.sbuild
+        return ->(env) js_sb_get(js_up(env, h), i)
       if b.tdz
         if h == 0
           return ->(env) js_tdz_check(env[i], nm)
@@ -1785,11 +1817,15 @@ F_CL_YES = 2097152
       # (FunctionDeclarationInstantiation step 28).
       bsc = simple ? fsc : JsScope.new(:block, fsc, false)
       copies = []
+      pa = {}
+      plus_assign_names(body, pa)
       vn.each ->(nm)
         if !simple && pnames.include?(nm)
           copies.push([fsc.names[nm].index, bsc.declare(nm, :var).index])
         else
-          bsc.declare(nm, :var)
+          vb = bsc.declare(nm, :var)
+          # `s += x` targets may hold a string builder (js_sb_*): their reads materialize it
+          vb.sbuild = true if pa.has_key?(nm) && vb.kind == :var && !pnames.include?(nm)
       fns = []
       body.each ->(s)
         if s.kind == :function_decl
@@ -3282,3 +3318,55 @@ JS_TRACE_CATCH = [false]
   JS_LAZY_STATS[2] += 1
   JS_LAZY_T[1] = JS_LAZY_T[1] + (clock() - t0)
   nil
+
+# ---- string builders for `s += v` on local vars (ropes without changing the value model) ----
+
+# A var slot may hold one: reads (js_sb_get) see the string, appends grow a buffer, so a
+# loop of appends is linear and leaves no intermediate strings behind.
++ JsStrBuilder
+  rw :sb, :cache
+
+JS_SB_MIN = 256
+
+-> js_sb_get(fr, i)
+  v = fr[i]
+  return v if !v.is_a?(JsStrBuilder)
+  v.cache = v.sb.to_s if v.cache == nil
+  v.cache
+
+-> js_sb_append(fr, i, rhs, env)
+  cur = fr[i]
+  v = rhs.call(env)
+  if fr[i] != cur
+    # the right side reassigned the variable: the old value is the left operand
+    fr[i] = js_add(cur.is_a?(JsStrBuilder) ? js_sb_value(cur) : cur, v)
+    return nil
+  if cur.is_a?(JsStrBuilder)
+    sv = v.is_a?(String) ? v : js_to_string(js_to_primitive(v))
+    if fr[i] != cur
+      fr[i] = js_str_cat(js_sb_value(cur), sv)
+      return nil
+    if sv.size >= 3 && sv.byte_at(0) == 237 && sv.byte_at(1) >= 176
+      # a low surrogate may pair with the end of the buffer: join the slow way
+      fr[i] = js_str_cat(js_sb_value(cur), sv)
+      return nil
+    cur.sb.append(sv)
+    cur.cache = nil
+    return nil
+  if cur.is_a?(String) && v.is_a?(String) && cur.size + v.size >= JS_SB_MIN
+    if v.size >= 3 && v.byte_at(0) == 237 && v.byte_at(1) >= 176
+      fr[i] = js_str_cat(cur, v)
+      return nil
+    b = JsStrBuilder.new
+    b.sb = StringBuffer()
+    b.sb.append(cur)
+    b.sb.append(v)
+    b.cache = nil
+    fr[i] = b
+    return nil
+  fr[i] = js_add(cur, v)
+  nil
+
+-> js_sb_value(b)
+  b.cache = b.sb.to_s if b.cache == nil
+  b.cache

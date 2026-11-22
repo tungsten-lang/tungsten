@@ -1228,6 +1228,8 @@ declare double @llvm.fabs.f64(double)
   -> get_ident(name, sc)
     r = @jc.resolve(name, sc)
     unsupported("with") if r.withs != nil
+    # a `+=` string-builder var (interp.w js_sb_*) is read through js_sb_get: interpreter only
+    unsupported("string builder var") if r.kind == :slot && r.binding.sbuild
     if r.kind == :slot && @env_mode
       e = env_at_from(sc, r.hops)
       v = tmp()
@@ -1255,6 +1257,7 @@ declare double @llvm.fabs.f64(double)
   -> set_ident(name, sc, mode, v)
     r = @jc.resolve(name, sc)
     unsupported("with") if r.withs != nil && mode != :init
+    unsupported("string builder var") if r.kind == :slot && r.binding.sbuild
     if r.kind == :slot
       b = r.binding
       if mode == :assign && b.kind == :self

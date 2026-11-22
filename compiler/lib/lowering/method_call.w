@@ -592,6 +592,19 @@
 -> int_element_typed_array?(t)
   t in (:typed_array_u4 :typed_array_i4 :typed_array_u8 :typed_array_i8 :typed_array_u16 :typed_array_i16 :typed_array_u32 :typed_array_i32 :typed_array_u64 :typed_array_i64)
 
+# Non-release builds check every inline typed-array element access against
+# the array's live size and raise IndexError with the index and size; release
+# builds keep the unchecked load/store. Indices the compiler proves in range
+# (typed-array iteration) skip the check.
+-> emit_typed_array_bounds_check(ctx, arr_reg, idx_reg, idx_raw)
+  if ctx[:mod][:bounds_checks] != true || ctx[:bounds_proven] == true
+    return nil
+  wfn = ctx[:func]
+  t = next_temp(wfn)
+  helper = idx_raw == true ? "__w_ta_bounds_check" : "__w_ta_bounds_check_boxed"
+  emit_wire_call_direct_i64(wfn, nil, [arr_reg, idx_reg], nil, nil, helper, nil, nil, t)
+  nil
+
 -> lower_method_call(ctx, node)
   wfn = ctx[:func]
   method_name = node.name
@@ -2390,6 +2403,7 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
+      emit_typed_array_bounds_check(ctx, receiver_reg, idx_reg, idx_raw)
       emit_wire_typed_array_get_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, elem_signed, temp)
       stamp_alias_scope(ctx, wfn, recv_node)
       if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
@@ -2462,6 +2476,7 @@
           scratch.push(next_temp(wfn))
           si += 1
         temp = next_temp(wfn)
+        emit_typed_array_bounds_check(ctx, receiver_reg, idx_reg, idx_raw)
         emit_wire_typed_array_compound_op_inline(wfn, receiver_reg, elem_bits, fused_op, idx_reg, idx_raw, scratch, elem_signed, temp, rhs_reg)
         stamp_alias_scope(ctx, wfn, recv_node)
         # The fused emitter returns an unboxed integer, just like an inline
@@ -2521,6 +2536,7 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
+      emit_typed_array_bounds_check(ctx, receiver_reg, idx_reg, idx_raw)
       emit_wire_typed_array_set_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, elem_signed, temp, val_reg)
       stamp_alias_scope(ctx, wfn, recv_node)
       return val_expr

@@ -952,6 +952,13 @@
     if decls_out.index("@w_to_i64(") == nil
       decls_out = decls_out + "declare i64 @w_to_i64(i64) nounwind\n"
     decls_out = decls_out + to_i64_fast_helper_ir() + "\n"
+  if ccall_needed.has_key?("__w_ta_bounds_check") || ccall_needed.has_key?("__w_ta_bounds_check_boxed")
+    if decls_out.index("@w_typed_index_error(") == nil
+      decls_out = decls_out + "declare void @w_typed_index_error(i64, i64) cold nounwind\n"
+    if ccall_needed.has_key?("__w_ta_bounds_check")
+      decls_out = decls_out + ta_bounds_check_helper_ir(false) + "\n"
+    if ccall_needed.has_key?("__w_ta_bounds_check_boxed")
+      decls_out = decls_out + ta_bounds_check_helper_ir(true) + "\n"
   if ccall_needed.has_key?("__w_cast_i64_fast")
     if decls_out.index("@w_cast_i64(") == nil
       decls_out = decls_out + "declare i64 @w_cast_i64(i64) nounwind\n"

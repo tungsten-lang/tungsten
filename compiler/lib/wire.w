@@ -123,6 +123,12 @@ use wire_constructors
     # for "true"), so `if FAST_MATH` constant-folds at LLVM level into
     # an unconditional branch — no runtime global load.
     build_defines:    {},
+    # Inline typed-array accesses carry bounds checks (lower_ast).
+    bounds_checks:    false,
+    # Module-level names assigned exactly once (collect_top_level_static_types).
+    top_level_assign_once: {},
+    # Ivars with a write of unknown type (collect_ivar_types).
+    ivar_untyped_writes: {},
     known_classes:    {},
     # `constant_alias "WC"` directives, collected in lowering's
     # registration prepass: alias → namespace ("WC" → "Tungsten:Carbide").

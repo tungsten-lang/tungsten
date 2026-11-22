@@ -548,6 +548,7 @@ typedef struct {
 WValue w_int(int64_t v);
 int64_t w_to_i64(WValue v);
 int64_t w_cast_i64(WValue v);
+void w_typed_index_error(int64_t index, int64_t size) __attribute__((noreturn, cold));
 int64_t w_numeric_to_i64(WValue v);
 int64_t w_range_bound_i64(WValue v);
 WValue w_range_bound_i64_w(WValue v);

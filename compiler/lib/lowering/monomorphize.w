@@ -821,6 +821,12 @@
             ai += 1
         bi += 1
     ci += 1
+  untyped = mod[:ivar_untyped_writes]
+  if untyped == nil
+    untyped = {}
+  # A target ivar qualifies only if all of its writes are accessor reads of
+  # one typed field: count the writes per ivar, then the resolvable ones.
+  resolved = {}
   ki = 0
   while ki < ast_keys.size()
     key = ast_keys[ki]
@@ -828,8 +834,17 @@
     cname = key.slice(0, dot_idx)
     method_ast = mod[:class_method_asts][key]
     if ivar_types[cname] != nil && !(skip_core_methods && definition_from_core?(method_ast))
-      walk_accessor_ivar_assigns(method_ast.body, cname, ivar_types, ivar_conflicts, owners)
+      walk_accessor_ivar_assigns(method_ast.body, cname, ivar_types, ivar_conflicts, owners, untyped, resolved)
     ki += 1
+  rk = resolved.keys()
+  ri = 0
+  while ri < rk.size()
+    entry = resolved[rk[ri]]
+    if entry != :conflict
+      ivar_types[entry[0]][entry[1]] = entry[2]
+      if env("TUNGSTEN_DEBUG_IVAR_PROP") == "1"
+        << "ivar-prop " + entry[0] + " " + entry[1] + " " + entry[2].to_s()
+    ri += 1
   nil
 
 -> note_accessor_owner(owners, mname, cname)
@@ -840,28 +855,39 @@
     owners[mname] = :ambiguous
   nil
 
--> walk_accessor_ivar_assigns(node, cname, ivar_types, ivar_conflicts, owners)
+-> walk_accessor_ivar_assigns(node, cname, ivar_types, ivar_conflicts, owners, untyped, resolved)
   if node == nil
     return nil
   if is_ast_node?(node)
     if ast_kind(node) == :assign && node.target != nil && ast_kind(node.target) == :ivar && node.type_hint == nil
       iname = node.target.name
       v = node.value
-      if ivar_types[cname][iname] == nil && ivar_conflicts[cname][iname] != true && v != nil && is_ast_node?(v) && ast_kind(v) == :call && v.receiver != nil && v.block == nil && (v.args == nil || v.args.size() == 0)
-        owner = owners[v.name]
-        if owner != nil && owner != :ambiguous && owners["@field:" + v.name] == owner && ivar_types[owner] != nil
-          ft = ivar_types[owner]["@" + v.name]
-          if ft != nil && is_typed_array_type?(ft) && ivar_conflicts[owner]["@" + v.name] != true
-            ivar_types[cname][iname] = ft
+      rkey = cname + "#" + iname
+      if ivar_types[cname][iname] == nil && ivar_conflicts[cname][iname] != true
+        ft = nil
+        if v != nil && is_ast_node?(v) && ast_kind(v) == :call && v.receiver != nil && v.block == nil && (v.args == nil || v.args.size() == 0)
+          owner = owners[v.name]
+          fkey = owner == nil || owner == :ambiguous ? nil : owner + "#@" + v.name
+          if fkey != nil && owners["@field:" + v.name] == owner && ivar_types[owner] != nil && untyped[fkey] != true && ivar_conflicts[owner]["@" + v.name] != true
+            ft = ivar_types[owner]["@" + v.name]
+            if ft != nil && !is_typed_array_type?(ft)
+              ft = nil
+        prev = resolved[rkey]
+        if ft == nil
+          resolved[rkey] = :conflict
+        elsif prev == nil
+          resolved[rkey] = [cname, iname, ft]
+        elsif prev != :conflict && prev[2] != ft
+          resolved[rkey] = :conflict
     children = ast_children(node)
     ci = 0
     while ci < children.size()
-      walk_accessor_ivar_assigns(children[ci], cname, ivar_types, ivar_conflicts, owners)
+      walk_accessor_ivar_assigns(children[ci], cname, ivar_types, ivar_conflicts, owners, untyped, resolved)
       ci += 1
   elsif type(node) == "Array"
     ai = 0
     while ai < node.size()
-      walk_accessor_ivar_assigns(node[ai], cname, ivar_types, ivar_conflicts, owners)
+      walk_accessor_ivar_assigns(node[ai], cname, ivar_types, ivar_conflicts, owners, untyped, resolved)
       ai += 1
   nil
 
@@ -885,6 +911,14 @@
       itype = ivar_assign_hint_type(node.type_hint)
       if itype == nil
         itype = infer_type(node.value, {}, mod[:fn_return_types], lowering_infer_maps)
+      if itype == nil
+        # Remember writes of unknown type: accessor propagation only trusts
+        # an ivar every write of which is typed.
+        uw = mod[:ivar_untyped_writes]
+        if uw == nil
+          uw = {}
+          mod[:ivar_untyped_writes] = uw
+        uw[cname + "#" + iname] = true
       if itype != nil
         existing = ivar_types[cname][iname]
         if existing != nil && existing != itype

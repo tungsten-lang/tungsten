@@ -1002,6 +1002,10 @@ use lowering/definitions
   cache_probe = incremental_core_cache_prepare(ast, source_manifest, fast_mode, build_defines, math_mode, no_static_slab, release_mode, auto_closed_world)
   mod = init_lowering_module(source_path, fast_mode, math_mode, no_static_slab, build_defines, cache_probe[:retain_mark])
   mod[:incremental_core_cache_probe] = cache_probe
+  # Inline typed-array element accesses are bounds-checked in every build
+  # but --release (TUNGSTEN_BOUNDS_CHECKS=1 forces them on, =0 off).
+  bounds_env = env("TUNGSTEN_BOUNDS_CHECKS")
+  mod[:bounds_checks] = bounds_env == "1" || (!release_mode && bounds_env != "0")
   require_bigint_source_seams(mod, ast.expressions)
   collect_lowering_contracts(mod, ast.expressions, source_path)
   if auto_closed_world

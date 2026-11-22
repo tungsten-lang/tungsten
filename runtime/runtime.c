@@ -22815,6 +22815,16 @@ int64_t w_to_i64(WValue v) {
     return as_int(v);
 }
 
+/* Out-of-range typed-array index on an inline element access compiled with
+ * bounds checks (every build but --release; TUNGSTEN_BOUNDS_CHECKS=0/1
+ * overrides). */
+void w_typed_index_error(int64_t index, int64_t size) {
+    char msg[128];
+    snprintf(msg, sizeof msg, "index %lld out of bounds for typed array of size %lld",
+             (long long)index, (long long)size);
+    w_raise_error_named("IndexError", msg);
+}
+
 /* Explicit `## i64` (and narrower) conversion of a dynamically typed value:
  * integers keep their low 64 bits like w_to_i64, a Float truncates toward
  * zero as `.to_i` does (saturating at the i64 range, NaN -> 0), and a

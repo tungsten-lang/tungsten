@@ -298,6 +298,14 @@ GFX_MENU_HELP     = -3   # Help > <App> Help
 -> gfx_open_panel(window, title, types, dir)
   ccall("w_gfx_open_panel", window, title, types, dir)
 
+# The system clipboard as plain text: gfx_clipboard_text is nil when it holds
+# no text; gfx_clipboard_set_text replaces it (true on success). No window needed.
+-> gfx_clipboard_text
+  ccall("w_gfx_clipboard_text")
+
+-> gfx_clipboard_set_text(text)
+  ccall("w_gfx_clipboard_set_text", text)
+
 -> gfx_save_panel(window, title, name, types, dir)
   ccall("w_gfx_save_panel", window, title, name, types, dir)
 

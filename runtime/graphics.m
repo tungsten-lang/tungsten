@@ -1444,6 +1444,30 @@ WValue w_gfx_open_panel(WValue window_v, WValue title_v, WValue types_v, WValue 
     return result;
 }
 
+/* w_gfx_clipboard_text(): the general pasteboard's plain text, or nil. Needs
+ * no window and works from any thread (NSPasteboard is thread safe). */
+WValue w_gfx_clipboard_text(void) {
+    WValue result = W_NIL;
+    @autoreleasepool {
+        NSString *s = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString];
+        if (s) result = w_string([s UTF8String]);
+    }
+    return result;
+}
+
+/* w_gfx_clipboard_set_text(s): replace the general pasteboard with plain text;
+ * true on success. */
+WValue w_gfx_clipboard_set_text(WValue text_v) {
+    BOOL ok = NO;
+    @autoreleasepool {
+        NSString *s = gfx_string_or(text_v, @"");
+        NSPasteboard *pb = [NSPasteboard generalPasteboard];
+        [pb clearContents];
+        ok = [pb setString:s forType:NSPasteboardTypeString];
+    }
+    return ok ? W_TRUE : W_FALSE;
+}
+
 /* w_gfx_save_panel(window, title, name, types, dir): the path to save to, or
  * nil when cancelled; name the suggested file name */
 WValue w_gfx_save_panel(WValue window_v, WValue title_v, WValue name_v, WValue types_v, WValue dir_v) {

@@ -77915,6 +77915,13 @@ W_BRIDGE_STUB WValue w_gfx_menu_set(WValue window, WValue id, WValue enabled,
     (void)window; (void)id; (void)enabled; (void)checked;
     return w_gfx_unavailable();
 }
+W_BRIDGE_STUB WValue w_gfx_clipboard_text(void) {
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_clipboard_set_text(WValue text) {
+    (void)text;
+    return w_gfx_unavailable();
+}
 W_BRIDGE_STUB WValue w_gfx_open_panel(WValue window, WValue title, WValue types,
                                        WValue dir) {
     (void)window; (void)title; (void)types; (void)dir;

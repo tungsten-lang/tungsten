@@ -140,10 +140,10 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     f = @ctl[@ctl.size - 1]
     if sp() == f.height
       w_invalid("type mismatch: stack underflow") if !f.unreachable
-      @pt = t == nil ? BOT : BOT
+      @pt = t == nil ? T_BOT : T_BOT
       @pk = K_SLOT
       @pv = 0
-      return BOT
+      return T_BOT
     i = sp() - 1
     at = @st_t[i]
     if t != nil && !wt_sub?(at, t)
@@ -167,12 +167,12 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
   -> pop_ref
     f = @ctl[@ctl.size - 1]
     if sp() == f.height && f.unreachable
-      @pt = BOT
+      @pt = T_BOT
       @pk = K_SLOT
       @pv = 0
-      return BOT
+      return T_BOT
     t = pop(nil)
-    w_invalid("type mismatch: expected reference") if t != BOT && !wt_ref?(t)
+    w_invalid("type mismatch: expected reference") if t != T_BOT && !wt_ref?(t)
     t
 
   -> emit_const(slot, t, v)
@@ -223,7 +223,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
 
   -> emit_move(t, d, s)
     return nil if d == s
-    if t == V128
+    if t == T_V128
       emit3(OP_MOV2, d, s)
     elsif wt_ref?(t)
       emit3(OP_MOVR, d, s)
@@ -312,7 +312,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     @cmp_a = a
     @cmp_bk = bk
     @cmp_b = b
-    push_entry(I32, K_CMP, 0)
+    push_entry(T_I32, K_CMP, 0)
 
   -> flush_cmp
     i = sp() - 1
@@ -335,7 +335,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       @st_k[i] = K_SLOT
       pop_raw()
       return r
-    pop(I32)
+    pop(T_I32)
     if @pk == K_CONST
       return [CMP_NE, -1, 1, @pv & 0xffffffff]
     [CMP_NE, @pv, 1, 0]
@@ -466,11 +466,11 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     @m.mems[mi]
 
   -> addr_type(mi)
-    check_mem(mi).is64 ? I64 : I32
+    check_mem(mi).is64 ? T_I64 : T_I32
 
   -> table_addr(ti)
     w_invalid("unknown table " + ti.to_s) if ti >= @m.tables.size
-    @m.tables[ti].is64 ? I64 : I32
+    @m.tables[ti].is64 ? T_I64 : T_I32
 
   -> check_table(ti)
     w_invalid("unknown table " + ti.to_s) if ti >= @m.tables.size
@@ -810,7 +810,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       if gi < @m.n_imp_globals && g.mutable
         d = push(g.type)
         ext(0x23, [d, gi])
-      elsif g.type == V128
+      elsif g.type == T_V128
         d = push(g.type)
         emit_d([OP_GGET2, d, gi])
       elsif wt_ref?(g.type)
@@ -826,7 +826,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       a = pop_slot(g.type)
       if gi < @m.n_imp_globals
         ext(0x24, [gi, a])
-      elsif g.type == V128
+      elsif g.type == T_V128
         emit_n([OP_GSET2, gi, a])
       elsif wt_ref?(g.type)
         emit_n([OP_GSETR, gi, a])
@@ -835,21 +835,21 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     elsif op == 0x25
       ti = r.vu32()
       tt = check_table(ti)
-      a = pop_slot(tt.is64 ? I64 : I32)
+      a = pop_slot(tt.is64 ? T_I64 : T_I32)
       d = push(tt.elem)
       ext(0x25, [ti, d, a])
     elsif op == 0x26
       ti = r.vu32()
       tt = check_table(ti)
       v = pop_slot(tt.elem)
-      a = pop_slot(tt.is64 ? I64 : I32)
+      a = pop_slot(tt.is64 ? T_I64 : T_I32)
       ext(0x26, [ti, a, v])
     elsif op >= 0x28 && op <= 0x3e
       instr_mem(op)
     elsif op == 0x3f
       mi = r.vu32()
       mt = check_mem(mi)
-      d = push(mt.is64 ? I64 : I32)
+      d = push(mt.is64 ? T_I64 : T_I32)
       if mi == 0
         emit_d([OP_MSIZE, d, mt.page_log2])
       else
@@ -857,18 +857,18 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     elsif op == 0x40
       mi = r.vu32()
       mt = check_mem(mi)
-      at = mt.is64 ? I64 : I32
+      at = mt.is64 ? T_I64 : T_I32
       a = pop_slot(at)
       d = push(at)
       ext(0x40, [mi, d, a])
     elsif op == 0x41
-      push_const(I32, r.vs32() & 0xffffffff)
+      push_const(T_I32, r.vs32() & 0xffffffff)
     elsif op == 0x42
-      push_const(I64, r.vs64())
+      push_const(T_I64, r.vs64())
     elsif op == 0x43
-      push_const(F32, r.vf32())
+      push_const(T_F32, r.vf32())
     elsif op == 0x44
-      push_const(F64, r.vf64())
+      push_const(T_F64, r.vf64())
     elsif op >= 0x45 && op <= 0xc4
       instr_num(op)
     elsif op == 0xd0
@@ -878,7 +878,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     elsif op == 0xd1
       pop_ref()
       a = @pv
-      d = push(I32)
+      d = push(T_I32)
       emit_d([OP_ISNULL, d, a])
     elsif op == 0xd2
       fi = r.vu32()
@@ -889,14 +889,14 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     elsif op == 0xd3
       b = pop_slot(wt_ref(true, HT_EQ))
       a = pop_slot(wt_ref(true, HT_EQ))
-      d = push(I32)
+      d = push(T_I32)
       emit_d([OP_REFEQ, d, a, b])
     elsif op == 0xd4
       t = pop_ref()
       a = @pv
-      nt = t == BOT ? BOT : w_nonnull(t)
+      nt = t == T_BOT ? T_BOT : w_nonnull(t)
       emit2(OP_ASNONNULL, a)
-      push_alias(nt == BOT ? wt_ref(false, HT_BOT) : nt, a)
+      push_alias(nt == T_BOT ? wt_ref(false, HT_BOT) : nt, a)
     elsif op == 0xd5 || op == 0xd6
       instr_br_on_null(op)
     elsif op == 0x06 || op == 0x07 || op == 0x08 || op == 0x09 || op == 0x0a || op == 0x18 || op == 0x19 || op == 0x1f
@@ -1041,7 +1041,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     nil
 
   -> do_call_indirect(ti, ft, tab, tail)
-    a = pop_slot(@m.tables[tab].is64 ? I64 : I32)
+    a = pop_slot(@m.tables[tab].is64 ? T_I64 : T_I32)
     base = args_to_homes(ft)
     canon = @m.canon[ti]
     if tail
@@ -1101,7 +1101,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       n = @r.vu32()
       w_invalid("invalid result arity") if n != 1
       t = @r.val_type()
-    cond = pop_slot(I32)
+    cond = pop_slot(T_I32)
     if t == nil
       # untyped select: numeric/vector operands only
       t2 = pop(nil)
@@ -1112,15 +1112,15 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       k1 = @pk
       v1 = @pv
       a = k1 == K_CONST ? const_to_slot(t1, v1) : v1
-      w_invalid("type mismatch: select operands") if (wt_ref?(t1) && t1 != BOT) || (wt_ref?(t2) && t2 != BOT)
-      w_invalid("type mismatch: select operands") if t1 != t2 && t1 != BOT && t2 != BOT
-      rt = t1 == BOT ? t2 : t1
+      w_invalid("type mismatch: select operands") if (wt_ref?(t1) && t1 != T_BOT) || (wt_ref?(t2) && t2 != T_BOT)
+      w_invalid("type mismatch: select operands") if t1 != t2 && t1 != T_BOT && t2 != T_BOT
+      rt = t1 == T_BOT ? t2 : t1
     else
       b = pop_slot(t)
       a = pop_slot(t)
       rt = t
     d = push(rt)
-    if rt == V128
+    if rt == T_V128
       emit_d([OP_SELECT2, d, a, b, cond])
     elsif wt_ref?(rt)
       emit_d([OP_SELECTR, d, a, b, cond])
@@ -1144,7 +1144,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     while k <= n
       ls.push(r.vu32())
       k += 1
-    a = pop_slot(I32)
+    a = pop_slot(T_I32)
     # arity checks
     dflt = label(ls[n])
     arity = dflt.label_types.size
@@ -1182,7 +1182,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     f = label(d)
     t = pop_ref()
     a = @pk == K_SLOT ? @pv : 0
-    nt = t == BOT ? wt_ref(false, HT_BOT) : w_nonnull(t)
+    nt = t == T_BOT ? wt_ref(false, HT_BOT) : w_nonnull(t)
     lt = f.label_types
     if op == 0xd5
       check_label_values(lt)
@@ -1222,51 +1222,51 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
   -> instr_mem(op)
     # [natural log2, value type, is store, op]
     if op == 0x28
-      ld(2, I32, OP_LD32)
+      ld(2, T_I32, OP_LD32)
     elsif op == 0x29
-      ld(3, I64, OP_LD64)
+      ld(3, T_I64, OP_LD64)
     elsif op == 0x2a
-      ld(2, F32, OP_LD32)
+      ld(2, T_F32, OP_LD32)
     elsif op == 0x2b
-      ld(3, F64, OP_LD64)
+      ld(3, T_F64, OP_LD64)
     elsif op == 0x2c
-      ld(0, I32, OP_LD8S32)
+      ld(0, T_I32, OP_LD8S32)
     elsif op == 0x2d
-      ld(0, I32, OP_LD8U)
+      ld(0, T_I32, OP_LD8U)
     elsif op == 0x2e
-      ld(1, I32, OP_LD16S32)
+      ld(1, T_I32, OP_LD16S32)
     elsif op == 0x2f
-      ld(1, I32, OP_LD16U)
+      ld(1, T_I32, OP_LD16U)
     elsif op == 0x30
-      ld(0, I64, OP_LD8S64)
+      ld(0, T_I64, OP_LD8S64)
     elsif op == 0x31
-      ld(0, I64, OP_LD8U)
+      ld(0, T_I64, OP_LD8U)
     elsif op == 0x32
-      ld(1, I64, OP_LD16S64)
+      ld(1, T_I64, OP_LD16S64)
     elsif op == 0x33
-      ld(1, I64, OP_LD16U)
+      ld(1, T_I64, OP_LD16U)
     elsif op == 0x34
-      ld(2, I64, OP_LD32S64)
+      ld(2, T_I64, OP_LD32S64)
     elsif op == 0x35
-      ld(2, I64, OP_LD32)
+      ld(2, T_I64, OP_LD32)
     elsif op == 0x36
-      st(2, I32, OP_ST32)
+      st(2, T_I32, OP_ST32)
     elsif op == 0x37
-      st(3, I64, OP_ST64)
+      st(3, T_I64, OP_ST64)
     elsif op == 0x38
-      st(2, F32, OP_ST32)
+      st(2, T_F32, OP_ST32)
     elsif op == 0x39
-      st(3, F64, OP_ST64)
+      st(3, T_F64, OP_ST64)
     elsif op == 0x3a
-      st(0, I32, OP_ST8)
+      st(0, T_I32, OP_ST8)
     elsif op == 0x3b
-      st(1, I32, OP_ST16)
+      st(1, T_I32, OP_ST16)
     elsif op == 0x3c
-      st(0, I64, OP_ST8)
+      st(0, T_I64, OP_ST8)
     elsif op == 0x3d
-      st(1, I64, OP_ST16)
+      st(1, T_I64, OP_ST16)
     elsif op == 0x3e
-      st(2, I64, OP_ST32)
+      st(2, T_I64, OP_ST32)
     nil
 
   # Memory operand checks for memory64 / huge offsets. Returns the effective offset to
@@ -1353,173 +1353,173 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       bv = tv
     if ak == K_CONST
       av = const_to_slot(t, av)
-    if t == I32 && bk == K_CONST
+    if t == T_I32 && bk == K_CONST
       bv = bv & 0xffffffff
     push_cmp(c, av, bk == K_CONST ? 1 : 0, bv)
 
   -> instr_num(op)
     if op == 0x45
-      pop(I32)
+      pop(T_I32)
       if @pk == K_CONST
-        push_const(I32, @pv == 0 ? 1 : 0)
+        push_const(T_I32, @pv == 0 ? 1 : 0)
       else
         push_cmp(CMP_EQ, @pv, 1, 0)
     elsif op >= 0x46 && op <= 0x4f
       c = [CMP_EQ, CMP_NE, CMP_LTS32, CMP_LTU, CMP_GTS32, CMP_GTU, CMP_LES32, CMP_LEU, CMP_GES32, CMP_GEU][op - 0x46]
-      cmpop(I32, c)
+      cmpop(T_I32, c)
     elsif op == 0x50
-      pop(I64)
+      pop(T_I64)
       if @pk == K_CONST
-        push_const(I32, @pv == 0 ? 1 : 0)
+        push_const(T_I32, @pv == 0 ? 1 : 0)
       else
         push_cmp(CMP_EQ, @pv, 1, 0)
     elsif op >= 0x51 && op <= 0x5a
       c = [CMP_EQ, CMP_NE, CMP_LTS64, CMP_LTU, CMP_GTS64, CMP_GTU, CMP_LES64, CMP_LEU, CMP_GES64, CMP_GEU][op - 0x51]
-      cmpop(I64, c)
+      cmpop(T_I64, c)
     elsif op >= 0x5b && op <= 0x60
-      binop(F32, I32, OP_FEQ32 + (op - 0x5b), -1)
+      binop(T_F32, T_I32, OP_FEQ32 + (op - 0x5b), -1)
     elsif op >= 0x61 && op <= 0x66
-      binop(F64, I32, OP_FEQ64 + (op - 0x61), -1)
+      binop(T_F64, T_I32, OP_FEQ64 + (op - 0x61), -1)
     elsif op == 0x67
-      unop(I32, I32, OP_CLZ32)
+      unop(T_I32, T_I32, OP_CLZ32)
     elsif op == 0x68
-      unop(I32, I32, OP_CTZ32)
+      unop(T_I32, T_I32, OP_CTZ32)
     elsif op == 0x69
-      unop(I32, I32, OP_POPCNT)
+      unop(T_I32, T_I32, OP_POPCNT)
     elsif op == 0x6a
-      binop(I32, I32, OP_ADD32, OP_ADDI32)
+      binop(T_I32, T_I32, OP_ADD32, OP_ADDI32)
     elsif op == 0x6b
-      sub_op(I32)
+      sub_op(T_I32)
     elsif op == 0x6c
-      binop(I32, I32, OP_MUL32, OP_MULI32)
+      binop(T_I32, T_I32, OP_MUL32, OP_MULI32)
     elsif op == 0x6d
-      binop(I32, I32, OP_DIVS32, -1)
+      binop(T_I32, T_I32, OP_DIVS32, -1)
     elsif op == 0x6e
-      binop(I32, I32, OP_DIVU32, -1)
+      binop(T_I32, T_I32, OP_DIVU32, -1)
     elsif op == 0x6f
-      binop(I32, I32, OP_REMS32, -1)
+      binop(T_I32, T_I32, OP_REMS32, -1)
     elsif op == 0x70
-      binop(I32, I32, OP_REMU32, -1)
+      binop(T_I32, T_I32, OP_REMU32, -1)
     elsif op == 0x71
-      binop(I32, I32, OP_AND, OP_ANDI)
+      binop(T_I32, T_I32, OP_AND, OP_ANDI)
     elsif op == 0x72
-      binop(I32, I32, OP_OR, OP_ORI)
+      binop(T_I32, T_I32, OP_OR, OP_ORI)
     elsif op == 0x73
-      binop(I32, I32, OP_XOR, OP_XORI)
+      binop(T_I32, T_I32, OP_XOR, OP_XORI)
     elsif op == 0x74
-      shift_op(I32, OP_SHL32, OP_SHLI32, 31)
+      shift_op(T_I32, OP_SHL32, OP_SHLI32, 31)
     elsif op == 0x75
-      shift_op(I32, OP_SHRS32, OP_SHRSI32, 31)
+      shift_op(T_I32, OP_SHRS32, OP_SHRSI32, 31)
     elsif op == 0x76
-      shift_op(I32, OP_SHRU32, OP_SHRUI32, 31)
+      shift_op(T_I32, OP_SHRU32, OP_SHRUI32, 31)
     elsif op == 0x77
-      binop(I32, I32, OP_ROTL32, -1)
+      binop(T_I32, T_I32, OP_ROTL32, -1)
     elsif op == 0x78
-      binop(I32, I32, OP_ROTR32, -1)
+      binop(T_I32, T_I32, OP_ROTR32, -1)
     elsif op == 0x79
-      unop(I64, I64, OP_CLZ64)
+      unop(T_I64, T_I64, OP_CLZ64)
     elsif op == 0x7a
-      unop(I64, I64, OP_CTZ64)
+      unop(T_I64, T_I64, OP_CTZ64)
     elsif op == 0x7b
-      unop(I64, I64, OP_POPCNT)
+      unop(T_I64, T_I64, OP_POPCNT)
     elsif op == 0x7c
-      binop(I64, I64, OP_ADD64, OP_ADDI64)
+      binop(T_I64, T_I64, OP_ADD64, OP_ADDI64)
     elsif op == 0x7d
-      sub_op(I64)
+      sub_op(T_I64)
     elsif op == 0x7e
-      binop(I64, I64, OP_MUL64, OP_MULI64)
+      binop(T_I64, T_I64, OP_MUL64, OP_MULI64)
     elsif op == 0x7f
-      binop(I64, I64, OP_DIVS64, -1)
+      binop(T_I64, T_I64, OP_DIVS64, -1)
     elsif op == 0x80
-      binop(I64, I64, OP_DIVU64, -1)
+      binop(T_I64, T_I64, OP_DIVU64, -1)
     elsif op == 0x81
-      binop(I64, I64, OP_REMS64, -1)
+      binop(T_I64, T_I64, OP_REMS64, -1)
     elsif op == 0x82
-      binop(I64, I64, OP_REMU64, -1)
+      binop(T_I64, T_I64, OP_REMU64, -1)
     elsif op == 0x83
-      binop(I64, I64, OP_AND, OP_ANDI)
+      binop(T_I64, T_I64, OP_AND, OP_ANDI)
     elsif op == 0x84
-      binop(I64, I64, OP_OR, OP_ORI)
+      binop(T_I64, T_I64, OP_OR, OP_ORI)
     elsif op == 0x85
-      binop(I64, I64, OP_XOR, OP_XORI)
+      binop(T_I64, T_I64, OP_XOR, OP_XORI)
     elsif op == 0x86
-      shift_op(I64, OP_SHL64, OP_SHLI64, 63)
+      shift_op(T_I64, OP_SHL64, OP_SHLI64, 63)
     elsif op == 0x87
-      shift_op(I64, OP_SHRS64, OP_SHRSI64, 63)
+      shift_op(T_I64, OP_SHRS64, OP_SHRSI64, 63)
     elsif op == 0x88
-      shift_op(I64, OP_SHRU64, OP_SHRUI64, 63)
+      shift_op(T_I64, OP_SHRU64, OP_SHRUI64, 63)
     elsif op == 0x89
-      binop(I64, I64, OP_ROTL64, -1)
+      binop(T_I64, T_I64, OP_ROTL64, -1)
     elsif op == 0x8a
-      binop(I64, I64, OP_ROTR64, -1)
+      binop(T_I64, T_I64, OP_ROTR64, -1)
     elsif op >= 0x8b && op <= 0x91
-      unop(F32, F32, OP_FABS32 + (op - 0x8b))
+      unop(T_F32, T_F32, OP_FABS32 + (op - 0x8b))
     elsif op >= 0x92 && op <= 0x98
-      binop(F32, F32, OP_FADD32 + (op - 0x92), -1)
+      binop(T_F32, T_F32, OP_FADD32 + (op - 0x92), -1)
     elsif op >= 0x99 && op <= 0x9f
-      unop(F64, F64, OP_FABS64 + (op - 0x99))
+      unop(T_F64, T_F64, OP_FABS64 + (op - 0x99))
     elsif op >= 0xa0 && op <= 0xa6
-      binop(F64, F64, OP_FADD64 + (op - 0xa0), -1)
+      binop(T_F64, T_F64, OP_FADD64 + (op - 0xa0), -1)
     elsif op == 0xa7
-      unop(I64, I32, OP_WRAP)
+      unop(T_I64, T_I32, OP_WRAP)
     elsif op == 0xa8
-      unop(F32, I32, OP_TRUNC_F32_S32)
+      unop(T_F32, T_I32, OP_TRUNC_F32_S32)
     elsif op == 0xa9
-      unop(F32, I32, OP_TRUNC_F32_U32)
+      unop(T_F32, T_I32, OP_TRUNC_F32_U32)
     elsif op == 0xaa
-      unop(F64, I32, OP_TRUNC_F64_S32)
+      unop(T_F64, T_I32, OP_TRUNC_F64_S32)
     elsif op == 0xab
-      unop(F64, I32, OP_TRUNC_F64_U32)
+      unop(T_F64, T_I32, OP_TRUNC_F64_U32)
     elsif op == 0xac
-      unop(I32, I64, OP_EXTS32)
+      unop(T_I32, T_I64, OP_EXTS32)
     elsif op == 0xad
-      reinterpret(I32, I64)
+      reinterpret(T_I32, T_I64)
     elsif op == 0xae
-      unop(F32, I64, OP_TRUNC_F32_S64)
+      unop(T_F32, T_I64, OP_TRUNC_F32_S64)
     elsif op == 0xaf
-      unop(F32, I64, OP_TRUNC_F32_U64)
+      unop(T_F32, T_I64, OP_TRUNC_F32_U64)
     elsif op == 0xb0
-      unop(F64, I64, OP_TRUNC_F64_S64)
+      unop(T_F64, T_I64, OP_TRUNC_F64_S64)
     elsif op == 0xb1
-      unop(F64, I64, OP_TRUNC_F64_U64)
+      unop(T_F64, T_I64, OP_TRUNC_F64_U64)
     elsif op == 0xb2
-      unop(I32, F32, OP_CVT_S32_F32)
+      unop(T_I32, T_F32, OP_CVT_S32_F32)
     elsif op == 0xb3
-      unop(I32, F32, OP_CVT_U32_F32)
+      unop(T_I32, T_F32, OP_CVT_U32_F32)
     elsif op == 0xb4
-      unop(I64, F32, OP_CVT_S64_F32)
+      unop(T_I64, T_F32, OP_CVT_S64_F32)
     elsif op == 0xb5
-      unop(I64, F32, OP_CVT_U64_F32)
+      unop(T_I64, T_F32, OP_CVT_U64_F32)
     elsif op == 0xb6
-      unop(F64, F32, OP_DEMOTE)
+      unop(T_F64, T_F32, OP_DEMOTE)
     elsif op == 0xb7
-      unop(I32, F64, OP_CVT_S32_F64)
+      unop(T_I32, T_F64, OP_CVT_S32_F64)
     elsif op == 0xb8
-      unop(I32, F64, OP_CVT_U32_F64)
+      unop(T_I32, T_F64, OP_CVT_U32_F64)
     elsif op == 0xb9
-      unop(I64, F64, OP_CVT_S64_F64)
+      unop(T_I64, T_F64, OP_CVT_S64_F64)
     elsif op == 0xba
-      unop(I64, F64, OP_CVT_U64_F64)
+      unop(T_I64, T_F64, OP_CVT_U64_F64)
     elsif op == 0xbb
-      unop(F32, F64, OP_PROMOTE)
+      unop(T_F32, T_F64, OP_PROMOTE)
     elsif op == 0xbc
-      reinterpret(F32, I32)
+      reinterpret(T_F32, T_I32)
     elsif op == 0xbd
-      reinterpret(F64, I64)
+      reinterpret(T_F64, T_I64)
     elsif op == 0xbe
-      reinterpret(I32, F32)
+      reinterpret(T_I32, T_F32)
     elsif op == 0xbf
-      reinterpret(I64, F64)
+      reinterpret(T_I64, T_F64)
     elsif op == 0xc0
-      unop(I32, I32, OP_EXT8S32)
+      unop(T_I32, T_I32, OP_EXT8S32)
     elsif op == 0xc1
-      unop(I32, I32, OP_EXT16S32)
+      unop(T_I32, T_I32, OP_EXT16S32)
     elsif op == 0xc2
-      unop(I64, I64, OP_EXT8S64)
+      unop(T_I64, T_I64, OP_EXT8S64)
     elsif op == 0xc3
-      unop(I64, I64, OP_EXT16S64)
+      unop(T_I64, T_I64, OP_EXT16S64)
     elsif op == 0xc4
-      unop(I64, I64, OP_EXTS32)
+      unop(T_I64, T_I64, OP_EXTS32)
     nil
 
   # Same bits, new type: no code (i64.extend_i32_u too, since i32 slots are zero-extended).
@@ -1536,11 +1536,11 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     if bk == K_CONST
       a = pop_slot(t)
       d = push(t)
-      nk = t == I32 ? ((0 - bv) & 0xffffffff) : ((0 - bv) ## i64)
-      emit_d([t == I32 ? OP_ADDI32 : OP_ADDI64, d, a, nk])
+      nk = t == T_I32 ? ((0 - bv) & 0xffffffff) : ((0 - bv) ## i64)
+      emit_d([t == T_I32 ? OP_ADDI32 : OP_ADDI64, d, a, nk])
       return nil
     push_entry(t, bk, bv)
-    binop(t, t, t == I32 ? OP_SUB32 : OP_SUB64, -1)
+    binop(t, t, t == T_I32 ? OP_SUB32 : OP_SUB64, -1)
 
   -> shift_op(t, opc, imm_op, mask)
     pop(t)
@@ -1559,16 +1559,16 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
   -> instr_fc(sub)
     r = @r
     if sub <= 7
-      ta = (sub == 0 || sub == 1 || sub == 4 || sub == 5) ? F32 : F64
-      tr = sub <= 3 ? I32 : I64
+      ta = (sub == 0 || sub == 1 || sub == 4 || sub == 5) ? T_F32 : T_F64
+      tr = sub <= 3 ? T_I32 : T_I64
       unop(ta, tr, OP_SAT_F32_S32 + sub)
     elsif sub == 8
       di = r.vu32()
       mi = r.vu32()
       at = addr_type(mi)
       check_data(di)
-      n = pop_slot(I32)
-      s = pop_slot(I32)
+      n = pop_slot(T_I32)
+      s = pop_slot(T_I32)
       d = pop_slot(at)
       ext(0xfc0008, [mi, di, d, s, n])
     elsif sub == 9
@@ -1580,7 +1580,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       m2 = r.vu32()
       a1 = addr_type(m1)
       a2 = addr_type(m2)
-      nt = (a1 == I64 && a2 == I64) ? I64 : I32
+      nt = (a1 == T_I64 && a2 == T_I64) ? T_I64 : T_I32
       n = pop_slot(nt)
       s = pop_slot(a2)
       d = pop_slot(a1)
@@ -1592,7 +1592,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       mi = r.vu32()
       at = addr_type(mi)
       n = pop_slot(at)
-      v = pop_slot(I32)
+      v = pop_slot(T_I32)
       d = pop_slot(at)
       if mi == 0
         emit_n([OP_MFILL, d, v, n])
@@ -1604,9 +1604,9 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       e = check_elem(ei)
       tt = check_table(ti)
       w_invalid("type mismatch: elem segment type") if !wt_sub?(e.type, tt.elem)
-      n = pop_slot(I32)
-      s = pop_slot(I32)
-      d = pop_slot(tt.is64 ? I64 : I32)
+      n = pop_slot(T_I32)
+      s = pop_slot(T_I32)
+      d = pop_slot(tt.is64 ? T_I64 : T_I32)
       ext(0xfc000c, [ti, ei, d, s, n])
     elsif sub == 13
       ei = r.vu32()
@@ -1618,15 +1618,15 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       tt1 = check_table(t1)
       tt2 = check_table(t2)
       w_invalid("type mismatch: table.copy") if !wt_sub?(tt2.elem, tt1.elem)
-      nt = (tt1.is64 && tt2.is64) ? I64 : I32
+      nt = (tt1.is64 && tt2.is64) ? T_I64 : T_I32
       n = pop_slot(nt)
-      s = pop_slot(tt2.is64 ? I64 : I32)
-      d = pop_slot(tt1.is64 ? I64 : I32)
+      s = pop_slot(tt2.is64 ? T_I64 : T_I32)
+      d = pop_slot(tt1.is64 ? T_I64 : T_I32)
       ext(0xfc000e, [t1, t2, d, s, n])
     elsif sub == 15
       ti = r.vu32()
       tt = check_table(ti)
-      at = tt.is64 ? I64 : I32
+      at = tt.is64 ? T_I64 : T_I32
       n = pop_slot(at)
       v = pop_slot(tt.elem)
       d = push(at)
@@ -1634,12 +1634,12 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     elsif sub == 16
       ti = r.vu32()
       tt = check_table(ti)
-      d = push(tt.is64 ? I64 : I32)
+      d = push(tt.is64 ? T_I64 : T_I32)
       ext(0xfc0010, [ti, d])
     elsif sub == 17
       ti = r.vu32()
       tt = check_table(ti)
-      at = tt.is64 ? I64 : I32
+      at = tt.is64 ? T_I64 : T_I32
       n = pop_slot(at)
       v = pop_slot(tt.elem)
       d = pop_slot(at)
@@ -1825,7 +1825,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     elsif sub == 6 || sub == 7
       ti = r.vu32()
       t = array_type(ti)
-      n = pop_slot(I32)
+      n = pop_slot(T_I32)
       v = -1
       if sub == 6
         v = pop_slot(wt_unpack(t.ftypes[0]))
@@ -1859,8 +1859,8 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       else
         e = check_elem(si)
         w_invalid("type mismatch: elem segment type") if !wt_sub?(e.type, et)
-      n = pop_slot(I32)
-      s = pop_slot(I32)
+      n = pop_slot(T_I32)
+      s = pop_slot(T_I32)
       d = push(wt_ref(false, @m.canon[ti]))
       ext(sx, [ti, si, d, s, n])
     elsif sub >= 11 && sub <= 13
@@ -1868,7 +1868,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       t = array_type(ti)
       et = t.ftypes[0]
       w_invalid("type mismatch: packed element") if (sub == 11) == wt_packed?(et)
-      i = pop_slot(I32)
+      i = pop_slot(T_I32)
       a = pop_slot(wt_ref(true, @m.canon[ti]))
       d = push(wt_unpack(et))
       ext(sx, [ti, d, a, i])
@@ -1877,20 +1877,20 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       t = array_type(ti)
       w_invalid("array is immutable") if !t.fmuts[0]
       v = pop_slot(wt_unpack(t.ftypes[0]))
-      i = pop_slot(I32)
+      i = pop_slot(T_I32)
       a = pop_slot(wt_ref(true, @m.canon[ti]))
       ext(sx, [ti, a, i, v])
     elsif sub == 15
       a = pop_slot(wt_ref(true, HT_ARRAY))
-      d = push(I32)
+      d = push(T_I32)
       ext(sx, [d, a])
     elsif sub == 16
       ti = r.vu32()
       t = array_type(ti)
       w_invalid("array is immutable") if !t.fmuts[0]
-      n = pop_slot(I32)
+      n = pop_slot(T_I32)
       v = pop_slot(wt_unpack(t.ftypes[0]))
-      i = pop_slot(I32)
+      i = pop_slot(T_I32)
       a = pop_slot(wt_ref(true, @m.canon[ti]))
       ext(sx, [ti, a, i, v, n])
     elsif sub == 17
@@ -1900,10 +1900,10 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       at2 = array_type(t2)
       w_invalid("array is immutable") if !at1.fmuts[0]
       w_invalid("type mismatch: array.copy") if !wt_sub?(at2.ftypes[0], at1.ftypes[0]) && !(at1.ftypes[0] == at2.ftypes[0])
-      n = pop_slot(I32)
-      s = pop_slot(I32)
+      n = pop_slot(T_I32)
+      s = pop_slot(T_I32)
       b = pop_slot(wt_ref(true, @m.canon[t2]))
-      di = pop_slot(I32)
+      di = pop_slot(T_I32)
       a = pop_slot(wt_ref(true, @m.canon[t1]))
       ext(sx, [t1, t2, a, di, b, s, n])
     elsif sub == 18 || sub == 19
@@ -1918,9 +1918,9 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       else
         e = check_elem(si)
         w_invalid("type mismatch: elem segment type") if !wt_sub?(e.type, et)
-      n = pop_slot(I32)
-      s = pop_slot(I32)
-      i = pop_slot(I32)
+      n = pop_slot(T_I32)
+      s = pop_slot(T_I32)
+      i = pop_slot(T_I32)
       a = pop_slot(wt_ref(true, @m.canon[ti]))
       ext(sx, [ti, si, a, i, s, n])
     elsif sub >= 20 && sub <= 23
@@ -1929,9 +1929,9 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       tt = wt_ref(nullable, ht)
       t = pop_ref()
       a = @pk == K_SLOT ? @pv : 0
-      w_invalid("type mismatch: cast to unrelated type") if t != BOT && wt_ht_top(wt_ht(t)) != wt_ht_top(ht) && wt_ht(t) != HT_BOT
+      w_invalid("type mismatch: cast to unrelated type") if t != T_BOT && wt_ht_top(wt_ht(t)) != wt_ht_top(ht) && wt_ht(t) != HT_BOT
       if sub <= 21
-        d = push(I32)
+        d = push(T_I32)
         ext(sx, [ht, d, a])
       else
         d = push(tt)
@@ -1984,22 +1984,22 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     elsif sub == 26
       t = pop(wt_ref(true, HT_EXTERN))
       a = @pk == K_SLOT ? @pv : const_to_slot(t, @pv)
-      nt = wt_ref(t == BOT ? false : wt_nullable?(t), HT_ANY)
+      nt = wt_ref(t == T_BOT ? false : wt_nullable?(t), HT_ANY)
       d = push(nt)
       ext(sx, [d, a])
     elsif sub == 27
       t = pop(wt_ref(true, HT_ANY))
       a = @pk == K_SLOT ? @pv : const_to_slot(t, @pv)
-      nt = wt_ref(t == BOT ? false : wt_nullable?(t), HT_EXTERN)
+      nt = wt_ref(t == T_BOT ? false : wt_nullable?(t), HT_EXTERN)
       d = push(nt)
       ext(sx, [d, a])
     elsif sub == 28
-      a = pop_slot(I32)
+      a = pop_slot(T_I32)
       d = push(wt_ref(false, HT_I31))
       ext(sx, [d, a])
     elsif sub == 29 || sub == 30
       a = pop_slot(wt_ref(true, HT_I31))
-      d = push(I32)
+      d = push(T_I32)
       ext(sx, [d, a])
     else
       w_malformed("illegal opcode 0xfb " + sub.to_s)
@@ -2014,7 +2014,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       w_malformed("malformed atomic.fence") if b != 0
       return nil
     nat = 2
-    vt = I32
+    vt = T_I32
     kind = 0
     if sub == 0
       nat = 2
@@ -2026,7 +2026,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
       # loads 0x10-0x16, stores 0x17-0x1d, rmw 0x1e-0x47 (7 ops each x 6), cmpxchg 0x48-0x4e
       j = (sub - 0x10) % 7
       nat = [2, 3, 0, 1, 0, 1, 2][j]
-      vt = (j == 0 || j == 2 || j == 3) ? I32 : I64
+      vt = (j == 0 || j == 2 || j == 3) ? T_I32 : T_I64
     else
       w_malformed("illegal opcode 0xfe " + sub.to_s)
     a = r.vu32()
@@ -2038,18 +2038,18 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     mt = check_mem(mi)
     w_invalid("alignment must be natural") if a != nat
     w_invalid("offset out of range") if !mt.is64 && (off < 0 || off > 4294967295)
-    at = mt.is64 ? I64 : I32
+    at = mt.is64 ? T_I64 : T_I32
     sx = 0xfe0000 + sub
     if sub == 0
-      n = pop_slot(I32)
+      n = pop_slot(T_I32)
       p = pop_slot(at)
-      d = push(I32)
+      d = push(T_I32)
       ext(sx, [mi, d, p, n, off])
     elsif sub == 1 || sub == 2
-      to = pop_slot(I64)
-      e = pop_slot(sub == 1 ? I32 : I64)
+      to = pop_slot(T_I64)
+      e = pop_slot(sub == 1 ? T_I32 : T_I64)
       p = pop_slot(at)
-      d = push(I32)
+      d = push(T_I32)
       ext(sx, [mi, d, p, e, to, off])
     elsif sub <= 0x16
       p = pop_slot(at)
@@ -2103,12 +2103,12 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
 
   -> simd_replace(ts, sub, lane)
     b = pop_slot(ts)
-    a = pop_slot(V128)
-    d = push(V128)
+    a = pop_slot(T_V128)
+    d = push(T_V128)
     emit_d([OP_VOP, d, a, b, lane, sub])
 
   -> simd_const(lo, hi)
-    d = push(V128)
+    d = push(T_V128)
     emit_d([OP_CONST2, d, lo, hi])
 
   -> simd_mem(sub, natural, store, lane)
@@ -2116,16 +2116,16 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     mi = ma[0]
     at = addr_type(mi)
     if lane >= 0
-      v = pop_slot(V128)
+      v = pop_slot(T_V128)
       a = pop_slot(at)
       if store
         ext(0xfd0000 + sub, [mi, a, v, ma[1], lane])
       else
-        d = push(V128)
+        d = push(T_V128)
         ext(0xfd0000 + sub, [mi, d, a, ma[1], lane, v])
       return nil
     if store
-      v = pop_slot(V128)
+      v = pop_slot(T_V128)
       a = pop_slot(at)
       if sub == 11 && mi == 0 && !@m.mems[0].is64
         emit_n([OP_ST128, a, v, ma[1]])
@@ -2133,7 +2133,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
         ext(0xfd0000 + sub, [mi, a, v, ma[1]])
     else
       a = pop_slot(at)
-      d = push(V128)
+      d = push(T_V128)
       if sub == 0 && mi == 0 && !@m.mems[0].is64
         emit_d([OP_LD128, d, a, ma[1]])
       else

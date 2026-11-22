@@ -157,7 +157,7 @@
 
   -> val_type
     c = byte()
-    return c if c == I32 || c == I64 || c == F32 || c == F64 || c == V128
+    return c if c == T_I32 || c == T_I64 || c == T_F32 || c == T_F64 || c == T_V128
     ref_type_after(c)
 
   -> ref_type
@@ -172,7 +172,7 @@
 
   -> storage_type
     c = peek()
-    if c == I8 || c == I16
+    if c == T_I8 || c == T_I16
       @pos += 1
       return c
     val_type()
@@ -214,7 +214,7 @@
     if c == 0x40
       @pos += 1
       return [-1, -1]
-    if c == I32 || c == I64 || c == F32 || c == F64 || c == V128 || c == 0x70 || c == 0x6f || c == 0x6e || c == 0x6d || c == 0x6c || c == 0x6b || c == 0x6a || c == 0x69 || c == 0x74 || c == 0x73 || c == 0x72 || c == 0x71 || c == 0x63 || c == 0x64
+    if c == T_I32 || c == T_I64 || c == T_F32 || c == T_F64 || c == T_V128 || c == 0x70 || c == 0x6f || c == 0x6e || c == 0x6d || c == 0x6c || c == 0x6b || c == 0x6a || c == 0x69 || c == 0x74 || c == 0x73 || c == 0x72 || c == 0x71 || c == 0x63 || c == 0x64
       return [0, val_type()]
     v = vs33()
     w_malformed("malformed block type") if v < 0

@@ -1,22 +1,22 @@
 # wasm/types — value types, the canonical type registry and the decoded module structure.
 #
 # Value types are plain integers so they compare with == and fit in typed arrays:
-#   numeric  I32 0x7f, I64 0x7e, F32 0x7d, F64 0x7c, V128 0x7b; packed storage I8 0x78, I16 0x77
-#   BOT      0: the bottom type validation gives values popped from an unreachable stack
+#   numeric  T_I32 0x7f, T_I64 0x7e, T_F32 0x7d, T_F64 0x7c, T_V128 0x7b; packed storage T_I8 0x78, T_I16 0x77
+#   T_BOT      0: the bottom type validation gives values popped from an unreachable stack
 #   ref      REF_BIT | (NULL_BIT if nullable) | heap type
 # A heap type is either abstract (HT_ABS + its binary code, e.g. HT_ABS + 0x70 for func) or
 # a canonical type id (< HT_ABS). Canonical ids are process-wide: iso-recursive type
 # equivalence (GC proposal) holds across modules exactly when the ids are equal, so
 # call_indirect, imports and casts compare integers.
 
-I32 = 0x7f
-I64 = 0x7e
-F32 = 0x7d
-F64 = 0x7c
-V128 = 0x7b
-I8 = 0x78
-I16 = 0x77
-BOT = 0
+T_I32 = 0x7f
+T_I64 = 0x7e
+T_F32 = 0x7d
+T_F64 = 0x7c
+T_V128 = 0x7b
+T_I8 = 0x78
+T_I16 = 0x77
+T_BOT = 0
 
 REF_BIT = 1048576     # 1 << 20
 NULL_BIT = 524288     # 1 << 19
@@ -55,28 +55,28 @@ EXNREF = REF_BIT + NULL_BIT + HT_EXN
   (t & NULL_BIT) != 0
 
 -> wt_num?(t)
-  t == I32 || t == I64 || t == F32 || t == F64
+  t == T_I32 || t == T_I64 || t == T_F32 || t == T_F64
 
 # Interpreter stack slots a value of this type takes (v128 is two i64 words).
 -> wt_slots(t)
-  t == V128 ? 2 : 1
+  t == T_V128 ? 2 : 1
 
 -> wt_packed?(t)
-  t == I8 || t == I16
+  t == T_I8 || t == T_I16
 
 # The value type a storage type unpacks to.
 -> wt_unpack(t)
-  wt_packed?(t) ? I32 : t
+  wt_packed?(t) ? T_I32 : t
 
 -> wt_name(t)
-  return "i32" if t == I32
-  return "i64" if t == I64
-  return "f32" if t == F32
-  return "f64" if t == F64
-  return "v128" if t == V128
-  return "i8" if t == I8
-  return "i16" if t == I16
-  return "bot" if t == BOT
+  return "i32" if t == T_I32
+  return "i64" if t == T_I64
+  return "f32" if t == T_F32
+  return "f64" if t == T_F64
+  return "v128" if t == T_V128
+  return "i8" if t == T_I8
+  return "i16" if t == T_I16
+  return "bot" if t == T_BOT
   if wt_ref?(t)
     return "(ref " + (wt_nullable?(t) ? "null " : "") + wt_ht_name(wt_ht(t)) + ")"
   "?" + t.to_s
@@ -250,8 +250,8 @@ W_TYPES = WTypeRegistry.new
 
 -> wt_sub?(a, b)
   return true if a == b
-  return true if a == BOT
-  return false if b == BOT
+  return true if a == T_BOT
+  return false if b == T_BOT
   if wt_ref?(a) && wt_ref?(b)
     return false if wt_nullable?(a) && !wt_nullable?(b)
     return wt_heap_sub?(wt_ht(a), wt_ht(b))

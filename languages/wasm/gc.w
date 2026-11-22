@@ -7,23 +7,23 @@
 # [0, 2^31) (the low 31 bits), so ref.eq on i31 compares values.
 
 -> w_storage_bytes(t)
-  return 1 if t == I8
-  return 2 if t == I16
-  return 4 if t == I32 || t == F32
-  return 16 if t == V128
+  return 1 if t == T_I8
+  return 2 if t == T_I16
+  return 4 if t == T_I32 || t == T_F32
+  return 16 if t == T_V128
   8
 
 # Store a value (slot-normalised) into packed storage width.
 -> w_pack(t, v)
-  return v & 0xff if t == I8
-  return v & 0xffff if t == I16
+  return v & 0xff if t == T_I8
+  return v & 0xffff if t == T_I16
   v
 
 # Read a packed field as an i32 (signed or not).
 -> w_unpack(t, v, signed)
-  if t == I8
+  if t == T_I8
     return signed && v >= 128 ? (v - 256) & 0xffffffff : v
-  if t == I16
+  if t == T_I16
     return signed && v >= 32768 ? (v - 65536) & 0xffffffff : v
   v
 
@@ -40,7 +40,7 @@
   t = st.ftypes[k]
   if wt_ref?(t)
     s.refs[k] = v
-  elsif t == V128
+  elsif t == T_V128
     s.nums[2 * k] = v == nil ? 0 : v.lo
     s.nums[2 * k + 1] = v == nil ? 0 : v.hi
   else
@@ -50,19 +50,19 @@
 -> w_field_get(s, st, k, signed)
   t = st.ftypes[k]
   return s.refs[k] if wt_ref?(t)
-  return WV128.new(s.nums[2 * k], s.nums[2 * k + 1]) if t == V128
+  return WV128.new(s.nums[2 * k], s.nums[2 * k + 1]) if t == T_V128
   w_unpack(t, s.nums[2 * k], signed)
 
 -> w_array_alloc(at, n)
   w_trap_code(13) if n < 0 || n > 100000000
   t = at.ftypes[0]
-  WArray.new(at.canon, n, wt_ref?(t), t == V128)
+  WArray.new(at.canon, n, wt_ref?(t), t == T_V128)
 
 -> w_elem_set(a, at, i, v)
   t = at.ftypes[0]
   if wt_ref?(t)
     a.refs[i] = v
-  elsif t == V128
+  elsif t == T_V128
     a.nums[2 * i] = v.lo
     a.nums[2 * i + 1] = v.hi
   else
@@ -72,7 +72,7 @@
 -> w_elem_get(a, at, i, signed)
   t = at.ftypes[0]
   return a.refs[i] if wt_ref?(t)
-  return WV128.new(a.nums[2 * i], a.nums[2 * i + 1]) if t == V128
+  return WV128.new(a.nums[2 * i], a.nums[2 * i + 1]) if t == T_V128
   w_unpack(t, a.nums[i], signed)
 
 # Read one element of storage type t from bytes at p (little-endian).

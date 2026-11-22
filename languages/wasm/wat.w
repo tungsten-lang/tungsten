@@ -792,11 +792,11 @@
   -> val_type(node)
     if node.atom?
       t = node.text
-      return [I32] if t == "i32"
-      return [I64] if t == "i64"
-      return [F32] if t == "f32"
-      return [F64] if t == "f64"
-      return [V128] if t == "v128"
+      return [T_I32] if t == "i32"
+      return [T_I64] if t == "i64"
+      return [T_F32] if t == "f32"
+      return [T_F64] if t == "f64"
+      return [T_V128] if t == "v128"
       return [0x70] if t == "funcref"
       return [0x6f] if t == "externref"
       return [0x6e] if t == "anyref"
@@ -828,9 +828,9 @@
 
   -> storage_type(node)
     if node.atom? && node.text == "i8"
-      return [I8]
+      return [T_I8]
     if node.atom? && node.text == "i16"
-      return [I16]
+      return [T_I16]
     val_type(node)
 
   -> heap_type_bytes(ht)

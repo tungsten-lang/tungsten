@@ -42,16 +42,16 @@ MAX_PAGES64 = 281474976710656
       break
     elsif op == 0x41
       r.vs32()
-      st.push(I32)
+      st.push(T_I32)
     elsif op == 0x42
       r.vs64()
-      st.push(I64)
+      st.push(T_I64)
     elsif op == 0x43
       r.vf32()
-      st.push(F32)
+      st.push(T_F32)
     elsif op == 0x44
       r.vf64()
-      st.push(F64)
+      st.push(T_F64)
     elsif op == 0xd0
       st.push(wt_ref(true, r.heap_type()))
     elsif op == 0xd2
@@ -66,14 +66,14 @@ MAX_PAGES64 = 281474976710656
       w_invalid("constant expression required") if g.mutable
       st.push(g.type)
     elsif op == 0x6a || op == 0x6b || op == 0x6c || op == 0x7c || op == 0x7d || op == 0x7e
-      t = op <= 0x6c ? I32 : I64
+      t = op <= 0x6c ? T_I32 : T_I64
       w_invalid("type mismatch") if st.size < 2 || st.pop != t || st.pop != t
       st.push(t)
     elsif op == 0xfd
       sub = r.vu32()
       w_invalid("constant expression required") if sub != 12
       r.bytes(16)
-      st.push(V128)
+      st.push(T_V128)
     elsif op == 0xfb
       sub = r.vu32()
       if sub == 0 || sub == 1
@@ -99,12 +99,12 @@ MAX_PAGES64 = 281474976710656
             w_invalid("type mismatch") if st.size == 0 || !wt_sub?(st.pop, wt_unpack(t.ftypes[0]))
             k += 1
         else
-          w_invalid("type mismatch") if st.size == 0 || st.pop != I32
+          w_invalid("type mismatch") if st.size == 0 || st.pop != T_I32
           if sub == 6
             w_invalid("type mismatch") if st.size == 0 || !wt_sub?(st.pop, wt_unpack(t.ftypes[0]))
         st.push(wt_ref(false, m.canon[ti]))
       elsif sub == 28
-        w_invalid("type mismatch") if st.size == 0 || st.pop != I32
+        w_invalid("type mismatch") if st.size == 0 || st.pop != T_I32
         st.push(wt_ref(false, HT_I31))
       elsif sub == 26 || sub == 27
         w_invalid("type mismatch") if st.size == 0
@@ -159,12 +159,12 @@ MAX_PAGES64 = 281474976710656
     if e.mode == 0
       w_invalid("unknown table " + e.table.to_s) if e.table >= m.tables.size
       tt = m.tables[e.table]
-      w_valid_const(m, e.offset, tt.is64 ? I64 : I32, m.globals.size)
+      w_valid_const(m, e.offset, tt.is64 ? T_I64 : T_I32, m.globals.size)
       w_invalid("type mismatch: elem segment type") if !wt_sub?(e.type, tt.elem)
   m.datas.each ->(d)
     if d.mode == 0
       w_invalid("unknown memory " + d.mem.to_s) if d.mem >= m.mems.size
-      w_valid_const(m, d.offset, m.mems[d.mem].is64 ? I64 : I32, m.globals.size)
+      w_valid_const(m, d.offset, m.mems[d.mem].is64 ? T_I64 : T_I32, m.globals.size)
   # exports
   names = {}
   m.exports.each ->(x)

@@ -35,22 +35,22 @@ use ../wasm
     h = {}
     void = wt_func_type([], [])
     h["print"] = wasm_host_func(void, ->(args) nil)
-    h["print_i32"] = wasm_host_func(wt_func_type([I32], []), ->(args) nil)
-    h["print_i64"] = wasm_host_func(wt_func_type([I64], []), ->(args) nil)
-    h["print_f32"] = wasm_host_func(wt_func_type([F32], []), ->(args) nil)
-    h["print_f64"] = wasm_host_func(wt_func_type([F64], []), ->(args) nil)
-    h["print_i32_f32"] = wasm_host_func(wt_func_type([I32, F32], []), ->(args) nil)
-    h["print_f64_f64"] = wasm_host_func(wt_func_type([F64, F64], []), ->(args) nil)
-    g = WGlobal.new(I32, false)
+    h["print_i32"] = wasm_host_func(wt_func_type([T_I32], []), ->(args) nil)
+    h["print_i64"] = wasm_host_func(wt_func_type([T_I64], []), ->(args) nil)
+    h["print_f32"] = wasm_host_func(wt_func_type([T_F32], []), ->(args) nil)
+    h["print_f64"] = wasm_host_func(wt_func_type([T_F64], []), ->(args) nil)
+    h["print_i32_f32"] = wasm_host_func(wt_func_type([T_I32, T_F32], []), ->(args) nil)
+    h["print_f64_f64"] = wasm_host_func(wt_func_type([T_F64, T_F64], []), ->(args) nil)
+    g = WGlobal.new(T_I32, false)
     g.set(666)
     h["global_i32"] = g
-    g = WGlobal.new(I64, false)
+    g = WGlobal.new(T_I64, false)
     g.set(666)
     h["global_i64"] = g
-    g = WGlobal.new(F32, false)
+    g = WGlobal.new(T_F32, false)
     g.set(wat_f32("666.6"))
     h["global_f32"] = g
-    g = WGlobal.new(F64, false)
+    g = WGlobal.new(T_F64, false)
     g.set(wat_f64("666.6"))
     h["global_f64"] = g
     h["table"] = WTable.new(FUNCREF, 10, 20, false, nil)

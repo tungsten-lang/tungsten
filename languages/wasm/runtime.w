@@ -18,7 +18,7 @@
   -> new(@v)
 
 + WFunc
-  rw :fid, :type, :inst, :index, :host, :name, :jit
+  rw :fid, :type, :inst, :index, :host, :name, :jit, :hobj
   -> new(@type, @inst, @index, @host)
     @fid = 0
     @name = nil
@@ -28,7 +28,7 @@
     W_TYPES.types[@type]
 
 + WTable
-  rw :elems, :fids, :type, :max, :is64
+  rw :elems, :fids, :type, :max, :is64, :hobj
 
   -> new(@type, n, @max, @is64, init)
     @elems = []
@@ -84,7 +84,7 @@
 W_UID = [0]
 
 + WMemory
-  rw :data, :size, :max, :shared, :is64, :page_log2, :on_grow, :buffer, :lock, :uid
+  rw :data, :size, :max, :shared, :is64, :page_log2, :on_grow, :buffer, :lock, :uid, :hobj
 
   -> new(pages, @max, @shared, @is64, @page_log2)
     W_UID[0] += 1
@@ -128,7 +128,7 @@ W_UID = [0]
     old
 
 + WGlobal
-  rw :type, :mutable, :nums, :refs, :at
+  rw :type, :mutable, :nums, :refs, :at, :hobj
 
   -> new(@type, @mutable)
     @nums = i64[2]
@@ -137,13 +137,13 @@ W_UID = [0]
 
   -> get
     return @refs[@at] if wt_ref?(@type)
-    return WV128.new(@nums[@at * 2], @nums[@at * 2 + 1]) if @type == V128
+    return WV128.new(@nums[@at * 2], @nums[@at * 2 + 1]) if @type == T_V128
     @nums[@at * 2]
 
   -> set(v)
     if wt_ref?(@type)
       @refs[@at] = v
-    elsif @type == V128
+    elsif @type == T_V128
       @nums[@at * 2] = v.lo
       @nums[@at * 2 + 1] = v.hi
     else
@@ -151,7 +151,7 @@ W_UID = [0]
     nil
 
 + WTag
-  rw :type
+  rw :type, :hobj
   -> new(@type)
 
   -> sig
@@ -164,7 +164,7 @@ W_UID = [0]
 
 # GC objects.
 + WStruct
-  rw :type, :nums, :refs
+  rw :type, :nums, :refs, :hobj
   -> new(@type, n)
     @nums = i64[n * 2 + 1]
     @refs = []
@@ -174,7 +174,7 @@ W_UID = [0]
       k += 1
 
 + WArray
-  rw :type, :len, :nums, :refs, :wide
+  rw :type, :len, :nums, :refs, :wide, :hobj
   -> new(@type, @len, is_ref, @wide)
     @nums = nil
     @refs = nil
@@ -291,13 +291,13 @@ W_TRAP_MSGS = ["", "unreachable", "integer divide by zero", "integer overflow", 
 
 -> w_slot_read(ex, t, s)
   return ex.ostk[s] if wt_ref?(t)
-  return WV128.new(ex.stk[s], ex.stk[s + 1]) if t == V128
+  return WV128.new(ex.stk[s], ex.stk[s + 1]) if t == T_V128
   ex.stk[s]
 
 -> w_slot_write(ex, t, s, v)
   if wt_ref?(t)
     ex.ostk[s] = v
-  elsif t == V128
+  elsif t == T_V128
     ex.stk[s] = v.lo
     ex.stk[s + 1] = v.hi
   else
@@ -936,7 +936,7 @@ W_NOTAB = i64[1]
 -> w_store_global(inst, gi, t, v)
   if wt_ref?(t)
     inst.gref[gi] = v
-  elsif t == V128
+  elsif t == T_V128
     inst.glob[gi * 2] = v.lo
     inst.glob[gi * 2 + 1] = v.hi
   else

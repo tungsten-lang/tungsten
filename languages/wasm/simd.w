@@ -65,28 +65,28 @@
       k += 1
     c.simd_shuffle(lo, hi)
   elsif sub >= 15 && sub <= 20
-    ts = [I32, I32, I32, I64, F32, F64][sub - 15]
-    c.simd_unop(ts, V128, sub)
+    ts = [T_I32, T_I32, T_I32, T_I64, T_F32, T_F64][sub - 15]
+    c.simd_unop(ts, T_V128, sub)
   elsif sub >= 21 && sub <= 34
     lane = r.byte()
-    info = [[16, I32, 0], [16, I32, 0], [16, I32, 1], [8, I32, 0], [8, I32, 0], [8, I32, 1], [4, I32, 0], [4, I32, 1], [2, I64, 0], [2, I64, 1], [4, F32, 0], [4, F32, 1], [2, F64, 0], [2, F64, 1]][sub - 21]
+    info = [[16, T_I32, 0], [16, T_I32, 0], [16, T_I32, 1], [8, T_I32, 0], [8, T_I32, 0], [8, T_I32, 1], [4, T_I32, 0], [4, T_I32, 1], [2, T_I64, 0], [2, T_I64, 1], [4, T_F32, 0], [4, T_F32, 1], [2, T_F64, 0], [2, T_F64, 1]][sub - 21]
     w_invalid("invalid lane index") if lane >= info[0]
     if info[2] == 0
-      c.simd_lane_op(V128, info[1], sub, lane)
+      c.simd_lane_op(T_V128, info[1], sub, lane)
     else
       c.simd_replace(info[1], sub, lane)
   else
     k = wasm_simd_kind(sub)
     if k == "u"
-      c.simd_unop(V128, V128, sub)
+      c.simd_unop(T_V128, T_V128, sub)
     elsif k == "b"
-      c.simd_binop(V128, V128, V128, sub)
+      c.simd_binop(T_V128, T_V128, T_V128, sub)
     elsif k == "t"
-      c.simd_ternop(V128, sub)
+      c.simd_ternop(T_V128, sub)
     elsif k == "s"
-      c.simd_binop(V128, I32, V128, sub)
+      c.simd_binop(T_V128, T_I32, T_V128, sub)
     elsif k == "r"
-      c.simd_unop(V128, I32, sub)
+      c.simd_unop(T_V128, T_I32, sub)
     else
       w_malformed("illegal opcode 0xfd " + sub.to_s)
   nil
@@ -98,19 +98,19 @@
     w_invalid("invalid lane index") if lane >= lanes
     mi = ma[0]
     at = addr_type(mi)
-    v = pop_slot(V128)
+    v = pop_slot(T_V128)
     a = pop_slot(at)
     if store
       ext(0xfd0000 + sub, [mi, a, v, ma[1], lane])
     else
-      d = push(V128)
+      d = push(T_V128)
       ext(0xfd0000 + sub, [mi, d, a, ma[1], lane, v])
     nil
 
   -> simd_shuffle(lo, hi)
-    b = pop_slot(V128)
-    a = pop_slot(V128)
-    d = push(V128)
+    b = pop_slot(T_V128)
+    a = pop_slot(T_V128)
+    d = push(T_V128)
     emit_d([OP_VOP, d, a, b, @code.size + 8, 13])
     # the lane pattern follows inline after a jump-over
     emit_n([OP_JMP, @code.size + 4, lo, hi])

@@ -1796,11 +1796,16 @@ module Tungsten
 
         # ── Array builtins ───────────────────────────────────────────────
 
-        interpreter.define_method_builtin("first") do |recv, _args, _block|
+        # Every Core `first`/`last` takes no argument (core/array.w,
+        # range.w, tuple.w, ...); a surplus one is an ArgumentError on every
+        # engine, never Ruby's first(n).
+        interpreter.define_method_builtin("first") do |recv, args, _block|
+          interpreter.check_arity!("first", args, 0)
           recv.first
         end
 
-        interpreter.define_method_builtin("last") do |recv, _args, _block|
+        interpreter.define_method_builtin("last") do |recv, args, _block|
+          interpreter.check_arity!("last", args, 0)
           recv.last
         end
 

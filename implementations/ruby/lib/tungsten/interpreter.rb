@@ -580,23 +580,71 @@ module Tungsten
       err
     end
 
+    # Native Ruby exceptions a builtin can raise, in subclass-first order,
+    # mapped to the Core error class (core/errors/) a compiled program raises
+    # for the same failure. Anything else in the StandardError family maps
+    # to Error.
+    NATIVE_ERROR_CLASSES = [
+      [ ::KeyError, "KeyError" ],
+      [ ::StopIteration, "StopIteration" ],
+      [ ::IndexError, "IndexError" ],
+      [ ::FrozenError, "FrozenError" ],
+      [ ::NoMethodError, "NoMethodError" ],
+      [ ::NameError, "NameError" ],
+      [ ::ZeroDivisionError, "ZeroDivisionError" ],
+      [ ::RangeError, "RangeError" ],
+      [ ::ArgumentError, "ArgumentError" ],
+      [ ::TypeError, "TypeError" ],
+      [ ::EOFError, "EndOfFile" ],
+      [ ::Errno::ENOENT, "FileNotFound" ],
+      [ ::Errno::EACCES, "PermissionDenied" ],
+      [ ::Errno::ECONNREFUSED, "ConnectionRefused" ],
+      [ ::IOError, "IOError" ],
+      [ ::SystemCallError, "IOError" ]
+    ].freeze
+
+    # A runtime error whose rescued value is an instance of the Core error
+    # class `class_name`, as if the program had run `raise class_name, msg`.
+    def typed_runtime_error(class_name, msg, node: nil)
+      err = build_runtime_error(msg, node: node)
+      w_class = @classes[class_name] || try_autoload_core(class_name)
+      err.raised_value = instantiate(w_class, [ msg ]) if w_class.is_a?(Runtime::WClass)
+      err
+    end
+
+    # The arity-contract failure every engine raises for a fixed-signature
+    # method (compiler/lib/builtin_arity.w, runtime.c w_arity_contract_error).
+    def check_arity!(method_name, args, expected)
+      return if args.size == expected
+
+      noun = expected == 1 ? "argument" : "arguments"
+      raise typed_runtime_error(
+        "ArgumentError",
+        "'#{method_name}' takes #{expected} #{noun}, got #{args.size} — arguments are never silently dropped or padded"
+      )
+    end
+
     def runtime_error_from_exception(error, node: nil)
+      raise error unless error.is_a?(::StandardError) || error.is_a?(::SystemStackError)
+      return build_runtime_error("stack level too deep (infinite recursion?)", node: node) if error.is_a?(::SystemStackError)
+
+      class_name = NATIVE_ERROR_CLASSES.find { |klass, _| error.is_a?(klass) }&.last || "Error"
+      typed_runtime_error(class_name, native_error_message(error), node: node)
+    end
+
+    def native_error_message(error)
       case error
-      when NoMethodError
+      when ::NoMethodError
         receiver = begin
           error.receiver
-        rescue ArgumentError
+        rescue ::ArgumentError
           nil
         end
-        build_runtime_error("undefined method '#{error.name}'#{receiver ? " for #{receiver.inspect}" : ""}", node: node)
-      when ZeroDivisionError
-        build_runtime_error("division by zero", node: node)
-      when SystemStackError
-        build_runtime_error("stack level too deep (infinite recursion?)", node: node)
-      when TypeError, ::FrozenError
-        build_runtime_error(error.message, node: node)
+        "undefined method '#{error.name}'#{receiver ? " for #{receiver.inspect}" : ""}"
+      when ::ZeroDivisionError
+        "division by zero"
       else
-        raise error
+        error.message
       end
     end
 
@@ -3524,7 +3572,14 @@ module Tungsten
         result = node.body.eval_in(self)
       rescue Tungsten::Error => e
         result = evaluate_begin_rescue(node, e)
-      rescue NoMethodError, ZeroDivisionError, SystemStackError, TypeError, ::FrozenError => e
+      rescue ::UncaughtThrowError
+        # break/next/return unwind with throw; one with no matching catch is
+        # an implementation bug, never a Tungsten error to rescue.
+        raise
+      rescue ::StandardError, ::SystemStackError => e
+        # A builtin backed by a Ruby method raised natively (Array#insert's
+        # IndexError, Integer#/'s ZeroDivisionError, ...): rescue it as the
+        # matching Core error, like the compiled runtime does.
         result = evaluate_begin_rescue(node, runtime_error_from_exception(e, node: node))
       ensure
         node.ensure_body.eval_in(self) if node.ensure_body && !node.ensure_body.empty?

@@ -27,7 +27,7 @@ RSpec.describe "Hash freezing" do
       begin
         h["x"] = 2
       rescue error
-        error.include?("frozen")
+        error.is_a?(FrozenError) && error.message.include?("frozen")
     W
   end
 end

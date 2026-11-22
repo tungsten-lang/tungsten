@@ -1001,9 +1001,9 @@ RSpec.describe Tungsten::Interpreter do
     expect(run(code)).to eq("oops")
   end
 
-  it "rescues native runtime errors inside begin/rescue" do
-    code = "begin\n  1 / 0\nrescue err\n  err"
-    expect(run(code)).to eq("division by zero")
+  it "rescues native runtime errors inside begin/rescue as the matching Core error" do
+    code = "begin\n  1 / 0\nrescue err\n  [err.class.name, err.message]"
+    expect(run(code)).to eq([ "ZeroDivisionError", "division by zero" ])
   end
 
   it "handles begin/rescue without variable" do

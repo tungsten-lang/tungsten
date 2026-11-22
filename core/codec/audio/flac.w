@@ -686,3 +686,6 @@ acodec_register("flac", ->(cfg) FlacDec.new(cfg))
   total = si[:total]
   total = acc if total == 0
   {cfg: cfg, samples: samples, duration: total / (rate * ~1.0)}
+
+# Raw elementary-stream files (.mp3 / .aac ADTS / .flac) go through this parser.
+es_parser_register(:flac, ->(b) flac_es_parse(b))

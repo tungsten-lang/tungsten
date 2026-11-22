@@ -145,3 +145,11 @@ ACODECS = {}
 
   -> .register_audio(id, make)
     acodec_register(id, make)
+
+# ---- elementary-stream parsers (MP3, ADTS AAC, native FLAC, raw AC-3 files) ----
+# A codec file registers its *_es_parse here; the container layer's EsDemuxer looks it up.
+# parse: ->(bytes) {cfg:, samples:, duration:}
+ES_PARSERS = {}
+
+-> es_parser_register(kind, parse)
+  ES_PARSERS[kind] = parse

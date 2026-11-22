@@ -1661,3 +1661,6 @@ acodec_register("mp3 ", ->(cfg) Mp3Dec.new(cfg))
   total = total - trim
   total = 0 if total < 0 || idx == 0
   {cfg: cfg, samples: samples, duration: total / (rate * ~1.0)}
+
+# Raw elementary-stream files (.mp3 / .aac ADTS / .flac) go through this parser.
+es_parser_register(:mp3, ->(b) mp3_es_parse(b))

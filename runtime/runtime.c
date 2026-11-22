@@ -66120,6 +66120,10 @@ static WValue w_ic_universal_is_a(WValue r, WValue *a, int c) {
 static WValue w_ic_universal_spaceship(WValue r, WValue *a, int c) {
     return c >= 1 ? w_spaceship(r, a[0]) : W_NIL;
 }
+static WValue w_ic_universal_hash(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_public_hash(r);
+}
 
 /* Out-of-line slow path: cache miss → full dispatch + populate IC.
  * Only runs on first call per call site (or on type-change); the hot
@@ -66174,6 +66178,18 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
             w_ic_publish(cache, key, (void *)w_ic_universal_spaceship, -1);
             return w_spaceship(recv, args_ptr[0]);
         }
+    }
+
+    /* Universal public `hash` on Strings, Symbols, Ints and Floats. A source
+     * `hash` method was already taken by the type-class lookup above; these
+     * receivers otherwise reach the cascade's universal fallback, which
+     * published no cache entry, so every call re-walked the whole cascade
+     * (~200 ns for a String, ~65 ns for a Float). Publish the handler. */
+    if (key < 0x100 && argc == 0 &&
+        (w_is_stringy(recv) || w_is_int(recv) || w_is_double(recv)) &&
+        (name == WN_hash || w_hash_key_eq(name, WN_hash))) {
+        w_ic_publish(cache, key, (void *)w_ic_universal_hash, -1);
+        return w_public_hash(recv);
     }
 
     g_generic_ctor_selected = NULL;

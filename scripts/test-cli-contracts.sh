@@ -8,6 +8,7 @@ TYPED_SIGNATURE_VALID="$ROOT/spec/compiler/small_array_stack_escape_spec.w"
 INVALID="$ROOT/spec/cli/check_type_error.w"
 INVALID_CAMEL="$ROOT/spec/cli/camel_case_invalid.w"
 INVALID_STR_TYPE="$ROOT/spec/cli/str_type_invalid.w"
+HINT_OPERATOR_TAIL="$ROOT/spec/cli/type_hint_operator_tail_invalid.w"
 INVALID_GPU="$ROOT/spec/cli/gpu_check_missing_hint.w"
 MULTI_INVALID_GPU="$ROOT/spec/cli/gpu_check_multiple_errors.w"
 UNSUPPORTED_GPU_TYPE="$ROOT/spec/cli/gpu_check_unsupported_type.w"
@@ -58,6 +59,14 @@ if "$TUNGSTEN" --check "$INVALID_STR_TYPE" >"$TMP/check-str-type-error.out" 2>&1
 fi
 grep -q 'E_PARSE_INVALID_TYPE_NAME' "$TMP/check-str-type-error.out"
 grep -q "unknown type 'str'.*type is 'string'" "$TMP/check-str-type-error.out"
+# An operator after `## T` is hint text; reject it instead of dropping it.
+if "$TUNGSTEN" --check "$HINT_OPERATOR_TAIL" >"$TMP/check-hint-tail.out" 2>&1; then
+  printf 'tungsten --check accepted an operator after a type hint\n' >&2
+  exit 1
+fi
+grep -q "'- ~0.5' after '## f64' is part of the type hint" "$TMP/check-hint-tail.out"
+"$TUNGSTEN" --check -e 'b = ((2 * 3) ## f64) - ~0.5' >"$TMP/check-hint-paren.out"
+grep -qx '200 OK' "$TMP/check-hint-paren.out"
 "$TUNGSTEN" --check -e 'value = "text" ## string' >"$TMP/check-string-type.out"
 grep -qx '200 OK' "$TMP/check-string-type.out"
 

@@ -1250,6 +1250,7 @@
     if comment_pos != nil
       hint = hint.slice(0, comment_pos)
     validate_type_hint_spelling(hint)
+    validate_type_hint_tail(hint)
     advance()
     hint = hint.strip()
     # A hint names a value, never `<<` / `<-` (a print's value is nil): bind
@@ -1315,6 +1316,29 @@
         text = parts[0].strip()
     if text == "str" || text.starts_with?("str\[")
       raise compile_error_at(:E_PARSE_INVALID_TYPE_NAME, "unknown type 'str'; Tungsten's text type is 'string'")
+
+  # The hint text runs to the end of its line or group, so in
+  # `(e) ## f64 - ~0.5` the `- ~0.5` is hint text that lowering would ignore.
+  # Reject an operator after the type name instead of dropping it silently.
+  # Only trailing ascriptions are checked: an own-line `## Heading / note`
+  # is a doc comment that the pending-hint collector ignores.
+  -> validate_type_hint_tail(hint)
+    text = hint.to_s()
+    comment_pos = text.index("#")
+    if comment_pos != nil
+      text = text.slice(0, comment_pos)
+    text = text.strip()
+    space = text.index(" ")
+    if space == nil
+      return nil
+    type_name = text.slice(0, space)
+    rest = text.slice(space, text.size() - space).strip()
+    if rest.size() == 0
+      return nil
+    first = rest.slice(0, 1)
+    if first in ("+" "-" "*" "/" "%" "&" "|" "^" "<" ">" "=" "~" "!")
+      raise compile_error_at(:E_PARSE_TYPE_HINT_OPERATOR, "'" + rest + "' after '## " + type_name + "' is part of the type hint, not an operation; parenthesize the cast: '((expr) ## " + type_name + ") " + rest + "'")
+    nil
 
   # `recase` / `recase expr` — re-run the enclosing case. Bare form (nil value)
   # re-evaluates the original subject; the expr form dispatches on expr. Same

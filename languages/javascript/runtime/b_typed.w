@@ -268,9 +268,10 @@ TA_BIG_START = 9
   nil
 
 # The value converted for this array's content type (ToNumber or ToBigInt).
+# TODO(tungsten): js_dyn keeps the BigInt path from being typed as Float (repros/numeric_infer.w)
 -> js_ta_convert(t, v)
-  return js_to_bigint_from(v, false) if js_ta_big?(t.kind)
-  js_to_number(v)
+  return js_dyn(js_to_bigint_from(v, false)) if js_ta_big?(t.kind)
+  js_dyn(js_to_number(v))
 
 # CanonicalNumericIndexString: an Int index, -1 for an invalid numeric key, nil for other keys.
 -> js_ta_index_key(k)

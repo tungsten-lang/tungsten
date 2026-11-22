@@ -2166,6 +2166,8 @@ typedef struct CGImg {
     CGImageRef      sc_img[CG_MAX_SCALED], sc_src[CG_MAX_SCALED];
     size_t          sc_w[CG_MAX_SCALED], sc_h[CG_MAX_SCALED], sc_bytes[CG_MAX_SCALED];
     int             sc_next;
+    CGImageRef      sc_pend_src;     /* the last uncached draw size: cached when drawn again */
+    size_t          sc_pend_w, sc_pend_h;
 } CGImg;
 
 static CGImg   *g_images[CG_MAX_IMAGES];
@@ -2978,8 +2980,9 @@ static int cg_image_draw_exact(CGCanvas *c, CGImg *im, CGImageRef img, double dx
  * resampled by CoreGraphics on every draw — every tile repaint, every scroll
  * frame that paints. Instead it is resampled once (at the canvas's quality)
  * to the device size it is drawn at and the copy is drawn about 1:1, which
- * CoreGraphics does as a near-copy. Two sizes are kept per image (bytes count
- * toward the image budget). TUNGSTEN_CG_SCALE_CACHE=0 turns it off. */
+ * CoreGraphics does as a near-copy. The copy is made on the second draw at a
+ * size (a single draw is left to CoreGraphics). Two sizes are kept per image
+ * (bytes count toward the image budget). TUNGSTEN_CG_SCALE_CACHE=0 turns it off. */
 static int g_scale_cache = -1;
 
 static CGImageRef cg_img_scaled(CGImg *im, CGImageRef src, CGCanvas *c, size_t tw, size_t th, CGInterpolationQuality q) {
@@ -2995,6 +2998,15 @@ static CGImageRef cg_img_scaled(CGImg *im, CGImageRef src, CGCanvas *c, size_t t
             pthread_mutex_unlock(&g_img_lock);
             return r;
         }
+    }
+    /* first draw at this size: no copy yet (a one-off draw would pay a whole-image
+     * resample for what may be a tile's worth of it); the second draw makes one */
+    if (!(im->sc_pend_src == src && im->sc_pend_w == tw && im->sc_pend_h == th)) {
+        im->sc_pend_src = src;
+        im->sc_pend_w = tw;
+        im->sc_pend_h = th;
+        pthread_mutex_unlock(&g_img_lock);
+        return NULL;
     }
     pthread_mutex_unlock(&g_img_lock);
     CGBitmapInfo info = (CGBitmapInfo)kCGImageAlphaPremultipliedLast;

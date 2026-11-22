@@ -18,6 +18,7 @@ use core/metal
 use core/codec/gpu
 
 JPEG_GPU_MIN = 1000000
+JPEG_GPU_USED = [0]          # images converted on the GPU (tests, benchmarks)
 
 -> jpeg_gpu_msl
   <<~MSL
@@ -225,6 +226,7 @@ JPEG_GPU_KERNELS = ["jpg_idct", "jpg_color"]
     i += 1
   cob = metal_buffer_for(dev, coefs)
   out = metal_buffer_for(dev, rgba)
+  pbs = []
   metal_batch_begin(q)
   c = 0
   while c < 3
@@ -234,6 +236,7 @@ JPEG_GPU_KERNELS = ["jpg_idct", "jpg_color"]
     nbx = ci[b + 7] < bw ? ci[b + 7] + 1 : bw
     nby = ci[b + 8] < bh ? ci[b + 8] + 1 : bh
     pb = codec_gpu_params(dev, [ci[b], bw, nbx, nby, ci[b + 6] * 64, offs[c], bw * 8])
+    pbs.push(pb)
     metal_dispatch_n(q, g[:pipes]["jpg_idct"], [cob, qtb, planes, pb], nbx * nby)
     c += 1
   metal_batch_barrier(q)
@@ -249,8 +252,15 @@ JPEG_GPU_KERNELS = ["jpg_idct", "jpg_color"]
     pv.push((w * hs + hmax - 1) / hmax)
     pv.push((h * vs + vmax - 1) / vmax)
     c += 1
-  metal_dispatch_n(q, g[:pipes]["jpg_color"], [planes, out, codec_gpu_params(dev, pv)], w * h)
+  pc = codec_gpu_params(dev, pv)
+  pbs.push(pc)
+  metal_dispatch_n(q, g[:pipes]["jpg_color"], [planes, out, pc], w * h)
   metal_batch_commit(q)
   metal_sync_array(rgba, out)
-  metal_buffer_release(planes)
+  JPEG_GPU_USED[0] += 1
+  pbs.push(planes)
+  pbs.push(qtb)
+  pbs.push(cob)
+  pbs.push(out)
+  pbs.each ->(b) metal_buffer_release(b)
   true

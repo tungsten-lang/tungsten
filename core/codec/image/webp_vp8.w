@@ -14,6 +14,7 @@
 
 use core/codec/video/vp8_core
 use core/codec/image
+use core/codec/image/webp_gpu
 use webp_vp8l
 use core/codec/video/vp8_core_tables
 
@@ -1014,8 +1015,10 @@ VP8_VOFF = 600
     vp8_recon_row(blk, mby, mbw, mbh, modes, co, nzs, ty, tu, tv, yp, up, vp, tmp)
     mby += 1
   vp8_filter_frame(yp, up, vp, mbw, mbh, fi, ftype) if ftype > 0
-  bmp = Bitmap.new(w, h)
-  vp8_to_rgba(yp, up, vp, ys, uvs, w, h, bmp.rgba)
+  # large frames: upsampling + colour on the GPU (core/codec/image/webp_gpu, bit-exact)
+  gpu = webp_gpu_wanted?(w, h)
+  bmp = gpu ? Bitmap.new(w, h, metal_array(8, w * h * 4)) : Bitmap.new(w, h)
+  vp8_to_rgba(yp, up, vp, ys, uvs, w, h, bmp.rgba) if !(gpu && webp_gpu_to_rgba(yp, up, vp, ys, uvs, w, h, bmp.rgba))
   vp8_free_all([yp, up, vp, ty, tu, tv, blk, modes, co, nzs, ctx, it, il4, info, dcb, tmp, fi, prob, tb, bm, q, fs, br])
   parts.each ->(x) vl_free(x)
   bmp

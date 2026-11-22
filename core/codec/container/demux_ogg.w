@@ -403,11 +403,7 @@ OGG_TAB = [nil]
 
 # ---- elementary streams parsed by their codec (MP3, ADTS AAC, native FLAC) ----
 
-ES_PARSERS = {}
-
-# parse: ->(bytes) {cfg:, samples:, duration:} (the codec file's *_es_parse).
--> es_parser_register(kind, parse)
-  ES_PARSERS[kind] = parse
+# ES_PARSERS / es_parser_register live in core/codec/media.w (every codec loads it).
 
 + EsDemuxer < Demuxer
   -> new(k)

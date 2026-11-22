@@ -1761,3 +1761,6 @@ acodec_register("mp4a", ->(cfg) AacDec.new(cfg))
     p += flen
   aac_fail("aac: no ADTS frames") if cfg == nil
   {cfg: cfg, samples: samples, duration: (nframes * 1024 ## f64) / (rate ## f64)}
+
+# Raw elementary-stream files (.mp3 / .aac ADTS / .flac) go through this parser.
+es_parser_register(:adts, ->(b) aac_es_parse(b))

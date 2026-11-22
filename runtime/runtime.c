@@ -755,6 +755,23 @@ static void *w_memwatch_main(void *arg) {
     return NULL;
 }
 
+/* Process.memory_footprint → physical footprint in bytes (compressed pages
+ * included); Process.memory_limit = bytes (0 = none) changes the ceiling the
+ * watch enforces, so a program can set its own default without the env var. */
+WValue w_memwatch_get_footprint(void) {
+    return w_int((int64_t)w_memwatch_footprint());
+}
+
+WValue w_memwatch_set_limit(WValue bytes) {
+    int64_t n = w_is_int(bytes) ? w_as_int(bytes) : 0;
+    g_memwatch_limit = n > 0 ? (uint64_t)n : 0;
+    return W_NIL;
+}
+
+WValue w_memwatch_get_limit(void) {
+    return w_int((int64_t)g_memwatch_limit);
+}
+
 __attribute__((constructor))
 static void w_memwatch_start(void) {
     uint64_t limit = W_MEMWATCH_DEFAULT_LIMIT;
@@ -779,6 +796,10 @@ static void w_memwatch_start(void) {
     pthread_create(&t, &attr, w_memwatch_main, NULL);
     pthread_attr_destroy(&attr);
 }
+#else
+WValue w_memwatch_get_footprint(void) { return w_int(0); }
+WValue w_memwatch_set_limit(WValue bytes) { (void)bytes; return W_NIL; }
+WValue w_memwatch_get_limit(void) { return w_int(0); }
 #endif /* __APPLE__ || __linux__ */
 
 #if BN_BIGINT_ARENA_ACTIVE
@@ -54960,6 +54981,17 @@ int64_t __w_deadline_ticks_after_seconds(int64_t seconds) {
 #endif
 }
 
+int64_t __w_deadline_ticks_after_ms(int64_t ms) {
+#ifdef __APPLE__
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0) mach_timebase_info(&tb);
+    uint64_t ticks_per_ms = (1000000ULL * (uint64_t)tb.denom) / (uint64_t)tb.numer;
+    return __w_clock_ticks_raw() + ms * (int64_t)ticks_per_ms;
+#else
+    return __w_clock_ticks_raw() + ms * 1000000LL;
+#endif
+}
+
 int64_t __w_clock_ns_raw(void) {
 #ifdef __APPLE__
     static mach_timebase_info_data_t tb;
@@ -74732,9 +74764,22 @@ static int w_socket_tcp_connect_fd_impl(const char *host, int port, int64_t dead
     }
 
     if (ret < 0) {
-        /* EINPROGRESS — park on write-ready */
-        if (!w_socket_park_until(fd, W_EVENT_WRITE, deadline_ticks)) {
+        /* EINPROGRESS — park on write-ready. Outside a goroutine the park is a
+         * poll(2) of at most 100 ms when there is no deadline, so keep waiting:
+         * without this a native Thread (or the main thread) failed every connect
+         * slower than 100 ms and got back a Socket with fd -1. No deadline means
+         * the kernel's own connect timeout decides. */
+        int ready = 0;
+        for (;;) {
+            if (w_socket_park_until(fd, W_EVENT_WRITE, deadline_ticks)) { ready = 1; break; }
+            if (deadline_ticks > 0 || w_deadline_expired(deadline_ticks)) break;
+            int so_err = 0;
+            socklen_t so_len = sizeof(so_err);
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_err, &so_len) == 0 && so_err != 0) { ready = 1; break; }
+        }
+        if (!ready) {
             close(fd);
+            if (raise_errors) w_raise(w_string("socket: connect timed out"));
             return -1;
         }
 
@@ -74754,6 +74799,7 @@ static int w_socket_tcp_connect_fd_impl(const char *host, int port, int64_t dead
 
 WValue w_socket_tcp_connect(const char *host, int port) {
     int fd = w_socket_tcp_connect_fd_impl(host, port, 0, 1);
+    if (fd < 0) w_raise(w_string("socket: connect failed"));
     WSocket *s = calloc(1, sizeof(WSocket));
     s->type = W_TYPE_SOCKET;
     s->fd = fd;
@@ -74765,6 +74811,22 @@ WValue w_socket_tcp_connect(const char *host, int port) {
 
 WValue w_socket_connect_raw(WValue host, int64_t port) {
     return w_socket_tcp_connect(as_str(host), (int)port);
+}
+
+/* Socket.connect(host, port, timeout_ms): raises "socket: connect timed out" when the
+ * handshake has not completed within timeout_ms (> 0). */
+WValue w_socket_connect_timeout(WValue host, WValue port, WValue timeout_ms) {
+    int64_t ms = w_is_int(timeout_ms) ? w_as_int(timeout_ms) : 0;
+    int64_t deadline = ms > 0 ? __w_deadline_ticks_after_ms(ms) : 0;
+    int fd = w_socket_tcp_connect_fd_impl(as_str(host), (int)w_as_int(port), deadline, 1);
+    if (fd < 0) w_raise(w_string("socket: connect failed"));
+    WSocket *s = calloc(1, sizeof(WSocket));
+    s->type = W_TYPE_SOCKET;
+    s->fd = fd;
+    s->listening = 0;
+    s->closed = 0;
+    s->ssl = NULL;
+    return w_box_ptr(s, W_SUBTAG_SOCKET);
 }
 
 int64_t w_socket_connect_fd(WValue host, int64_t port) {

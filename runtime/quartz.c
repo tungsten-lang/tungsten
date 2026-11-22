@@ -2145,6 +2145,7 @@ WValue w_cg_text_measure(WValue hv, WValue sv) {
 
 #define CG_MAX_IMAGES   16384
 #define CG_MAX_VARIANTS 4
+#define CG_MAX_SCALED   2
 
 typedef struct {
     CGColorSpaceRef space;   /* canvas space this variant is for (retained) */
@@ -2161,6 +2162,10 @@ typedef struct CGImg {
     size_t          w, h, bytes;
     int             nvar, next_var;
     CGImgVariant    var[CG_MAX_VARIANTS];
+    /* copies resampled to the device size they are drawn at (cg_img_scaled) */
+    CGImageRef      sc_img[CG_MAX_SCALED], sc_src[CG_MAX_SCALED];
+    size_t          sc_w[CG_MAX_SCALED], sc_h[CG_MAX_SCALED], sc_bytes[CG_MAX_SCALED];
+    int             sc_next;
 } CGImg;
 
 static CGImg   *g_images[CG_MAX_IMAGES];
@@ -2176,6 +2181,8 @@ static void cg_img_free(CGImg *im) {
         if (im->var[i].image) CGImageRelease(im->var[i].image);
         if (im->var[i].space) CGColorSpaceRelease(im->var[i].space);
     }
+    for (int i = 0; i < CG_MAX_SCALED; i++)
+        if (im->sc_img[i]) CGImageRelease(im->sc_img[i]);
     if (im->image) CGImageRelease(im->image);
     free(im->path);
     free(im);
@@ -2184,6 +2191,7 @@ static void cg_img_free(CGImg *im) {
 static size_t cg_img_total(CGImg *im) {
     size_t t = im->bytes;
     for (int i = 0; i < im->nvar; i++) t += im->var[i].bytes;
+    for (int i = 0; i < CG_MAX_SCALED; i++) t += im->sc_bytes[i];
     return t;
 }
 
@@ -2405,6 +2413,34 @@ static void cg_free_pixels(void *info, const void *data, size_t size) {
  * pixels are copied (premultiplied, the layout every other image uses), so
  * the buffer may be reused or freed at once. For decoders written in
  * Tungsten: nothing touches the disk and ImageIO is not involved. */
+static WValue cg_image_adopt_rgba(uint8_t *px, size_t w, size_t h, int opaque);
+
+/* w_cg_image_from_premultiplied(buf, w, h, opaque) -> handle: like
+ * image_from_rgba for pixels a decoder already premultiplied (RGBA8, the
+ * canvas's own format): one memcpy, no per-pixel work. opaque: every alpha
+ * is 255 (stored as RGBX; drawn without blending). */
+WValue w_cg_image_from_premultiplied(WValue bufv, WValue wv, WValue hv, WValue opaquev) {
+    double dw = cg_num(wv, "width"), dh = cg_num(hv, "height");
+    if (!(dw >= 1 && dh >= 1 && dw <= 1048576 && dh <= 1048576) || dw * dh > 4.0e9 / 4)
+        cg_raise("Canvas.image_from_premultiplied: bad size %gx%g", dw, dh);
+    size_t w = (size_t)dw, h = (size_t)dh, n = w * h * 4;
+    const uint8_t *src = NULL;
+    if (w_is_int(bufv)) {
+        src = (const uint8_t *)(uintptr_t)w_as_int(bufv);
+    } else if (w_is_array(bufv)) {
+        WArray *a = w_as_array(bufv);
+        if (a->ebits != 8) cg_raise("Canvas.image_from_premultiplied: pixels must be a ByteArray (u8[])");
+        if ((size_t)a->size < n)
+            cg_raise("Canvas.image_from_premultiplied: buffer has %lld bytes, need %zu", (long long)a->size, n);
+        src = (const uint8_t *)a->slots + (size_t)a->start;
+    }
+    if (!src) cg_raise("Canvas.image_from_premultiplied: pixels must be a ByteArray or data pointer Integer");
+    uint8_t *px = malloc(n);
+    if (!px) cg_raise("Canvas.image_from_premultiplied: out of memory");
+    memcpy(px, src, n);
+    return cg_image_adopt_rgba(px, w, h, cg_truthy(opaquev));
+}
+
 WValue w_cg_image_from_rgba(WValue bufv, WValue wv, WValue hv) {
     double dw = cg_num(wv, "width"), dh = cg_num(hv, "height");
     if (!(dw >= 1 && dh >= 1 && dw <= 1048576 && dh <= 1048576) || dw * dh > 4.0e9 / 4)
@@ -2425,23 +2461,36 @@ WValue w_cg_image_from_rgba(WValue bufv, WValue wv, WValue hv) {
     }
     uint8_t *px = malloc(n);
     if (!px) cg_raise("Canvas.image_from_rgba: out of memory");
-    for (size_t i = 0; i < n; i += 4) {
-        unsigned a = src[i + 3];
-        if (a == 255) {
-            px[i] = src[i]; px[i + 1] = src[i + 1]; px[i + 2] = src[i + 2]; px[i + 3] = 255;
-        } else {
-            /* round(c * a / 255) */
-            unsigned t;
+    /* Opaque images (every alpha 255: JPEG, video, most photos) are a plain
+     * copy, stored as RGBX so CoreGraphics composites them without blending;
+     * otherwise a branch-free premultiply the compiler vectorises:
+     * round(c * a / 255) = (t + (t >> 8)) >> 8 with t = c * a + 128, exact
+     * for a = 255 too. */
+    int opaque = 1;
+    for (size_t i = 3; i < n; i += 4) {
+        if (src[i] != 255) { opaque = 0; break; }
+    }
+    if (opaque) {
+        memcpy(px, src, n);
+    } else {
+        for (size_t i = 0; i < n; i += 4) {
+            unsigned a = src[i + 3], t;
             t = src[i] * a + 128;     px[i]     = (uint8_t)((t + (t >> 8)) >> 8);
             t = src[i + 1] * a + 128; px[i + 1] = (uint8_t)((t + (t >> 8)) >> 8);
             t = src[i + 2] * a + 128; px[i + 2] = (uint8_t)((t + (t >> 8)) >> 8);
             px[i + 3] = (uint8_t)a;
         }
     }
+    return cg_image_adopt_rgba(px, w, h, opaque);
+}
+
+/* An image over px (w * h RGBA8 premultiplied, malloc'd: the image frees it). */
+static WValue cg_image_adopt_rgba(uint8_t *px, size_t w, size_t h, int opaque) {
+    size_t n = w * h * 4;
     CGDataProviderRef prov = CGDataProviderCreateWithData(NULL, px, n, cg_free_pixels);
     if (!prov) { free(px); cg_raise("Canvas.image_from_rgba: CGDataProviderCreateWithData failed"); }
     CGImageRef img = CGImageCreate(w, h, 8, 32, w * 4, cg_srgb(),
-                                   (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big,
+                                   (CGBitmapInfo)(opaque ? kCGImageAlphaNoneSkipLast : kCGImageAlphaPremultipliedLast) | kCGBitmapByteOrder32Big,
                                    prov, NULL, false, kCGRenderingIntentDefault);
     CGDataProviderRelease(prov);
     if (!img) cg_raise("Canvas.image_from_rgba: CGImageCreate failed");
@@ -2924,6 +2973,59 @@ static int cg_image_draw_exact(CGCanvas *c, CGImg *im, CGImageRef img, double dx
  *   "fill"/"none" (stretch); align: SVG preserveAspectRatio alignment
  *   ("xMidYMid", "xMinYMax", …). sx..sh crop the source in image pixels
  *   (sw nil or <= 0 = whole image). w/h nil = the image's own size. */
+/* ---- drawn-size cache ----
+ * A large image drawn much smaller (a 3000 px photo in a 600 px box) is
+ * resampled by CoreGraphics on every draw — every tile repaint, every scroll
+ * frame that paints. Instead it is resampled once (at the canvas's quality)
+ * to the device size it is drawn at and the copy is drawn about 1:1, which
+ * CoreGraphics does as a near-copy. Two sizes are kept per image (bytes count
+ * toward the image budget). TUNGSTEN_CG_SCALE_CACHE=0 turns it off. */
+static int g_scale_cache = -1;
+
+static CGImageRef cg_img_scaled(CGImg *im, CGImageRef src, CGCanvas *c, size_t tw, size_t th, CGInterpolationQuality q) {
+    if (g_scale_cache < 0) {
+        const char *e = getenv("TUNGSTEN_CG_SCALE_CACHE");
+        g_scale_cache = (e && e[0] == '0') ? 0 : 1;
+    }
+    if (!g_scale_cache) return NULL;
+    pthread_mutex_lock(&g_img_lock);
+    for (int i = 0; i < CG_MAX_SCALED; i++) {
+        if (im->sc_img[i] && im->sc_src[i] == src && im->sc_w[i] == tw && im->sc_h[i] == th) {
+            CGImageRef r = CGImageRetain(im->sc_img[i]);
+            pthread_mutex_unlock(&g_img_lock);
+            return r;
+        }
+    }
+    pthread_mutex_unlock(&g_img_lock);
+    CGBitmapInfo info = (CGBitmapInfo)kCGImageAlphaPremultipliedLast;
+    if (c->bpc == 8) info |= kCGBitmapByteOrder32Big;
+    else if (c->bpc == 16) info |= kCGBitmapByteOrder16Little | (c->is_float ? kCGBitmapFloatComponents : 0);
+    else info |= kCGBitmapByteOrder32Little | kCGBitmapFloatComponents;
+    CGContextRef ctx = CGBitmapContextCreate(NULL, tw, th, (size_t)c->bpc, 0, c->space, info);
+    if (!ctx) return NULL;
+    CGContextSetBlendMode(ctx, kCGBlendModeCopy);
+    CGContextSetInterpolationQuality(ctx, q);
+    CGContextDrawImage(ctx, CGRectMake(0, 0, tw, th), src);
+    CGImageRef out = CGBitmapContextCreateImage(ctx);
+    size_t bytes = CGBitmapContextGetBytesPerRow(ctx) * th;
+    CGContextRelease(ctx);
+    if (!out) return NULL;
+    pthread_mutex_lock(&g_img_lock);
+    int k = im->sc_next++ % CG_MAX_SCALED;
+    if (im->sc_img[k]) {
+        CGImageRelease(im->sc_img[k]);
+        g_image_bytes -= im->sc_bytes[k];
+    }
+    im->sc_img[k] = CGImageRetain(out);
+    im->sc_src[k] = src;
+    im->sc_w[k] = tw;
+    im->sc_h[k] = th;
+    im->sc_bytes[k] = bytes;
+    g_image_bytes += bytes;
+    pthread_mutex_unlock(&g_img_lock);
+    return out;
+}
+
 WValue w_cg_image_draw(WValue hv, WValue imv, WValue xv, WValue yv, WValue wv, WValue hgtv,
                        WValue fitv, WValue alignv, WValue opv, WValue qv,
                        WValue sxv, WValue syv, WValue swv, WValue shv) {
@@ -2972,6 +3074,16 @@ WValue w_cg_image_draw(WValue hv, WValue imv, WValue xv, WValue yv, WValue wv, W
         part = CGImageCreateWithImageInRect(img, CGRectMake(sx, sy, sw, sh));
         if (!part) return W_FALSE;
         img = part;
+    } else if (q != kCGInterpolationNone && iw * ih >= 65536) {
+        /* drawn well below its size on an axis-aligned CTM: draw a copy resampled to that size */
+        CGAffineTransform m = CGContextGetCTM(c->ctx);
+        if (m.b == 0 && m.c == 0) {
+            double pw = fabs(m.a) * dw, ph = fabs(m.d) * dh;
+            if (pw >= 1 && ph >= 1 && pw < 0.75 * iw && ph < 0.75 * ih) {
+                part = cg_img_scaled(im, img, c, (size_t)lround(pw), (size_t)lround(ph), q);
+                if (part) img = part;
+            }
+        }
     }
     CGContextSaveGState(c->ctx);
     if (slice) CGContextClipToRect(c->ctx, CGRectMake(x, y, w, h));

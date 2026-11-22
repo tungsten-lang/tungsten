@@ -1276,15 +1276,17 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 # bare name that nothing in this function shadows (a slot, binding, typed
 # local, parameter, function, or any assignment in the body), as a fresh
 # literal node; otherwise nil. Top-level code keeps reading the global.
--> literal_const_node(ctx, nm)
+-> literal_const_node(ctx, nm, allow_wide = false)
   if ctx[:func][:name] == "main"
     return nil
   mod = ctx[:mod]
   fl = mod[:top_level_float_literals]
   il = mod[:top_level_int_literals]
+  wl = mod[:top_level_wide_int_literals]
   isf = fl != nil && fl[nm] != nil
   isi = il != nil && il.has_key?(nm)
-  if !isf && !isi
+  isw = allow_wide && !isi && wl != nil && wl.has_key?(nm)
+  if !isf && !isi && !isw
     return nil
   if pipe_ident_shadowed?(ctx, nm)
     return nil
@@ -1293,6 +1295,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return nil
   if isf
     return Tungsten:AST:Float.new(fl[nm].value.to_s())
+  if isw
+    return Tungsten:AST:Int.new(wl[nm])
   Tungsten:AST:Int.new(il[nm])
 
 # Replace such names inside an arithmetic subtree (binary and unary
@@ -1304,15 +1308,15 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   k = ast_kind(node)
   if k == :binary_op
     l = node.left
+    r = node.right
     if l != nil && is_ast_node?(l) && ast_kind(l) == :var
-      rl = literal_const_node(ctx, l.name)
+      rl = literal_const_node(ctx, l.name, literal_const_machine_operand?(ctx, r))
       if rl != nil
         node.left = rl
     else
       inline_literal_consts(ctx, l)
-    r = node.right
     if r != nil && is_ast_node?(r) && ast_kind(r) == :var
-      rr = literal_const_node(ctx, r.name)
+      rr = literal_const_node(ctx, r.name, literal_const_machine_operand?(ctx, node.left))
       if rr != nil
         node.right = rr
     else
@@ -1328,6 +1332,16 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   elsif k == :type_ascription
     inline_literal_consts(ctx, node.expression)
   nil
+
+# A wide (past-i48) literal constant folds only beside an operand typed as a
+# machine int, where it lowers as an immediate. Beside a boxed operand the
+# literal would be boxed into a fresh BigInt on every evaluation, while the
+# global it replaces holds one shared box.
+-> literal_const_machine_operand?(ctx, other)
+  if other == nil || !is_ast_node?(other)
+    return false
+  t = infer_type(other, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+  is_machine_int_type(canonical_machine_int_type(t))
 
 -> pipe_ident_shadowed?(ctx, nm)
   if ctx[:func][:var_slots][nm] != nil || ctx[:bindings][nm] != nil || ctx[:var_types][nm] != nil

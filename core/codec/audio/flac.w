@@ -514,6 +514,8 @@ FL_BPS = [0, 8, 12, 0, 16, 20, 24, 32]
   ro :rate, :channels, :bps, :last_ints, :last_stride, :last_frames, :last_channels, :crc_errors
 
   -> new(cfg)
+    @reuse = cfg.is_a?(CodecConfig) && cfg.reuse_output == true
+    @obuf = nil
     @si = nil
     @rate = cfg.sample_rate
     @channels = cfg.channels
@@ -557,7 +559,8 @@ FL_BPS = [0, 8, 12, 0, 16, 20, 24, 32]
     if bs > @stride
       @stride = bs
       @s = i64[@stride * 8]
-    out = f32[bs * ch]
+    @obuf = audio_out(@obuf, @reuse, bs * ch)
+    out = @obuf ## f32[]
     ok = false
     if r == 0
       e = fl_frame(b, 0, nb, hi, bps, @s, @stride, @coef, @st, FL_CLZ, FL_CRC16)
@@ -569,10 +572,20 @@ FL_BPS = [0, 8, 12, 0, 16, 20, 24, 32]
     else
       @crc_errors += 1
       @last_frames = 0
+      fl_zero_f32(out, bs * ch) if @reuse
     @last_ints = @s
     @last_stride = @stride
     @last_channels = ch
-    AudioBlock.new(out, bs, ch, rate, sample.pts)
+    blk = AudioBlock.new(out, bs, ch, rate, sample.pts)
+    blk.owned = !@reuse
+    blk
+
+-> fl_zero_f32(a, n) (f32[] i64) i64
+  i = 0
+  while i < n
+    a[i] = (~0.0 ## f32)
+    i += 1
+  n
 
 acodec_register("flac", ->(cfg) FlacDec.new(cfg))
 

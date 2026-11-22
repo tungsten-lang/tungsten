@@ -1298,6 +1298,8 @@ MP_DEQ12 = mp_mk_deq12()
   ro :rate, :channels, :bad_frames
 
   -> new(cfg)
+    @reuse = cfg.is_a?(CodecConfig) && cfg.reuse_output == true
+    @obuf = nil
     @rate = cfg.sample_rate
     @channels = cfg.channels
     @fbuf = u8[4096]
@@ -1343,7 +1345,8 @@ MP_DEQ12 = mp_mk_deq12()
     nch = 2
     nch = 1 if (h3 & 192) == 192
     spf = mp_hdr_spf(h1)
-    out = f32[spf * nch]
+    @obuf = audio_out(@obuf, @reuse, spf * nch)
+    out = @obuf ## f32[]
     if @fbuf.size < fsize + 16
       @fbuf = u8[fsize + 16]
       @md = u8[511 + fsize + 64]
@@ -1373,7 +1376,9 @@ MP_DEQ12 = mp_mk_deq12()
         k += 1
     @rate = rate
     @channels = nch
-    AudioBlock.new(out, spf, nch, rate, sample.pts)
+    blk = AudioBlock.new(out, spf, nch, rate, sample.pts)
+    blk.owned = !@reuse
+    blk
 
   -> decode_l3(fb, h1, h2, h3, nch, out)
     st = @st

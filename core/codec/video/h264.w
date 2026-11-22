@@ -65,6 +65,7 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
     @serial = 0
     @slice_counter = 0
     @dpb = []
+    @spare = []          # buffer sets [y, cb, cr, mv, refi, rid] of dead pictures, reused (bury_dead)
     @out = []
     @cur = nil
     @prev_ref_frame_num = 0
@@ -213,16 +214,18 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
   # ------------------------------------------------------------ decoder API
 
   # Pictures that left the DPB in the previous call: their planes were (maybe)
-  # handed out as frames the caller has converted by now, so release them.
+  # handed out as frames the caller has converted by now, so they go back to
+  # the picture pool (@spare, buffers of the current size) or are released.
   -> bury_dead
     if @grave != nil
       @grave.each ->(q)
-        ccall("w_value_free_w", q.y) if q.y != nil
-        ccall("w_value_free_w", q.cb) if q.cb != nil && q.cb != q.y
-        ccall("w_value_free_w", q.cr) if q.cr != nil && q.cr != q.cb
-        ccall("w_value_free_w", q.mv) if q.mv != nil
-        ccall("w_value_free_w", q.refi) if q.refi != nil
-        ccall("w_value_free_w", q.rid) if q.rid != nil
+        if !recycle(q)
+          ccall("w_value_free_w", q.y) if q.y != nil
+          ccall("w_value_free_w", q.cb) if q.cb != nil && q.cb != q.y
+          ccall("w_value_free_w", q.cr) if q.cr != nil && q.cr != q.cb
+          ccall("w_value_free_w", q.mv) if q.mv != nil
+          ccall("w_value_free_w", q.refi) if q.refi != nil
+          ccall("w_value_free_w", q.rid) if q.rid != nil
         q.y = nil
         q.cb = nil
         q.cr = nil
@@ -231,6 +234,16 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
         q.rid = nil
     @grave = []
     nil
+
+  # Keep a dead picture's buffers for the next picture when they have the
+  # current size (true: q's buffers now belong to the pool).
+  -> recycle(q)
+    return false if q.y == nil || q.mv == nil || q.refi == nil || q.rid == nil || q.nonexist == 1
+    return false if @spare.size >= 4 || q.y.size != @lw * @lh || q.mv.size != @n4 * 4
+    csz = @cfmt != 0 ? @cw * @ch : 1
+    return false if q.cb == nil || q.cr == nil || q.cb == q.y || q.cb.size != csz || q.cr.size != csz
+    @spare.push([q.y, q.cb, q.cr, q.mv, q.refi, q.rid])
+    true
 
   # Drop pictures from the DPB (mode 0: all; 1: keep references; 2: keep
   # references and pictures waiting for output), queueing the dropped ones for
@@ -471,12 +484,7 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
       fill_frame_gap(sl, sps)
     @serial += 1
     pic = H264Pic.new(@serial)
-    @cur_y = u8[@lw * @lh]
-    @cur_cb = u8[@cfmt != 0 ? @cw * @ch : 1]
-    @cur_cr = u8[@cfmt != 0 ? @cw * @ch : 1]
-    @cur_mv = i32[@n4 * 4]
-    @cur_ref = i32[@n4 * 2]
-    @cur_rid = i32[@n4 * 2]
+    take_buffers()
     pic.y = @cur_y
     pic.cb = @cur_cb
     pic.cr = @cur_cr
@@ -494,6 +502,32 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
     @npics += 1
     @cur = pic
     @cur_ref_idc = sl.nal_ref_idc
+    0
+
+  # The current picture's planes and motion arrays: a pooled set of the
+  # current size (motion arrays cleared, as freshly allocated ones are) or new.
+  -> take_buffers
+    csz = @cfmt != 0 ? @cw * @ch : 1
+    while @spare.size > 0
+      b = @spare.pop
+      if b[0].size == @lw * @lh && b[1].size == csz && b[3].size == @n4 * 4
+        @cur_y = b[0] ## u8[]
+        @cur_cb = b[1] ## u8[]
+        @cur_cr = b[2] ## u8[]
+        @cur_mv = b[3] ## i32[]
+        @cur_ref = b[4] ## i32[]
+        @cur_rid = b[5] ## i32[]
+        @cur_mv.fill(0)
+        @cur_ref.fill(0)
+        @cur_rid.fill(0)
+        return 0
+      b.each ->(a) ccall("w_value_free_w", a)
+    @cur_y = u8[@lw * @lh]
+    @cur_cb = u8[csz]
+    @cur_cr = u8[csz]
+    @cur_mv = i32[@n4 * 4]
+    @cur_ref = i32[@n4 * 2]
+    @cur_rid = i32[@n4 * 2]
     0
 
   -> compute_poc(pic, sl, sps)
@@ -570,9 +604,10 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
       @dpb.each ->(q)
         lastr = q if q.ref != 0 && (lastr == nil || q.serial > lastr.serial)
       if lastr != nil
-        p.y = lastr.y.copy(0, lastr.y.size)
-        p.cb = lastr.cb.copy(0, lastr.cb.size) if @cfmt != 0
-        p.cr = lastr.cr.copy(0, lastr.cr.size) if @cfmt != 0
+        h264_copy_u8(lastr.y, p.y, p.y.size)
+        if @cfmt != 0
+          h264_copy_u8(lastr.cb, p.cb, p.cb.size)
+          h264_copy_u8(lastr.cr, p.cr, p.cr.size)
       sliding_window(gfn, sps)
       p.ref = 1
       @dpb.push(p)
@@ -1091,3 +1126,10 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
 vcodec_register("avc1", ->(cfg) H264Dec.new(cfg))
 vcodec_register("avc3", ->(cfg) H264Dec.new(cfg))
 vcodec_register("h264", ->(cfg) H264Dec.new(cfg))
+
+-> h264_copy_u8(a, b, n) (u8[] u8[] i64) i64
+  i = 0
+  while i < n
+    b[i] = a[i]
+    i += 1
+  n

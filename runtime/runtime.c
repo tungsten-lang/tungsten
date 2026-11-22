@@ -78154,6 +78154,10 @@ W_BRIDGE_STUB WValue w_gfx_tex_upload_yuv(WValue window, WValue tex_id, WValue p
     (void)window; (void)tex_id; (void)planes; (void)params;
     return w_gfx_unavailable();
 }
+W_BRIDGE_STUB WValue w_gfx_tex_set_surface(WValue window, WValue tex_id, WValue pb, WValue params) {
+    (void)window; (void)tex_id; (void)pb; (void)params;
+    return w_gfx_unavailable();
+}
 W_BRIDGE_STUB WValue w_gfx_capture_next(WValue window) {
     (void)window;
     return w_gfx_unavailable();

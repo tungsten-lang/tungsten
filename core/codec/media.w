@@ -41,6 +41,22 @@
 #   "pcm "  {bits: 8|16|24|32, float: bool, big_endian: bool}
 # Elementary-stream files (MP3, ADTS AAC, native FLAC, WAV) are split into
 # samples by the codec's own *_es_parse(bytes) (see each codec file).
+#
+# Streaming consumers (a player) can opt out of per-frame allocation through
+# two CodecConfig hints, set before the decoder is created:
+#   cfg.reuse_output = true   decoders may return their own buffers, valid
+#                             until the next call: audio an f32[] (AudioBlock
+#                             #owned false; samples.size may exceed frames *
+#                             channels), video planes they would otherwise
+#                             allocate per frame (VideoFrame#owned false)
+#   cfg.surfaces = true       the system video decoder hands out its picture
+#                             buffers as GPU surfaces (VideoFrame#surface, no
+#                             planes: core/codec/video/yuv_gpu presents them
+#                             without a copy; f.materialize copies them out);
+#                             the consumer releases each frame with f.release
+# Plane buffers that a consumer keeps (frame rings) come from media_plane(n,
+# bits): page-aligned, page-multiple storage that can back a Metal buffer
+# without a copy (newBufferWithBytesNoCopy).
 # ==== end of core header ====
 
 + MediaError < StandardError
@@ -51,8 +67,12 @@
   # code points; 2 = unspecified (the bitstream's own VUI wins when present).
   # codec_string: the RFC 6381 string ("avc1.64001f", "vp09.00.10.08") if known.
   rw :primaries, :transfer, :matrix, :full_range, :codec_string
+  # Consumer hints (see the header): reuse audio output buffers / take system video surfaces.
+  rw :reuse_output, :surfaces
 
   -> new(@codec, @extra = nil)
+    @reuse_output = false
+    @surfaces = false
     @primaries = 2
     @transfer = 2
     @matrix = 2
@@ -84,11 +104,17 @@
 # they drop explicitly). owned: true when the planes were allocated for this
 # frame alone, so the consumer may release them (ccall "w_value_free_w")
 # once it has converted the frame.
+# surface: a system decoder's picture buffer (an opaque handle; cfg.surfaces)
+# instead of planes; surface_ptr its CVPixelBuffer's address while the handle
+# is held. release: the consumer is done (frees owned planes, gives the
+# surface back); materialize: copy a surface frame's picture out into planes.
 + VideoFrame
-  rw :width, :height, :planes, :strides, :chroma, :bit_depth, :pts, :duration, :primaries, :transfer, :matrix, :full_range, :crop, :owned
+  rw :width, :height, :planes, :strides, :chroma, :bit_depth, :pts, :duration, :primaries, :transfer, :matrix, :full_range, :crop, :owned, :surface, :surface_ptr
 
   -> new(@width, @height, @planes, @strides, @chroma, @bit_depth, @pts)
     @owned = false
+    @surface = nil
+    @surface_ptr = 0
     @duration = ~0.0
     @primaries = 1
     @transfer = 1
@@ -96,13 +122,73 @@
     @full_range = false
     @crop = nil
 
+  # Release what this frame holds once its consumer is done with it: planes
+  # allocated for it alone (owned) and its system surface.
+  -> release
+    if @surface != nil
+      VIDEO_SURFACE_OPS[0].call(@surface) if VIDEO_SURFACE_OPS[0] != nil
+      @surface = nil
+      @surface_ptr = 0
+    if @owned
+      i = 0
+      while i < @planes.size
+        ccall("w_value_free_w", @planes[i])
+        i += 1
+      @planes = []
+      @owned = false
+    nil
+
+  # Give a surface frame planes of its own (copied out of the surface, owned
+  # by the frame, which keeps the surface until release). Returns self.
+  -> materialize
+    return self if @surface == nil || @planes.size >= 3 || VIDEO_SURFACE_OPS[1] == nil
+    cw = (@width + 1) / 2
+    ch = (@height + 1) / 2
+    pl = nil
+    if @bit_depth > 8
+      pl = [u16[@width * @height], u16[cw * ch], u16[cw * ch]]
+    else
+      pl = [u8[@width * @height], u8[cw * ch], u8[cw * ch]]
+    VIDEO_SURFACE_OPS[1].call(@surface, pl)
+    @planes = pl
+    @strides = [@width, cw, cw]
+    @owned = true
+    self
+
+# [release(handle), copy_planes(handle, planes)] for surface frames (core/codec/system).
+VIDEO_SURFACE_OPS = [nil, nil]
+
+-> video_surface_ops(release, copy)
+  VIDEO_SURFACE_OPS[0] = release
+  VIDEO_SURFACE_OPS[1] = copy
+
 # Decoded audio: interleaved Float32 samples in -1…1: samples is an f32[] of
 # frames * channels values (frame-major: L R L R …), at sample_rate. pts in
-# seconds (the pts of the sample it came from).
+# seconds (the pts of the sample it came from). owned: true when samples was
+# allocated for this block (the consumer may free it); false when it is the
+# decoder's reused buffer (cfg.reuse_output), valid until the next call.
 + AudioBlock
-  rw :samples, :frames, :channels, :sample_rate, :pts
+  rw :samples, :frames, :channels, :sample_rate, :pts, :owned
 
   -> new(@samples, @frames, @channels, @sample_rate, @pts)
+    @owned = true
+
+# The output buffer of an audio decoder for n values: the decoder's reused one
+# (cfg.reuse_output; grown when too small) or a fresh f32[]. Usage:
+#   @obuf = audio_out(@obuf, @reuse, n)  ...  blk.owned = !@reuse
+-> audio_out(buf, reuse, n)
+  return f32[n < 1 ? 1 : n] if !reuse
+  return buf if buf != nil && buf.size >= n
+  ccall("w_value_free_w", buf) if buf != nil
+  f32[n < 1024 ? 1024 : n]
+
+# Page-aligned plane storage for n samples (u8[] when bits <= 8, else u16[]):
+# its base and length are page multiples, so a Metal buffer can wrap it with
+# no copy. Costs a system call: allocate once and reuse (frame rings, pools).
+-> media_plane(n, bits)
+  return ccall("w_array_new_aligned", 16, n < 1 ? 1 : n) if bits > 8
+  ccall("w_array_new_aligned", 8, n < 1 ? 1 : n)
+
 
 VCODECS = {}
 ACODECS = {}

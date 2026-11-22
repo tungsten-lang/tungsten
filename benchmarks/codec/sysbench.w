@@ -2,7 +2,7 @@
 # VideoToolbox, AudioToolbox, ImageIO) on the same files.
 #
 #   bin/tungsten -o /tmp/sysbench --release benchmarks/codec/sysbench.w
-#   /tmp/sysbench video FILE ours|sys|sysdrop    one decoder: speed, CPU, memory
+#   /tmp/sysbench video FILE ours|sys|sysdrop|syssurf    one decoder: speed, CPU, memory
 #   /tmp/sysbench audio FILE ours|sys
 #   /tmp/sysbench image FILE ours|sys [N]        N decodes (default 5)
 #   /tmp/sysbench cmpvideo FILE                  both decoders: PSNR per plane
@@ -18,7 +18,9 @@
 #   frame / block).
 # Run each speed measurement in its own process so the peak RSS is that
 # decoder's. "sys" copies every frame out of the CVPixelBuffer into Y/Cb/Cr
-# planes (the VideoFrame contract); "sysdrop" only decodes.
+# planes (the VideoFrame contract); "sysdrop" only decodes; "syssurf" hands
+# out the decoder's surfaces (cfg.surfaces: what a player draws with no copy)
+# and releases each one.
 #
 # Video and audio files are demuxed with core/codec's demuxers, and both
 # decoders get the same samples. Nothing is played.
@@ -87,13 +89,14 @@ use core/canvas
 
 # frames whose planes were allocated for them alone belong to the consumer
 -> sb_release(f)
-  if f.owned
-    f.planes.each ->(p) ccall("w_value_free_w", p)
+  f.release
   0
 
 -> sb_vdec(cfg, which)
-  return SysVideoDec.new(cfg) if which == "sys" || which == "sysdrop"
+  cfg.surfaces = which == "syssurf"
+  return SysVideoDec.new(cfg) if which == "sys" || which == "sysdrop" || which == "syssurf"
   Codec.prefer_system([])
+  cfg.reuse_output = true     # frames are consumed before the next call, as a player does
   Codec.video(cfg)
 
 -> sb_adec(cfg, which)
@@ -479,7 +482,7 @@ use core/canvas
   vids.each ->(v)
     p = dir + "/" + v
     if File.exist?(p)
-      ["ours", "sys", "sysdrop"].each ->(w)
+      ["ours", "sys", "sysdrop", "syssurf"].each ->(w)
         k = 0
         while k < reps
           run.call("video " + p + " " + w)
@@ -523,4 +526,4 @@ elsif mode == "cmpref"
 elsif mode == "cmpimage"
   sb_cmpimage(path)
 else
-  << "usage: sysbench video|audio|image|cmpvideo|cmpaudio|cmpimage FILE [ours|sys|sysdrop]"
+  << "usage: sysbench video|audio|image|cmpvideo|cmpaudio|cmpimage FILE [ours|sys|sysdrop|syssurf]"

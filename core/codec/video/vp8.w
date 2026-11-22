@@ -278,6 +278,19 @@ VP8V_PRED4_FROM16 = [2, 1, 0, 9]
     @segmap = u8[1]
     @bmodes = i64[16]
     @nzb = i64[24]
+    # per-MB motion vector candidates (decode_mvs) and per-row contexts: reused, never reallocated
+    @edges = i64[3]
+    @nmx = i64[4]
+    @nmy = i64[4]
+    @cnt = i64[4]
+    @left_nnz = i64[9]
+    @left_b = i64[4]
+    @dq = i64[5]
+    @pslots = []        # bool-decoder states of the token partitions (up to 8), reused
+    # picture pool: a buffer is free when no reference (last / golden / altref) holds it; the
+    # picture handed out by decode is valid until the next call (core/codec/media), so at most
+    # four buffers ever exist (three references + the one being decoded)
+    @pool = []
 
   # ---------------------------------------------------------------- API
 
@@ -299,6 +312,40 @@ VP8V_PRED4_FROM16 = [2, 1, 0, 9]
     @last = nil
     @golden = nil
     @altref = nil
+
+  # Release every pooled picture (size change / close).
+  -> free_pool
+    i = 0
+    while i < @pool.size
+      f = @pool[i]
+      ccall("w_value_free_w", f.y)
+      ccall("w_value_free_w", f.u)
+      ccall("w_value_free_w", f.v)
+      i += 1
+    @pool = []
+    @last = nil
+    @golden = nil
+    @altref = nil
+    @cur = nil
+    0
+
+  -> close
+    free_pool
+    0
+
+  # A picture buffer no reference holds (allocated when all four are in use).
+  -> take_frame(ys, uvs, rows)
+    i = 0
+    while i < @pool.size
+      f = @pool[i]
+      if f != @last && f != @golden && f != @altref
+        f.w = @w
+        f.h = @h
+        return f
+      i += 1
+    f = VP8VFrame.new(u8[ys * rows * 16], u8[uvs * rows * 8], u8[uvs * rows * 8], @w, @h)
+    @pool.push(f)
+    f
 
   -> emit(f)
     vf = VideoFrame.new(f.w, f.h, [f.y, f.u, f.v], [@mbw * 16, @mbw * 8, @mbw * 8], "420", 8, @pts)
@@ -398,13 +445,15 @@ VP8V_PRED4_FROM16 = [2, 1, 0, 9]
     raise VP8VError.new("vp8: bad partitions") if rem < 0
     pp = ps + 3 * (np - 1)
     @parts = []
+    while @pslots.size < np
+      @pslots.push(i64[6])
     k = 0
     while k < np
       sz = rem
       if k < np - 1
         sz = d[ps + k * 3] | (d[ps + k * 3 + 1] << 8) | (d[ps + k * 3 + 2] << 16)
         raise VP8VError.new("vp8: bad partition size") if sz > rem
-      s = i64[6]
+      s = @pslots[k] ## i64[]
       vp8bd_init(d, s, pp, sz)
       @parts.push(s)
       pp += sz
@@ -412,7 +461,11 @@ VP8V_PRED4_FROM16 = [2, 1, 0, 9]
       k += 1
     # quantisers
     yac = uint(7)
-    dq = [sint(4), sint(4), sint(4), sint(4), sint(4)]
+    dq = @dq
+    k = 0
+    while k < 5
+      dq[k] = sint(4)
+      k += 1
     k = 0
     while k < 4
       b = yac
@@ -499,6 +552,7 @@ VP8V_PRED4_FROM16 = [2, 1, 0, 9]
     mbw = (w + 15) >> 4
     mbh = (h + 15) >> 4
     if mbw != @mbw || mbh != @mbh
+      free_pool
       @mbw = mbw
       @mbh = mbh
       @segmap = u8[mbw * mbh]
@@ -566,10 +620,10 @@ VP8V_PRED4_FROM16 = [2, 1, 0, 9]
     mbh = @mbh
     ys = mbw * 16
     uvs = mbw * 8
-    cy = u8[ys * mbh * 16]
-    cu = u8[uvs * mbh * 8]
-    cv = u8[uvs * mbh * 8]
-    @cur = VP8VFrame.new(cy, cu, cv, @w, @h)
+    @cur = take_frame(ys, uvs, mbh)
+    cy = @cur.y ## u8[]
+    cu = @cur.u ## u8[]
+    cv = @cur.v ## u8[]
     @cy = cy
     @cu = cu
     @cv = cv
@@ -585,8 +639,7 @@ VP8V_PRED4_FROM16 = [2, 1, 0, 9]
     mby = 0
     while mby < mbh
       @tok = @parts[mby % @parts.size]
-      @left_nnz = i64[9]
-      @left_b = i64[4]
+      vp8v_zero(@left_nnz)
       vp8v_set(@left_b, 2)
       mbx = 0
       while mbx < mbw
@@ -969,10 +1022,16 @@ VP8V_PRED4_FROM16 = [2, 1, 0, 9]
   # Returns the MB mode (5 zero, 6 mv, 7 split) and fills mv/bmv.
   -> decode_mvs(mi, mbx, mby, ref)
     mbw = @mbw
-    edges = [mi - (mbw + 2), mi - 1, mi - (mbw + 2) - 1]
-    nmx = [0, 0, 0, 0]
-    nmy = [0, 0, 0, 0]
-    cnt = [0, 0, 0, 0]
+    edges = @edges
+    edges[0] = mi - (mbw + 2)
+    edges[1] = mi - 1
+    edges[2] = mi - (mbw + 2) - 1
+    nmx = @nmx
+    nmy = @nmy
+    cnt = @cnt
+    vp8v_zero(nmx)
+    vp8v_zero(nmy)
+    vp8v_zero(cnt)
     idx = 0
     cb = sign_bias(ref)
     n = 0

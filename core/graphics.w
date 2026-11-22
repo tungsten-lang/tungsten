@@ -107,6 +107,13 @@ GFX_LAYER_TEX_STRAIGHT = 4   # unpremultiplied RGBA/BGRA texture quad
 -> gfx_tex_upload_yuv(window, tex_id, planes, params)
   ccall("w_gfx_tex_upload_yuv", window, tex_id, planes, params)
 
+# Show a decoder's picture buffer in a yuv texture with no copy: pb is a
+# CVPixelBuffer address (core/codec/system surfaces: ccall
+# "w_media_surface_ptr"); params as for gfx_tex_upload_yuv. False when it
+# cannot be wrapped (copy the planes instead).
+-> gfx_tex_set_surface(window, tex_id, pb, params)
+  ccall("w_gfx_tex_set_surface", window, tex_id, pb, params)
+
 # Colour management. The window's layer is tagged sRGB by default (the window
 # server matches it to the display). gfx_set_color_space(window, "display_p3")
 # switches it to Display P3: then textures not marked P3 (gfx_tex_set_space),

@@ -5,8 +5,10 @@
 #   layers: kind GFX_LAYER_TEX with tex id vt.id (vt.width x vt.height source pixels)
 #   vt.free
 #
-# The frame's planes are copied into R8 (8-bit) or R16 (9..16-bit) textures,
-# one memcpy per plane; the compositor's fragment shader does the Y'CbCr → RGB
+# A system decoder's surface frame (VideoFrame#surface, cfg.surfaces) is not
+# copied at all: its CVPixelBuffer's planes become the textures
+# (gfx_tex_set_surface). Other frames' planes are copied into R8 (8-bit) or
+# R16 (9..16-bit) textures, one memcpy per plane; the compositor's fragment shader does the Y'CbCr → RGB
 # conversion (same matrix / range coefficients as core/codec/video/yuv) with
 # bilinear chroma upsampling while it draws the quad, so a frame costs no CPU
 # colour conversion, no RGBA buffer and no CanvasImage. Wide-gamut and HDR
@@ -55,7 +57,7 @@ YUV_GPU_CICP = {}
   d = frame.bit_depth
   scale = d > 8 ? ~65535.0 : ~255.0
   k = yuv_coeffs(frame)
-  grey = chm == "400" || frame.planes.size < 3
+  grey = chm == "400" || (frame.surface == nil && frame.planes.size < 3)
   q = ~65536.0
   r = nil
   if grey
@@ -89,6 +91,7 @@ YUV_GPU_CICP = {}
   # Copy frame into the texture (re-created when the size or depth changed).
   # false when the frame is not GPU-presentable (the caller converts on the CPU).
   -> upload(frame)
+    return upload_surface(frame) if frame.surface != nil && frame.planes.size == 0
     return false if !yuv_gpu_presentable?(frame)
     c = frame.crop
     w = c == nil ? frame.width : c[2]
@@ -120,6 +123,28 @@ YUV_GPU_CICP = {}
     pl = frame.planes
     planes = pl.size >= 3 ? [pl[0], pl[1], pl[2]] : [pl[0], pl[0], pl[0]]
     gfx_tex_upload_yuv(@win, @id, planes, yuv_gpu_params(frame, cw, ch))
+    @uploads += 1
+    true
+
+  # A surface frame (4:2:0, NV12 / P010): wrapped, not copied. false when the
+  # buffer cannot be wrapped (the caller copies its planes out:
+  # VideoFrame#materialize, and uploads again).
+  -> upload_surface(frame)
+    w = frame.width
+    h = frame.height
+    return false if w <= 0 || h <= 0
+    cw = (w + 1) >> 1
+    ch = (h + 1) >> 1
+    sixteen = frame.bit_depth > 8
+    if @id == nil || w != @width || h != @height || cw != @cw || ch != @ch || sixteen != @sixteen
+      gfx_tex_free(@win, @id) if @id != nil
+      @id = gfx_tex_new_yuv(@win, w, h, cw, ch, sixteen)
+      @width = w
+      @height = h
+      @cw = cw
+      @ch = ch
+      @sixteen = sixteen
+    return false if frame.surface_ptr == 0 || !gfx_tex_set_surface(@win, @id, frame.surface_ptr, yuv_gpu_params(frame, cw, ch))
     @uploads += 1
     true
 

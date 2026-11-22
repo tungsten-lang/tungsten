@@ -66,6 +66,13 @@ use hevc_filter
     @pic_count = 0
     @eos = false
     @pending = []
+    # output planes for decode / flush (VideoFrames) with cfg.reuse_output: sets
+    # handed out by the previous call (@out_lent) are free again at the next one
+    # (@out_free); otherwise every frame gets planes of its own (owned)
+    @reuse = cfg.is_a?(CodecConfig) && cfg.reuse_output == true
+    @pool_out = false
+    @out_lent = []
+    @out_free = []
     @mp = nil
     @mv = nil
     @layout_key = nil
@@ -589,6 +596,8 @@ use hevc_filter
     oh = y1 - y0
     raise HevcError.new("hevc: bad conformance window") if ow <= 0 || oh <= 0
     base = p.slot * @slot_size
+    if @pool_out && sps[:bd_c] == sps[:bd_y]
+      return pooled_planes(p, sps, ct, w, h, cw, ch, x0, y0, ow, oh, ssx, ssy, base)
     planes = []
     yp = u16[ow * oh]
     hv_crop(@px, base, w, x0, y0, yp, ow, oh)
@@ -605,6 +614,56 @@ use hevc_filter
       planes.push(cb)
       planes.push(cr)
     {w: ow, h: oh, sps: sps, planes: planes, poc: p.poc, pts: p.pts, dur: p.dur}
+
+  # picture_planes for VideoFrames: cropped straight into a reused set of
+  # planes (u8[] for 8-bit streams, u16[] otherwise), valid until the next call
+  -> pooled_planes(p, sps, ct, w, h, cw, ch, x0, y0, ow, oh, ssx, ssy, base)
+    eight = sps[:bd_y] == 8
+    ocw = ct == 0 ? 0 : (ow + (1 << ssx) - 1) >> ssx
+    och = ct == 0 ? 0 : (oh + (1 << ssy) - 1) >> ssy
+    np = ct == 0 ? 1 : 3
+    set = nil
+    while set == nil && @out_free.size > 0
+      c = @out_free.pop
+      if c[0] == eight && c[1] == ow * oh && c[2] == ocw * och && c[3].size == np
+        set = c
+      else
+        c[3].each ->(a) ccall("w_value_free_w", a)
+    if set == nil
+      pl = []
+      if eight
+        pl.push(u8[ow * oh])
+        if np == 3
+          pl.push(u8[ocw * och])
+          pl.push(u8[ocw * och])
+      else
+        pl.push(u16[ow * oh])
+        if np == 3
+          pl.push(u16[ocw * och])
+          pl.push(u16[ocw * och])
+      set = [eight, ow * oh, ocw * och, pl]
+    @out_lent.push(set)
+    planes = set[3]
+    if eight
+      hv_crop8(@px, base, w, x0, y0, planes[0], ow, oh)
+      if np == 3
+        hv_crop8(@px, base + w * h, cw, x0 >> ssx, y0 >> ssy, planes[1], ocw, och)
+        hv_crop8(@px, base + w * h + cw * ch, cw, x0 >> ssx, y0 >> ssy, planes[2], ocw, och)
+    else
+      hv_crop(@px, base, w, x0, y0, planes[0], ow, oh)
+      if np == 3
+        hv_crop(@px, base + w * h, cw, x0 >> ssx, y0 >> ssy, planes[1], ocw, och)
+        hv_crop(@px, base + w * h + cw * ch, cw, x0 >> ssx, y0 >> ssy, planes[2], ocw, och)
+    {w: ow, h: oh, sps: sps, planes: planes, poc: p.poc, pts: p.pts, dur: p.dur, pooled: true}
+
+  # The planes handed out by the previous decode / flush are free again.
+  -> lend_reset
+    @pool_out = @reuse
+    while @out_lent.size > 0
+      @out_free.push(@out_lent.pop)
+    while @out_free.size > 8
+      @out_free.pop[3].each ->(a) ccall("w_value_free_w", a)
+    0
 
   -> take_pending
     out = @pending
@@ -632,10 +691,12 @@ use hevc_filter
     if sample.is_a?(MediaSample)
       @cur_pts = sample.pts
       @cur_dur = sample.duration
+    lend_reset()
     decode_au(data)
     take_pending().map(->(e) hv_video_frame(e))
 
   -> flush
+    lend_reset()
     flush_all().map(->(e) hv_video_frame(e))
 
   rw :dpb, :px, :mp, :mv, :st, :tb, :cf, :cab, :slot_size, :pic, :pic_sps, :pic_pps, :nslots, :n4
@@ -669,6 +730,18 @@ use hevc_filter
   0
 
 -> hv_crop(px, base, stride, x0, y0, out, ow, oh) (u16[] i64 i64 i64 i64 u16[] i64 i64) i64
+  y = 0 ## i64
+  while y < oh
+    s = (base + (y0 + y) * stride + x0) ## i64
+    o = (y * ow) ## i64
+    x = 0 ## i64
+    while x < ow
+      out[o + x] = px[s + x]
+      x += 1
+    y += 1
+  0
+
+-> hv_crop8(px, base, stride, x0, y0, out, ow, oh) (u16[] i64 i64 i64 i64 u8[] i64 i64) i64
   y = 0 ## i64
   while y < oh
     s = (base + (y0 + y) * stride + x0) ## i64
@@ -825,8 +898,11 @@ use hevc_filter
   # the cropped planes were allocated for this frame alone: an 8-bit frame
   # gets byte copies (the u16 originals are released here) and the consumer
   # owns whatever the frame holds (VideoFrame#owned)
+  pooled = e[:pooled] == true
   e[:planes].each ->(p)
-    if bd == 8
+    if pooled
+      planes.push(p)
+    elsif bd == 8
       b = ByteArray.new(p.size)
       hv_u16_to_u8(p, b, p.size)
       planes.push(b)
@@ -841,7 +917,7 @@ use hevc_filter
     strides.push((w + (1 << ssx) - 1) >> ssx)
     strides.push((w + (1 << ssx) - 1) >> ssx)
   f = VideoFrame.new(w, h, planes, strides, chroma, bd, e[:pts])
-  f.owned = true
+  f.owned = !pooled
   f.duration = e[:dur] if e[:dur] != nil
   c = hv_cicp(sps)
   if c != nil

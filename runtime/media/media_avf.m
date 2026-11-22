@@ -10460,6 +10460,13 @@ WValue w_media_pcm_open(WValue ratev, WValue chv) {
     P->cap = (int64_t)(rate * PCM_CAP_SECONDS);
     P->ring = calloc((size_t)(P->cap * ch), sizeof(float));
     atomic_store(&P->volume, 1.0f);
+    /* TUNGSTEN_AUDIO_NULL=1: never touch the output device (tests, benchmarks): the real-time null sink plays instead */
+    const char *nul = getenv("TUNGSTEN_AUDIO_NULL");
+    if (nul && nul[0] == '1') {
+        P->nosink = 1;
+        pthread_create(&P->sink_thread, NULL, pcm_null_sink, P);
+        return w_int(w_media_handle_new(P, W_MEDIA_KIND_PCM));
+    }
     @autoreleasepool {
         P->engine = [[AVAudioEngine alloc] init];
         AVAudioFormat *fmt = [[[AVAudioFormat alloc] initStandardFormatWithSampleRate:rate channels:(AVAudioChannelCount)ch] autorelease];

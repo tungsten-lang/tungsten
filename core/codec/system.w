@@ -29,9 +29,12 @@
 # says which one is running ("system" / "own").
 #
 # Frames: VideoFrames with planes copied out of the CVPixelBuffer (NV12 /
-# P010 de-interleaved into Y, Cb, Cr; owned: true). Audio: AudioBlocks of
-# interleaved f32 in WAVE channel order at the rate AudioToolbox decodes to
-# (the SBR rate for HE-AAC, stereo for HE-AAC v2).
+# P010 de-interleaved into Y, Cb, Cr; owned: true), or with cfg.surfaces the
+# CVPixelBuffer itself (VideoFrame#surface, no planes and no copy: a player
+# draws it with core/codec/video/yuv_gpu and gives it back with
+# VideoFrame#release). Audio: AudioBlocks of interleaved f32 in WAVE channel
+# order at the rate AudioToolbox decodes to (the SBR rate for HE-AAC, stereo
+# for HE-AAC v2); with cfg.reuse_output the decoder's own buffer.
 #
 # Measurement helper: sys_rusage → {user:, sys:, max_rss:, now:}.
 
@@ -101,9 +104,19 @@ SYS_DEFAULT_IMAGES = ["heic", "avif", "jxl", "jpeg", "webp"]
   -> flush
     take(true)
 
+  # Frames that finished decoding since the last call, without new input
+  # (asynchronous decoding: a consumer waiting for more samples polls).
+  -> poll
+    take(false)
+
   # decode / flush without copying the pictures out (benchmarks): returns
   # the presentation times of the frames that came out
   -> decode_drop(sample)
+    if @handle == nil
+      v = sys_vp9_vpcc(sample.data)
+      return [] if v == nil
+      @bits = (v[6] >> 4) > 8 ? 10 : 8
+      open(v)
     us = (sample.pts * 1000000.0).round
     ccall("w_media_vtdec_decode", @handle, sample.data, us, sys_dts_us(sample))
     drain(false)
@@ -142,8 +155,10 @@ SYS_DEFAULT_IMAGES = ["heic", "avif", "jxl", "jpeg", "webp"]
         out.push(f)
     out
 
-  # One frame (nil when none is ready). Planes are allocated for the frame.
+  # One frame (nil when none is ready). Planes are allocated for the frame,
+  # or (cfg.surfaces) the frame holds the decoder's buffer.
   -> take_one(fl)
+    return take_surface(fl) if @cfg.surfaces == true
     w = @cfg.width
     h = @cfg.height
     # planes for the next frame, kept until a frame takes them
@@ -164,6 +179,26 @@ SYS_DEFAULT_IMAGES = ["heic", "avif", "jxl", "jpeg", "webp"]
     cw = (w + 1) / 2
     f = VideoFrame.new(w, h, planes, [w, cw, cw], "420", @bits, pts)
     f.owned = true
+    d = @durs.delete(r[0])
+    f.duration = d if d != nil
+    f.primaries = @colour[0]
+    f.transfer = @colour[1]
+    f.matrix = @colour[2]
+    f.full_range = @colour[3]
+    @frames += 1
+    f
+
+  -> take_surface(fl)
+    r = ccall("w_media_vtdec_take_surface", @handle, fl)
+    return nil if r == nil
+    w = r[1]
+    h = r[2]
+    @cfg.width = w
+    @cfg.height = h
+    cw = (w + 1) / 2
+    f = VideoFrame.new(w, h, [], [w, cw, cw], "420", @bits, r[0] / 1000000.0)
+    f.surface = r[4]
+    f.surface_ptr = ccall("w_media_surface_ptr", r[4])
     d = @durs.delete(r[0])
     f.duration = d if d != nil
     f.primaries = @colour[0]
@@ -258,6 +293,16 @@ SYS_DEFAULT_IMAGES = ["heic", "avif", "jxl", "jpeg", "webp"]
     return [1, 1, 1, fr]
   [p, t, m, fr]
 
+# ---- surfaces: VideoFrame#release / #materialize call these ----
+
+-> sys_surface_release(h)
+  ccall("w_media_surface_release", h)
+
+-> sys_surface_planes(h, planes)
+  ccall("w_media_surface_planes", h, planes)
+
+video_surface_ops(->(h) sys_surface_release(h), ->(h, pl) sys_surface_planes(h, pl))
+
 # ---- audio ----
 
 + SysAudioDec
@@ -285,6 +330,7 @@ SYS_DEFAULT_IMAGES = ["heic", "avif", "jxl", "jpeg", "webp"]
     @channels = cfg.channels
     @format = fmt
     @buf = nil
+    @reuse = cfg.reuse_output == true
     @frames = 0
     # AC-3 / E-AC-3 take their format from the first packet's header, so
     # those open on the first decode; MPEG-4 audio opens now (fails early)
@@ -309,6 +355,10 @@ SYS_DEFAULT_IMAGES = ["heic", "avif", "jxl", "jpeg", "webp"]
     n = ccall("w_media_atdec_decode", @handle, d, @buf)
     return nil if n == 0
     @frames += n
+    if @reuse
+      b = AudioBlock.new(@buf, n, @channels, @rate, sample.pts)
+      b.owned = false
+      return b
     AudioBlock.new(sys_take_f32(@buf, n * @channels), n, @channels, @rate, sample.pts)
 
   -> flush
@@ -416,6 +466,12 @@ SYS_REPLAY = 96
 
   -> flush
     @inner.flush
+
+  # video: frames finished since the last call (system decoder; ours finish
+  # synchronously, so none)
+  -> poll
+    return [] if @kind != 0 || @backend != "system"
+    @inner.poll
 
   -> reset
     @inner.reset

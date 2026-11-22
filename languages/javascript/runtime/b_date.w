@@ -344,7 +344,11 @@ JS_CLOCK_HOOK = [nil]
 -> js_date_now
   h = JS_CLOCK_HOOK[0]
   return h.call() if h != nil
-  Instant.now.unix_ms + ~0.0
+  t = Instant.now
+  v = t.unix_ms + ~0.0
+  # the Instant is not referenced anywhere else; release it (Date.now runs in hot loops)
+  ccall("w_value_free_w", t)
+  v
 
 -> js_date_ctor(args, nt)
   r = JS_REALM[0]

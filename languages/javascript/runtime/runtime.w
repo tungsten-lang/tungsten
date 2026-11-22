@@ -31,6 +31,20 @@ C_RETURN = 3
   rw :kind, :label, :value
   -> new(@kind, @label, @value)
 
+# `return v` without allocating: v goes in a per-thread register and one shared completion
+# reads it back. Consumers take .value at once; a finally block that runs code while a
+# return is pending saves and restores the register (js_run_try_finally and friends).
++ JsRetMark < JsCompletion
+  -> value
+    JS_RETVAL[0]
+
+JS_RETVAL = JsTlsCell.new(1, nil)
+JS_RET_MARK = JsRetMark.new(C_RETURN, nil, nil)
+
+-> js_ret(v)
+  JS_RETVAL[0] = v
+  JS_RET_MARK
+
 BREAK_PLAIN = JsCompletion.new(C_BREAK, nil, nil)
 CONTINUE_PLAIN = JsCompletion.new(C_CONTINUE, nil, nil)
 
@@ -43,7 +57,7 @@ CONTINUE_PLAIN = JsCompletion.new(C_CONTINUE, nil, nil)
 
 # One compiled function: everything the interpreter needs to activate it.
 + JsCode
-  rw :name, :length, :nslots, :binder, :body, :strict, :kind, :expr_body, :src, :pos, :fin, :is_class, :derived, :args_slot, :method, :lazy_kind, :self_slot, :url, :builtin, :pending, :native, :unit, :aot_src, :calls, :aot_map, :aot_lex, :aot_hoist
+  rw :name, :length, :nslots, :binder, :body, :strict, :kind, :expr_body, :src, :pos, :fin, :is_class, :derived, :args_slot, :method, :lazy_kind, :self_slot, :url, :builtin, :pending, :native, :unit, :aot_src, :calls, :aot_map, :aot_lex, :aot_hoist, :frame_free
 
   -> new(@name)
     @length = 0
@@ -362,6 +376,13 @@ JS_WATCH = [Env.get("BLADE_JS_WATCH", "")]
     JS_DEPTH[0] = d - 1
     raise e
   JS_DEPTH[0] = d - 1
+  if code.frame_free
+    # nothing can reference this frame any more (no closures, eval, mapped arguments,
+    # coroutine or derived-constructor use): release it now
+    v = code.expr_body ? r : ((r != nil && r.kind == C_RETURN) ? r.value : nil)
+    ccall("w_value_free_w", env)
+    JS_LAST_ENV[0] = nil
+    return v
   JS_LAST_ENV[0] = env
   return r if code.expr_body
   return r.value if r != nil && r.kind == C_RETURN

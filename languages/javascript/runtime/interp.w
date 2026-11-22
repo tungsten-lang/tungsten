@@ -742,7 +742,7 @@ F_CL_YES = 2097152
     if fs != nil && fs.is_async && fs.is_gen
       h = hops_between(sc.frame, fs.frame)
       return ->(env) JsCompletion.new(C_RETURN, nil, js_await(js_up(env, h)[FS_GEN], e.call(env)))
-    ->(env) JsCompletion.new(C_RETURN, nil, e.call(env))
+    ->(env) js_ret(e.call(env))
 
   -> compile_try(n, sc)
     block = compile_block(n.a.list, sc)
@@ -1483,7 +1483,8 @@ F_CL_YES = 2097152
     fs = list.map(->(x) cx(x, sc))
     n = fs.size
     if n == 0
-      return ->(env) []
+      # one shared empty list (argument arrays are never mutated)
+      return ->(env) JS_NO_ARGS
     if n == 1
       a0 = fs[0]
       return ->(env) [a0.call(env)]
@@ -1552,11 +1553,7 @@ F_CL_YES = 2097152
       # (a?.b)() keeps a?.b's this
       return ->(env) js_call_named(f.call(env), nil, args.call(env), what)
     cp = n.pos
-    ->(env)
-      fv = f.call(env)
-      av = args.call(env)
-      JS_POS[JS_DEPTH[0]] = cp
-      js_call_named(fv, nil, av, what)
+    ->(env) js_call_ident_site(f, args, env, cp, what)
 
   -> compile_new(n, sc)
     f = cx(n.a, sc)
@@ -1814,6 +1811,8 @@ F_CL_YES = 2097152
         code.body = ->(env) js_fn_prologue(env, lex, hoist, stmts)
     @fn_depth -= 1
     code.nslots = fsc.size
+    # the frame can be released when the call returns if nothing can capture it
+    code.frame_free = !async && !gen && !derived && !n.has?(F_HAS_EVAL) && (code.args_slot < 0 || code.strict) && !any_closure?(params) && !any_closure?(n.b)
     code
 
   # The parameter binder ->(env, args).
@@ -2468,8 +2467,31 @@ JS_TRACE_MISS = [false]
   JS_POS[JS_DEPTH[0]] = cp
   if f.is_a?(JsFunction)
     return f.native.call(o, av, nil) if f.native != nil
-    return js_call_code(f, o, av)
+    r = js_call_code(f, o, av)
+    js_args_done(f, av)
+    return r
   js_call_named(f, o, av, js_callee_desc(o, key))
+
+JS_NO_ARGS = []
+
+# A call site's argument array once an interpreted callee has bound it: parameters, rest
+# arrays and strict arguments objects all copy out of it, so it can be released. (Not for
+# natives, which may keep views of it, nor for the empty literal, which may be shared.)
+-> js_args_done(f, av)
+  c = f.code
+  return nil if c == nil || av.size == 0 || c.native != nil || (c.args_slot >= 0 && !c.strict)
+  ccall("w_value_free_w", av)
+  nil
+
+-> js_call_ident_site(f, args, env, cp, what)
+  fv = f.call(env)
+  av = args.call(env)
+  JS_POS[JS_DEPTH[0]] = cp
+  if fv.is_a?(JsFunction) && fv.native == nil && fv.code != nil
+    r = js_call_code(fv, nil, av)
+    js_args_done(fv, av)
+    return r
+  js_call_named(fv, nil, av, what)
 
 -> js_callee_desc(o, key)
   base = o.is_a?(JsFunction) ? o.fname.to_s : (o.is_a?(JsObject) ? (o.cls == "Object" ? "object" : o.cls) : js_typeof(o))
@@ -2870,7 +2892,9 @@ JS_TRACE_MISS = [false]
 -> js_cpl_keep(env, h, slot, fin)
   fr = js_up(env, h)
   saved = fr[slot]
+  rv = JS_RETVAL[0]
   r = fin.call(env)
+  JS_RETVAL[0] = rv if r == nil
   fr[slot] = saved if r == nil
   r
 
@@ -2891,9 +2915,11 @@ JS_TRACE_MISS = [false]
   rescue e
     err = e
   JS_DEPTH[0] = d if err != nil
+  rv = r == JS_RET_MARK ? JS_RETVAL[0] : nil
   f = fin.call(env)
   return f if f != nil
   raise err if err != nil
+  JS_RETVAL[0] = rv if r == JS_RET_MARK
   r
 
 -> js_run_try_catch_finally(block, handler, fin, env)
@@ -2914,9 +2940,11 @@ JS_TRACE_MISS = [false]
     rescue e2
       err = e2
   JS_DEPTH[0] = d if err != nil
+  rv = r == JS_RET_MARK ? JS_RETVAL[0] : nil
   f = fin.call(env)
   return f if f != nil
   raise err if err != nil
+  JS_RETVAL[0] = rv if r == JS_RET_MARK
   r
 
 -> js_catch_owner(size_of, bind, hb, env, v)

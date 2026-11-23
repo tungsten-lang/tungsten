@@ -1,0 +1,845 @@
+-- Fermat Infinite Descent, Arbitrary-Exponent Coprime Power Factorization,
+-- Complete Proof of FLT for Exponent n = 4, and All-Exponent Prime Reduction.
+--
+-- ALL theorems proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import adelic
+import von_mangoldt
+
+-- ====================================================================================
+-- 1. Unification of Prime Predicates (`prime`, `is_prime_nat`, `is_prime_full`)
+-- ====================================================================================
+
++ prime.to_is_prime_nat (p : ℕ) (hp : prime p) : is_prime_nat p
+  unfold is_prime_nat
+  constructor
+  · unfold prime at hp; exact hp.1
+  · intro a b hd; exact prime_dvd_mul.nat p a b hp hd
+
++ is_prime_nat.to_prime (p : ℕ) (hp : is_prime_nat p) : prime p
+  unfold is_prime_nat at hp
+  unfold prime
+  constructor
+  · exact hp.1
+  · intro d hdlt hd2 hdm
+    have hdiv := div_add_mod.nat p d
+    rw [hdm] at hdiv
+    set q := p / d
+    have hp_eq : p = d * q := by linarith
+    have hd_prod : p ∣ (d * q) := (dvd.iff_exists p (d * q) (by omega)).mpr ⟨1, by rw [← hp_eq]; ring⟩
+    obtain hpd | hpq := hp.2 d q hd_prod
+    · obtain ⟨u, hu⟩ := (dvd.iff_exists p d (by omega)).mp hpd
+      by_cases hu0 : u = 0
+      · rw [hu0] at hu; omega
+      · have hu1 : 1 ≤ u := by omega
+        have hge := mul_le_mul_of_nonneg_left.nat 1 u p hu1 (by omega)
+        have hp1 : p * 1 = p := by ring
+        rw [← hu, hp1] at hge; omega
+    · obtain ⟨u, hu⟩ := (dvd.iff_exists p q (by omega)).mp hpq
+      by_cases hu0 : u = 0
+      · rw [hu0] at hu; rw [hu] at hp_eq; omega
+      · have hu1 : 1 ≤ u := by omega
+        have hq_ge : p ≤ q
+          have hge := mul_le_mul_of_nonneg_left.nat 1 u p hu1 (by omega)
+          have hp1 : p * 1 = p := by ring
+          rw [← hu, hp1] at hge; exact hge
+        have hd_ge : 2 * p ≤ d * q
+          have h1 := mul_le_mul_of_nonneg_right.nat 2 d p hd2 (by omega)
+          have h2 := mul_le_mul_of_nonneg_left.nat p q d hq_ge (by omega)
+          linarith
+        omega
+
++ is_prime_nat.to_full (p : ℕ) (hp : is_prime_nat p) : is_prime_full p
+  have hpr := is_prime_nat.to_prime p hp
+  unfold is_prime_full
+  constructor
+  · exact hp
+  · intro d hd
+    by_cases hd0 : d = 0
+    · rw [hd0] at hd
+      unfold dvd at hd
+      have hdiv := div_add_mod.nat p 0
+      have hp2 := hp.1
+      have h0m : 0 * (p / 0) = 0 := by ring
+      rw [h0m, hd] at hdiv
+      omega
+    · by_cases hd1 : d = 1
+      · left; exact hd1
+      · right
+        have hd2 : 2 ≤ d := by omega
+        have hd_le : d ≤ p
+          obtain ⟨q, hq⟩ := (dvd.iff_exists d p (by omega)).mp hd
+          by_cases hq0 : q = 0
+          · rw [hq0] at hq; have hp2 := hp.1; omega
+          · have hq1 : 1 ≤ q := by omega
+            have hge := mul_le_mul_of_nonneg_left.nat 1 q d hq1 (by omega)
+            rw [← hq] at hge; linarith
+        by_contra hne
+        have hlt : d < p := by omega
+        unfold prime at hpr
+        exact hpr.2 d hlt hd2 hd
+
++ is_prime_nat_two : is_prime_nat 2
+  apply prime.to_is_prime_nat 2
+  unfold prime
+  intro d hd1 hd2; omega
+
++ is_prime_nat_three : is_prime_nat 3
+  apply prime.to_is_prime_nat 3
+  unfold prime
+  intro d hd1 hd2
+  have hd_eq : d = 2 := by omega
+  rw [hd_eq]; decide
+-- ====================================================================================
+
++ int.nearest_quot (u d : ℤ) (hd : 0 < d) :
+    ∃ q : ℤ, 2 * (u - q * d) ≤ d ∧ -d ≤ 2 * (u - q * d)
+  set K := nat_of_int (|u| + 1) with hK_def
+  have hK_eq : (K : ℤ) = |u| + 1
+    rw [hK_def]; exact int_of_nat_of_int (|u| + 1) (by linarith [abs_nonneg.int u])
+  have hu_nn : 0 ≤ u + (K : ℤ) * d
+    have habs : -(|u|) ≤ u
+      obtain ⟨e, _⟩ | ⟨e, _⟩ := abs_cases.int u <;> linarith
+    have hK_nn : (0 : ℤ) ≤ (K : ℤ) := (cast_le.int 0 K).mpr (by omega)
+    have hKd : (K : ℤ) ≤ (K : ℤ) * d
+      have h2 := mul_le_mul_of_nonneg_left.int 1 d (K : ℤ) (by omega) hK_nn
+      linarith
+    linarith
+  set dn := nat_of_int d with hdn_def
+  have hdn : (dn : ℤ) = d := by rw [hdn_def]; exact int_of_nat_of_int d (by omega)
+  have hdn_pos : 0 < dn
+    by_contra h0; have hz : dn = 0 := by omega
+    rw [hz, cast_zero.int] at hdn; omega
+  set un := nat_of_int (u + (K : ℤ) * d) with hun_def
+  have hun : (un : ℤ) = u + (K : ℤ) * d := by rw [hun_def]; exact int_of_nat_of_int (u + (K : ℤ) * d) hu_nn
+  have hdm := div_add_mod.nat un dn
+  have hrem := mod_lt.nat un dn hdn_pos
+  have hcast : ((dn * (un / dn) + un % dn : ℕ) : ℤ) = (un : ℤ) := by rw [hdm]
+  rw [cast_add.int, cast_mul.int, hdn, hun] at hcast
+  by_cases hhalf : 2 * (un % dn) ≤ dn
+  · use ((un / dn : ℕ) : ℤ) - (K : ℤ)
+    have hr_nn : (0 : ℤ) ≤ ((un % dn : ℕ) : ℤ) := (cast_le.int 0 (un % dn)).mpr (by omega)
+    have hr2 : 2 * ((un % dn : ℕ) : ℤ) ≤ d
+      have hc : ((2 * (un % dn) : ℕ) : ℤ) ≤ (dn : ℤ) := (cast_le.int (2 * (un % dn)) dn).mpr hhalf
+      rw [cast_mul.int, hdn] at hc
+      have h2 : ((2 : ℕ) : ℤ) = 2 := by decide
+      rw [h2] at hc; exact hc
+    constructor <;> linarith
+  · use ((un / dn : ℕ) : ℤ) + 1 - (K : ℤ)
+    have hr_lt : ((un % dn : ℕ) : ℤ) < d := by rw [← hdn]; exact (cast_lt.int (un % dn) dn).mpr hrem
+    have hr2 : d < 2 * ((un % dn : ℕ) : ℤ)
+      have hc : (dn : ℤ) < ((2 * (un % dn) : ℕ) : ℤ) := (cast_lt.int dn (2 * (un % dn))).mpr (by omega)
+      rw [cast_mul.int, hdn] at hc
+      have h2 : ((2 : ℕ) : ℤ) = 2 := by decide
+      rw [h2] at hc; exact hc
+    constructor <;> linarith
+
++ int.sq_le_of_two_bounds (r d : ℤ) (hhi : 2 * r ≤ d) (hlo : -d ≤ 2 * r) :
+    4 * (r * r) ≤ d * d
+  have h1 := mul_nonneg.int (d - 2 * r) (d + 2 * r) (by linarith) (by linarith)
+  linarith
+
+-- ====================================================================================
+-- 3. Arbitrary-Exponent Coprime Power-Product Theorem (`a * b = c^k => a = u^k, b = v^k`)
+-- ====================================================================================
+
+-> nat.coprime_primes (a b : ℕ) : Prop :=
+  ∀ p : ℕ, is_prime_nat p → ¬ (p ∣ a ∧ p ∣ b)
+
++ nat.coprime_primes_symm (a b : ℕ) (h : nat.coprime_primes a b) : nat.coprime_primes b a
+  unfold nat.coprime_primes at h ⊢
+  intro p hp hboth
+  obtain ⟨hpb, hpa⟩ := hboth
+  exact h p hp ⟨hpa, hpb⟩
+
++ nat.mul_cancel_left_pos (c x y : ℕ) (hc : 0 < c) (heq : c * x = c * y) : x = y
+  by_contra hne
+  by_cases hlt : x < y
+  · have h1 := mul_le_mul_of_nonneg_left.nat (x + 1) y c (by omega) (by omega)
+    have h2 : c * (x + 1) = c * x + c := by ring
+    omega
+  · have h1 := mul_le_mul_of_nonneg_left.nat (y + 1) x c (by omega) (by omega)
+    have h2 : c * (y + 1) = c * y + c := by ring
+    omega
+
++ nat.pow_ge_two (p k : ℕ) (hp : 2 ≤ p) (hk : 1 ≤ k) : 2 ≤ p ^ k
+  have hk1 : k = (k - 1) + 1 := by omega
+  rw [hk1, pow_succ.nat]
+  have hpos := pow_pos.nat p (k - 1) (by omega)
+  nlinarith
+
++ nat.one_pow_eq (m : ℕ) : 1 ^ m = 1
+  induction m with j ihj
+  · rw [pow_zero.nat]
+  · rw [succ_eq_add_one.nat, pow_succ.nat, ihj]; ring
+
++ nat.mul_pow_eq (m x y : ℕ) : (x * y) ^ m = x ^ m * y ^ m
+  induction m with j ihj
+  · rw [pow_zero.nat, pow_zero.nat, pow_zero.nat]; ring
+  · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat, pow_succ.nat, ihj]; ring
+
+-- THEOREM: If a * b = c^k (k >= 1, a > 0, b > 0) and no prime divides both a and b,
+-- then a and b are themselves k-th powers!
++ nat.coprime_mul_eq_pow (k : ℕ) (hk : 1 ≤ k) :
+    ∀ a : ℕ, 0 < a → ∀ b c : ℕ, 0 < b → nat.coprime_primes a b → a * b = c ^ k →
+      ∃ u v : ℕ, a = u ^ k ∧ b = v ^ k
+  apply nat.strong_induct (fun (a : ℕ) => 0 < a → ∀ b c : ℕ, 0 < b → nat.coprime_primes a b → a * b = c ^ k → ∃ u v : ℕ, a = u ^ k ∧ b = v ^ k)
+  intro a ih ha b c hb hcop heq
+  unfold nat.coprime_primes at hcop
+  have hc_pos : 0 < c
+    by_contra hc0
+    have hcz : c = 0 := by omega
+    have hk1 : k = (k - 1) + 1 := by omega
+    rw [hcz, hk1, pow_succ.nat] at heq
+    have hab_pos := mul_pos.nat a b ha hb
+    have hr0 : 0 ^ (k - 1) * 0 = 0 := by ring
+    rw [hr0] at heq; omega
+  by_cases ha1 : a = 1
+  · use 1, c
+    have h1k := nat.one_pow_eq k
+    constructor
+    · rw [ha1, h1k]
+    · rw [ha1] at heq; linarith
+  · have ha2 : 2 ≤ a := by omega
+    set p := min_fac a with hp_def
+    have hspec := min_fac.spec a ha2
+    have hp_pr : prime p := by rw [hp_def]; exact min_fac.prime a ha2
+    have hp_nat : is_prime_nat p := prime.to_is_prime_nat p hp_pr
+    have hp2 : 2 ≤ p := by rw [hp_def]; exact hspec.1
+    have hp_dvd_a : p ∣ a := by rw [hp_def]; exact hspec.2.2.1
+    have hp_ndvd_b : ¬ (p ∣ b)
+      intro hpb
+      exact hcop p hp_nat ⟨hp_dvd_a, hpb⟩
+    -- Compare v_p(a * b) = v_p(c^k) via `padic.sat`!
+    have hvp_ab : vp p (a * b) = vp p a + vp p b := vp.mul p a b hp_nat ha hb
+    have hvp_b0 : vp p b = 0 := vp.eq_zero_of_not_dvd p b hp2 hb hp_ndvd_b
+    have hvp_ck : vp p (c ^ k) = k * vp p c := vp.pow p c k hp_nat hc_pos
+    have hvp_eq : vp p a = k * vp p c
+      rw [heq] at hvp_ab
+      omega
+    have hp1_dvd : p ^ 1 ∣ a
+      have hp1 : p ^ 1 = p := by ring
+      rw [hp1]; exact hp_dvd_a
+    have hvp_a_ge1 : 1 ≤ vp p a := (vp.le_iff_pow_dvd p a 1 hp2 ha).mpr hp1_dvd
+    have hvp_c_ge1 : 1 ≤ vp p c
+      by_contra h0
+      have hcz : vp p c = 0 := by omega
+      rw [hcz] at hvp_eq
+      have hk0 : k * 0 = 0 := by ring
+      rw [hk0] at hvp_eq; omega
+    have hvp_a_gek : k ≤ vp p a
+      have hge := mul_le_mul_of_nonneg_left.nat 1 (vp p c) k hvp_c_ge1 (by omega)
+      have hk1 : k * 1 = k := by ring
+      rw [hk1] at hge; omega
+    have hpk_dvd_a : p ^ k ∣ a := (vp.le_iff_pow_dvd p a k hp2 ha).mp hvp_a_gek
+    have hp_dvd_c : p ∣ c
+      have hp1 : p ^ 1 = p := by ring
+      rw [← hp1]
+      exact (vp.le_iff_pow_dvd p c 1 hp2 hc_pos).mp hvp_c_ge1
+    have hpk_pos : 0 < p ^ k := pow_pos.nat p k (by omega)
+    obtain ⟨a', ha'⟩ := (dvd.iff_exists (p ^ k) a hpk_pos).mp hpk_dvd_a
+    obtain ⟨c', hc'⟩ := (dvd.iff_exists p c (by omega)).mp hp_dvd_c
+    have ha'_pos : 0 < a'
+      by_contra h0; have hz : a' = 0 := by omega
+      rw [hz] at ha'
+      have hr0 : p ^ k * 0 = 0 := by ring
+      rw [hr0] at ha'; omega
+    have ha'_lt : a' < a
+      have hpk2 : 2 ≤ p ^ k := nat.pow_ge_two p k hp2 hk
+      have hge := mul_le_mul_of_nonneg_right.nat 2 (p ^ k) a' hpk2 (by omega)
+      rw [← ha'] at hge; omega
+    have hpow_mul := nat.mul_pow_eq k p c'
+    have heq' : a' * b = c' ^ k
+      apply nat.mul_cancel_left_pos (p ^ k) (a' * b) (c' ^ k) hpk_pos
+      have hl : p ^ k * (a' * b) = a * b := by rw [ha']; ring
+      rw [hl, heq, hc', hpow_mul]
+    have hcop' : nat.coprime_primes a' b
+      unfold nat.coprime_primes
+      intro q hq hboth
+      obtain ⟨hqa', hqb⟩ := hboth
+      apply hcop q hq
+      constructor
+      · obtain ⟨w, hw⟩ := (dvd.iff_exists q a' (by linarith [hq.1])).mp hqa'
+        exact (dvd.iff_exists q a (by linarith [hq.1])).mpr ⟨p ^ k * w, by rw [ha', hw]; ring⟩
+      · exact hqb
+    obtain ⟨u', v, hu', hv⟩ := ih a' ha'_lt ha'_pos b c' hb hcop' heq'
+    use p * u', v
+    have hpu_pow := nat.mul_pow_eq k p u'
+    exact ⟨by rw [ha', hu', hpu_pow], hv⟩
+
++ nat.coprime_mul_eq_sq (a b c : ℕ) (ha : 0 < a) (hb : 0 < b)
+    (hcop : nat.coprime_primes a b) (heq : a * b = c ^ 2) :
+    ∃ u v : ℕ, a = u ^ 2 ∧ b = v ^ 2
+  exact nat.coprime_mul_eq_pow 2 (by decide) a ha b c hb hcop heq
+
+-- ====================================================================================
+-- 4. Primitive Pythagorean Parameterization & Fermat's Complete n = 4 Descent
+-- ====================================================================================
+
++ nat.sq_mod4 (n : ℕ) :
+    (n % 2 = 0 → (n ^ 2) % 4 = 0) ∧ (n % 2 = 1 → (n ^ 2) % 4 = 1)
+  have hdm := div_add_mod.nat n 2
+  have hrem := mod_lt.nat n 2 (by decide)
+  set q := n / 2
+  constructor
+  · intro hev
+    have hn : n = 2 * q := by omega
+    have hsq : n ^ 2 = 0 + 4 * (q * q) := by rw [hn]; ring
+    rw [hsq, add_mul_mod.nat]
+    exact (div_mod_of_lt.nat 0 4 (by decide)).2
+  · intro hodd
+    have hn : n = 2 * q + 1 := by omega
+    have hsq : n ^ 2 = 1 + 4 * (q * q + q) := by rw [hn]; ring
+    rw [hsq, add_mul_mod.nat]
+    exact (div_mod_of_lt.nat 1 4 (by decide)).2
+
++ pythagorean.not_both_odd (X Y Z : ℕ) (hX : X % 2 = 1) (hY : Y % 2 = 1) :
+    X ^ 2 + Y ^ 2 ≠ Z ^ 2
+  intro heq
+  have hX4 : (X ^ 2) % 4 = 1 := (nat.sq_mod4 X).2 hX
+  have hY4 : (Y ^ 2) % 4 = 1 := (nat.sq_mod4 Y).2 hY
+  have hsum4 : (X ^ 2 + Y ^ 2) % 4 = 2
+    rw [add_mod.nat (X ^ 2) (Y ^ 2) 4, hX4, hY4]; decide
+  have hZrem := mod_lt.nat Z 2 (by decide)
+  by_cases hZ0 : Z % 2 = 0
+  · have hZ4 : (Z ^ 2) % 4 = 0 := (nat.sq_mod4 Z).1 hZ0
+    rw [heq] at hsum4; omega
+  · have hZ1 : Z % 2 = 1 := by omega
+    have hZ4 : (Z ^ 2) % 4 = 1 := (nat.sq_mod4 Z).2 hZ1
+    rw [heq] at hsum4; omega
+
++ pythagorean.primitive_param (X Y Z : ℕ)
+    (hX : 0 < X) (hY : 0 < Y) (hcop : nat.coprime_primes X Y)
+    (hXodd : X % 2 = 1) (hYev : Y % 2 = 0) (heq : X ^ 2 + Y ^ 2 = Z ^ 2) :
+    ∃ u v : ℕ, 0 < v ∧ v < u ∧ nat.coprime_primes u v ∧ (u + v) % 2 = 1 ∧
+      X = u ^ 2 - v ^ 2 ∧ Y = 2 * u * v ∧ Z = u ^ 2 + v ^ 2
+  -- Step 1: Z > X and Z is odd.
+  have hZ2_gt : X ^ 2 < Z ^ 2 := by nlinarith
+  have hX_lt_Z : X < Z
+    by_contra hle
+    have hge : Z ≤ X := by omega
+    have hsq := mul_le_mul.nat Z X Z X hge hge (by omega) (by omega)
+    have hz2 : Z * Z = Z ^ 2 := by ring
+    have hx2 : X * X = X ^ 2 := by ring
+    linarith
+  have hZodd : Z % 2 = 1
+    have hX2 : (X ^ 2) % 2 = 1
+      have hx_eq : X ^ 2 = X * X := by ring
+      rw [hx_eq, mul_mod.nat X X 2, hXodd]; decide
+    have hY2 : (Y ^ 2) % 2 = 0
+      have hy_eq : Y ^ 2 = Y * Y := by ring
+      rw [hy_eq, mul_mod.nat Y Y 2, hYev]; decide
+    have hZ2_mod : (Z ^ 2) % 2 = 1
+      rw [← heq, add_mod.nat (X ^ 2) (Y ^ 2) 2, hX2, hY2]; decide
+    have hZrem := mod_lt.nat Z 2 (by decide)
+    by_cases hz0 : Z % 2 = 0
+    · have hz20 : (Z ^ 2) % 2 = 0
+        have hz_eq : Z ^ 2 = Z * Z := by ring
+        rw [hz_eq, mul_mod.nat Z Z 2, hz0]; decide
+      omega
+    · omega
+  -- Step 2: Factor Y^2 = (Z + X) * (Z - X) with Z + X = 2*B, Z - X = 2*A, Y = 2*Y0!
+  have hYdm := div_add_mod.nat Y 2
+  rw [hYev] at hYdm
+  set Y0 := Y / 2
+  have hY_eq : Y = 2 * Y0 := by omega
+  have hY0_pos : 0 < Y0 := by omega
+  have hXdm := div_add_mod.nat X 2
+  rw [hXodd] at hXdm
+  have hZdm := div_add_mod.nat Z 2
+  rw [hZodd] at hZdm
+  set B := (Z + X) / 2
+  set A := (Z - X) / 2
+  have hZX_add : Z + X = 2 * B
+    have hsum : Z + X = 2 * (Z / 2 + X / 2 + 1) := by omega
+    have hdiv := div_mod_unique.nat (Z + X) 2 (Z / 2 + X / 2 + 1) 0 (by omega) (by decide)
+    omega
+  have hZX_sub : Z - X = 2 * A
+    have hsub : Z - X = 2 * (Z / 2 - X / 2) := by omega
+    have hdiv := div_mod_unique.nat (Z - X) 2 (Z / 2 - X / 2) 0 (by omega) (by decide)
+    omega
+  have hA_pos : 0 < A := by omega
+  have hB_pos : 0 < B := by omega
+  have hA_lt_B : A < B := by omega
+  have hZ_sum : Z = B + A := by omega
+  have hX_diff : X = B - A := by omega
+  have hBA_prod : B * A = Y0 ^ 2
+    apply nat.mul_cancel_left_pos 4 (B * A) (Y0 ^ 2) (by decide)
+    have hB_XA : B = X + A := by omega
+    have hZ_XA : Z = X + 2 * A := by omega
+    have hid : (X + 2 * A) ^ 2 = X ^ 2 + 4 * ((X + A) * A) := by ring
+    have hr : 4 * (Y0 ^ 2) = (2 * Y0) ^ 2 := by ring
+    rw [← hZ_XA, ← hB_XA] at hid
+    rw [hr, ← hY_eq]
+    linarith
+  -- Step 3: Prove nat.coprime_primes B A!
+  have hcop_BA : nat.coprime_primes B A
+    unfold nat.coprime_primes at hcop ⊢
+    intro p hp hboth
+    obtain ⟨hpB, hpA⟩ := hboth
+    have hp2 : 2 ≤ p := hp.1
+    have hpZ : p ∣ Z
+      rw [hZ_sum]; exact dvd.add_nat p B A (by omega) hpB hpA
+    have hpX : p ∣ X
+      obtain ⟨qb, hqb⟩ := (dvd.iff_exists p B (by omega)).mp hpB
+      obtain ⟨qa, hqa⟩ := (dvd.iff_exists p A (by omega)).mp hpA
+      have hqa_le : qa ≤ qb
+        by_contra hgt
+        have hm := mul_le_mul_of_nonneg_left.nat (qb + 1) qa p (by omega) (by omega)
+        have he : p * (qb + 1) = B + p := by rw [hqb]; ring
+        omega
+      have hx_fac : X = p * (qb - qa)
+        have hs : (qb - qa) + qa = qb := by omega
+        have hadd : p * (qb - qa) + p * qa = p * qb
+          calc p * (qb - qa) + p * qa = p * ((qb - qa) + qa) := by ring
+            _ = p * qb := by rw [hs]
+        omega
+      exact (dvd.iff_exists p X (by omega)).mpr ⟨qb - qa, hx_fac⟩
+    have hpY2 : p ∣ (Y ^ 2)
+      obtain ⟨qz, hqz⟩ := (dvd.iff_exists p Z (by omega)).mp hpZ
+      obtain ⟨qx, hqx⟩ := (dvd.iff_exists p X (by omega)).mp hpX
+      have hy2 : Y ^ 2 = Z ^ 2 - X ^ 2 := by omega
+      have hfac : Z ^ 2 - X ^ 2 = p * (p * (qz * qz - qx * qx))
+        have hle : qx * qx ≤ qz * qz
+          have h1 : qx ≤ qz
+            by_contra hgt
+            have hge := mul_le_mul_of_nonneg_left.nat (qz + 1) qx p (by omega) (by omega)
+            rw [← hqx] at hge
+            have hpz1 : p * (qz + 1) = Z + p := by rw [hqz]; ring
+            omega
+          exact mul_le_mul.nat qx qz qx qz h1 h1 (by omega) (by omega)
+        have hsub_eq : p * (p * (qz * qz - qx * qx)) + (p * qx) ^ 2 = (p * qz) ^ 2
+          have hadd : (qz * qz - qx * qx) + qx * qx = qz * qz := by omega
+          calc p * (p * (qz * qz - qx * qx)) + (p * qx) ^ 2
+            = p * p * ((qz * qz - qx * qx) + qx * qx) := by ring
+            _ = p * p * (qz * qz) := by rw [hadd]
+            _ = (p * qz) ^ 2 := by ring
+        rw [← hqx, ← hqz] at hsub_eq
+        omega
+      rw [hy2]
+      exact (dvd.iff_exists p (Z ^ 2 - X ^ 2) (by omega)).mpr ⟨p * (qz * qz - qx * qx), hfac⟩
+    have hpY : p ∣ Y := prime_dvd_of_dvd_pow.nat p Y 2 (is_prime_nat.to_prime p hp) hpY2
+    exact hcop p hp ⟨hpX, hpY⟩
+  -- Step 4: Apply `nat.coprime_mul_eq_sq` to B * A = Y0^2!
+  obtain ⟨u, v, hu_sq, hv_sq⟩ := nat.coprime_mul_eq_sq B A Y0 hB_pos hA_pos hcop_BA hBA_prod
+  have hv_pos : 0 < v
+    by_contra h0; have hz : v = 0 := by omega
+    rw [hz] at hv_sq
+    have h02 : 0 ^ 2 = 0 := by decide
+    rw [h02] at hv_sq; omega
+  have hv_lt_u : v < u
+    by_contra hle
+    have hge : u ≤ v := by omega
+    have hsq := mul_le_mul.nat u v u v hge hge (by omega) (by omega)
+    have hu2 : u * u = u ^ 2 := by ring
+    have hv2 : v * v = v ^ 2 := by ring
+    omega
+  have hcop_uv : nat.coprime_primes u v
+    unfold nat.coprime_primes
+    intro p hp hboth
+    obtain ⟨hpu, hpv⟩ := hboth
+    have hcop_BA_u := hcop_BA
+    unfold nat.coprime_primes at hcop_BA_u
+    apply hcop_BA_u p hp
+    obtain ⟨qu, hqu⟩ := (dvd.iff_exists p u (by linarith [hp.1])).mp hpu
+    obtain ⟨qv, hqv⟩ := (dvd.iff_exists p v (by linarith [hp.1])).mp hpv
+    constructor
+    · exact (dvd.iff_exists p B (by linarith [hp.1])).mpr ⟨p * qu * qu, by rw [hu_sq, hqu]; ring⟩
+    · exact (dvd.iff_exists p A (by linarith [hp.1])).mpr ⟨p * qv * qv, by rw [hv_sq, hqv]; ring⟩
+  have huv_eq : Y0 = u * v
+    have hsq_eq : Y0 * Y0 = (u * v) * (u * v)
+      calc Y0 * Y0 = Y0 ^ 2 := by ring
+        _ = B * A := hBA_prod.symm
+        _ = u ^ 2 * v ^ 2 := by rw [hu_sq, hv_sq]
+        _ = (u * v) * (u * v) := by ring
+    by_contra hne
+    by_cases hlt : Y0 < u * v
+    · have h1 := mul_le_mul.nat (Y0 + 1) (u * v) (Y0 + 1) (u * v) (by omega) (by omega) (by omega) (by omega)
+      nlinarith
+    · have h1 := mul_le_mul.nat (u * v + 1) Y0 (u * v + 1) Y0 (by omega) (by omega) (by omega) (by omega)
+      nlinarith
+  have huv_par : (u + v) % 2 = 1
+    have hZ_uv : Z = u ^ 2 + v ^ 2 := by omega
+    have hu_rem := mod_lt.nat u 2 (by decide)
+    have hv_rem := mod_lt.nat v 2 (by decide)
+    by_cases hu0 : u % 2 = 0
+    · by_cases hv0 : v % 2 = 0
+      · have hcop_uv_u := hcop_uv
+        unfold nat.coprime_primes at hcop_uv_u
+        exfalso; exact hcop_uv_u 2 is_prime_nat_two ⟨hu0, hv0⟩
+      · have hv1 : v % 2 = 1 := by omega
+        rw [add_mod.nat u v 2, hu0, hv1]; decide
+    · have hu1 : u % 2 = 1 := by omega
+      by_cases hv0 : v % 2 = 0
+      · rw [add_mod.nat u v 2, hu1, hv0]; decide
+      · have hv1 : v % 2 = 1 := by omega
+        have hu2 : (u ^ 2) % 2 = 1
+          have he : u ^ 2 = u * u := by ring
+          rw [he, mul_mod.nat u u 2, hu1]; decide
+        have hv2 : (v ^ 2) % 2 = 1
+          have he : v ^ 2 = v * v := by ring
+          rw [he, mul_mod.nat v v 2, hv1]; decide
+        have hz2 : Z % 2 = 0
+          rw [hZ_uv, add_mod.nat (u ^ 2) (v ^ 2) 2, hu2, hv2]; decide
+        omega
+  have hX_fin : X = u ^ 2 - v ^ 2 := by omega
+  have hY_fin : Y = 2 * u * v := by rw [hY_eq, huv_eq]; ring
+  have hZ_fin : Z = u ^ 2 + v ^ 2 := by omega
+  use u, v
+  exact ⟨hv_pos, hv_lt_u, hcop_uv, huv_par, hX_fin, hY_fin, hZ_fin⟩
+
+-> fermat4_sq_at (m : ℕ) : Prop :=
+  ∃ a b : ℕ, 0 < a ∧ 0 < b ∧ a ^ 4 + b ^ 4 = m ^ 2
+
+-- THEOREM 4A (FERMAT'S COMPLETE n = 4 INFINITE DESCENT THEOREM — 0 CUSTOM AXIOMS!):
+-- For ALL positive natural numbers x, y > 0 and z : N, x^4 + y^4 != z^2!
++ flt.exp_four_sq (x y z : ℕ) (hx : 0 < x) (hy : 0 < y) : x ^ 4 + y ^ 4 ≠ z ^ 2
+  intro heq_init
+  have hdesc : ∀ m : ℕ, fermat4_sq_at m → ∃ m' : ℕ, m' < m ∧ fermat4_sq_at m'
+    intro m hm
+    unfold fermat4_sq_at at hm
+    obtain ⟨a, b, ha, hb, habm⟩ := hm
+    have hm_pos : 0 < m
+      by_contra h0; have hz : m = 0 := by omega
+      rw [hz] at habm
+      have ha4 : 0 < a ^ 4 := pow_pos.nat a 4 ha
+      have h02 : 0 ^ 2 = 0 := by decide
+      rw [h02] at habm; omega
+    -- Case A: If some prime p divides both a and b, divide (a, b, m) by (p, p, p^2)!
+    by_cases hnot_cop : ¬ nat.coprime_primes a b
+    · unfold nat.coprime_primes at hnot_cop
+      have hex_p : ∃ p : ℕ, is_prime_nat p ∧ p ∣ a ∧ p ∣ b
+        by_contra hno
+        apply hnot_cop
+        intro p hp hboth
+        exact hno ⟨p, hp, hboth.1, hboth.2⟩
+      obtain ⟨p, hp, hpa, hpb⟩ := hex_p
+      have hp2 : 2 ≤ p := hp.1
+      obtain ⟨a1, ha1⟩ := (dvd.iff_exists p a (by omega)).mp hpa
+      obtain ⟨b1, hb1⟩ := (dvd.iff_exists p b (by omega)).mp hpb
+      have hp4_m2 : p ^ 4 ∣ (m ^ 2)
+        have hfac : a ^ 4 + b ^ 4 = p ^ 4 * (a1 ^ 4 + b1 ^ 4) := by rw [ha1, hb1]; ring
+        rw [← habm]
+        exact (dvd.iff_exists (p ^ 4) (a ^ 4 + b ^ 4) (pow_pos.nat p 4 (by omega))).mpr ⟨a1 ^ 4 + b1 ^ 4, hfac⟩
+      have hvp_m2 : 4 ≤ vp p (m ^ 2) := (vp.le_iff_pow_dvd p (m ^ 2) 4 hp2 (pow_pos.nat m 2 hm_pos)).mpr hp4_m2
+      rw [vp.pow p m 2 hp hm_pos] at hvp_m2
+      have hvp_m : 2 ≤ vp p m := by omega
+      have hp2_m : p ^ 2 ∣ m := (vp.le_iff_pow_dvd p m 2 hp2 hm_pos).mp hvp_m
+      obtain ⟨m1, hm1⟩ := (dvd.iff_exists (p ^ 2) m (pow_pos.nat p 2 (by omega))).mp hp2_m
+      have ha1_pos : 0 < a1 := by by_contra h0; have hz : a1 = 0 := by omega; rw [hz] at ha1; omega
+      have hb1_pos : 0 < b1 := by by_contra h0; have hz : b1 = 0 := by omega; rw [hz] at hb1; omega
+      have hm1_pos : 0 < m1 := by by_contra h0; have hz : m1 = 0 := by omega; rw [hz] at hm1; omega
+      have hm1_lt : m1 < m
+        have hsq4 : 4 ≤ p * p := mul_le_mul.nat 2 p 2 p hp2 hp2 (by decide) (by omega)
+        have hp_sq : p * p = p ^ 2 := by ring
+        rw [hp_sq] at hsq4
+        have hge := mul_le_mul_of_nonneg_right.nat 4 (p ^ 2) m1 hsq4 (by omega)
+        rw [← hm1] at hge; omega
+      have heq1 : a1 ^ 4 + b1 ^ 4 = m1 ^ 2
+        apply nat.mul_cancel_left_pos (p ^ 4) (a1 ^ 4 + b1 ^ 4) (m1 ^ 2) (pow_pos.nat p 4 (by omega))
+        have hl : p ^ 4 * (a1 ^ 4 + b1 ^ 4) = a ^ 4 + b ^ 4 := by rw [ha1, hb1]; ring
+        have hr : p ^ 4 * m1 ^ 2 = m ^ 2 := by rw [hm1]; ring
+        rw [hl, hr, habm]
+      use m1
+      unfold fermat4_sq_at
+      exact ⟨hm1_lt, ⟨a1, b1, ha1_pos, hb1_pos, heq1⟩⟩
+    · -- Case B: `nat.coprime_primes a b`! Apply primitive Pythagorean descent!
+      have hcop : nat.coprime_primes a b
+        by_contra hc_not
+        exact hnot_cop hc_not
+      have hcop_u := hcop
+      unfold nat.coprime_primes at hcop_u
+      have hcop2 : nat.coprime_primes (a ^ 2) (b ^ 2)
+        unfold nat.coprime_primes
+        intro p hp hboth
+        obtain ⟨hpa2, hpb2⟩ := hboth
+        have hpr := is_prime_nat.to_prime p hp
+        exact hcop_u p hp ⟨prime_dvd_of_dvd_pow.nat p a 2 hpr hpa2, prime_dvd_of_dvd_pow.nat p b 2 hpr hpb2⟩
+      -- Normalize parity so WLOG x0 is odd and y0 is even with x0^4 + y0^4 = m^2:
+      have hnorm : ∃ x0 y0 : ℕ, 0 < x0 ∧ 0 < y0 ∧ nat.coprime_primes (x0 ^ 2) (y0 ^ 2) ∧
+          (x0 ^ 2) % 2 = 1 ∧ (y0 ^ 2) % 2 = 0 ∧ (x0 ^ 2) ^ 2 + (y0 ^ 2) ^ 2 = m ^ 2
+        have ha_rem := mod_lt.nat a 2 (by decide)
+        have hb_rem := mod_lt.nat b 2 (by decide)
+        by_cases ha0 : a % 2 = 0
+        · by_cases hb0 : b % 2 = 0
+          · exfalso; exact hcop_u 2 is_prime_nat_two ⟨ha0, hb0⟩
+          · have hb1 : b % 2 = 1 := by omega
+            use b, a
+            have hb2_odd : (b ^ 2) % 2 = 1
+              have he : b ^ 2 = b * b := by ring
+              rw [he, mul_mod.nat b b 2, hb1]; decide
+            have ha2_ev : (a ^ 2) % 2 = 0
+              have he : a ^ 2 = a * a := by ring
+              rw [he, mul_mod.nat a a 2, ha0]; decide
+            have hpow_eq : (b ^ 2) ^ 2 + (a ^ 2) ^ 2 = m ^ 2
+              have hpow : (b ^ 2) ^ 2 + (a ^ 2) ^ 2 = a ^ 4 + b ^ 4 := by ring
+              rw [hpow, habm]
+            exact ⟨hb, ha, nat.coprime_primes_symm (a ^ 2) (b ^ 2) hcop2, hb2_odd, ha2_ev, hpow_eq⟩
+        · have ha1 : a % 2 = 1 := by omega
+          have ha2_odd : (a ^ 2) % 2 = 1
+            have he : a ^ 2 = a * a := by ring
+            rw [he, mul_mod.nat a a 2, ha1]; decide
+          by_cases hb0 : b % 2 = 0
+          · use a, b
+            have hb2_ev : (b ^ 2) % 2 = 0
+              have he : b ^ 2 = b * b := by ring
+              rw [he, mul_mod.nat b b 2, hb0]; decide
+            have hpow_eq : (a ^ 2) ^ 2 + (b ^ 2) ^ 2 = m ^ 2
+              have hpow : (a ^ 2) ^ 2 + (b ^ 2) ^ 2 = a ^ 4 + b ^ 4 := by ring
+              rw [hpow, habm]
+            exact ⟨ha, hb, hcop2, ha2_odd, hb2_ev, hpow_eq⟩
+          · have hb1 : b % 2 = 1 := by omega
+            have hb2_odd : (b ^ 2) % 2 = 1
+              have he : b ^ 2 = b * b := by ring
+              rw [he, mul_mod.nat b b 2, hb1]; decide
+            have hpow_id : (a ^ 2) ^ 2 + (b ^ 2) ^ 2 = a ^ 4 + b ^ 4 := by ring
+            have hpow : (a ^ 2) ^ 2 + (b ^ 2) ^ 2 = m ^ 2 := by linarith
+            exfalso; exact pythagorean.not_both_odd (a ^ 2) (b ^ 2) m ha2_odd hb2_odd hpow
+      obtain ⟨x0, y0, hx0, hy0, hcop_xy, hx0_odd, hy0_ev, hpyth1⟩ := hnorm
+      -- First Pythagorean step on (x0^2, y0^2, m):
+      obtain ⟨u, v, hv_pos, hv_lt_u, hcop_uv, huv_par, hx0_eq, hy0_eq, hm_eq⟩ :=
+        pythagorean.primitive_param (x0 ^ 2) (y0 ^ 2) m (pow_pos.nat x0 2 hx0) (pow_pos.nat y0 2 hy0) hcop_xy hx0_odd hy0_ev hpyth1
+      -- Since x0^2 = u^2 - v^2 is odd (1 mod 4) and (u + v) % 2 = 1, u MUST be odd and v MUST be even!
+      have hx0_2_eq : x0 ^ 2 + v ^ 2 = u ^ 2 := by omega
+      have hv_ev : v % 2 = 0
+        have hv_rem := mod_lt.nat v 2 (by decide)
+        by_cases hv0 : v % 2 = 0
+        · exact hv0
+        · have hv1 : v % 2 = 1 := by omega
+          have hu_ev : u % 2 = 0
+            have hu_rem := mod_lt.nat u 2 (by decide)
+            by_cases hu0 : u % 2 = 0; exact hu0
+            have hu1 : u % 2 = 1 := by omega
+            rw [add_mod.nat u v 2, hu1, hv1] at huv_par; omega
+          have hx4 : ((x0 ^ 2) % 4) = 1
+            have hx_rem := mod_lt.nat x0 2 (by decide)
+            by_cases hxe : x0 % 2 = 0
+            · have he : x0 ^ 2 = x0 * x0 := by ring
+              rw [he, mul_mod.nat x0 x0 2, hxe] at hx0_odd; omega
+            · exact (nat.sq_mod4 x0).2 (by omega)
+          have hv4 : (v ^ 2) % 4 = 1 := (nat.sq_mod4 v).2 hv1
+          have hu4 : (u ^ 2) % 4 = 0 := (nat.sq_mod4 u).1 hu_ev
+          have hsum4 : (x0 ^ 2 + v ^ 2) % 4 = 2 := by rw [add_mod.nat (x0 ^ 2) (v ^ 2) 4, hx4, hv4]; decide
+          rw [hx0_2_eq, hu4] at hsum4; omega
+      have hx0_par : x0 % 2 = 1
+        have hrem := mod_lt.nat x0 2 (by decide)
+        by_cases h0 : x0 % 2 = 0
+        · have he : x0 ^ 2 = x0 * x0 := by ring
+          rw [he, mul_mod.nat x0 x0 2, h0] at hx0_odd; omega
+        · omega
+      have hcop_x0v : nat.coprime_primes x0 v
+        unfold nat.coprime_primes
+        intro p hp hboth
+        obtain ⟨hpx0, hpv⟩ := hboth
+        have hcop_uv_u := hcop_uv
+        unfold nat.coprime_primes at hcop_uv_u
+        apply hcop_uv_u p hp
+        obtain ⟨qx, hqx⟩ := (dvd.iff_exists p x0 (by linarith [hp.1])).mp hpx0
+        obtain ⟨qv, hqv⟩ := (dvd.iff_exists p v (by linarith [hp.1])).mp hpv
+        have hpu2 : p ∣ (u ^ 2)
+          rw [← hx0_2_eq]
+          exact (dvd.iff_exists p (x0 ^ 2 + v ^ 2) (by linarith [hp.1])).mpr ⟨p * (qx * qx + qv * qv), by rw [hqx, hqv]; ring⟩
+        exact ⟨prime_dvd_of_dvd_pow.nat p u 2 (is_prime_nat.to_prime p hp) hpu2, hpv⟩
+      -- Second Pythagorean step on (x0, v, u):
+      obtain ⟨s, r, hr_pos, hr_lt_s, hcop_sr, hsr_par, _, hv_sr, hu_sr⟩ :=
+        pythagorean.primitive_param x0 v u hx0 hv_pos hcop_x0v hx0_par hv_ev hx0_2_eq
+      -- Now y0^2 = 2 * u * v = 4 * u * s * r, so y0 is even (y0 = 2 * y1) and y1^2 = u * (s * r)!
+      have hy0_par : y0 % 2 = 0
+        have hrem := mod_lt.nat y0 2 (by decide)
+        by_cases h0 : y0 % 2 = 0; exact h0
+        have h1 : y0 % 2 = 1 := by omega
+        have he : y0 ^ 2 = y0 * y0 := by ring
+        rw [he, mul_mod.nat y0 y0 2, h1] at hy0_ev; omega
+      have hydm := div_add_mod.nat y0 2
+      rw [hy0_par] at hydm
+      set y1 := y0 / 2
+      have hy0_2y1 : y0 = 2 * y1 := by omega
+      have husr_eq : u * (s * r) = y1 ^ 2
+        apply nat.mul_cancel_left_pos 4 (u * (s * r)) (y1 ^ 2) (by decide)
+        have hl : 4 * (u * (s * r)) = 2 * u * (2 * s * r) := by ring
+        have hr4 : 4 * (y1 ^ 2) = (2 * y1) ^ 2 := by ring
+        rw [hl, ← hv_sr, ← hy0_eq, hr4, ← hy0_2y1]
+      -- Verify coprimality of u = s^2 + r^2 with s * r:
+      have hcop_sr_u := hcop_sr
+      unfold nat.coprime_primes at hcop_sr_u
+      have hcop_u_sr : nat.coprime_primes u (s * r)
+        unfold nat.coprime_primes
+        intro p hp hboth
+        obtain ⟨hpu, hpsr⟩ := hboth
+        obtain hps | hpr := hp.2 s r hpsr
+        · obtain ⟨qu, hqu⟩ := (dvd.iff_exists p u (by linarith [hp.1])).mp hpu
+          obtain ⟨qs, hqs⟩ := (dvd.iff_exists p s (by linarith [hp.1])).mp hps
+          have hpr2 : p ∣ (r ^ 2)
+            have hr2_pos : 0 < r ^ 2 := pow_pos.nat r 2 hr_pos
+            have hr2_eq : r ^ 2 = u - s ^ 2 := by omega
+            have hle : p * qs * qs ≤ qu
+              by_contra hgt
+              have hge := mul_le_mul_of_nonneg_left.nat (qu + 1) (p * qs * qs) p (by omega) (by linarith [hp.1])
+              have hpq1 : p * (qu + 1) = u + p := by rw [hqu]; ring
+              have hs2_eq : p * (p * qs * qs) = s ^ 2 := by rw [hqs]; ring
+              linarith
+            have hfac_r2 : u - s ^ 2 = p * (qu - p * qs * qs)
+              have he : (qu - p * qs * qs) + p * qs * qs = qu := by omega
+              have hadd : p * (qu - p * qs * qs) + (p * qs) ^ 2 = p * qu
+                calc p * (qu - p * qs * qs) + (p * qs) ^ 2
+                  = p * ((qu - p * qs * qs) + p * qs * qs) := by ring
+                  _ = p * qu := by rw [he]
+              have hs_sq : (p * qs) ^ 2 = s ^ 2 := by rw [← hqs]
+              rw [hs_sq, ← hqu] at hadd; omega
+            rw [hr2_eq]
+            exact (dvd.iff_exists p (u - s ^ 2) (by linarith [hp.1])).mpr ⟨qu - p * qs * qs, hfac_r2⟩
+          exact hcop_sr_u p hp ⟨hps, prime_dvd_of_dvd_pow.nat p r 2 (is_prime_nat.to_prime p hp) hpr2⟩
+        · obtain ⟨qu, hqu⟩ := (dvd.iff_exists p u (by linarith [hp.1])).mp hpu
+          obtain ⟨qr, hqr⟩ := (dvd.iff_exists p r (by linarith [hp.1])).mp hpr
+          have hps2 : p ∣ (s ^ 2)
+            have hs2_pos : 0 < s ^ 2 := pow_pos.nat s 2 (by omega)
+            have hs2_eq : s ^ 2 = u - r ^ 2 := by omega
+            have hle : p * qr * qr ≤ qu
+              by_contra hgt
+              have hge := mul_le_mul_of_nonneg_left.nat (qu + 1) (p * qr * qr) p (by omega) (by linarith [hp.1])
+              have hpq1 : p * (qu + 1) = u + p := by rw [hqu]; ring
+              have hr2_eq : p * (p * qr * qr) = r ^ 2 := by rw [hqr]; ring
+              linarith
+            have hfac_s2 : u - r ^ 2 = p * (qu - p * qr * qr)
+              have he : (qu - p * qr * qr) + p * qr * qr = qu := by omega
+              have hadd : p * (qu - p * qr * qr) + (p * qr) ^ 2 = p * qu
+                calc p * (qu - p * qr * qr) + (p * qr) ^ 2
+                  = p * ((qu - p * qr * qr) + p * qr * qr) := by ring
+                  _ = p * qu := by rw [he]
+              have hr_sq : (p * qr) ^ 2 = r ^ 2 := by rw [← hqr]
+              rw [hr_sq, ← hqu] at hadd; omega
+            rw [hs2_eq]
+            exact (dvd.iff_exists p (u - r ^ 2) (by linarith [hp.1])).mpr ⟨qu - p * qr * qr, hfac_s2⟩
+          exact hcop_sr_u p hp ⟨prime_dvd_of_dvd_pow.nat p s 2 (is_prime_nat.to_prime p hp) hps2, hpr⟩
+      -- Factor u = m'^2 and s * r = w^2, then s = a'^2 and r = b'^2!
+      have hu_pos : 0 < u := by omega
+      have hsr_pos : 0 < s * r := mul_pos.nat s r (by omega) hr_pos
+      obtain ⟨m', w, hu_m', hsr_w⟩ := nat.coprime_mul_eq_sq u (s * r) y1 hu_pos hsr_pos hcop_u_sr husr_eq
+      obtain ⟨a', b', hs_a', hr_b'⟩ := nat.coprime_mul_eq_sq s r w (by omega) hr_pos hcop_sr hsr_w
+      have ha'_pos : 0 < a' := by by_contra h0; have hz : a' = 0 := by omega; rw [hz] at hs_a'; have h02 : 0 ^ 2 = 0 := by decide; rw [h02] at hs_a'; omega
+      have hb'_pos : 0 < b' := by by_contra h0; have hz : b' = 0 := by omega; rw [hz] at hr_b'; have h02 : 0 ^ 2 = 0 := by decide; rw [h02] at hr_b'; omega
+      have hm'_pos : 0 < m' := by by_contra h0; have hz : m' = 0 := by omega; rw [hz] at hu_m'; have h02 : 0 ^ 2 = 0 := by decide; rw [h02] at hu_m'; omega
+      have hm'_lt_m : m' < m
+        have hm'_le_u : m' ≤ u
+          have hge := mul_le_mul_of_nonneg_left.nat 1 m' m' (by omega) (by omega)
+          have hm1 : m' * 1 = m' := by ring
+          have hmsq : m' * m' = m' ^ 2 := by ring
+          rw [hm1, hmsq, ← hu_m'] at hge; exact hge
+        have hu_le_u2 : u ≤ u ^ 2
+          have hge := mul_le_mul_of_nonneg_left.nat 1 u u (by omega) (by omega)
+          have hu1 : u * 1 = u := by ring
+          have husq : u * u = u ^ 2 := by ring
+          rw [hu1, husq] at hge; exact hge
+        have hv2_pos : 0 < v ^ 2 := pow_pos.nat v 2 hv_pos
+        omega
+      have hnew_f4 : a' ^ 4 + b' ^ 4 = m' ^ 2
+        have ha4 : a' ^ 4 = s ^ 2 := by rw [hs_a']; ring
+        have hb4 : b' ^ 4 = r ^ 2 := by rw [hr_b']; ring
+        rw [ha4, hb4, ← hu_sr, hu_m']
+      use m'
+      unfold fermat4_sq_at
+      exact ⟨hm'_lt_m, ⟨a', b', ha'_pos, hb'_pos, hnew_f4⟩⟩
+  exact nat.infinite_descent fermat4_sq_at hdesc z ⟨x, y, hx, hy, heq_init⟩
+
+-- COROLLARY 4B (FERMAT'S LAST THEOREM FOR EXPONENT n = 4 — 0 CUSTOM AXIOMS!):
++ flt.exp_four (x y z : ℕ) (hx : 0 < x) (hy : 0 < y) : x ^ 4 + y ^ 4 ≠ z ^ 4
+  intro heq
+  have hz2 : z ^ 4 = (z ^ 2) ^ 2 := by ring
+  rw [hz2] at heq
+  exact flt.exp_four_sq x y (z ^ 2) hx hy heq
+
+-- ====================================================================================
+-- 5. All-Exponent Reduction to n = 3, n = 4, and Odd Primes p >= 5 (0 CUSTOM AXIOMS!)
+-- ====================================================================================
+
+-> flt_at (n : ℕ) : Prop :=
+  ∀ x y z : ℕ, 0 < x → 0 < y → x ^ n + y ^ n ≠ z ^ n
+
++ nat.pow_mul_swap (m k b : ℕ) : b ^ (k * m) = (b ^ k) ^ m
+  induction m with j ihj
+  · have hk0 : k * 0 = 0 := by ring
+    rw [hk0, pow_zero.nat, pow_zero.nat]
+  · rw [succ_eq_add_one.nat]
+    have hkd : k * (j + 1) = k * j + k := by ring
+    rw [hkd, pow_add.nat, pow_succ.nat, ihj]
+
++ flt_at.of_dvd (d n : ℕ) (hd : 1 ≤ d) (hdvd : d ∣ n) (hflt : flt_at d) : flt_at n
+  obtain ⟨k, hk⟩ := (dvd.iff_exists d n (by omega)).mp hdvd
+  unfold flt_at at hflt ⊢
+  intro x y z hx hy heq
+  by_cases hk0 : k = 0
+  · rw [hk0] at hk
+    have hd0 : d * 0 = 0 := by ring
+    rw [hd0] at hk
+    rw [hk, pow_zero.nat, pow_zero.nat, pow_zero.nat] at heq
+    omega
+  · have hdk : d * k = k * d := by ring
+    rw [hk, hdk, nat.pow_mul_swap d k x, nat.pow_mul_swap d k y, nat.pow_mul_swap d k z] at heq
+    exact hflt (x ^ k) (y ^ k) (z ^ k) (pow_pos.nat x k hx) (pow_pos.nat y k hy) heq
+
+-- Every integer n >= 3 is divisible EITHER by 4 OR by an odd prime p >= 3!
++ nat.dvd_four_or_odd_prime (n : ℕ) (hn : 3 ≤ n) :
+    4 ∣ n ∨ ∃ p : ℕ, is_prime_nat p ∧ 3 ≤ p ∧ p ∣ n
+  by_cases h4 : n % 4 = 0
+  · left; exact h4
+  · right
+    have hex_m : ∃ m : ℕ, 3 ≤ m ∧ m % 2 = 1 ∧ m ∣ n
+      have hrem4 := mod_lt.nat n 4 (by decide)
+      have hdm4 := div_add_mod.nat n 4
+      set q := n / 4
+      by_cases hr1 : n % 4 = 1
+      · use n
+        have hn_par : n % 2 = 1
+          have he : n = 1 + 2 * (2 * q) := by omega
+          rw [he, add_mul_mod.nat]; decide
+        have hn_self : n ∣ n := (dvd.iff_exists n n (by omega)).mpr ⟨1, by ring⟩
+        exact ⟨hn, hn_par, hn_self⟩
+      · by_cases hr3 : n % 4 = 3
+        · use n
+          have hn_par : n % 2 = 1
+            have he : n = 1 + 2 * (2 * q + 1) := by omega
+            rw [he, add_mul_mod.nat]; decide
+          have hn_self : n ∣ n := (dvd.iff_exists n n (by omega)).mpr ⟨1, by ring⟩
+          exact ⟨hn, hn_par, hn_self⟩
+        · have hr2 : n % 4 = 2 := by omega
+          have hq1 : 1 ≤ q := by omega
+          use 2 * q + 1
+          have hm_par : (2 * q + 1) % 2 = 1
+            have he : 2 * q + 1 = 1 + 2 * q := by ring
+            rw [he, add_mul_mod.nat]; decide
+          have hm_dvd : (2 * q + 1) ∣ n := (dvd.iff_exists (2 * q + 1) n (by omega)).mpr ⟨2, by omega⟩
+          exact ⟨by omega, hm_par, hm_dvd⟩
+    obtain ⟨m, hm3, hmodd, hmdvd⟩ := hex_m
+    have hsp := min_fac.spec m (by omega)
+    have hp_nat : is_prime_nat (min_fac m) := prime.to_is_prime_nat (min_fac m) (min_fac.prime m (by omega))
+    have hp_ne2 : min_fac m ≠ 2
+      intro hp2
+      have hpm : min_fac m ∣ m := hsp.2.2.1
+      rw [hp2] at hpm
+      unfold dvd at hpm; omega
+    have hp3 : 3 ≤ min_fac m := by linarith [hsp.1]
+    use min_fac m
+    exact ⟨hp_nat, hp3, dvd.trans_nat (min_fac m) m n (by omega) (by omega) hsp.2.2.1 hmdvd⟩
+
++ flt.reduce_to_three_and_primes_ge_5
+    (h3 : flt_at 3)
+    (hp5 : ∀ p : ℕ, is_prime_nat p → 5 ≤ p → flt_at p) :
+    ∀ n : ℕ, 3 ≤ n → flt_at n
+  intro n hn
+  obtain h4 | ⟨p, hp, hp3, hpdvd⟩ := nat.dvd_four_or_odd_prime n hn
+  · exact flt_at.of_dvd 4 n (by decide) h4 flt.exp_four
+  · by_cases heq3 : p = 3
+    · rw [heq3] at hpdvd
+      exact flt_at.of_dvd 3 n (by decide) hpdvd h3
+    · by_cases heq4 : p = 4
+      · exfalso
+        have h24 : 4 ∣ (2 * 2) := (dvd.iff_exists 4 (2 * 2) (by decide)).mpr ⟨1, by decide⟩
+        rw [← heq4] at h24
+        obtain hd | hd := hp.2 2 2 h24
+        · unfold dvd at hd; rw [heq4] at hd
+          have hlt24 : (2 : ℕ) % 4 = 2 := by decide
+          rw [hlt24] at hd; omega
+        · unfold dvd at hd; rw [heq4] at hd
+          have hlt24 : (2 : ℕ) % 4 = 2 := by decide
+          rw [hlt24] at hd; omega
+      · exact flt_at.of_dvd p n (by omega) hpdvd (hp5 p hp (by omega))

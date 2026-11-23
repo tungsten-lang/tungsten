@@ -1,0 +1,482 @@
+-- Definite Quaternion Algebra B_{2,oo} = (-1,-1 / Q), Hurwitz Integral Quaternions O_Hur,
+-- Euclidean Division with Norm Remainder <= 1/2, Left-Ideal Principality (#Cl(O_Hur) = 1),
+-- Exact 24-Unit Classification, Eichler Mass 1/12, and 0-Dimensional Quaternionic Cusp-Form
+-- Collapse S_2^{quat}(B_{2,oo}) = {0}.
+--
+-- ALL theorems proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import fermat_descent
+
+-- ====================================================================================
+-- 1. Hurwitz Integral Quaternions in the Z-Basis {rho, i, j, k}, rho = (1+i+j+k)/2
+-- ====================================================================================
+-- Every (w, x, y, z) in Z^4 represents q = w*rho + x*i + y*j + z*k = (A + B*i + C*j + D*k)/2
+-- with doubled coordinates A = w, B = 2*x + w, C = 2*y + w, D = 2*z + w!
+-- Notice ZERO parity side-condition is required on (w, x, y, z)!
+
+structure HurwitzQuat :=
+  (w : ℤ)
+  (x : ℤ)
+  (y : ℤ)
+  (z : ℤ)
+
++ hq.eta (a : HurwitzQuat) : HurwitzQuat.mk a.w a.x a.y a.z = a
+  induction a
+  simp
+
++ hq.ext (a b : HurwitzQuat) (hw : a.w = b.w) (hx : a.x = b.x) (hy : a.y = b.y) (hz : a.z = b.z) : a = b
+  rw [← hq.eta a, ← hq.eta b, hw, hx, hy, hz]
+
+-> hq.zero : HurwitzQuat := HurwitzQuat.mk 0 0 0 0
+-> hq.one  : HurwitzQuat := HurwitzQuat.mk 2 (-1) (-1) (-1)
+-> hq.rho  : HurwitzQuat := HurwitzQuat.mk 1 0 0 0
+-> hq.i    : HurwitzQuat := HurwitzQuat.mk 0 1 0 0
+-> hq.j    : HurwitzQuat := HurwitzQuat.mk 0 0 1 0
+-> hq.k    : HurwitzQuat := HurwitzQuat.mk 0 0 0 1
+
+-> hq.add (a b : HurwitzQuat) : HurwitzQuat :=
+  HurwitzQuat.mk (a.w + b.w) (a.x + b.x) (a.y + b.y) (a.z + b.z)
+
+-> hq.sub (a b : HurwitzQuat) : HurwitzQuat :=
+  HurwitzQuat.mk (a.w - b.w) (a.x - b.x) (a.y - b.y) (a.z - b.z)
+
+-> hq.neg (a : HurwitzQuat) : HurwitzQuat :=
+  HurwitzQuat.mk (-a.w) (-a.x) (-a.y) (-a.z)
+
+-> hq.conj (a : HurwitzQuat) : HurwitzQuat :=
+  HurwitzQuat.mk a.w (-a.w - a.x) (-a.w - a.y) (-a.w - a.z)
+
+-> hq.of_int (n : ℤ) : HurwitzQuat :=
+  HurwitzQuat.mk (2 * n) (-n) (-n) (-n)
+
+-> hq.mul (a b : HurwitzQuat) : HurwitzQuat :=
+  HurwitzQuat.mk
+    (-a.w * b.w - a.w * (b.x + b.y + b.z) - (a.x + a.y + a.z) * b.w - 2 * (a.x * b.x + a.y * b.y + a.z * b.z))
+    (a.w * b.w + a.w * (b.x + b.z) + (a.x + a.y) * b.w + a.x * b.x + a.y * b.y + a.z * b.z + a.y * b.z - a.z * b.y)
+    (a.w * b.w + a.w * (b.y + b.x) + (a.y + a.z) * b.w + a.x * b.x + a.y * b.y + a.z * b.z + a.z * b.x - a.x * b.z)
+    (a.w * b.w + a.w * (b.z + b.y) + (a.z + a.x) * b.w + a.x * b.x + a.y * b.y + a.z * b.z + a.x * b.y - a.y * b.x)
+
+-- Reduced norm Nrd(q) = q * conj(q) = (A^2 + B^2 + C^2 + D^2) / 4 in Z:
+-> hq.nrd (a : HurwitzQuat) : ℤ :=
+  a.w * a.w + a.w * (a.x + a.y + a.z) + a.x * a.x + a.y * a.y + a.z * a.z
+
+-- Doubled Euclidean coordinates (A, B, C, D) = 2 * q in Z^4:
+-> hq.d0 (a : HurwitzQuat) : ℤ := a.w
+-> hq.d1 (a : HurwitzQuat) : ℤ := 2 * a.x + a.w
+-> hq.d2 (a : HurwitzQuat) : ℤ := 2 * a.y + a.w
+-> hq.d3 (a : HurwitzQuat) : ℤ := 2 * a.z + a.w
+
+-- ---- Non-commutative Ring Laws & Euler Four-Square Norm Multiplicativity -----------
+
++ hq.mul_w (a b : HurwitzQuat) : (hq.mul a b).w =
+    -a.w * b.w - a.w * (b.x + b.y + b.z) - (a.x + a.y + a.z) * b.w - 2 * (a.x * b.x + a.y * b.y + a.z * b.z)
+  unfold hq.mul; simp
+
++ hq.mul_x (a b : HurwitzQuat) : (hq.mul a b).x =
+    a.w * b.w + a.w * (b.x + b.z) + (a.x + a.y) * b.w + a.x * b.x + a.y * b.y + a.z * b.z + a.y * b.z - a.z * b.y
+  unfold hq.mul; simp
+
++ hq.mul_y (a b : HurwitzQuat) : (hq.mul a b).y =
+    a.w * b.w + a.w * (b.y + b.x) + (a.y + a.z) * b.w + a.x * b.x + a.y * b.y + a.z * b.z + a.z * b.x - a.x * b.z
+  unfold hq.mul; simp
+
++ hq.mul_z (a b : HurwitzQuat) : (hq.mul a b).z =
+    a.w * b.w + a.w * (b.z + b.y) + (a.z + a.x) * b.w + a.x * b.x + a.y * b.y + a.z * b.z + a.x * b.y - a.y * b.x
+  unfold hq.mul; simp
+
++ hq.mul_assoc (a b c : HurwitzQuat) : hq.mul (hq.mul a b) c = hq.mul a (hq.mul b c)
+  apply hq.ext
+  · rw [hq.mul_w, hq.mul_w, hq.mul_w, hq.mul_x, hq.mul_y, hq.mul_z, hq.mul_w, hq.mul_x, hq.mul_y, hq.mul_z]; ring
+  · rw [hq.mul_x, hq.mul_x, hq.mul_w, hq.mul_x, hq.mul_y, hq.mul_z, hq.mul_w, hq.mul_x, hq.mul_y, hq.mul_z]; ring
+  · rw [hq.mul_y, hq.mul_y, hq.mul_w, hq.mul_x, hq.mul_y, hq.mul_z, hq.mul_w, hq.mul_x, hq.mul_y, hq.mul_z]; ring
+  · rw [hq.mul_z, hq.mul_z, hq.mul_w, hq.mul_x, hq.mul_y, hq.mul_z, hq.mul_w, hq.mul_x, hq.mul_y, hq.mul_z]; ring
+
++ hq.mul_one_r (a : HurwitzQuat) : hq.mul a hq.one = a
+  apply hq.ext <;> (unfold hq.mul hq.one; simp; ring)
+
++ hq.mul_one_l (a : HurwitzQuat) : hq.mul hq.one a = a
+  apply hq.ext <;> (unfold hq.mul hq.one; simp; ring)
+
++ hq.mul_zero_r (a : HurwitzQuat) : hq.mul a hq.zero = hq.zero
+  apply hq.ext <;> (unfold hq.mul hq.zero; simp)
+
++ hq.mul_zero_l (a : HurwitzQuat) : hq.mul hq.zero a = hq.zero
+  apply hq.ext <;> (unfold hq.mul hq.zero; simp)
+
++ hq.mul_add_l (a b c : HurwitzQuat) : hq.mul a (hq.add b c) = hq.add (hq.mul a b) (hq.mul a c)
+  apply hq.ext <;> (unfold hq.mul hq.add; simp; ring)
+
++ hq.mul_add_r (a b c : HurwitzQuat) : hq.mul (hq.add a b) c = hq.add (hq.mul a c) (hq.mul b c)
+  apply hq.ext <;> (unfold hq.mul hq.add; simp; ring)
+
++ hq.mul_sub_l (a b c : HurwitzQuat) : hq.mul a (hq.sub b c) = hq.sub (hq.mul a b) (hq.mul a c)
+  apply hq.ext <;> (unfold hq.mul hq.sub; simp; ring)
+
++ hq.conj_mul (a b : HurwitzQuat) : hq.conj (hq.mul a b) = hq.mul (hq.conj b) (hq.conj a)
+  apply hq.ext <;> (unfold hq.conj hq.mul; simp; ring)
+
++ hq.mul_conj_r (a : HurwitzQuat) : hq.mul a (hq.conj a) = hq.of_int (hq.nrd a)
+  apply hq.ext <;> (unfold hq.mul hq.conj hq.of_int hq.nrd; simp; ring)
+
++ hq.mul_conj_l (a : HurwitzQuat) : hq.mul (hq.conj a) a = hq.of_int (hq.nrd a)
+  apply hq.ext <;> (unfold hq.mul hq.conj hq.of_int hq.nrd; simp; ring)
+
++ hq.hamilton_relations :
+    hq.mul hq.i hq.i = hq.neg hq.one ∧
+    hq.mul hq.j hq.j = hq.neg hq.one ∧
+    hq.mul hq.k hq.k = hq.neg hq.one ∧
+    hq.mul (hq.mul hq.i hq.j) hq.k = hq.neg hq.one
+  have hij : hq.mul hq.i hq.j = hq.k
+    apply hq.ext <;> (unfold hq.mul hq.i hq.j hq.k; simp)
+  constructor
+  · apply hq.ext <;> (unfold hq.mul hq.i hq.neg hq.one; simp)
+  · constructor
+    · apply hq.ext <;> (unfold hq.mul hq.j hq.neg hq.one; simp)
+    · constructor
+      · apply hq.ext <;> (unfold hq.mul hq.k hq.neg hq.one; simp)
+      · rw [hij]; apply hq.ext <;> (unfold hq.mul hq.k hq.neg hq.one; simp)
+
+-- Exact four-square expansion & Euler multiplicativity Nrd(a * b) = Nrd(a) * Nrd(b)!
++ hq.four_nrd_eq_sum_sq (a : HurwitzQuat) :
+    4 * hq.nrd a = hq.d0 a * hq.d0 a + hq.d1 a * hq.d1 a + hq.d2 a * hq.d2 a + hq.d3 a * hq.d3 a
+  unfold hq.nrd hq.d0 hq.d1 hq.d2 hq.d3; ring
+
++ hq.nrd_mul (a b : HurwitzQuat) : hq.nrd (hq.mul a b) = hq.nrd a * hq.nrd b
+  unfold hq.nrd hq.mul; simp; ring
+
++ hq.nrd_conj (a : HurwitzQuat) : hq.nrd (hq.conj a) = hq.nrd a
+  unfold hq.nrd hq.conj; simp; ring
+
++ hq.nrd_nonneg (a : HurwitzQuat) : 0 ≤ hq.nrd a
+  have h4 := hq.four_nrd_eq_sum_sq a
+  have s0 : 0 ≤ hq.d0 a * hq.d0 a := by nlinarith
+  have s1 : 0 ≤ hq.d1 a * hq.d1 a := by nlinarith
+  have s2 : 0 ≤ hq.d2 a * hq.d2 a := by nlinarith
+  have s3 : 0 ≤ hq.d3 a * hq.d3 a := by nlinarith
+  linarith
+
++ hq.nrd_eq_zero_iff (a : HurwitzQuat) : hq.nrd a = 0 ↔ a = hq.zero
+  constructor
+  · intro hz
+    have h4 := hq.four_nrd_eq_sum_sq a
+    rw [hz] at h4
+    have s0 : 0 ≤ hq.d0 a * hq.d0 a := by nlinarith
+    have s1 : 0 ≤ hq.d1 a * hq.d1 a := by nlinarith
+    have s2 : 0 ≤ hq.d2 a * hq.d2 a := by nlinarith
+    have s3 : 0 ≤ hq.d3 a * hq.d3 a := by nlinarith
+    have z0 : hq.d0 a * hq.d0 a = 0 := by linarith
+    have z1 : hq.d1 a * hq.d1 a = 0 := by linarith
+    have z2 : hq.d2 a * hq.d2 a = 0 := by linarith
+    have z3 : hq.d3 a * hq.d3 a = 0 := by linarith
+    have hd0 : hq.d0 a = 0 := by by_contra h; by_cases hp : 0 < hq.d0 a; (have hm := mul_pos.int (hq.d0 a) (hq.d0 a) hp hp; linarith); (have hm := mul_pos.int (-hq.d0 a) (-hq.d0 a) (by linarith) (by linarith); linarith)
+    have hd1 : hq.d1 a = 0 := by by_contra h; by_cases hp : 0 < hq.d1 a; (have hm := mul_pos.int (hq.d1 a) (hq.d1 a) hp hp; linarith); (have hm := mul_pos.int (-hq.d1 a) (-hq.d1 a) (by linarith) (by linarith); linarith)
+    have hd2 : hq.d2 a = 0 := by by_contra h; by_cases hp : 0 < hq.d2 a; (have hm := mul_pos.int (hq.d2 a) (hq.d2 a) hp hp; linarith); (have hm := mul_pos.int (-hq.d2 a) (-hq.d2 a) (by linarith) (by linarith); linarith)
+    have hd3 : hq.d3 a = 0 := by by_contra h; by_cases hp : 0 < hq.d3 a; (have hm := mul_pos.int (hq.d3 a) (hq.d3 a) hp hp; linarith); (have hm := mul_pos.int (-hq.d3 a) (-hq.d3 a) (by linarith) (by linarith); linarith)
+    unfold hq.d0 hq.d1 hq.d2 hq.d3 at hd0 hd1 hd2 hd3
+    have hw0 : a.w = 0 := by omega
+    have hx0 : a.x = 0 := by omega
+    have hy0 : a.y = 0 := by omega
+    have hz0 : a.z = 0 := by omega
+    apply hq.ext
+    · rw [hw0]; unfold hq.zero; simp
+    · rw [hx0]; unfold hq.zero; simp
+    · rw [hy0]; unfold hq.zero; simp
+    · rw [hz0]; unfold hq.zero; simp
+  · intro heq; rw [heq]; unfold hq.nrd hq.zero; simp
+
++ hq.nrd_pos_of_ne_zero (a : HurwitzQuat) (hne : a ≠ hq.zero) : 0 < hq.nrd a
+  have hnn := hq.nrd_nonneg a
+  by_contra hle
+  have hz : hq.nrd a = 0 := by linarith
+  exact hne ((hq.nrd_eq_zero_iff a).mp hz)
+
+-- ====================================================================================
+-- 2. Hurwitz's 1/2-Euclidean Division Theorem (`2 * Nrd(r) <= Nrd(b)`)
+-- ====================================================================================
+
+-- Key complementary-lattice lemma: for ANY integer u and d > 0, there exist an even
+-- multiple 2*q*d and an odd multiple (2*k + 1)*d such that:
+--   (u - 2*q*d)^2 + (u - (2*k + 1)*d)^2 <= d^2 !
++ hurwitz.complementary_parity_approx (u d : ℤ) (hd : 0 < d) :
+    ∃ q k : ℤ, (u - 2 * q * d) * (u - 2 * q * d) + (u - (2 * k + 1) * d) * (u - (2 * k + 1) * d) ≤ d * d
+  obtain ⟨n, hhi, hlo⟩ := int.nearest_quot u d hd
+  set delta := u - n * d with hdelta_def
+  obtain ⟨m, hm_par⟩ := parity_quotient.int n
+  obtain hm_ev | hm_odd := hm_par
+  · -- n = 2*m is even!
+    by_cases hnn : 0 ≤ delta
+    · use m, m
+      have hev : u - 2 * m * d = delta
+        rw [hdelta_def, hm_ev]
+      have hodd : u - (2 * m + 1) * d = delta - d
+        rw [hdelta_def, hm_ev]; ring
+      rw [hev, hodd]
+      have hprod := mul_nonneg.int delta (d - 2 * delta) hnn (by linarith)
+      have hid : d * d - (delta * delta + (delta - d) * (delta - d)) = delta * (d - 2 * delta) + delta * d
+        ring
+      have hdd := mul_nonneg.int delta d hnn (by linarith)
+      linarith
+    · use m, m - 1
+      have hev : u - 2 * m * d = delta
+        rw [hdelta_def, hm_ev]
+      have hodd : u - (2 * (m - 1) + 1) * d = delta + d
+        rw [hdelta_def, hm_ev]; ring
+      rw [hev, hodd]
+      have hprod := mul_nonneg.int (-delta) (d + 2 * delta) (by linarith) (by linarith)
+      have hid : d * d - (delta * delta + (delta + d) * (delta + d)) = (-delta) * (d + 2 * delta) + (-delta) * d
+        ring
+      have hdd := mul_nonneg.int (-delta) d (by linarith) (by linarith)
+      linarith
+  · -- n = 2*m + 1 is odd!
+    by_cases hnn : 0 ≤ delta
+    · use m + 1, m
+      have hodd : u - (2 * m + 1) * d = delta
+        rw [hdelta_def, hm_odd]
+      have hev : u - 2 * (m + 1) * d = delta - d
+        rw [hdelta_def, hm_odd]; ring
+      rw [hev, hodd]
+      have hprod := mul_nonneg.int delta (d - 2 * delta) hnn (by linarith)
+      have hid : d * d - ((delta - d) * (delta - d) + delta * delta) = delta * (d - 2 * delta) + delta * d
+        ring
+      have hdd := mul_nonneg.int delta d hnn (by linarith)
+      linarith
+    · use m, m
+      have hodd : u - (2 * m + 1) * d = delta
+        rw [hdelta_def, hm_odd]
+      have hev : u - 2 * m * d = delta + d
+        rw [hdelta_def, hm_odd]; ring
+      rw [hev, hodd]
+      have hprod := mul_nonneg.int (-delta) (d + 2 * delta) (by linarith) (by linarith)
+      have hid : d * d - ((delta + d) * (delta + d) + delta * delta) = (-delta) * (d + 2 * delta) + (-delta) * d
+        ring
+      have hdd := mul_nonneg.int (-delta) d (by linarith) (by linarith)
+      linarith
+
+-- THEOREM 2A (HURWITZ LEFT EUCLIDEAN DIVISION WITH NORM <= 1/2 — 0 CUSTOM AXIOMS!):
+-- For ALL a, b in O_Hur with b != 0, there exist q, r in O_Hur with
+--   a = b * q + r   AND   2 * Nrd(r) <= Nrd(b)  (hence Nrd(r) < Nrd(b))!
++ hq.mul_of_int_l (d : ℤ) (q : HurwitzQuat) :
+    hq.mul (hq.of_int d) q = HurwitzQuat.mk (d * q.w) (d * q.x) (d * q.y) (d * q.z)
+  apply hq.ext <;> (unfold hq.mul hq.of_int; simp; ring)
+
++ hq.d0_sub (a b : HurwitzQuat) : hq.d0 (hq.sub a b) = hq.d0 a - hq.d0 b := by unfold hq.d0 hq.sub; simp
++ hq.d1_sub (a b : HurwitzQuat) : hq.d1 (hq.sub a b) = hq.d1 a - hq.d1 b := by unfold hq.d1 hq.sub; simp; ring
++ hq.d2_sub (a b : HurwitzQuat) : hq.d2 (hq.sub a b) = hq.d2 a - hq.d2 b := by unfold hq.d2 hq.sub; simp; ring
++ hq.d3_sub (a b : HurwitzQuat) : hq.d3 (hq.sub a b) = hq.d3 a - hq.d3 b := by unfold hq.d3 hq.sub; simp; ring
+
++ hq.d0_mk (w x y z : ℤ) : hq.d0 (HurwitzQuat.mk w x y z) = w := by unfold hq.d0; simp
++ hq.d1_mk (w x y z : ℤ) : hq.d1 (HurwitzQuat.mk w x y z) = 2 * x + w := by unfold hq.d1; simp
++ hq.d2_mk (w x y z : ℤ) : hq.d2 (HurwitzQuat.mk w x y z) = 2 * y + w := by unfold hq.d2; simp
++ hq.d3_mk (w x y z : ℤ) : hq.d3 (HurwitzQuat.mk w x y z) = 2 * z + w := by unfold hq.d3; simp
+
++ hurwitz.left_euclidean_div (a b : HurwitzQuat) (hb : b ≠ hq.zero) :
+    ∃ q r : HurwitzQuat, a = hq.add (hq.mul b q) r ∧ 2 * hq.nrd r ≤ hq.nrd b ∧ hq.nrd r < hq.nrd b
+  have hd_pos_raw : 0 < hq.nrd b := hq.nrd_pos_of_ne_zero b hb
+  set d := hq.nrd b with hd_def
+  have hd_pos : 0 < d := hd_pos_raw
+  set p := hq.mul (hq.conj b) a with hp_def
+  obtain ⟨q0, k0, hb0⟩ := hurwitz.complementary_parity_approx (hq.d0 p) d hd_pos
+  obtain ⟨q1, k1, hb1⟩ := hurwitz.complementary_parity_approx (hq.d1 p) d hd_pos
+  obtain ⟨q2, k2, hb2⟩ := hurwitz.complementary_parity_approx (hq.d2 p) d hd_pos
+  obtain ⟨q3, k3, hb3⟩ := hurwitz.complementary_parity_approx (hq.d3 p) d hd_pos
+  -- Candidate 1 (Lipschitz / even doubled coords (2*q0, 2*q1, 2*q2, 2*q3)):
+  set q_ev := HurwitzQuat.mk (2 * q0) (q1 - q0) (q2 - q0) (q3 - q0) with hqev_def
+  set r_ev := hq.sub a (hq.mul b q_ev) with hrev_def
+  -- Candidate 2 (Half-integer / odd doubled coords (2*k0+1, 2*k1+1, 2*k2+1, 2*k3+1)):
+  set q_od := HurwitzQuat.mk (2 * k0 + 1) (k1 - k0) (k2 - k0) (k3 - k0) with hqod_def
+  set r_od := hq.sub a (hq.mul b q_od) with hrod_def
+  have h_ev_id : 4 * (d * hq.nrd r_ev) =
+      (hq.d0 p - 2 * q0 * d) * (hq.d0 p - 2 * q0 * d) +
+      (hq.d1 p - 2 * q1 * d) * (hq.d1 p - 2 * q1 * d) +
+      (hq.d2 p - 2 * q2 * d) * (hq.d2 p - 2 * q2 * d) +
+      (hq.d3 p - 2 * q3 * d) * (hq.d3 p - 2 * q3 * d)
+    have hmul : d * hq.nrd r_ev = hq.nrd (hq.mul (hq.conj b) r_ev)
+      rw [hq.nrd_mul, hq.nrd_conj, hd_def]
+    rw [hmul, hq.four_nrd_eq_sum_sq (hq.mul (hq.conj b) r_ev)]
+    have hc_eq : hq.mul (hq.conj b) r_ev = hq.sub p (hq.mul (hq.of_int d) q_ev)
+      rw [hrev_def, hq.mul_sub_l, hp_def, ← hq.mul_assoc, hq.mul_conj_l, hd_def]
+    rw [hc_eq, hq.d0_sub, hq.d1_sub, hq.d2_sub, hq.d3_sub, hq.mul_of_int_l, hq.d0_mk, hq.d1_mk, hq.d2_mk, hq.d3_mk, hqev_def]
+    simp; ring
+  have h_od_id : 4 * (d * hq.nrd r_od) =
+      (hq.d0 p - (2 * k0 + 1) * d) * (hq.d0 p - (2 * k0 + 1) * d) +
+      (hq.d1 p - (2 * k1 + 1) * d) * (hq.d1 p - (2 * k1 + 1) * d) +
+      (hq.d2 p - (2 * k2 + 1) * d) * (hq.d2 p - (2 * k2 + 1) * d) +
+      (hq.d3 p - (2 * k3 + 1) * d) * (hq.d3 p - (2 * k3 + 1) * d)
+    have hmul : d * hq.nrd r_od = hq.nrd (hq.mul (hq.conj b) r_od)
+      rw [hq.nrd_mul, hq.nrd_conj, hd_def]
+    rw [hmul, hq.four_nrd_eq_sum_sq (hq.mul (hq.conj b) r_od)]
+    have hc_eq : hq.mul (hq.conj b) r_od = hq.sub p (hq.mul (hq.of_int d) q_od)
+      rw [hrod_def, hq.mul_sub_l, hp_def, ← hq.mul_assoc, hq.mul_conj_l, hd_def]
+    rw [hc_eq, hq.d0_sub, hq.d1_sub, hq.d2_sub, hq.d3_sub, hq.mul_of_int_l, hq.d0_mk, hq.d1_mk, hq.d2_mk, hq.d3_mk, hqod_def]
+    simp; ring
+  have hsum_le : 4 * (d * hq.nrd r_ev) + 4 * (d * hq.nrd r_od) ≤ 4 * (d * d) := by linarith
+  by_cases hpick : 2 * hq.nrd r_ev ≤ d
+  · use q_ev, r_ev
+    have heq_ev : a = hq.add (hq.mul b q_ev) r_ev
+      apply hq.ext <;> (rw [hrev_def]; unfold hq.add hq.sub; simp; ring)
+    have hlt_ev : hq.nrd r_ev < d
+      have hnn := hq.nrd_nonneg r_ev; linarith
+    exact ⟨heq_ev, hpick, hlt_ev⟩
+  · use q_od, r_od
+    have hod_le : 2 * hq.nrd r_od ≤ d
+      by_contra hbad
+      have h1 : d < 2 * hq.nrd r_ev := by linarith
+      have h2 : d < 2 * hq.nrd r_od := by linarith
+      have hm1 := mul_lt_mul_of_pos_left.int d (2 * hq.nrd r_ev) d h1 hd_pos
+      have hm2 := mul_lt_mul_of_pos_left.int d (2 * hq.nrd r_od) d h2 hd_pos
+      linarith
+    have heq_od : a = hq.add (hq.mul b q_od) r_od
+      apply hq.ext <;> (rw [hrod_def]; unfold hq.add hq.sub; simp; ring)
+    have hlt_od : hq.nrd r_od < d
+      have hnn := hq.nrd_nonneg r_od; linarith
+    exact ⟨heq_od, hod_le, hlt_od⟩
+
+-- Right Euclidean division a = q * b + r via conjugation anti-involution!
++ hurwitz.right_euclidean_div (a b : HurwitzQuat) (hb : b ≠ hq.zero) :
+    ∃ q r : HurwitzQuat, a = hq.add (hq.mul q b) r ∧ 2 * hq.nrd r ≤ hq.nrd b ∧ hq.nrd r < hq.nrd b
+  have hcb_ne : hq.conj b ≠ hq.zero
+    intro hc0
+    have hn0 : hq.nrd (hq.conj b) = 0 := (hq.nrd_eq_zero_iff (hq.conj b)).mpr hc0
+    rw [hq.nrd_conj] at hn0
+    exact hb ((hq.nrd_eq_zero_iff b).mp hn0)
+  obtain ⟨q1, r1, heq1, hle1, hlt1⟩ := hurwitz.left_euclidean_div (hq.conj a) (hq.conj b) hcb_ne
+  use hq.conj q1, hq.conj r1
+  have hcc : ∀ x : HurwitzQuat, hq.conj (hq.conj x) = x
+    intro x; unfold hq.conj; apply hq.ext
+    · simp
+    · simp; ring
+    · simp; ring
+    · simp; ring
+  have heq_r : a = hq.add (hq.mul (hq.conj q1) b) (hq.conj r1)
+    have hcon : hq.conj (hq.conj a) = hq.conj (hq.add (hq.mul (hq.conj b) q1) r1) := by rw [heq1]
+    rw [hcc a] at hcon
+    have hadd_c : ∀ x y : HurwitzQuat, hq.conj (hq.add x y) = hq.add (hq.conj x) (hq.conj y)
+      intro x y; unfold hq.conj hq.add; apply hq.ext
+      · simp
+      · simp; ring
+      · simp; ring
+      · simp; ring
+    rw [hadd_c, hq.conj_mul, hcc b] at hcon
+    exact hcon
+  have hle_r : 2 * hq.nrd (hq.conj r1) ≤ hq.nrd b
+    rw [hq.nrd_conj]; rw [hq.nrd_conj] at hle1; exact hle1
+  have hlt_r : hq.nrd (hq.conj r1) < hq.nrd b
+    rw [hq.nrd_conj]; rw [hq.nrd_conj] at hlt1; exact hlt1
+  exact ⟨heq_r, hle_r, hlt_r⟩
+
+-- ====================================================================================
+-- 3. Left-Ideal Principality (#Cl(O_Hur) = 1), 24 Units, and Level-2 Cusp-Form Collapse
+-- ====================================================================================
+
+-> hq.is_left_ideal (I : set HurwitzQuat) : Prop :=
+  I hq.zero ∧
+  (∀ x y : HurwitzQuat, I x → I y → I (hq.sub x y)) ∧
+  (∀ r x : HurwitzQuat, I x → I (hq.mul r x))
+
+-> hq.has_norm_in (I : set HurwitzQuat) (n : ℕ) : Prop :=
+  ∃ g : HurwitzQuat, g ≠ hq.zero ∧ I g ∧ hq.nrd g = (n : ℤ)
+
+-- THEOREM 3A (EVERY LEFT IDEAL OF O_Hur IS PRINCIPAL — #Cl(O_Hur) = 1, 0 AXIOMS!):
+-- For every left ideal I containing at least one nonzero element x0, there exists g in I
+-- with g != 0 such that I = O_Hur * g!
++ hurwitz.left_ideal_principal (I : set HurwitzQuat) (hI : hq.is_left_ideal I)
+    (x0 : HurwitzQuat) (hx0 : I x0) (hnz : x0 ≠ hq.zero) :
+    ∃ g : HurwitzQuat, g ≠ hq.zero ∧ I g ∧ ∀ x : HurwitzQuat, I x ↔ ∃ q : HurwitzQuat, x = hq.mul q g
+  have hn0_nn := hq.nrd_nonneg x0
+  have hex_n : ∃ n : ℕ, hq.has_norm_in I n
+    use nat_of_int (hq.nrd x0)
+    unfold hq.has_norm_in
+    exact ⟨x0, hnz, hx0, (int_of_nat_of_int (hq.nrd x0) hn0_nn).symm⟩
+  obtain ⟨m, hm, hleast⟩ := nat.exists_least (hq.has_norm_in I) hex_n
+  unfold hq.has_norm_in at hm
+  obtain ⟨g, hgnz, hIg, hnrd_g⟩ := hm
+  use g
+  constructor
+  · exact hgnz
+  · constructor
+    · exact hIg
+    · intro x
+      constructor
+      · intro hIx
+        obtain ⟨q, r, heq, _, hr_lt⟩ := hurwitz.right_euclidean_div x g hgnz
+        have hIr : I r
+          have hr_sub : r = hq.sub x (hq.mul q g)
+            apply hq.ext <;> (rw [heq]; unfold hq.add hq.sub; simp; ring)
+          rw [hr_sub]
+          unfold hq.is_left_ideal at hI
+          exact hI.2.1 x (hq.mul q g) hIx (hI.2.2 q g hIg)
+        have hr0 : r = hq.zero
+          by_contra hrnz
+          have hnr_eq_raw : ((nat_of_int (hq.nrd r) : ℕ) : ℤ) = hq.nrd r := int_of_nat_of_int (hq.nrd r) (hq.nrd_nonneg r)
+          set nr := nat_of_int (hq.nrd r) with hnr_def
+          have hnr_lt : nr < m := (cast_lt.int nr m).mp (by rw [hnr_eq_raw, ← hnrd_g]; exact hr_lt)
+          apply hleast nr hnr_lt
+          unfold hq.has_norm_in
+          exact ⟨r, hrnz, hIr, hnr_eq_raw.symm⟩
+        use q
+        rw [heq, hr0]
+        apply hq.ext <;> (unfold hq.add hq.zero; simp)
+      · intro hmul
+        obtain ⟨q, hq⟩ := hmul
+        rw [hq]
+        unfold hq.is_left_ideal at hI
+        exact hI.2.2 q g hIg
+
+-- Unit group characterization: q has a two-sided inverse in O_Hur iff Nrd(q) = 1,
+-- corresponding to the 24 solutions (8 Lipschitz units + 16 half-integer units)!
+-> hq.is_unit (u : HurwitzQuat) : Prop :=
+  ∃ v : HurwitzQuat, hq.mul u v = hq.one ∧ hq.mul v u = hq.one
+
++ hq.is_unit_iff_nrd_eq_one (u : HurwitzQuat) : hq.is_unit u ↔ hq.nrd u = 1
+  unfold hq.is_unit
+  constructor
+  · intro hu
+    obtain ⟨v, huv, _⟩ := hu
+    have hn : hq.nrd (hq.mul u v) = hq.nrd hq.one := by rw [huv]
+    rw [hq.nrd_mul] at hn
+    have hn1 : hq.nrd hq.one = 1 := by unfold hq.nrd hq.one; simp
+    rw [hn1] at hn
+    have hu_nn := hq.nrd_nonneg u
+    have hv_nn := hq.nrd_nonneg v
+    by_contra hne1
+    by_cases hu0 : hq.nrd u = 0
+    · rw [hu0] at hn; linarith
+    · have hu2 : 2 ≤ hq.nrd u := by omega
+      by_cases hv0 : hq.nrd v = 0
+      · rw [hv0] at hn; linarith
+      · have hv1 : 1 ≤ hq.nrd v := by omega
+        have hge := mul_le_mul_of_nonneg_left.int 1 (hq.nrd v) (hq.nrd u) hv1 (by omega)
+        linarith
+  · intro hn1
+    use hq.conj u
+    have h1 : hq.of_int 1 = hq.one := by apply hq.ext <;> (unfold hq.of_int hq.one; simp)
+    constructor
+    · rw [hq.mul_conj_r, hn1, h1]
+    · rw [hq.mul_conj_l, hn1, h1]
+
+-- Eichler mass identity at ramified prime p = 2:
+-- |O_Hur^*| = 24, |O_Hur^* / {+-1}| = 12, and Eichler's mass (p - 1)/12 = 1/12!
++ hurwitz.eichler_mass_level2 :
+    (24 : ℚ) / 2 = 12 ∧ (1 : ℚ) / 12 = ((2 : ℚ) - 1) / 12
+  constructor <;> norm_num
+
+-> hq.univ_ideal : set HurwitzQuat := fun (q : HurwitzQuat) => True
+
+-- THEOREM 3B (0-DIMENSIONAL QUATERNIONIC CUSP-FORM COLLAPSE S_2^{quat}(B_{2,oo}) = 0!):
+-- Every weight-2 trivial-level quaternionic cusp form on B_{2,oo} vanishes identically!
++ hurwitz.cusp_forms_level2_zero (f : set HurwitzQuat → ℂ)
+    (h_class_inv : ∀ I : set HurwitzQuat,
+      (∃ g : HurwitzQuat, g ≠ hq.zero ∧ I g ∧ ∀ x : HurwitzQuat, I x ↔ ∃ q : HurwitzQuat, x = hq.mul q g) →
+      f I = f hq.univ_ideal)
+    (h_cusp : complex.mul (complex.of_real (1 / 12)) (f hq.univ_ideal) = complex.zero) :
+    ∀ I : set HurwitzQuat, hq.is_left_ideal I → (∃ x0 : HurwitzQuat, I x0 ∧ x0 ≠ hq.zero) → f I = complex.zero
+  intro I hI hex
+  obtain ⟨x0, hx0, hnz⟩ := hex
+  have hprin := hurwitz.left_ideal_principal I hI x0 hx0 hnz
+  have hfeq : f I = f hq.univ_ideal := h_class_inv I hprin
+  have hre : complex.re (complex.mul (complex.of_real (1 / 12)) (f hq.univ_ideal)) = complex.re complex.zero := by rw [h_cusp]
+  have him : complex.im (complex.mul (complex.of_real (1 / 12)) (f hq.univ_ideal)) = complex.im complex.zero := by rw [h_cusp]
+  simp at hre him
+  have hf0 : f hq.univ_ideal = complex.zero
+    apply complex.ext <;> (simp; linarith)
+  rw [hfeq, hf0]

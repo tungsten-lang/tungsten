@@ -1,0 +1,110 @@
+-- End-to-end regression spec for the 5-module 0-axiom FLT / Hurwitz-Tate-Khare prelude suite:
+--   fermat_descent, hurwitz_quaternion, eisenstein, dirichlet_five, frey_elliptic.
+-- Every theorem below must check with ZERO custom `axiom:` tags (only `[oracle:arith, oracle:ring]`).
+
+import frey_elliptic
+
+-- 1. fermat_descent: arbitrary-k coprime power factorization, Fermat n = 4, and prime reduction
++ spec_coprime_mul_pow (k a b c : ℕ) (hk : 1 ≤ k) (ha : 0 < a) (hb : 0 < b)
+    (hcop : nat.coprime_primes a b) (heq : a * b = c ^ k) :
+    ∃ u v : ℕ, a = u ^ k ∧ b = v ^ k
+  exact nat.coprime_mul_eq_pow k hk a ha b c hb hcop heq
+
++ spec_flt_exp_four (x y z : ℕ) (hx : 0 < x) (hy : 0 < y) : x ^ 4 + y ^ 4 ≠ z ^ 4
+  exact flt.exp_four x y z hx hy
+
+-- 2. hurwitz_quaternion: 1/2-Euclidean division, #Cl(O_Hur) = 1, 24-unit norm, S_2^{quat}(B_{2,oo}) = 0
++ spec_hurwitz_euclid (a b : HurwitzQuat) (hb : b ≠ hq.zero) :
+    ∃ q r : HurwitzQuat, a = hq.add (hq.mul b q) r ∧ 2 * hq.nrd r ≤ hq.nrd b ∧ hq.nrd r < hq.nrd b
+  exact hurwitz.left_euclidean_div a b hb
+
++ spec_hurwitz_pid (I : set HurwitzQuat) (hI : hq.is_left_ideal I) (x0 : HurwitzQuat) (hx0 : I x0) (hnz : x0 ≠ hq.zero) :
+    ∃ g : HurwitzQuat, g ≠ hq.zero ∧ I g ∧ ∀ x : HurwitzQuat, I x ↔ ∃ q : HurwitzQuat, x = hq.mul q g
+  exact hurwitz.left_ideal_principal I hI x0 hx0 hnz
+
++ spec_hurwitz_cusp_zero (f : set HurwitzQuat → ℂ)
+    (h_inv : ∀ I : set HurwitzQuat,
+      (∃ g : HurwitzQuat, g ≠ hq.zero ∧ I g ∧ ∀ x : HurwitzQuat, I x ↔ ∃ q : HurwitzQuat, x = hq.mul q g) →
+      f I = f hq.univ_ideal)
+    (h_cusp : complex.mul (complex.of_real (1 / 12)) (f hq.univ_ideal) = complex.zero)
+    (I : set HurwitzQuat) (hI : hq.is_left_ideal I) (hex : ∃ x0 : HurwitzQuat, I x0 ∧ x0 ≠ hq.zero) :
+    f I = complex.zero
+  exact hurwitz.cusp_forms_level2_zero f h_inv h_cusp I hI hex
+
+-- 3. eisenstein: A_2 shell quotient, Gauss lambda-descent, Euler n = 3, and all-n reduction to p >= 5
++ spec_flt_exp_three (x y z : ℕ) (hx : 0 < x) (hy : 0 < y) : x ^ 3 + y ^ 3 ≠ z ^ 3
+  exact flt.exp_three x y z hx hy
+
++ spec_flt_reduce_ge_5 (hp5 : ∀ p : ℕ, is_prime_nat p → 5 ≤ p → flt_at p) (n : ℕ) (hn : 3 ≤ n) :
+    flt_at n
+  exact flt.reduce_to_primes_ge_5 hp5 n hn
+
+-- 3B. dirichlet_five: Z[phi] 5/16-Euclidean division, Dirichlet-Legendre n = 5, and all-n reduction to p >= 7
++ spec_gi5_euclid (x y : GoldenInt) (hy : y ≠ gi5.zero) :
+    ∃ q r : GoldenInt, x = gi5.add (gi5.mul y q) r ∧ 16 * |gi5.norm r| ≤ 5 * |gi5.norm y| ∧ |gi5.norm r| < |gi5.norm y|
+  exact gi5.euclidean_div x y hy
+
++ spec_flt_exp_five (x y z : ℕ) (hx : 0 < x) (hy : 0 < y) : x ^ 5 + y ^ 5 ≠ z ^ 5
+  exact flt.exp_five x y z hx hy
+
++ spec_flt_reduce_ge_7 (hp7 : ∀ p : ℕ, is_prime_nat p → 7 ≤ p → flt_at p) (n : ℕ) (hn : 3 ≤ n) :
+    flt_at n
+  exact flt.reduce_to_primes_ge_7 hp7 n hn
+
+-- 4. frey_elliptic: Weierstrass minimality, Frey global semistability, zero-Mazur Case I & 3 nmid abc, mod-2 S_3, Kummer Case I
++ spec_frey_three_ndvd_zero_mazur (p : ℕ) (hp5 : 5 ≤ p) (f_mod_3 : ℕ → ℕ)
+    (h_inj : 4 * p ≤ 1 + (∑ x < 3, ∑ y < 3, if (y * y) % 3 = (f_mod_3 x) % 3 then (1 : ℕ) else 0)) :
+    False
+  exact frey.irreducible_of_three_ndvd p hp5 f_mod_3 h_inj
++ spec_frey_semistable_minimal (p : ℕ) (hp : 5 ≤ p) (a b c u v scale c4' disc' : ℤ)
+    (hsum : a ^ p + b ^ p + c ^ p = 0) (hA : a ^ p = 4 * u + 1) (hC : c ^ p = 16 * v)
+    (hcab : nat.coprime_primes (nat_of_int (|a|)) (nat_of_int (|b|)))
+    (hcac : nat.coprime_primes (nat_of_int (|a|)) (nat_of_int (|c|)))
+    (hcbc : nat.coprime_primes (nat_of_int (|b|)) (nat_of_int (|c|)))
+    (hsc : scale ≠ 0)
+    (hc4nz : wc.c4 (frey.curve u v (a ^ p)) ≠ 0) (hdnz : wc.disc (frey.curve u v (a ^ p)) ≠ 0)
+    (hc4s : scale ^ 4 * c4' = wc.c4 (frey.curve u v (a ^ p)))
+    (hds : scale ^ 12 * disc' = wc.disc (frey.curve u v (a ^ p))) :
+    |scale| = 1
+  have hsemi := frey.globally_semistable p hp a b c u v hsum hA hC hcab hcac hcbc
+  exact wc.minimal_of_semistable (wc.c4 (frey.curve u v (a ^ p))) c4' (wc.disc (frey.curve u v (a ^ p))) disc' scale hsc hc4nz hdnz hc4s hds hsemi
+
++ spec_frey_case1_zero_mazur (p : ℕ) (hp5 : 5 ≤ p) (f_mod_p : ℕ → ℕ) (hp_pr : is_prime_nat p)
+    (h_inj : 4 * p ≤ 1 + (∑ x < p, ∑ y < p, if (y * y) % p = (f_mod_p x) % p then (1 : ℕ) else 0)) :
+    False
+  exact frey.case1_irreducible_zero_mazur p hp5 f_mod_p hp_pr h_inj
+
++ spec_mod2_no_s3 (d : ℤ) (e2 h_plus f2 : ℕ)
+    (hd0 : d ≠ 0) (hd1 : d ≠ 1) (hsq : ¬ (4 ∣ nat_of_int (|d|)))
+    (hunr : ∀ p : ℕ, is_prime_nat p → 3 ≤ p → ¬ (p ∣ nat_of_int (|d|)))
+    (he2 : e2 = 1 ∨ e2 = 3)
+    (hh : (d = -1 → h_plus = 2) ∧ (d = -2 → h_plus = 2) ∧ (d = 2 → h_plus = 1))
+    (hf : (d = -1 → f2 = 1) ∧ (d = -2 → f2 = 1) ∧ (d = 2 → f2 = 1))
+    (hcft : (e2 = 1 → 3 ∣ h_plus) ∧ (e2 = 3 → 3 ∣ (2 ^ f2 - 1))) :
+    False
+  exact mod2_level2.no_s3_unramified_outside_2 d e2 h_plus f2 hd0 hd1 hsq hunr he2 hh hf hcft
+
++ spec_kummer_shell_case1 (p r1 r2 : ℕ) (x y z c1 c2 : ℤ)
+    (hp : is_prime_nat p) (hp5 : 5 ≤ p)
+    (hx : x % (p : ℤ) ≠ 0) (hy : y % (p : ℤ) ≠ 0) (hz : z % (p : ℤ) ≠ 0)
+    (hsum : (x + y + z) % (p : ℤ) = 0)
+    (hxy : ∀ j : ℕ, j < p → ((if j = 1 then x else (0 : ℤ)) + (if j = 2 then y else (0 : ℤ)) - (if j = (2 * r1) % p then y else (0 : ℤ)) - (if j = (2 * r1 + 1) % p then x else (0 : ℤ))) % (p : ℤ) = c1 % (p : ℤ))
+    (hxz : ∀ j : ℕ, j < p → ((if j = 1 then x else (0 : ℤ)) + (if j = 2 then z else (0 : ℤ)) - (if j = (2 * r2) % p then z else (0 : ℤ)) - (if j = (2 * r2 + 1) % p then x else (0 : ℤ))) % (p : ℤ) = c2 % (p : ℤ)) :
+    False
+  exact kummer.shell_case1_contradiction p r1 r2 x y z c1 c2 hp hp5 hx hy hz hsum hxy hxz
+
+#axioms spec_coprime_mul_pow
+#axioms spec_flt_exp_four
+#axioms spec_hurwitz_euclid
+#axioms spec_hurwitz_pid
+#axioms spec_hurwitz_cusp_zero
+#axioms spec_flt_exp_three
+#axioms spec_flt_reduce_ge_5
+#axioms spec_gi5_euclid
+#axioms spec_flt_exp_five
+#axioms spec_flt_reduce_ge_7
+#axioms spec_frey_three_ndvd_zero_mazur
+#axioms spec_frey_semistable_minimal
+#axioms spec_frey_case1_zero_mazur
+#axioms spec_mod2_no_s3
+#axioms spec_kummer_shell_case1

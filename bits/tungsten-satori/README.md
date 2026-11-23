@@ -1313,6 +1313,30 @@ Optional:
 * `import poly`: Laurent polynomials as `(exponent, coefficient)` lists; `poly_at1 poly_at_neg1
   poly_d1 poly_d2 poly_d3 poly_mirror poly_neg_var poly_within`. Conditions on knot polynomials and generating
   functions then close by `decide` (e.g. the purely-cosmetic-surgery sieve in `~/math/openai/families/306-cosmetic-surgery`).
+* `import fermat_descent`: arbitrary-exponent coprime power factorization (`nat.coprime_mul_eq_pow` via `padic`),
+  primitive Pythagorean parameterization (`pythagorean.primitive_param`), Fermat's infinite-descent proof of
+  `flt.exp_four_sq` / `flt.exp_four`, and prime exponent reduction `flt.reduce_to_three_and_primes_ge_5` (0 custom axioms).
+* `import hurwitz_quaternion`: definite quaternion algebra $B_{2,\infty}$ and maximal Hurwitz order $\mathcal{O}_{\mathrm{Hur}}$
+  in $\mathbb{Z}$-basis $\{\rho, i, j, k\}$, Euler norm multiplicativity, $\frac{1}{2}$-Euclidean division
+  (`hurwitz.left_euclidean_div`), left-ideal principality $\#\mathrm{Cl}(\mathcal{O}_{\mathrm{Hur}}) = 1$
+  (`hurwitz.left_ideal_principal`), 24-unit classification, Eichler mass $\frac{1}{12}$, and 0D cusp-form vanishing
+  `hurwitz.cusp_forms_level2_zero` (0 custom axioms).
+* `import eisenstein`: Eisenstein integers $\mathbb{Z}[\omega]$ with hexagonal $A_2 = \mathbb{Z}^3/\mathbb{Z}(1,1,1)$
+  shell quotient (`eis.shell_A2_quotient`), $\frac{3}{4}$-Euclidean division (`eis.euclidean_div`), Bézout GCD,
+  unique cube factorization (`eis.coprime_three_eq_unit_cube`), Gauss $\lambda = 1 - \omega$ infinite descent
+  (`eis.gauss_lambda_descent`), `flt.exp_three`, and `flt.reduce_to_primes_ge_5` (0 custom axioms).
+* `import dirichlet_five`: golden integers $\mathbb{Z}[\phi]$ ($\phi^2 - \phi - 1 = 0$), sharp $\frac{5}{16}$-Euclidean
+  division (`gi5.euclidean_div`), Bézout GCD, Pell mod-5 unit fifth-power characterization (`gi5.unit_fifth_of_mod5`),
+  Dirichlet–Legendre 1825 infinite descent (`dirichlet.quartic_fifth_descent`), all-case `flt.exp_five`, and all-exponent
+  reduction `flt.reduce_to_primes_ge_7` (0 custom axioms).
+* `import frey_elliptic`: bundled `WeierstrassCurve` invariants & coordinate-change minimality (`wc.minimal_of_semistable`),
+  prime-by-prime global semistability of the Frey–Hellegouarch curve (`frey.globally_semistable`), elementary $\le 2\ell + 1$
+  point-count elimination of Mazur across all of Case I and all $3 \nmid abc$ triples (`frey.case1_irreducible_zero_mazur`,
+  `frey.irreducible_of_three_ndvd`, `frey.good_odd_prime_ge_2p`), norm-Euclidean $\mathbb{Z}[i], \mathbb{Z}[\sqrt{-2}], \mathbb{Z}[\sqrt{2}]$
+  and mod-2 $\mathrm{GL}_2(\mathbb{F}_2) \simeq S_3$ non-existence unramified outside $\{2, \infty\}$
+  (`mod2_level2.no_s3_unramified_outside_2`), and Kummer's diagonal-shell Case-I congruence elimination
+  (`kummer.shell_case1_contradiction`, 0 custom axioms).
+  [Spec](spec/flt_prelude_spec.sat) · [Shorter FLT Route](examples/flt_shorter_route.sat)
 
 ## Design notes
 

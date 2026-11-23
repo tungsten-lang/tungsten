@@ -1,0 +1,1920 @@
+-- Eisenstein Integers Z[omega] (omega^2 + omega + 1 = 0), Cubic-Shell Hexagonal Quotient A_2,
+-- Euclidean Division (4 * N(r) <= 3 * N(b)), Bezout GCD, Coprime Cube Factorization,
+-- and Complete Unconditional Gauss-Euler Proof of Fermat's Last Theorem for Exponent n = 3!
+--
+-- ALL theorems proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import algebra
+import fermat_descent
+
+-- ====================================================================================
+-- 1. Eisenstein Integers Z[omega] & Cubic-Shell Hexagonal A_2 Quotient
+-- ====================================================================================
+
+structure Eisenstein :=
+  (a : ℤ)
+  (b : ℤ)
+
++ eis.eta (x : Eisenstein) : Eisenstein.mk x.a x.b = x
+  induction x
+  simp
+
++ eis.ext (x y : Eisenstein) (ha : x.a = y.a) (hb : x.b = y.b) : x = y
+  rw [← eis.eta x, ← eis.eta y, ha, hb]
+
+-> eis.zero    : Eisenstein := Eisenstein.mk 0 0
+-> eis.one     : Eisenstein := Eisenstein.mk 1 0
+-> eis.neg_one : Eisenstein := Eisenstein.mk (-1) 0
+-> eis.omega   : Eisenstein := Eisenstein.mk 0 1
+-> eis.omega2  : Eisenstein := Eisenstein.mk (-1) (-1)
+-> eis.lam     : Eisenstein := Eisenstein.mk 1 (-1)
+
+-> eis.of_int (n : ℤ) : Eisenstein := Eisenstein.mk n 0
+
+-> eis.add (x y : Eisenstein) : Eisenstein :=
+  Eisenstein.mk (x.a + y.a) (x.b + y.b)
+
+-> eis.sub (x y : Eisenstein) : Eisenstein :=
+  Eisenstein.mk (x.a - y.a) (x.b - y.b)
+
+-> eis.neg (x : Eisenstein) : Eisenstein :=
+  Eisenstein.mk (-x.a) (-x.b)
+
+-> eis.mul (x y : Eisenstein) : Eisenstein :=
+  Eisenstein.mk (x.a * y.a - x.b * y.b) (x.a * y.b + x.b * y.a - x.b * y.b)
+
+-> eis.conj (x : Eisenstein) : Eisenstein :=
+  Eisenstein.mk (x.a - x.b) (-x.b)
+
+-> eis.norm (x : Eisenstein) : ℤ :=
+  x.a * x.a - x.a * x.b + x.b * x.b
+
+-> eis.cube (x : Eisenstein) : Eisenstein :=
+  eis.mul x (eis.mul x x)
+
+-> eis.pow : Eisenstein → ℕ → Eisenstein
+  | _, 0 => eis.one
+  | x, k + 1 => eis.mul (eis.pow x k) x
+
+-> eis.dvd (d x : Eisenstein) : Prop :=
+  ∃ q : Eisenstein, x = eis.mul d q
+
+-> eis.coprime (x y : Eisenstein) : Prop :=
+  ∃ u v : Eisenstein, eis.add (eis.mul u x) (eis.mul v y) = eis.one
+
+-- HOL Typeclass Instances for Eisenstein:
+instance eis_zero_inst : Zero Eisenstein := Zero.mk eis.zero
+instance eis_one_inst  : One  Eisenstein := One.mk  eis.one
+instance eis_add_inst  : Add  Eisenstein := Add.mk  eis.add
+instance eis_sub_inst  : Sub  Eisenstein := Sub.mk  eis.sub
+instance eis_neg_inst  : Neg  Eisenstein := Neg.mk  eis.neg
+instance eis_mul_inst  : Mul  Eisenstein := Mul.mk  eis.mul
+
+-- ---- Cubic-shell hexagonal A_2 projection Z^3 / Z(1,1,1) -> Z[omega] --------------
+-> eis.shell_proj (x0 x1 x2 : ℤ) : Eisenstein :=
+  Eisenstein.mk (x0 - x2) (x1 - x2)
+
++ eis.shell_A2_quotient (x0 x1 x2 t : ℤ) :
+    eis.shell_proj (x0 + t) (x1 + t) (x2 + t) = eis.shell_proj x0 x1 x2 ∧
+    eis.shell_proj x2 x0 x1 = eis.mul eis.omega (eis.shell_proj x0 x1 x2)
+  constructor <;> (apply eis.ext <;> (unfold eis.shell_proj eis.mul eis.omega; simp; ring))
+
+-- ---- Basic Ring & Norm Laws --------------------------------------------------------
+
+@[auto] + eis.add_comm (x y : Eisenstein) : eis.add x y = eis.add y x
+  apply eis.ext <;> (unfold eis.add; simp; ring)
+
++ eis.add_zero_r (x : Eisenstein) : eis.add x eis.zero = x
+  apply eis.ext <;> (unfold eis.add eis.zero; simp)
+
+@[auto] + eis.mul_comm (x y : Eisenstein) : eis.mul x y = eis.mul y x
+  apply eis.ext <;> (unfold eis.mul; simp; ring)
+
+@[auto] + eis.mul_assoc (x y z : Eisenstein) : eis.mul (eis.mul x y) z = eis.mul x (eis.mul y z)
+  apply eis.ext <;> (unfold eis.mul; simp; ring)
+
++ eis.mul_one_r (x : Eisenstein) : eis.mul x eis.one = x
+  apply eis.ext <;> (unfold eis.mul eis.one; simp; ring)
+
+@[auto] + eis.mul_one_l (x : Eisenstein) : eis.mul eis.one x = x
+  apply eis.ext <;> (unfold eis.mul eis.one; simp; ring)
+
++ eis.mul_zero_r (x : Eisenstein) : eis.mul x eis.zero = eis.zero
+  apply eis.ext <;> (unfold eis.mul eis.zero; simp)
+
+@[auto] + eis.mul_add_l (x y z : Eisenstein) : eis.mul x (eis.add y z) = eis.add (eis.mul x y) (eis.mul x z)
+  apply eis.ext <;> (unfold eis.mul eis.add; simp; ring)
+
++ eis.mul_sub_l (x y z : Eisenstein) : eis.mul x (eis.sub y z) = eis.sub (eis.mul x y) (eis.mul x z)
+  apply eis.ext <;> (unfold eis.mul eis.sub; simp; ring)
+
++ eis.mul_conj (x : Eisenstein) : eis.mul x (eis.conj x) = eis.of_int (eis.norm x)
+  apply eis.ext <;> (unfold eis.mul eis.conj eis.of_int eis.norm; simp; ring)
+
++ eis.norm_mul (x y : Eisenstein) : eis.norm (eis.mul x y) = eis.norm x * eis.norm y
+  unfold eis.norm eis.mul; simp; ring
+
++ eis.norm_conj (x : Eisenstein) : eis.norm (eis.conj x) = eis.norm x
+  unfold eis.norm eis.conj; simp; ring
+
++ eis.four_norm (x : Eisenstein) :
+    4 * eis.norm x = (2 * x.a - x.b) * (2 * x.a - x.b) + 3 * (x.b * x.b)
+  unfold eis.norm; ring
+
++ eis.norm_nonneg (x : Eisenstein) : 0 ≤ eis.norm x
+  have h4 := eis.four_norm x
+  have s1 : 0 ≤ (2 * x.a - x.b) * (2 * x.a - x.b) := by nlinarith
+  have s2 : 0 ≤ x.b * x.b := by nlinarith
+  linarith
+
++ eis.norm_eq_zero_iff (x : Eisenstein) : eis.norm x = 0 ↔ x = eis.zero
+  constructor
+  · intro hz
+    have h4 := eis.four_norm x
+    rw [hz] at h4
+    have s1 : 0 ≤ (2 * x.a - x.b) * (2 * x.a - x.b) := by nlinarith
+    have s2 : 0 ≤ x.b * x.b := by nlinarith
+    have z2 : x.b * x.b = 0 := by linarith
+    have hb0 : x.b = 0
+      by_contra h; by_cases hp : 0 < x.b
+      · have hm := mul_pos.int x.b x.b hp hp; linarith
+      · have hm := mul_pos.int (-x.b) (-x.b) (by linarith) (by linarith); linarith
+    rw [hb0] at h4
+    have za : x.a * x.a = 0 := by linarith
+    have ha0 : x.a = 0
+      by_contra h; by_cases hp : 0 < x.a
+      · have hm := mul_pos.int x.a x.a hp hp; linarith
+      · have hm := mul_pos.int (-x.a) (-x.a) (by linarith) (by linarith); linarith
+    apply eis.ext
+    · rw [ha0]; unfold eis.zero; simp
+    · rw [hb0]; unfold eis.zero; simp
+  · intro heq; rw [heq]; unfold eis.norm eis.zero; simp
+
++ eis.norm_pos_of_ne_zero (x : Eisenstein) (hne : x ≠ eis.zero) : 0 < eis.norm x
+  have hnn := eis.norm_nonneg x
+  by_contra hle
+  exact hne ((eis.norm_eq_zero_iff x).mp (by linarith))
+
+-- Integral domain cancellation: c != 0 and c * x = c * y => x = y!
++ eis.mul_cancel_left (c x y : Eisenstein) (hc : c ≠ eis.zero) (heq : eis.mul c x = eis.mul c y) : x = y
+  have hsub0 : eis.mul c (eis.sub x y) = eis.zero
+    rw [eis.mul_sub_l, heq]
+    apply eis.ext <;> (unfold eis.sub eis.zero; simp; ring)
+  have hn : eis.norm (eis.mul c (eis.sub x y)) = 0 := (eis.norm_eq_zero_iff (eis.mul c (eis.sub x y))).mpr hsub0
+  rw [eis.norm_mul] at hn
+  have hnc : 0 < eis.norm c := eis.norm_pos_of_ne_zero c hc
+  have hnxy_nn : 0 ≤ eis.norm (eis.sub x y) := eis.norm_nonneg (eis.sub x y)
+  have hnxy0 : eis.norm (eis.sub x y) = 0
+    by_contra hnz
+    have hp := mul_pos.int (eis.norm c) (eis.norm (eis.sub x y)) hnc (by linarith)
+    linarith
+  have hd0 : eis.sub x y = eis.zero := (eis.norm_eq_zero_iff (eis.sub x y)).mp hnxy0
+  have ha : (eis.sub x y).a = 0 := by rw [hd0]; unfold eis.zero; simp
+  have hb : (eis.sub x y).b = 0 := by rw [hd0]; unfold eis.zero; simp
+  unfold eis.sub at ha hb; simp at ha hb
+  exact eis.ext x y (by linarith) (by linarith)
+
+@[auto] + eis.add_assoc (x y z : Eisenstein) : eis.add (eis.add x y) z = eis.add x (eis.add y z)
+  apply eis.ext <;> (unfold eis.add; simp; ring)
+
+@[auto] + eis.zero_add (x : Eisenstein) : eis.add eis.zero x = x
+  apply eis.ext <;> (unfold eis.add eis.zero; simp)
+
+@[auto] + eis.add_right_neg (x : Eisenstein) : eis.add x (eis.neg x) = eis.zero
+  apply eis.ext <;> (unfold eis.add eis.neg eis.zero; simp; ring)
+
+@[auto] + eis.mul_add_r (x y z : Eisenstein) : eis.mul (eis.add x y) z = eis.add (eis.mul x z) (eis.mul y z)
+  apply eis.ext <;> (unfold eis.mul eis.add; simp; ring)
+
+@[auto] + eis.one_ne_zero : eis.one ≠ eis.zero
+  intro h; have ha : eis.one.a = eis.zero.a := by rw [h]
+  unfold eis.one eis.zero at ha; simp at ha
+
+@[auto] + eis.mul_ne_zero (x y : Eisenstein) (hx : x ≠ eis.zero) (hy : y ≠ eis.zero) :
+    eis.mul x y ≠ eis.zero
+  intro h0
+  have hn0 : eis.norm (eis.mul x y) = 0 := (eis.norm_eq_zero_iff (eis.mul x y)).mpr h0
+  rw [eis.norm_mul] at hn0
+  have hpx := eis.norm_pos_of_ne_zero x hx
+  have hpy := eis.norm_pos_of_ne_zero y hy
+  have hpm := mul_pos.int (eis.norm x) (eis.norm y) hpx hpy
+  omega
+
+instance eis_add_group : AddCommGroup   Eisenstein := AddCommGroup.mk eis.zero eis.add eis.neg
+instance eis_ring      : Ring           Eisenstein := Ring.mk eis.zero eis.one eis.add eis.neg eis.mul
+instance eis_comm_ring : CommRing       Eisenstein := CommRing.mk eis.zero eis.one eis.add eis.neg eis.mul
+instance eis_domain    : IntegralDomain Eisenstein := IntegralDomain.mk eis.zero eis.one eis.add eis.neg eis.mul
+
+-- ====================================================================================
+-- 2. Euclidean Division (4 * N(r) <= 3 * N(b)) & Bezout GCD in Z[omega]
+-- ====================================================================================
+
++ eis.euclidean_div (a b : Eisenstein) (hb : b ≠ eis.zero) :
+    ∃ q r : Eisenstein, a = eis.add (eis.mul b q) r ∧ 4 * eis.norm r ≤ 3 * eis.norm b ∧ eis.norm r < eis.norm b
+  have hd_pos_raw : 0 < eis.norm b := eis.norm_pos_of_ne_zero b hb
+  set d := eis.norm b with hd_def
+  have hd_pos : 0 < d := hd_pos_raw
+  set p := eis.mul a (eis.conj b) with hp_def
+  obtain ⟨qa, hahi, halo⟩ := int.nearest_quot p.a d hd_pos
+  obtain ⟨qb, hbhi, hblo⟩ := int.nearest_quot p.b d hd_pos
+  set q := Eisenstein.mk qa qb with hq_def
+  set r := eis.sub a (eis.mul b q) with hr_def
+  use q, r
+  set u := p.a - qa * d with hu_def
+  set v := p.b - qb * d with hv_def
+  have hrc : eis.mul r (eis.conj b) = Eisenstein.mk u v
+    apply eis.ext <;> (rw [hr_def, hu_def, hv_def, hp_def, hq_def, hd_def]; unfold eis.mul eis.sub eis.conj eis.norm; simp; ring)
+  have hnm : eis.norm r * d = u * u - u * v + v * v
+    have h1 := eis.norm_mul r (eis.conj b)
+    rw [eis.norm_conj, ← hd_def, hrc] at h1
+    unfold eis.norm at h1; simp at h1
+    exact h1.symm
+  -- Key SOS identity: 6*d^2 - 8*(u^2 - u*v + v^2) = 2*(d - 2*u)*(d + 2*u) + 2*(d - 2*v)*(d + 2*v) + (d + 2*u)*(d + 2*v) + (d - 2*u)*(d - 2*v) >= 0!
+  have hs1 := mul_nonneg.int (d - 2 * u) (d + 2 * u) (by linarith) (by linarith)
+  have hs2 := mul_nonneg.int (d - 2 * v) (d + 2 * v) (by linarith) (by linarith)
+  have hs3 := mul_nonneg.int (d + 2 * u) (d + 2 * v) (by linarith) (by linarith)
+  have hs4 := mul_nonneg.int (d - 2 * u) (d - 2 * v) (by linarith) (by linarith)
+  have hsos : 6 * (d * d) - 8 * (u * u - u * v + v * v) =
+      2 * ((d - 2 * u) * (d + 2 * u)) + 2 * ((d - 2 * v) * (d + 2 * v)) +
+      (d + 2 * u) * (d + 2 * v) + (d - 2 * u) * (d - 2 * v) := by ring
+  have h8 : 8 * (eis.norm r * d) ≤ 6 * (d * d) := by linarith
+  have h43 : 4 * eis.norm r ≤ 3 * d
+    by_contra hgt
+    have hm := mul_lt_mul_of_pos_right.int (3 * d) (4 * eis.norm r) d (by linarith) hd_pos
+    linarith
+  have heq_r : a = eis.add (eis.mul b q) r
+    apply eis.ext <;> (rw [hr_def]; unfold eis.add eis.sub; simp; ring)
+  have hlt_r : eis.norm r < d
+    have hnn := eis.norm_nonneg r; linarith
+  exact ⟨heq_r, h43, hlt_r⟩
+
+-> eis.bezout_at (N : ℕ) : Prop :=
+  ∀ x y : Eisenstein, eis.norm y ≤ (N : ℤ) →
+    ∃ g u v : Eisenstein, eis.dvd g x ∧ eis.dvd g y ∧ g = eis.add (eis.mul u x) (eis.mul v y)
+
++ eis.bezout_gcd (a b : Eisenstein) :
+    ∃ g u v : Eisenstein, eis.dvd g a ∧ eis.dvd g b ∧ g = eis.add (eis.mul u a) (eis.mul v b)
+  have hstrong : ∀ N : ℕ, eis.bezout_at N
+    intro N; induction N with M ihM
+    · unfold eis.bezout_at; intro x y hny
+      have hy0 : y = eis.zero := (eis.norm_eq_zero_iff y).mp (by linarith [eis.norm_nonneg y])
+      use x, eis.one, eis.zero
+      have hdx : eis.dvd x x := ⟨eis.one, (eis.mul_one_r x).symm⟩
+      have hdy : eis.dvd x y := ⟨eis.zero, by rw [hy0, eis.mul_zero_r]⟩
+      have hbez : x = eis.add (eis.mul eis.one x) (eis.mul eis.zero y)
+        rw [hy0, eis.mul_one_l, eis.mul_zero_r, eis.add_zero_r]
+      exact ⟨hdx, hdy, hbez⟩
+    · unfold eis.bezout_at at ihM ⊢; intro x y hny
+      rw [succ_eq_add_one.nat] at hny
+      by_cases hy0 : y = eis.zero
+      · use x, eis.one, eis.zero
+        have hdx : eis.dvd x x := ⟨eis.one, (eis.mul_one_r x).symm⟩
+        have hdy : eis.dvd x y := ⟨eis.zero, by rw [hy0, eis.mul_zero_r]⟩
+        have hbez : x = eis.add (eis.mul eis.one x) (eis.mul eis.zero y)
+          rw [hy0, eis.mul_one_l, eis.mul_zero_r, eis.add_zero_r]
+        exact ⟨hdx, hdy, hbez⟩
+      · obtain ⟨q, r, heq, _, hrlt⟩ := eis.euclidean_div x y hy0
+        have hr_le : eis.norm r ≤ (M : ℤ)
+          rw [cast_add.int M 1, cast_one.int] at hny; omega
+        obtain ⟨g, u1, v1, hgy, hgr, hbez⟩ := ihM y r hr_le
+        use g, v1, eis.sub u1 (eis.mul v1 q)
+        have hgx : eis.dvd g x
+          have hgy_u := hgy
+          have hgr_u := hgr
+          unfold eis.dvd at hgy_u hgr_u ⊢
+          obtain ⟨ky, hky⟩ := hgy_u
+          obtain ⟨kr, hkr⟩ := hgr_u
+          exact ⟨eis.add (eis.mul ky q) kr, by rw [heq, hky, hkr, eis.mul_add_l, eis.mul_assoc]⟩
+        have hbez2 : g = eis.add (eis.mul v1 x) (eis.mul (eis.sub u1 (eis.mul v1 q)) y)
+          rw [hbez]
+          have hra : r.a = x.a - (eis.mul y q).a := by rw [heq]; unfold eis.add; simp; ring
+          have hrb : r.b = x.b - (eis.mul y q).b := by rw [heq]; unfold eis.add; simp; ring
+          apply eis.ext <;> (unfold eis.add eis.sub eis.mul; simp; rw [hra, hrb]; unfold eis.mul; simp; ring)
+        exact ⟨hgx, hgy, hbez2⟩
+  have hb_at := hstrong (nat_of_int (eis.norm b))
+  unfold eis.bezout_at at hb_at
+  exact hb_at a b (by rw [int_of_nat_of_int (eis.norm b) (eis.norm_nonneg b)]; linarith)
+
+-- ---- Coprimality, Euclid's Lemma, and Pairwise-Coprime Cube-Product Theorem --------
+
++ eis.coprime_symm (x y : Eisenstein) (h : eis.coprime x y) : eis.coprime y x
+  unfold eis.coprime at h ⊢
+  obtain ⟨u, v, huv⟩ := h
+  exact ⟨v, u, by rw [eis.add_comm]; exact huv⟩
+
++ eis.coprime_dvd_mul (a b c : Eisenstein) (hcop : eis.coprime a b) (hdvd : eis.dvd a (eis.mul b c)) :
+    eis.dvd a c
+  unfold eis.coprime at hcop
+  unfold eis.dvd at hdvd ⊢
+  obtain ⟨u, v, huv⟩ := hcop
+  obtain ⟨q, hq⟩ := hdvd
+  use eis.add (eis.mul u c) (eis.mul v q)
+  have hs1 : eis.mul (eis.add (eis.mul u a) (eis.mul v b)) c = eis.add (eis.mul (eis.mul u a) c) (eis.mul v (eis.mul b c))
+    apply eis.ext <;> (unfold eis.mul eis.add; simp; ring)
+  have hs2 : eis.add (eis.mul (eis.mul u a) c) (eis.mul v (eis.mul a q)) = eis.mul a (eis.add (eis.mul u c) (eis.mul v q))
+    apply eis.ext <;> (unfold eis.mul eis.add; simp; ring)
+  calc c = eis.mul eis.one c := (eis.mul_one_l c).symm
+    _ = eis.mul (eis.add (eis.mul u a) (eis.mul v b)) c := by rw [← huv]
+    _ = eis.add (eis.mul (eis.mul u a) c) (eis.mul v (eis.mul b c)) := hs1
+    _ = eis.add (eis.mul (eis.mul u a) c) (eis.mul v (eis.mul a q)) := by rw [hq]
+    _ = eis.mul a (eis.add (eis.mul u c) (eis.mul v q)) := hs2
+
++ eis.add_a (x y : Eisenstein) : (eis.add x y).a = x.a + y.a := by unfold eis.add; simp
++ eis.add_b (x y : Eisenstein) : (eis.add x y).b = x.b + y.b := by unfold eis.add; simp
++ eis.mul_a (x y : Eisenstein) : (eis.mul x y).a = x.a * y.a - x.b * y.b := by unfold eis.mul; simp
++ eis.mul_b (x y : Eisenstein) : (eis.mul x y).b = x.a * y.b + x.b * y.a - x.b * y.b := by unfold eis.mul; simp
++ eis.neg_a (x : Eisenstein) : (eis.neg x).a = -x.a := by unfold eis.neg; simp
++ eis.neg_b (x : Eisenstein) : (eis.neg x).b = -x.b := by unfold eis.neg; simp
++ eis.cube_eq (x : Eisenstein) : eis.cube x = eis.mul x (eis.mul x x) := by unfold eis.cube; trivial
+
++ eis.coprime_mul_r (a b c : Eisenstein) (hab : eis.coprime a b) (hac : eis.coprime a c) :
+    eis.coprime a (eis.mul b c)
+  unfold eis.coprime at hab hac ⊢
+  obtain ⟨u1, v1, h1⟩ := hab
+  obtain ⟨u2, v2, h2⟩ := hac
+  use eis.add (eis.mul u1 (eis.add (eis.mul u2 a) (eis.mul v2 c))) (eis.mul (eis.mul v1 b) u2), eis.mul v1 v2
+  have hprod : eis.mul (eis.add (eis.mul u1 a) (eis.mul v1 b)) (eis.add (eis.mul u2 a) (eis.mul v2 c)) = eis.one
+    rw [h1, h2, eis.mul_one_l]
+  have hid : eis.add (eis.mul (eis.add (eis.mul u1 (eis.add (eis.mul u2 a) (eis.mul v2 c))) (eis.mul (eis.mul v1 b) u2)) a) (eis.mul (eis.mul v1 v2) (eis.mul b c))
+      = eis.mul (eis.add (eis.mul u1 a) (eis.mul v1 b)) (eis.add (eis.mul u2 a) (eis.mul v2 c))
+    apply eis.ext
+    · simp only [eis.add_a, eis.add_b, eis.mul_a, eis.mul_b]; ring
+    · simp only [eis.add_a, eis.add_b, eis.mul_a, eis.mul_b]; ring
+  rw [hid, hprod]
+
++ eis.coprime_cube_l (p x : Eisenstein) (h : eis.coprime p x) : eis.coprime (eis.cube p) x
+  apply eis.coprime_symm
+  unfold eis.cube
+  have hs := eis.coprime_symm p x h
+  exact eis.coprime_mul_r x p (eis.mul p p) hs (eis.coprime_mul_r x p p hs hs)
+
++ eis.coprime_of_dvd_left (d a b : Eisenstein) (hd : eis.dvd d a) (hcop : eis.coprime a b) :
+    eis.coprime d b
+  unfold eis.dvd at hd
+  unfold eis.coprime at hcop ⊢
+  obtain ⟨q, hq⟩ := hd
+  obtain ⟨u, v, huv⟩ := hcop
+  use eis.mul u q, v
+  rw [hq] at huv
+  have hassoc : eis.mul (eis.mul u q) d = eis.mul u (eis.mul d q)
+    apply eis.ext <;> (unfold eis.mul; simp; ring)
+  rw [hassoc, huv]
+
++ eis.cube_mul (x y : Eisenstein) : eis.cube (eis.mul x y) = eis.mul (eis.cube x) (eis.cube y)
+  apply eis.ext <;> (unfold eis.cube eis.mul; simp; ring)
+
+-> eis.has_proper_div_norm (g : Eisenstein) (d : ℕ) : Prop :=
+  2 ≤ d ∧ ∃ pi : Eisenstein, eis.dvd pi g ∧ eis.norm pi = (d : ℤ)
+
++ eis.coprime_three_eq_unit_cube :
+    ∀ n : ℕ, ∀ g : Eisenstein, g ≠ eis.zero → eis.norm g = (n : ℤ) →
+      ∀ x1 x2 x3 u : Eisenstein,
+        eis.norm u = 1 →
+        eis.coprime x1 x2 → eis.coprime x1 x3 → eis.coprime x2 x3 →
+        eis.mul (eis.mul x1 x2) x3 = eis.mul u (eis.cube g) →
+        ∃ u1 u2 u3 a1 a2 a3 : Eisenstein,
+          eis.norm u1 = 1 ∧ eis.norm u2 = 1 ∧ eis.norm u3 = 1 ∧
+          x1 = eis.mul u1 (eis.cube a1) ∧ x2 = eis.mul u2 (eis.cube a2) ∧ x3 = eis.mul u3 (eis.cube a3)
+  apply nat.strong_induct (fun (n : ℕ) => ∀ g : Eisenstein, g ≠ eis.zero → eis.norm g = (n : ℤ) → ∀ x1 x2 x3 u : Eisenstein, eis.norm u = 1 → eis.coprime x1 x2 → eis.coprime x1 x3 → eis.coprime x2 x3 → eis.mul (eis.mul x1 x2) x3 = eis.mul u (eis.cube g) → ∃ u1 u2 u3 a1 a2 a3 : Eisenstein, eis.norm u1 = 1 ∧ eis.norm u2 = 1 ∧ eis.norm u3 = 1 ∧ x1 = eis.mul u1 (eis.cube a1) ∧ x2 = eis.mul u2 (eis.cube a2) ∧ x3 = eis.mul u3 (eis.cube a3))
+  intro n ih g hgnz hng x1 x2 x3 u hnu hc12 hc13 hc23 hprod
+  have hng_pos : 0 < eis.norm g := eis.norm_pos_of_ne_zero g hgnz
+  by_cases hn1 : n ≤ 1
+  · have hn_eq1 : eis.norm g = 1
+      have hc : (n : ℤ) ≤ 1 := (cast_le.int n 1).mpr hn1
+      linarith
+    have hnx_prod : (eis.norm x1 * eis.norm x2) * eis.norm x3 = 1
+      have h1 : eis.norm (eis.mul (eis.mul x1 x2) x3) = eis.norm (eis.mul u (eis.cube g)) := by rw [hprod]
+      rw [eis.norm_mul, eis.norm_mul, eis.norm_mul, hnu] at h1
+      unfold eis.cube at h1
+      rw [eis.norm_mul, eis.norm_mul, hn_eq1] at h1
+      linarith
+    have hnx1_nn := eis.norm_nonneg x1
+    have hnx2_nn := eis.norm_nonneg x2
+    have hnx3_nn := eis.norm_nonneg x3
+    have hnx1 : eis.norm x1 = 1
+      by_contra hne
+      by_cases hz : eis.norm x1 = 0
+      · have he0 : (0 * eis.norm x2) * eis.norm x3 = 0 := by ring
+        rw [hz, he0] at hnx_prod; linarith
+      · have hge2 : 2 ≤ eis.norm x1 := by omega
+        have h23 : 1 ≤ eis.norm x2 * eis.norm x3
+          by_contra h0
+          have h23_nn := mul_nonneg.int (eis.norm x2) (eis.norm x3) hnx2_nn hnx3_nn
+          have hz23 : eis.norm x2 * eis.norm x3 = 0 := by omega
+          have heq : (eis.norm x1 * eis.norm x2) * eis.norm x3 = eis.norm x1 * (eis.norm x2 * eis.norm x3) := by ring
+          have hx0 : eis.norm x1 * 0 = 0 := by ring
+          rw [heq, hz23, hx0] at hnx_prod; linarith
+        have hm := mul_le_mul_of_nonneg_left.int 1 (eis.norm x2 * eis.norm x3) (eis.norm x1) h23 (by omega)
+        have h1m : eis.norm x1 * 1 = eis.norm x1 := by ring
+        have hass : eis.norm x1 * (eis.norm x2 * eis.norm x3) = (eis.norm x1 * eis.norm x2) * eis.norm x3 := by ring
+        rw [h1m, hass, hnx_prod] at hm; linarith
+    have hnx23 : eis.norm x2 * eis.norm x3 = 1
+      have h1m : (1 * eis.norm x2) * eis.norm x3 = eis.norm x2 * eis.norm x3 := by ring
+      rw [hnx1, h1m] at hnx_prod; exact hnx_prod
+    have hnx2 : eis.norm x2 = 1
+      by_contra hne
+      by_cases hz : eis.norm x2 = 0
+      · have h0m : 0 * eis.norm x3 = 0 := by ring
+        rw [hz, h0m] at hnx23; linarith
+      · have hge2 : 2 ≤ eis.norm x2 := by omega
+        by_cases hz3 : eis.norm x3 = 0
+        · have hm0 : eis.norm x2 * 0 = 0 := by ring
+          rw [hz3, hm0] at hnx23; linarith
+        · have hm := mul_le_mul_of_nonneg_left.int 1 (eis.norm x3) (eis.norm x2) (by omega) (by omega)
+          have h1m : eis.norm x2 * 1 = eis.norm x2 := by ring
+          rw [h1m, hnx23] at hm; linarith
+    have hnx3 : eis.norm x3 = 1
+      have h1m : 1 * eis.norm x3 = eis.norm x3 := by ring
+      rw [hnx2, h1m] at hnx23; exact hnx23
+    have hc1 : eis.cube eis.one = eis.one := by apply eis.ext <;> (unfold eis.cube eis.mul eis.one; simp)
+    have hx1_e : x1 = eis.mul x1 (eis.cube eis.one) := by rw [hc1, eis.mul_one_r]
+    have hx2_e : x2 = eis.mul x2 (eis.cube eis.one) := by rw [hc1, eis.mul_one_r]
+    have hx3_e : x3 = eis.mul x3 (eis.cube eis.one) := by rw [hc1, eis.mul_one_r]
+    use x1, x2, x3, eis.one, eis.one, eis.one
+    exact ⟨hnx1, hnx2, hnx3, hx1_e, hx2_e, hx3_e⟩
+  · -- n >= 2: Choose a divisor pi | g of minimal norm d0 >= 2!
+    have hex_d : ∃ d : ℕ, eis.has_proper_div_norm g d
+      use n; unfold eis.has_proper_div_norm; exact ⟨by omega, ⟨g, ⟨eis.one, (eis.mul_one_r g).symm⟩, hng⟩⟩
+    obtain ⟨d0, hd0P, hd0_min⟩ := nat.exists_least (eis.has_proper_div_norm g) hex_d
+    unfold eis.has_proper_div_norm at hd0P
+    obtain ⟨hd0_ge2, pi, hpi_dvd_g, hnpi⟩ := hd0P
+    unfold eis.dvd at hpi_dvd_g
+    obtain ⟨g', hg'⟩ := hpi_dvd_g
+    have hpi_nz : pi ≠ eis.zero
+      intro hz; rw [hz] at hnpi; unfold eis.norm eis.zero at hnpi; simp at hnpi
+      have hc : (2 : ℤ) ≤ (d0 : ℤ) := (cast_le.int 2 d0).mpr hd0_ge2; linarith
+    have hg'_nz : g' ≠ eis.zero
+      intro hz; rw [hz, eis.mul_zero_r] at hg'; exact hgnz hg'
+    -- Minimality of d0 makes pi prime in Z[omega]: for any z, ¬(pi | z) => coprime pi z!
+    have hpi_cop_of_ndvd : ∀ z : Eisenstein, ¬ eis.dvd pi z → eis.coprime pi z
+      intro z hnd
+      obtain ⟨w, s, t, hwd_pi, hwd_z, hw_bez⟩ := eis.bezout_gcd pi z
+      unfold eis.dvd at hwd_pi hwd_z
+      obtain ⟨q_pi, hq_pi⟩ := hwd_pi
+      have hnw_pos : 0 < eis.norm w
+        apply eis.norm_pos_of_ne_zero w
+        intro hw0; rw [hw0, eis.mul_comm eis.zero q_pi, eis.mul_zero_r] at hq_pi; exact hpi_nz hq_pi
+      have hnq_pos : 0 < eis.norm q_pi
+        apply eis.norm_pos_of_ne_zero q_pi
+        intro hq0; rw [hq0, eis.mul_zero_r] at hq_pi; exact hpi_nz hq_pi
+      have hnpi_prod : (d0 : ℤ) = eis.norm w * eis.norm q_pi
+        rw [← hnpi, hq_pi, eis.norm_mul]
+      have hnq_ne1 : eis.norm q_pi ≠ 1
+        intro hq1
+        apply hnd
+        unfold eis.dvd
+        obtain ⟨kz, hkz⟩ := hwd_z
+        use eis.mul (eis.conj q_pi) kz
+        have hunit : eis.mul q_pi (eis.conj q_pi) = eis.one
+          rw [eis.mul_conj, hq1]; unfold eis.of_int eis.one; simp
+        calc z = eis.mul w kz := hkz
+          _ = eis.mul (eis.mul w eis.one) kz := by rw [eis.mul_one_r]
+          _ = eis.mul (eis.mul w (eis.mul q_pi (eis.conj q_pi))) kz := by rw [hunit]
+          _ = eis.mul pi (eis.mul (eis.conj q_pi) kz) := by rw [← eis.mul_assoc w q_pi, ← hq_pi, eis.mul_assoc]
+      have hnw_eq1 : eis.norm w = 1
+        by_contra hnw_ne1
+        have hnw_ge2 : 2 ≤ eis.norm w := by omega
+        have hnq_ge2 : 2 ≤ eis.norm q_pi := by omega
+        have hnw_c_raw : ((nat_of_int (eis.norm w) : ℕ) : ℤ) = eis.norm w := int_of_nat_of_int (eis.norm w) (by omega)
+        set nw := nat_of_int (eis.norm w)
+        have hnw_lt : nw < d0
+          have hm := mul_le_mul_of_nonneg_left.int 2 (eis.norm q_pi) (eis.norm w) hnq_ge2 (by omega)
+          exact (cast_lt.int nw d0).mp (by linarith)
+        apply hd0_min nw hnw_lt
+        unfold eis.has_proper_div_norm
+        have hnw2 : 2 ≤ nw := (cast_le.int 2 nw).mp (by linarith)
+        have hwd_g : eis.dvd w g := ⟨eis.mul q_pi g', by rw [hg', hq_pi, eis.mul_assoc]⟩
+        exact ⟨hnw2, ⟨w, hwd_g, hnw_c_raw.symm⟩⟩
+      unfold eis.coprime
+      use eis.mul (eis.conj w) s, eis.mul (eis.conj w) t
+      have hunit : eis.mul (eis.conj w) w = eis.one
+        rw [eis.mul_comm, eis.mul_conj, hnw_eq1]; unfold eis.of_int eis.one; simp
+      have hdist_bez : eis.add (eis.mul (eis.mul (eis.conj w) s) pi) (eis.mul (eis.mul (eis.conj w) t) z)
+          = eis.mul (eis.conj w) (eis.add (eis.mul s pi) (eis.mul t z))
+        apply eis.ext <;> (unfold eis.mul eis.add; simp; ring)
+      rw [hdist_bez, ← hw_bez, hunit]
+    -- Hence pi divides x1, x2, or x3!
+    have hpi_dvd_prod : eis.dvd pi (eis.mul (eis.mul x1 x2) x3)
+      unfold eis.dvd
+      use eis.mul u (eis.mul (eis.mul pi pi) (eis.cube g'))
+      rw [hprod, hg', eis.cube_mul]
+      have hcp : eis.cube pi = eis.mul pi (eis.mul pi pi) := by unfold eis.cube; trivial
+      rw [hcp]
+      apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b]; ring)
+    have hpi_cases : eis.dvd pi x1 ∨ eis.dvd pi x2 ∨ eis.dvd pi x3
+      by_cases hd1 : eis.dvd pi x1
+      · left; exact hd1
+      · right
+        by_cases hd2 : eis.dvd pi x2
+        · left; exact hd2
+        · right
+          have hcop12 := eis.coprime_mul_r pi x1 x2 (hpi_cop_of_ndvd x1 hd1) (hpi_cop_of_ndvd x2 hd2)
+          exact eis.coprime_dvd_mul pi (eis.mul x1 x2) x3 hcop12 hpi_dvd_prod
+    have hng'_c : ((nat_of_int (eis.norm g') : ℕ) : ℤ) = eis.norm g' := int_of_nat_of_int (eis.norm g') (eis.norm_nonneg g')
+    set ng' := nat_of_int (eis.norm g') with hng'_def
+    have hng'_lt : ng' < n
+      have hm : (n : ℤ) = (d0 : ℤ) * eis.norm g' := by rw [← hng, hg', eis.norm_mul, hnpi]
+      have hd0_2 : (2 : ℤ) ≤ (d0 : ℤ) := (cast_le.int 2 d0).mpr hd0_ge2
+      have hg'_pos := eis.norm_pos_of_ne_zero g' hg'_nz
+      have hge := mul_le_mul_of_nonneg_right.int 2 (d0 : ℤ) (eis.norm g') hd0_2 (by linarith)
+      exact (cast_lt.int ng' n).mp (by linarith)
+    have hpi3_nz : eis.cube pi ≠ eis.zero
+      intro hz
+      have hn0 : eis.norm (eis.cube pi) = 0 := (eis.norm_eq_zero_iff (eis.cube pi)).mpr hz
+      unfold eis.cube at hn0
+      rw [eis.norm_mul, eis.norm_mul, hnpi] at hn0
+      have hd0_pos : (0 : ℤ) < (d0 : ℤ) := by linarith [(cast_le.int 2 d0).mpr hd0_ge2]
+      have hp2 := mul_pos.int (d0 : ℤ) (d0 : ℤ) hd0_pos hd0_pos
+      have hp3 := mul_pos.int (d0 : ℤ) ((d0 : ℤ) * (d0 : ℤ)) hd0_pos hp2
+      linarith
+    obtain hd1 | hd2 | hd3 := hpi_cases
+    · -- Case 1: pi | x1 => pi^3 | x1!
+      have hc_pi_23 : eis.coprime (eis.cube pi) (eis.mul x2 x3)
+        apply eis.coprime_cube_l
+        exact eis.coprime_mul_r pi x2 x3 (eis.coprime_of_dvd_left pi x1 x2 hd1 hc12) (eis.coprime_of_dvd_left pi x1 x3 hd1 hc13)
+      have hpi3_dvd_all : eis.dvd (eis.cube pi) (eis.mul (eis.mul x2 x3) x1)
+        unfold eis.dvd
+        use eis.mul u (eis.cube g')
+        have hcomm : eis.mul (eis.mul x2 x3) x1 = eis.mul (eis.mul x1 x2) x3
+          apply eis.ext <;> (unfold eis.mul; simp; ring)
+        rw [hcomm, hprod, hg', eis.cube_mul]
+        apply eis.ext <;> (unfold eis.mul; simp; ring)
+      have hx1_d := eis.coprime_dvd_mul (eis.cube pi) (eis.mul x2 x3) x1 hc_pi_23 hpi3_dvd_all
+      unfold eis.dvd at hx1_d
+      obtain ⟨x1', hx1'⟩ := hx1_d
+      have hprod' : eis.mul (eis.mul x1' x2) x3 = eis.mul u (eis.cube g')
+        apply eis.mul_cancel_left (eis.cube pi) hpi3_nz
+        have hl : eis.mul (eis.cube pi) (eis.mul (eis.mul x1' x2) x3) = eis.mul (eis.mul x1 x2) x3
+          rw [hx1']; apply eis.ext <;> (unfold eis.mul; simp; ring)
+        have hr : eis.mul (eis.cube pi) (eis.mul u (eis.cube g')) = eis.mul u (eis.cube g)
+          rw [hg', eis.cube_mul]; apply eis.ext <;> (unfold eis.mul; simp; ring)
+        rw [hl, hr, hprod]
+      have hd_x1' : eis.dvd x1' x1 := by unfold eis.dvd; exact ⟨eis.cube pi, by rw [hx1', eis.mul_comm]⟩
+      have hc1'2 : eis.coprime x1' x2 := eis.coprime_of_dvd_left x1' x1 x2 hd_x1' hc12
+      have hc1'3 : eis.coprime x1' x3 := eis.coprime_of_dvd_left x1' x1 x3 hd_x1' hc13
+      obtain ⟨u1, u2, u3, a1', a2, a3, hu1, hu2, hu3, he1, he2, he3⟩ :=
+        ih ng' hng'_lt g' hg'_nz hng'_c.symm x1' x2 x3 u hnu hc1'2 hc1'3 hc23 hprod'
+      have hx1_fin : x1 = eis.mul u1 (eis.cube (eis.mul pi a1'))
+        rw [hx1', he1, eis.cube_mul]; apply eis.ext <;> (unfold eis.mul; simp; ring)
+      use u1, u2, u3, eis.mul pi a1', a2, a3
+      exact ⟨hu1, hu2, hu3, hx1_fin, he2, he3⟩
+    · -- Case 2: pi | x2 => pi^3 | x2!
+      have hc_pi_13 : eis.coprime (eis.cube pi) (eis.mul x1 x3)
+        apply eis.coprime_cube_l
+        exact eis.coprime_mul_r pi x1 x3 (eis.coprime_of_dvd_left pi x2 x1 hd2 (eis.coprime_symm x1 x2 hc12)) (eis.coprime_of_dvd_left pi x2 x3 hd2 hc23)
+      have hpi3_dvd_all : eis.dvd (eis.cube pi) (eis.mul (eis.mul x1 x3) x2)
+        unfold eis.dvd
+        use eis.mul u (eis.cube g')
+        have hcomm : eis.mul (eis.mul x1 x3) x2 = eis.mul (eis.mul x1 x2) x3
+          apply eis.ext <;> (unfold eis.mul; simp; ring)
+        rw [hcomm, hprod, hg', eis.cube_mul]
+        apply eis.ext <;> (unfold eis.mul; simp; ring)
+      have hx2_d := eis.coprime_dvd_mul (eis.cube pi) (eis.mul x1 x3) x2 hc_pi_13 hpi3_dvd_all
+      unfold eis.dvd at hx2_d
+      obtain ⟨x2', hx2'⟩ := hx2_d
+      have hprod' : eis.mul (eis.mul x1 x2') x3 = eis.mul u (eis.cube g')
+        apply eis.mul_cancel_left (eis.cube pi) hpi3_nz
+        have hl : eis.mul (eis.cube pi) (eis.mul (eis.mul x1 x2') x3) = eis.mul (eis.mul x1 x2) x3
+          rw [hx2']; apply eis.ext <;> (unfold eis.mul; simp; ring)
+        have hr : eis.mul (eis.cube pi) (eis.mul u (eis.cube g')) = eis.mul u (eis.cube g)
+          rw [hg', eis.cube_mul]; apply eis.ext <;> (unfold eis.mul; simp; ring)
+        rw [hl, hr, hprod]
+      have hd_x2' : eis.dvd x2' x2 := by unfold eis.dvd; exact ⟨eis.cube pi, by rw [hx2', eis.mul_comm]⟩
+      have hc12' : eis.coprime x1 x2'
+        apply eis.coprime_symm
+        exact eis.coprime_of_dvd_left x2' x2 x1 hd_x2' (eis.coprime_symm x1 x2 hc12)
+      have hc2'3 : eis.coprime x2' x3 := eis.coprime_of_dvd_left x2' x2 x3 hd_x2' hc23
+      obtain ⟨u1, u2, u3, a1, a2', a3, hu1, hu2, hu3, he1, he2, he3⟩ :=
+        ih ng' hng'_lt g' hg'_nz hng'_c.symm x1 x2' x3 u hnu hc12' hc13 hc2'3 hprod'
+      have hx2_fin : x2 = eis.mul u2 (eis.cube (eis.mul pi a2'))
+        rw [hx2', he2, eis.cube_mul]; apply eis.ext <;> (unfold eis.mul; simp; ring)
+      use u1, u2, u3, a1, eis.mul pi a2', a3
+      exact ⟨hu1, hu2, hu3, he1, hx2_fin, he3⟩
+    · -- Case 3: pi | x3 => pi^3 | x3!
+      have hc_pi_12 : eis.coprime (eis.cube pi) (eis.mul x1 x2)
+        apply eis.coprime_cube_l
+        exact eis.coprime_mul_r pi x1 x2 (eis.coprime_of_dvd_left pi x3 x1 hd3 (eis.coprime_symm x1 x3 hc13)) (eis.coprime_of_dvd_left pi x3 x2 hd3 (eis.coprime_symm x2 x3 hc23))
+      have hpi3_dvd_all : eis.dvd (eis.cube pi) (eis.mul (eis.mul x1 x2) x3)
+        unfold eis.dvd
+        use eis.mul u (eis.cube g')
+        rw [hprod, hg', eis.cube_mul]
+        apply eis.ext <;> (unfold eis.mul; simp; ring)
+      have hx3_d := eis.coprime_dvd_mul (eis.cube pi) (eis.mul x1 x2) x3 hc_pi_12 hpi3_dvd_all
+      unfold eis.dvd at hx3_d
+      obtain ⟨x3', hx3'⟩ := hx3_d
+      have hprod' : eis.mul (eis.mul x1 x2) x3' = eis.mul u (eis.cube g')
+        apply eis.mul_cancel_left (eis.cube pi) hpi3_nz
+        have hl : eis.mul (eis.cube pi) (eis.mul (eis.mul x1 x2) x3') = eis.mul (eis.mul x1 x2) x3
+          rw [hx3']; apply eis.ext <;> (unfold eis.mul; simp; ring)
+        have hr : eis.mul (eis.cube pi) (eis.mul u (eis.cube g')) = eis.mul u (eis.cube g)
+          rw [hg', eis.cube_mul]; apply eis.ext <;> (unfold eis.mul; simp; ring)
+        rw [hl, hr, hprod]
+      have hd_x3' : eis.dvd x3' x3 := by unfold eis.dvd; exact ⟨eis.cube pi, by rw [hx3', eis.mul_comm]⟩
+      have hc13' : eis.coprime x1 x3'
+        apply eis.coprime_symm
+        exact eis.coprime_of_dvd_left x3' x3 x1 hd_x3' (eis.coprime_symm x1 x3 hc13)
+      have hc23' : eis.coprime x2 x3'
+        apply eis.coprime_symm
+        exact eis.coprime_of_dvd_left x3' x3 x2 hd_x3' (eis.coprime_symm x2 x3 hc23)
+      obtain ⟨u1, u2, u3, a1, a2, a3', hu1, hu2, hu3, he1, he2, he3⟩ :=
+        ih ng' hng'_lt g' hg'_nz hng'_c.symm x1 x2 x3' u hnu hc12 hc13' hc23' hprod'
+      have hx3_fin : x3 = eis.mul u3 (eis.cube (eis.mul pi a3'))
+        rw [hx3', he3, eis.cube_mul]; apply eis.ext <;> (unfold eis.mul; simp; ring)
+      use u1, u2, u3, a1, a2, eis.mul pi a3'
+      exact ⟨hu1, hu2, hu3, he1, he2, hx3_fin⟩
+
+-- ====================================================================================
+-- 3. Six-Unit Classification, lambda = 1 - omega Arithmetic, & Gauss n = 3 Descent
+-- ====================================================================================
+
++ eis.lam_dvd_iff (x : Eisenstein) : eis.dvd eis.lam x ↔ (x.a + x.b) % 3 = 0
+  unfold eis.dvd
+  constructor
+  · intro hdx
+    obtain ⟨q, hq⟩ := hdx
+    have ha : x.a = q.a + q.b := by rw [hq]; unfold eis.mul eis.lam; simp; ring
+    have hb : x.b = -q.a + 2 * q.b := by rw [hq]; unfold eis.mul eis.lam; simp; ring
+    have hsum : x.a + x.b = 0 + 3 * q.b := by linarith
+    rw [hsum, add_mul_mod.int 0 q.b 3 (by decide)]
+    exact (div_mod_of_lt.int 0 3 (by decide) (by decide)).2
+  · intro hmod
+    have hdm := div_add_mod.int (x.a + x.b) 3
+    rw [hmod] at hdm
+    set k := (x.a + x.b) / 3
+    use Eisenstein.mk (x.a - k) k
+    apply eis.ext <;> (unfold eis.mul eis.lam; simp; linarith)
+
+-- Every element of Z[omega] NOT divisible by lambda has cube == +-1 (mod 9)!
++ eis.cube_mod9_of_not_lam_dvd (x : Eisenstein) (hnd : ¬ eis.dvd eis.lam x) :
+    ∃ s ka kb : ℤ, (s = 1 ∨ s = -1) ∧ (eis.cube x).a = s + 9 * ka ∧ (eis.cube x).b = 9 * kb
+  have hnot0 : (x.a + x.b) % 3 ≠ 0
+    intro h; exact hnd ((eis.lam_dvd_iff x).mpr h)
+  have hdma := div_add_mod.int x.a 3
+  have hdmb := div_add_mod.int x.b 3
+  have hra_nn := mod_nonneg.int x.a 3 (by decide)
+  have hra_lt := mod_lt.int x.a 3 (by decide)
+  have hrb_nn := mod_nonneg.int x.b 3 (by decide)
+  have hrb_lt := mod_lt.int x.b 3 (by decide)
+  set qa := x.a / 3
+  set qb := x.b / 3
+  set ra := x.a % 3
+  set rb := x.b % 3
+  have hxa : x.a = 3 * qa + ra := by linarith
+  have hxb : x.b = 3 * qb + rb := by linarith
+  set da := 3 * qa^3 + 3 * qa^2 * ra + qa * ra^2 - 9 * qa * qb^2 - 6 * qa * qb * rb - qa * rb^2 - 3 * ra * qb^2 - 2 * ra * qb * rb + 3 * qb^3 + 3 * qb^2 * rb + qb * rb^2 with hda_def
+  set db := 9 * qa^2 * qb + 3 * qa^2 * rb + 6 * qa * ra * qb + 2 * qa * ra * rb + ra^2 * qb - 9 * qa * qb^2 - 6 * qa * qb * rb - qa * rb^2 - 3 * ra * qb^2 - 2 * ra * qb * rb with hdb_def
+  have hshift_a : (eis.cube x).a = (eis.cube (Eisenstein.mk ra rb)).a + 9 * da
+    rw [hda_def]; unfold eis.cube eis.mul; rw [hxa, hxb]; simp; ring
+  have hshift_b : (eis.cube x).b = (eis.cube (Eisenstein.mk ra rb)).b + 9 * db
+    rw [hdb_def]; unfold eis.cube eis.mul; rw [hxa, hxb]; simp; ring
+  have hmod_sum : (ra + rb) % 3 ≠ 0
+    have hsum : x.a + x.b = (ra + rb) + 3 * (qa + qb) := by linarith
+    rw [hsum, add_mul_mod.int (ra + rb) (qa + qb) 3 (by decide)] at hnot0
+    exact hnot0
+  by_cases ha0 : ra = 0
+  · by_cases hb0 : rb = 0
+    · exfalso; rw [ha0, hb0] at hmod_sum; exact hmod_sum (by decide)
+    · by_cases hb1 : rb = 1
+      · use 1, da, db
+        have hs : (1 : ℤ) = 1 ∨ (1 : ℤ) = -1 := by left; decide
+        have ea : (eis.cube x).a = 1 + 9 * da
+          have hc0 : (eis.cube (Eisenstein.mk 0 1)).a = 1 := by unfold eis.cube eis.mul; simp
+          rw [hshift_a, ha0, hb1, hc0]
+        have eb : (eis.cube x).b = 9 * db
+          have hc0 : (eis.cube (Eisenstein.mk 0 1)).b = 0 := by unfold eis.cube eis.mul; simp
+          rw [hshift_b, ha0, hb1, hc0]; ring
+        exact ⟨hs, ea, eb⟩
+      · have hb2 : rb = 2 := by omega
+        use -1, 1 + da, db
+        have hs : (-1 : ℤ) = 1 ∨ (-1 : ℤ) = -1 := by right; decide
+        have ea : (eis.cube x).a = -1 + 9 * (1 + da)
+          have hc0 : (eis.cube (Eisenstein.mk 0 2)).a = 8 := by unfold eis.cube eis.mul; simp
+          rw [hshift_a, ha0, hb2, hc0]; ring
+        have eb : (eis.cube x).b = 9 * db
+          have hc0 : (eis.cube (Eisenstein.mk 0 2)).b = 0 := by unfold eis.cube eis.mul; simp
+          rw [hshift_b, ha0, hb2, hc0]; ring
+        exact ⟨hs, ea, eb⟩
+  · by_cases ha1 : ra = 1
+    · by_cases hb0 : rb = 0
+      · use 1, da, db
+        have hs : (1 : ℤ) = 1 ∨ (1 : ℤ) = -1 := by left; decide
+        have ea : (eis.cube x).a = 1 + 9 * da
+          have hc0 : (eis.cube (Eisenstein.mk 1 0)).a = 1 := by unfold eis.cube eis.mul; simp
+          rw [hshift_a, ha1, hb0, hc0]
+        have eb : (eis.cube x).b = 9 * db
+          have hc0 : (eis.cube (Eisenstein.mk 1 0)).b = 0 := by unfold eis.cube eis.mul; simp
+          rw [hshift_b, ha1, hb0, hc0]; ring
+        exact ⟨hs, ea, eb⟩
+      · by_cases hb1 : rb = 1
+        · use -1, da, db
+          have hs : (-1 : ℤ) = 1 ∨ (-1 : ℤ) = -1 := by right; decide
+          have ea : (eis.cube x).a = -1 + 9 * da
+            have hc0 : (eis.cube (Eisenstein.mk 1 1)).a = -1 := by unfold eis.cube eis.mul; simp
+            rw [hshift_a, ha1, hb1, hc0]
+          have eb : (eis.cube x).b = 9 * db
+            have hc0 : (eis.cube (Eisenstein.mk 1 1)).b = 0 := by unfold eis.cube eis.mul; simp
+            rw [hshift_b, ha1, hb1, hc0]; ring
+          exact ⟨hs, ea, eb⟩
+        · have hb2 : rb = 2 := by omega
+          exfalso; rw [ha1, hb2] at hmod_sum; exact hmod_sum (by decide)
+    · have ha2 : ra = 2 := by omega
+      by_cases hb0 : rb = 0
+      · use -1, 1 + da, db
+        have hs : (-1 : ℤ) = 1 ∨ (-1 : ℤ) = -1 := by right; decide
+        have ea : (eis.cube x).a = -1 + 9 * (1 + da)
+          have hc0 : (eis.cube (Eisenstein.mk 2 0)).a = 8 := by unfold eis.cube eis.mul; simp
+          rw [hshift_a, ha2, hb0, hc0]; ring
+        have eb : (eis.cube x).b = 9 * db
+          have hc0 : (eis.cube (Eisenstein.mk 2 0)).b = 0 := by unfold eis.cube eis.mul; simp
+          rw [hshift_b, ha2, hb0, hc0]; ring
+        exact ⟨hs, ea, eb⟩
+      · by_cases hb1 : rb = 1
+        · exfalso; rw [ha2, hb1] at hmod_sum; exact hmod_sum (by decide)
+        · have hb2 : rb = 2 := by omega
+          use 1, -1 + da, db
+          have hs : (1 : ℤ) = 1 ∨ (1 : ℤ) = -1 := by left; decide
+          have ea : (eis.cube x).a = 1 + 9 * (-1 + da)
+            have hc0 : (eis.cube (Eisenstein.mk 2 2)).a = -8 := by unfold eis.cube eis.mul; simp
+            rw [hshift_a, ha2, hb2, hc0]; ring
+          have eb : (eis.cube x).b = 9 * db
+            have hc0 : (eis.cube (Eisenstein.mk 2 2)).b = 0 := by unfold eis.cube eis.mul; simp
+            rw [hshift_b, ha2, hb2, hc0]; ring
+          exact ⟨hs, ea, eb⟩
+
+-- Exact unit bound: N(u) = 1 => u.b in {-1, 0, 1}, and if u.b = 0 then u = +-1!
++ eis.unit_b_range (u : Eisenstein) (hu : eis.norm u = 1) :
+    (u.b = -1 ∨ u.b = 0 ∨ u.b = 1) ∧ (u.b = 0 → u = eis.one ∨ u = eis.neg_one)
+  have h4 := eis.four_norm u
+  rw [hu] at h4
+  have hs1 : 0 ≤ (2 * u.a - u.b) * (2 * u.a - u.b) := by nlinarith
+  have hbb : u.b * u.b ≤ 1
+    by_contra hgt
+    have hge2 : 2 ≤ u.b * u.b := by omega
+    linarith
+  constructor
+  · by_cases hb0 : u.b = 0
+    · right; left; exact hb0
+    · by_cases hbp : 0 < u.b
+      · by_cases hb1 : u.b = 1
+        · right; right; exact hb1
+        · have hge2 : 2 ≤ u.b := by omega
+          have hm := mul_le_mul.int 2 u.b 2 u.b hge2 hge2 (by decide) (by omega); linarith
+      · by_cases hbm1 : u.b = -1
+        · left; exact hbm1
+        · have hge2 : 2 ≤ -u.b := by omega
+          have hm := mul_le_mul.int 2 (-u.b) 2 (-u.b) hge2 hge2 (by decide) (by omega); linarith
+  · intro hb0
+    unfold eis.norm at hu
+    rw [hb0] at hu
+    have ha2 : u.a * u.a = 1 := by linarith
+    by_cases hap : 0 < u.a
+    · left
+      have ha1 : u.a = 1
+        by_contra hne
+        have hge2 : 2 ≤ u.a := by omega
+        have hm := mul_le_mul.int 2 u.a 2 u.a hge2 hge2 (by decide) (by omega); linarith
+      exact eis.ext u eis.one ha1 hb0
+    · right
+      have ham1 : u.a = -1
+        by_contra hne
+        by_cases ha0 : u.a = 0; (rw [ha0] at ha2; linarith)
+        have hge2 : 2 ≤ -u.a := by omega
+        have hm := mul_le_mul.int 2 (-u.a) 2 (-u.a) hge2 hge2 (by decide) (by omega); linarith
+      exact eis.ext u eis.neg_one ham1 hb0
+
++ eis.lam_cube_coords : (eis.cube eis.lam).a = 3 * (-1) ∧ (eis.cube eis.lam).b = 3 * (-2) ∧ eis.norm (eis.cube eis.lam) = 27
+  constructor
+  · unfold eis.cube eis.mul eis.lam; simp
+  · constructor
+    · unfold eis.cube eis.mul eis.lam; simp
+    · unfold eis.cube eis.mul eis.lam eis.norm; simp
+
++ eis.lam_cube_mul_div3 (w : Eisenstein) :
+    ∃ ka kb : ℤ, (eis.mul (eis.cube eis.lam) w).a = 3 * ka ∧ (eis.mul (eis.cube eis.lam) w).b = 3 * kb
+  use -w.a + 2 * w.b, -2 * w.a + w.b
+  constructor <;> (unfold eis.cube eis.mul eis.lam; simp; ring)
+
++ int.cube_sub_self_div3 (z : ℤ) : ∃ k : ℤ, z ^ 3 - z = 3 * k
+  have hd := div_add_mod.int z 3
+  have h0 := mod_nonneg.int z 3 (by decide)
+  have hlt := mod_lt.int z 3 (by decide)
+  set q := z / 3
+  set r := z % 3
+  have hz : z = 3 * q + r := by linarith
+  by_cases hr0 : r = 0
+  · use 9 * q^3 - q; rw [hz, hr0]; ring
+  · by_cases hr1 : r = 1
+    · use 9 * q^3 + 9 * q^2 + 2 * q; rw [hz, hr1]; ring
+    · have hr2 : r = 2 := by omega
+      use 9 * q^3 + 18 * q^2 + 11 * q + 2; rw [hz, hr2]; ring
+
++ int.ne_zero_of_mod3_rem (r k : ℤ) (hr : r = 1 ∨ r = 2) : r + 3 * k ≠ 0
+  intro h
+  have hm : (r + 3 * k) % 3 = (0 : ℤ) % 3 := by rw [h]
+  rw [add_mul_mod.int r k 3 (by decide)] at hm
+  obtain h1 | h2 := hr
+  · rw [h1] at hm; have hne : (1 : ℤ) % 3 ≠ (0 : ℤ) % 3 := by decide; exact hne hm
+  · rw [h2] at hm; have hne : (2 : ℤ) % 3 ≠ (0 : ℤ) % 3 := by decide; exact hne hm
+
+-- Base case m = 1 of Gauss's descent: alpha^3 + beta^3 + u * lambda^3 * gamma^3 != 0!
++ eis.gauss_base_m1 (alpha beta gamma u : Eisenstein)
+    (hu : eis.norm u = 1)
+    (hna : ¬ eis.dvd eis.lam alpha) (hnb : ¬ eis.dvd eis.lam beta) (hng : ¬ eis.dvd eis.lam gamma) :
+    eis.add (eis.add (eis.cube alpha) (eis.cube beta)) (eis.mul u (eis.mul (eis.cube eis.lam) (eis.cube gamma))) ≠ eis.zero
+  intro heq
+  obtain ⟨sa, ka1, kb1, hsa, ha_a, ha_b⟩ := eis.cube_mod9_of_not_lam_dvd alpha hna
+  obtain ⟨sb, ka2, kb2, hsb, hb_a, hb_b⟩ := eis.cube_mod9_of_not_lam_dvd beta hnb
+  obtain ⟨t1, t2, ht_a, ht_b⟩ := eis.lam_cube_mul_div3 (eis.mul u (eis.cube gamma))
+  have hrhs_eq : eis.mul u (eis.mul (eis.cube eis.lam) (eis.cube gamma)) = eis.mul (eis.cube eis.lam) (eis.mul u (eis.cube gamma))
+    apply eis.ext <;> (unfold eis.mul; simp; ring)
+  have heq_a : (eis.add (eis.add (eis.cube alpha) (eis.cube beta)) (eis.mul u (eis.mul (eis.cube eis.lam) (eis.cube gamma)))).a = 0
+    rw [heq]; unfold eis.zero; simp
+  unfold eis.add at heq_a; simp at heq_a
+  rw [hrhs_eq, ht_a, ha_a, hb_a] at heq_a
+  have hs_zero : sa + sb = 0
+    obtain ha1 | ham1 := hsa
+    · obtain hb1 | hbm1 := hsb
+      · rw [ha1, hb1] at heq_a
+        exfalso; exact int.ne_zero_of_mod3_rem 2 (3 * ka1 + 3 * ka2 + t1) (by right; decide) (by linarith)
+      · rw [ha1, hbm1]; ring
+    · obtain hb1 | hbm1 := hsb
+      · rw [ham1, hb1]; ring
+      · rw [ham1, hbm1] at heq_a
+        exfalso; exact int.ne_zero_of_mod3_rem 1 (3 * ka1 + 3 * ka2 + t1 - 1) (by left; decide) (by linarith)
+  have hsum_9 : eis.add (eis.cube alpha) (eis.cube beta) = eis.mul (eis.of_int 9) (Eisenstein.mk (ka1 + ka2) (kb1 + kb2))
+    apply eis.ext
+    · unfold eis.add eis.mul eis.of_int; simp; rw [ha_a, hb_a]; linarith
+    · unfold eis.add eis.mul eis.of_int; simp; rw [ha_b, hb_b]; ring
+  have hneg_eq : eis.add (eis.cube alpha) (eis.cube beta) = eis.neg (eis.mul u (eis.mul (eis.cube eis.lam) (eis.cube gamma)))
+    have hb_eq : (eis.add (eis.add (eis.cube alpha) (eis.cube beta)) (eis.mul u (eis.mul (eis.cube eis.lam) (eis.cube gamma)))).b = 0
+      rw [heq]; unfold eis.zero; simp
+    have ha_eq2 : (eis.add (eis.add (eis.cube alpha) (eis.cube beta)) (eis.mul u (eis.mul (eis.cube eis.lam) (eis.cube gamma)))).a = 0
+      rw [heq]; unfold eis.zero; simp
+    unfold eis.add at ha_eq2 hb_eq; simp at ha_eq2 hb_eq
+    apply eis.ext <;> (unfold eis.add eis.neg; simp; linarith)
+  have hnorm_eq : eis.norm (eis.mul (eis.of_int 9) (Eisenstein.mk (ka1 + ka2) (kb1 + kb2))) =
+      eis.norm (eis.neg (eis.mul u (eis.mul (eis.cube eis.lam) (eis.cube gamma))))
+    rw [← hsum_9, hneg_eq]
+  have hnorm_neg : ∀ z : Eisenstein, eis.norm (eis.neg z) = eis.norm z
+    intro z; unfold eis.norm eis.neg; simp; ring
+  have hn9 : eis.norm (eis.of_int 9) = 81 := by unfold eis.norm eis.of_int; simp
+  rw [eis.norm_mul, hn9, hnorm_neg, eis.norm_mul, hu, eis.norm_mul, eis.lam_cube_coords.2.2] at hnorm_eq
+  set K := eis.norm (Eisenstein.mk (ka1 + ka2) (kb1 + kb2))
+  have h3_ng3 : eis.norm (eis.cube gamma) = 3 * K := by linarith
+  have hng3 : eis.norm (eis.cube gamma) = eis.norm gamma * (eis.norm gamma * eis.norm gamma)
+    unfold eis.cube; rw [eis.norm_mul, eis.norm_mul]
+  have hmod3_ng : eis.norm gamma % 3 = 0
+    have hd := div_add_mod.int (eis.norm gamma) 3
+    have h0 := mod_nonneg.int (eis.norm gamma) 3 (by decide)
+    have hlt := mod_lt.int (eis.norm gamma) 3 (by decide)
+    set qg := eis.norm gamma / 3
+    set rg := eis.norm gamma % 3
+    have he : eis.norm gamma = 3 * qg + rg := by linarith
+    by_cases hr0 : rg = 0; exact hr0
+    by_cases hr1 : rg = 1
+    · have h1 : eis.norm (eis.cube gamma) = 1 + 3 * (9 * qg^3 + 9 * qg^2 + 3 * qg) := by rw [hng3, he, hr1]; ring
+      rw [h3_ng3] at h1
+      exfalso; exact int.ne_zero_of_mod3_rem 1 (9 * qg^3 + 9 * qg^2 + 3 * qg - K) (by left; decide) (by linarith)
+    · have hr2 : rg = 2 := by omega
+      have h2 : eis.norm (eis.cube gamma) = 2 + 3 * (9 * qg^3 + 18 * qg^2 + 12 * qg + 2) := by rw [hng3, he, hr2]; ring
+      rw [h3_ng3] at h2
+      exfalso; exact int.ne_zero_of_mod3_rem 2 (9 * qg^3 + 18 * qg^2 + 12 * qg + 2 - K) (by right; decide) (by linarith)
+  have hsum_sq : (gamma.a + gamma.b) * (gamma.a + gamma.b) = eis.norm gamma + 3 * (gamma.a * gamma.b)
+    unfold eis.norm; ring
+  have hmod3_sum : (gamma.a + gamma.b) % 3 = 0
+    have hd := div_add_mod.int (gamma.a + gamma.b) 3
+    have h0 := mod_nonneg.int (gamma.a + gamma.b) 3 (by decide)
+    have hlt := mod_lt.int (gamma.a + gamma.b) 3 (by decide)
+    set qs := (gamma.a + gamma.b) / 3
+    set rs := (gamma.a + gamma.b) % 3
+    have he : gamma.a + gamma.b = 3 * qs + rs := by linarith
+    have hd_ng := div_add_mod.int (eis.norm gamma) 3
+    rw [hmod3_ng] at hd_ng
+    by_cases hr0 : rs = 0; exact hr0
+    by_cases hr1 : rs = 1
+    · have h1 : (gamma.a + gamma.b) * (gamma.a + gamma.b) = 1 + 3 * (3 * qs^2 + 2 * qs) := by rw [he, hr1]; ring
+      exfalso; exact int.ne_zero_of_mod3_rem 1 (3 * qs^2 + 2 * qs - (eis.norm gamma / 3) - gamma.a * gamma.b) (by left; decide) (by linarith)
+    · have hr2 : rs = 2 := by omega
+      have h2 : (gamma.a + gamma.b) * (gamma.a + gamma.b) = 1 + 3 * (3 * qs^2 + 4 * qs + 1) := by rw [he, hr2]; ring
+      exfalso; exact int.ne_zero_of_mod3_rem 1 (3 * qs^2 + 4 * qs + 1 - (eis.norm gamma / 3) - gamma.a * gamma.b) (by left; decide) (by linarith)
+  exact hng ((eis.lam_dvd_iff gamma).mpr hmod3_sum)
+
+-> eis.gauss_descent_at (m : ℕ) : Prop :=
+  1 ≤ m →
+    ∀ alpha beta gamma u : Eisenstein,
+      eis.norm u = 1 →
+      eis.coprime alpha beta →
+      ¬ eis.dvd eis.lam alpha → ¬ eis.dvd eis.lam beta → ¬ eis.dvd eis.lam gamma →
+      eis.add (eis.add (eis.cube alpha) (eis.cube beta)) (eis.mul u (eis.mul (eis.pow (eis.cube eis.lam) m) (eis.cube gamma))) ≠ eis.zero
+
+-- Inductive step & Complete Gauss Descent for ALL m >= 1!
++ eis.gauss_lambda_descent_aux (m : ℕ) : eis.gauss_descent_at m
+  induction m with m1 ih
+  · unfold eis.gauss_descent_at; simp
+  · unfold eis.gauss_descent_at at ih ⊢; intro hm1
+    rw [succ_eq_add_one.nat] at hm1 ⊢
+    intro alpha beta gamma u hu hcop hna hnb hng heq
+    by_cases hm1_0 : m1 = 0
+    · -- Base case m = 1!
+      have hp1 : eis.pow (eis.cube eis.lam) (0 + 1) = eis.cube eis.lam
+        simp [eis.pow]; exact eis.mul_one_l (eis.cube eis.lam)
+      rw [hm1_0, hp1] at heq
+      exact eis.gauss_base_m1 alpha beta gamma u hu hna hnb hng heq
+    · -- Step case m = m1 + 1 >= 2 (m1 >= 1): descend to m1!
+      have hm1_ge1 : 1 ≤ m1 := by omega
+      have hpow_succ : eis.pow (eis.cube eis.lam) (m1 + 1) = eis.mul (eis.cube eis.lam) (eis.pow (eis.cube eis.lam) m1)
+        simp [eis.pow]; exact eis.mul_comm (eis.pow (eis.cube eis.lam) m1) (eis.cube eis.lam)
+      have hab_div_lam3 : eis.add (eis.cube alpha) (eis.cube beta) =
+          eis.mul (eis.cube eis.lam) (eis.neg (eis.mul u (eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.cube gamma))))
+        have ha_z : (eis.add (eis.add (eis.cube alpha) (eis.cube beta)) (eis.mul u (eis.mul (eis.pow (eis.cube eis.lam) (m1 + 1)) (eis.cube gamma)))).a = 0
+          rw [heq]; unfold eis.zero; simp
+        have hb_z : (eis.add (eis.add (eis.cube alpha) (eis.cube beta)) (eis.mul u (eis.mul (eis.pow (eis.cube eis.lam) (m1 + 1)) (eis.cube gamma)))).b = 0
+          rw [heq]; unfold eis.zero; simp
+        rw [hpow_succ] at ha_z hb_z
+        unfold eis.add at ha_z hb_z; simp at ha_z hb_z
+        have hcomm_r : eis.mul (eis.cube eis.lam) (eis.neg (eis.mul u (eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.cube gamma)))) =
+            eis.neg (eis.mul u (eis.mul (eis.mul (eis.cube eis.lam) (eis.pow (eis.cube eis.lam) m1)) (eis.cube gamma)))
+          apply eis.ext <;> (unfold eis.mul eis.neg; simp; ring)
+        rw [hcomm_r]
+        apply eis.ext <;> (unfold eis.add eis.neg; simp; linarith)
+      -- Factor alpha^3 + beta^3 = (alpha + beta) * (alpha + omega*beta) * (alpha + omega^2*beta):
+      have hlam_sum : eis.dvd eis.lam (eis.add alpha beta) ∧
+          eis.dvd eis.lam (eis.add alpha (eis.mul eis.omega beta)) ∧
+          eis.dvd eis.lam (eis.add alpha (eis.mul eis.omega2 beta))
+        obtain ⟨t1, t2, hta, htb⟩ := eis.lam_cube_mul_div3 (eis.neg (eis.mul u (eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.cube gamma))))
+        have h3_ab3 : (eis.add (eis.cube alpha) (eis.cube beta)).a = 3 * t1 ∧ (eis.add (eis.cube alpha) (eis.cube beta)).b = 3 * t2
+          rw [hab_div_lam3]; exact ⟨hta, htb⟩
+        have hferm3 : ((alpha.a + alpha.b) + (beta.a + beta.b)) % 3 = 0
+          have hc_id : (alpha.a + alpha.b) + (beta.a + beta.b) =
+              (eis.add (eis.cube alpha) (eis.cube beta)).a +
+              3 * (alpha.a * alpha.b^2 + beta.a * beta.b^2) -
+              ((alpha.a^3 - alpha.a) + (beta.a^3 - beta.a) + (beta.b^3 - beta.b) + (alpha.b^3 - alpha.b))
+            rw [eis.add_a, eis.cube_eq alpha, eis.cube_eq beta]
+            simp only [eis.mul_a, eis.mul_b]; ring
+          obtain ⟨k1, hk1⟩ := int.cube_sub_self_div3 alpha.a
+          obtain ⟨k2, hk2⟩ := int.cube_sub_self_div3 beta.a
+          obtain ⟨k3, hk3⟩ := int.cube_sub_self_div3 beta.b
+          obtain ⟨k4, hk4⟩ := int.cube_sub_self_div3 alpha.b
+          rw [h3_ab3.1, hk1, hk2, hk3, hk4] at hc_id
+          set Q := t1 + (alpha.a * alpha.b^2 + beta.a * beta.b^2) - (k1 + k2 + k3 + k4)
+          have hmul3 : (alpha.a + alpha.b) + (beta.a + beta.b) = 0 + 3 * Q := by linarith
+          rw [hmul3, add_mul_mod.int 0 Q 3 (by decide)]
+          exact (div_mod_of_lt.int 0 3 (by decide) (by decide)).2
+        have hd_s0 : eis.dvd eis.lam (eis.add alpha beta)
+          have hm : ((eis.add alpha beta).a + (eis.add alpha beta).b) % 3 = 0
+            unfold eis.add; simp
+            have he : alpha.a + beta.a + (alpha.b + beta.b) = (alpha.a + alpha.b) + (beta.a + beta.b) := by ring
+            rw [he]; exact hferm3
+          exact (eis.lam_dvd_iff (eis.add alpha beta)).mpr hm
+        have hd_s1 : eis.dvd eis.lam (eis.add alpha (eis.mul eis.omega beta))
+          have hm : ((eis.add alpha (eis.mul eis.omega beta)).a + (eis.add alpha (eis.mul eis.omega beta)).b) % 3 = 0
+            have he : (eis.add alpha (eis.mul eis.omega beta)).a + (eis.add alpha (eis.mul eis.omega beta)).b = ((alpha.a + alpha.b) + (beta.a + beta.b)) + 3 * (-beta.b)
+              unfold eis.add eis.mul eis.omega; simp; ring
+            rw [he, add_mul_mod.int ((alpha.a + alpha.b) + (beta.a + beta.b)) (-beta.b) 3 (by decide)]; exact hferm3
+          exact (eis.lam_dvd_iff (eis.add alpha (eis.mul eis.omega beta))).mpr hm
+        have hd_s2 : eis.dvd eis.lam (eis.add alpha (eis.mul eis.omega2 beta))
+          have hm : ((eis.add alpha (eis.mul eis.omega2 beta)).a + (eis.add alpha (eis.mul eis.omega2 beta)).b) % 3 = 0
+            have he : (eis.add alpha (eis.mul eis.omega2 beta)).a + (eis.add alpha (eis.mul eis.omega2 beta)).b = ((alpha.a + alpha.b) + (beta.a + beta.b)) + 3 * (-beta.a)
+              unfold eis.add eis.mul eis.omega2; simp; ring
+            rw [he, add_mul_mod.int ((alpha.a + alpha.b) + (beta.a + beta.b)) (-beta.a) 3 (by decide)]; exact hferm3
+          exact (eis.lam_dvd_iff (eis.add alpha (eis.mul eis.omega2 beta))).mpr hm
+        exact ⟨hd_s0, hd_s1, hd_s2⟩
+      -- Step B: Choose beta' in {beta, omega*beta, omega^2*beta} (preserving cube!) so lambda^2 | (alpha + beta')!
+      have hex_b' : ∃ beta' : Eisenstein, eis.cube beta' = eis.cube beta ∧
+          eis.coprime alpha beta' ∧ ¬ eis.dvd eis.lam beta' ∧
+          ∃ f0 f1 f2 : Eisenstein,
+            eis.add alpha beta' = eis.mul eis.lam f0 ∧
+            eis.add alpha (eis.mul eis.omega beta') = eis.mul eis.lam f1 ∧
+            eis.add alpha (eis.mul eis.omega2 beta') = eis.mul eis.lam f2 ∧
+            eis.dvd eis.lam f0 ∧ ¬ eis.dvd eis.lam f1 ∧ ¬ eis.dvd eis.lam f2
+        have hd0_s := hlam_sum.1
+        have hd1_s := hlam_sum.2.1
+        have hd2_s := hlam_sum.2.2
+        unfold eis.dvd at hd0_s hd1_s hd2_s
+        obtain ⟨q0, hq0⟩ := hd0_s
+        obtain ⟨q1, hq1⟩ := hd1_s
+        obtain ⟨q2, hq2⟩ := hd2_s
+        have hlam_nz : eis.lam ≠ eis.zero := by decide
+        have hq01 : eis.sub q0 q1 = beta
+          apply eis.mul_cancel_left eis.lam hlam_nz
+          rw [eis.mul_sub_l, ← hq0, ← hq1]
+          apply eis.ext <;> (unfold eis.sub eis.add eis.mul eis.lam eis.omega; simp; ring)
+        have hq12 : eis.sub q1 q2 = eis.mul eis.omega beta
+          apply eis.mul_cancel_left eis.lam hlam_nz
+          rw [eis.mul_sub_l, ← hq1, ← hq2]
+          apply eis.ext <;> (unfold eis.sub eis.add eis.mul eis.lam eis.omega eis.omega2; simp; ring)
+        have hmod_b : (beta.a + beta.b) % 3 ≠ 0
+          intro h; exact hnb ((eis.lam_dvd_iff beta).mpr h)
+        have hs01 : (q0.a + q0.b) - (q1.a + q1.b) = beta.a + beta.b
+          have ha : (eis.sub q0 q1).a = beta.a := by rw [hq01]
+          have hb : (eis.sub q0 q1).b = beta.b := by rw [hq01]
+          unfold eis.sub at ha hb; simp at ha hb; linarith
+        have hs12 : (q1.a + q1.b) - (q2.a + q2.b) = beta.a + beta.b + 3 * (-beta.b)
+          have ha : (eis.sub q1 q2).a = (eis.mul eis.omega beta).a := by rw [hq12]
+          have hb : (eis.sub q1 q2).b = (eis.mul eis.omega beta).b := by rw [hq12]
+          unfold eis.sub eis.mul eis.omega at ha hb; simp at ha hb; linarith
+        have hdistinct : ∀ x y t : ℤ, x - y = (beta.a + beta.b) + 3 * t → x % 3 = 0 → y % 3 ≠ 0
+          intro x y t hxy hx0 hy0
+          have hdx := div_add_mod.int x 3; rw [hx0] at hdx
+          have hdy := div_add_mod.int y 3; rw [hy0] at hdy
+          have hbm : beta.a + beta.b = 0 + 3 * (x / 3 - y / 3 - t) := by linarith
+          rw [hbm, add_mul_mod.int 0 (x / 3 - y / 3 - t) 3 (by decide)] at hmod_b
+          exact hmod_b ((div_mod_of_lt.int 0 3 (by decide) (by decide)).2)
+        have hd0 := mod_nonneg.int (q0.a + q0.b) 3 (by decide)
+        have hl0 := mod_lt.int (q0.a + q0.b) 3 (by decide)
+        have hd1 := mod_nonneg.int (q1.a + q1.b) 3 (by decide)
+        have hl1 := mod_lt.int (q1.a + q1.b) 3 (by decide)
+        have hd2 := mod_nonneg.int (q2.a + q2.b) 3 (by decide)
+        have hl2 := mod_lt.int (q2.a + q2.b) 3 (by decide)
+        by_cases h0_z : (q0.a + q0.b) % 3 = 0
+        · use beta
+          have hcb_eq : eis.cube beta = eis.cube beta := by simp
+          have hnd1 : ¬ eis.dvd eis.lam q1
+            intro hc; exact hdistinct (q0.a + q0.b) (q1.a + q1.b) 0 (by linarith) h0_z ((eis.lam_dvd_iff q1).mp hc)
+          have hnd2 : ¬ eis.dvd eis.lam q2
+            intro hc
+            have hs02 : (q2.a + q2.b) - (q0.a + q0.b) = (beta.a + beta.b) + 3 * (-beta.a) := by linarith
+            exact hdistinct (q2.a + q2.b) (q0.a + q0.b) (-beta.a) hs02 ((eis.lam_dvd_iff q2).mp hc) h0_z
+          exact ⟨hcb_eq, hcop, hnb, ⟨q0, q1, q2, hq0, hq1, hq2, (eis.lam_dvd_iff q0).mpr h0_z, hnd1, hnd2⟩⟩
+        · by_cases h1_z : (q1.a + q1.b) % 3 = 0
+          · use eis.mul eis.omega beta
+            have hcube_w : eis.cube (eis.mul eis.omega beta) = eis.cube beta
+              have hw3 : eis.cube eis.omega = eis.one := by decide
+              rw [eis.cube_mul, hw3, eis.mul_one_l]
+            have hcop_w : eis.coprime alpha (eis.mul eis.omega beta)
+              have hcop_u := hcop
+              unfold eis.coprime at hcop_u ⊢
+              obtain ⟨su, sv, hsuv⟩ := hcop_u
+              use su, eis.mul sv eis.omega2
+              have hstep_w : eis.add (eis.mul su alpha) (eis.mul (eis.mul sv eis.omega2) (eis.mul eis.omega beta)) = eis.add (eis.mul su alpha) (eis.mul sv beta)
+                apply eis.ext <;> (unfold eis.mul eis.add eis.omega eis.omega2; simp; ring)
+              rw [hstep_w, hsuv]
+            have hnb_w : ¬ eis.dvd eis.lam (eis.mul eis.omega beta)
+              intro hc; apply hnb
+              unfold eis.dvd at hc ⊢
+              obtain ⟨kw, hkw⟩ := hc
+              use eis.mul eis.omega2 kw
+              have hb_w : beta = eis.mul eis.omega2 (eis.mul eis.omega beta)
+                apply eis.ext <;> (unfold eis.mul eis.omega eis.omega2; simp; ring)
+              have hc_w : eis.mul eis.omega2 (eis.mul eis.lam kw) = eis.mul eis.lam (eis.mul eis.omega2 kw)
+                apply eis.ext <;> (unfold eis.mul; simp; ring)
+              rw [hb_w, hkw, hc_w]
+            have hw2 : eis.mul eis.omega (eis.mul eis.omega beta) = eis.mul eis.omega2 beta
+              apply eis.ext <;> (unfold eis.mul eis.omega eis.omega2; simp; ring)
+            have hw3 : eis.mul eis.omega2 (eis.mul eis.omega beta) = beta
+              apply eis.ext <;> (unfold eis.mul eis.omega eis.omega2; simp; ring)
+            have he2 : eis.add alpha (eis.mul eis.omega (eis.mul eis.omega beta)) = eis.mul eis.lam q2 := by rw [hw2]; exact hq2
+            have he3 : eis.add alpha (eis.mul eis.omega2 (eis.mul eis.omega beta)) = eis.mul eis.lam q0 := by rw [hw3]; exact hq0
+            have hnd2 : ¬ eis.dvd eis.lam q2
+              intro hc; exact hdistinct (q1.a + q1.b) (q2.a + q2.b) (-beta.b) hs12 h1_z ((eis.lam_dvd_iff q2).mp hc)
+            have hnd0 : ¬ eis.dvd eis.lam q0
+              intro hc; exact h0_z ((eis.lam_dvd_iff q0).mp hc)
+            exact ⟨hcube_w, hcop_w, hnb_w, ⟨q1, q2, q0, hq1, he2, he3, (eis.lam_dvd_iff q1).mpr h1_z, hnd2, hnd0⟩⟩
+          · have h2_z : (q2.a + q2.b) % 3 = 0
+              have hd_b := div_add_mod.int (beta.a + beta.b) 3
+              have hb0_nn := mod_nonneg.int (beta.a + beta.b) 3 (by decide)
+              have hb_lt := mod_lt.int (beta.a + beta.b) 3 (by decide)
+              have hd_q0 := div_add_mod.int (q0.a + q0.b) 3
+              set r0 := (q0.a + q0.b) % 3
+              set rb := (beta.a + beta.b) % 3
+              have hq1_e : q1.a + q1.b = (r0 - rb) + 3 * ((q0.a + q0.b) / 3 - (beta.a + beta.b) / 3) := by linarith
+              have hq2_e : q2.a + q2.b = (r0 - 2 * rb) + 3 * ((q0.a + q0.b) / 3 - 2 * ((beta.a + beta.b) / 3) + beta.b) := by linarith
+              rw [hq1_e, add_mul_mod.int (r0 - rb) ((q0.a + q0.b) / 3 - (beta.a + beta.b) / 3) 3 (by decide)] at h1_z
+              rw [hq2_e, add_mul_mod.int (r0 - 2 * rb) ((q0.a + q0.b) / 3 - 2 * ((beta.a + beta.b) / 3) + beta.b) 3 (by decide)]
+              by_cases hr0_1 : r0 = 1
+              · by_cases hrb_1 : rb = 1
+                · exfalso; rw [hr0_1, hrb_1] at h1_z; exact h1_z (by decide)
+                · have hrb_2 : rb = 2 := by omega
+                  rw [hr0_1, hrb_2]; decide
+              · have hr0_2 : r0 = 2 := by omega
+                by_cases hrb_1 : rb = 1
+                · rw [hr0_2, hrb_1]; decide
+                · have hrb_2 : rb = 2 := by omega
+                  exfalso; rw [hr0_2, hrb_2] at h1_z; exact h1_z (by decide)
+            use eis.mul eis.omega2 beta
+            have hcube_w2 : eis.cube (eis.mul eis.omega2 beta) = eis.cube beta
+              have hw23 : eis.cube eis.omega2 = eis.one := by decide
+              rw [eis.cube_mul, hw23, eis.mul_one_l]
+            have hcop_w2 : eis.coprime alpha (eis.mul eis.omega2 beta)
+              have hcop_u := hcop
+              unfold eis.coprime at hcop_u ⊢
+              obtain ⟨su, sv, hsuv⟩ := hcop_u
+              use su, eis.mul sv eis.omega
+              have hstep_w2 : eis.add (eis.mul su alpha) (eis.mul (eis.mul sv eis.omega) (eis.mul eis.omega2 beta)) = eis.add (eis.mul su alpha) (eis.mul sv beta)
+                apply eis.ext <;> (unfold eis.mul eis.add eis.omega eis.omega2; simp; ring)
+              rw [hstep_w2, hsuv]
+            have hnb_w2 : ¬ eis.dvd eis.lam (eis.mul eis.omega2 beta)
+              intro hc; apply hnb
+              unfold eis.dvd at hc ⊢
+              obtain ⟨kw, hkw⟩ := hc
+              use eis.mul eis.omega kw
+              have hb_w2 : beta = eis.mul eis.omega (eis.mul eis.omega2 beta)
+                apply eis.ext <;> (unfold eis.mul eis.omega eis.omega2; simp; ring)
+              have hc_w2 : eis.mul eis.omega (eis.mul eis.lam kw) = eis.mul eis.lam (eis.mul eis.omega kw)
+                apply eis.ext <;> (unfold eis.mul; simp; ring)
+              rw [hb_w2, hkw, hc_w2]
+            have hw2_1 : eis.mul eis.omega (eis.mul eis.omega2 beta) = beta
+              apply eis.ext <;> (unfold eis.mul eis.omega eis.omega2; simp; ring)
+            have hw2_2 : eis.mul eis.omega2 (eis.mul eis.omega2 beta) = eis.mul eis.omega beta
+              apply eis.ext <;> (unfold eis.mul eis.omega eis.omega2; simp; ring)
+            have he2 : eis.add alpha (eis.mul eis.omega (eis.mul eis.omega2 beta)) = eis.mul eis.lam q0 := by rw [hw2_1]; exact hq0
+            have he3 : eis.add alpha (eis.mul eis.omega2 (eis.mul eis.omega2 beta)) = eis.mul eis.lam q1 := by rw [hw2_2]; exact hq1
+            have hnd0 : ¬ eis.dvd eis.lam q0
+              intro hc; exact h0_z ((eis.lam_dvd_iff q0).mp hc)
+            have hnd1 : ¬ eis.dvd eis.lam q1
+              intro hc; exact h1_z ((eis.lam_dvd_iff q1).mp hc)
+            exact ⟨hcube_w2, hcop_w2, hnb_w2, ⟨q2, q0, q1, hq2, he2, he3, (eis.lam_dvd_iff q2).mpr h2_z, hnd0, hnd1⟩⟩
+      obtain ⟨beta', hcube_b', hcop', hnb', f0, f1, f2, hf0, hf1, hf2, hdf0, hndf1, hndf2⟩ := hex_b'
+      have hlam_nz : eis.lam ≠ eis.zero := by decide
+      have hlam3_nz : eis.cube eis.lam ≠ eis.zero := by decide
+      have hf_prod : eis.mul (eis.mul f0 f1) f2 = eis.mul (eis.neg u) (eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.cube gamma))
+        apply eis.mul_cancel_left (eis.cube eis.lam) hlam3_nz
+        have hl : eis.mul (eis.cube eis.lam) (eis.mul (eis.mul f0 f1) f2) =
+            eis.mul (eis.mul (eis.mul eis.lam f0) (eis.mul eis.lam f1)) (eis.mul eis.lam f2)
+          rw [eis.cube_eq eis.lam]
+          apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b]; ring)
+        have hfac : eis.mul (eis.mul (eis.add alpha beta') (eis.add alpha (eis.mul eis.omega beta'))) (eis.add alpha (eis.mul eis.omega2 beta')) =
+            eis.add (eis.cube alpha) (eis.cube beta')
+          have hwa : eis.omega.a = 0 := by unfold eis.omega; simp
+          have hwb : eis.omega.b = 1 := by unfold eis.omega; simp
+          have hw2a : eis.omega2.a = -1 := by unfold eis.omega2; simp
+          have hw2b : eis.omega2.b = -1 := by unfold eis.omega2; simp
+          rw [eis.cube_eq alpha, eis.cube_eq beta']
+          apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b, eis.add_a, eis.add_b, hwa, hwb, hw2a, hw2b]; ring)
+        rw [hl, ← hf0, ← hf1, ← hf2, hfac, hcube_b', hab_div_lam3]
+        apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b, eis.neg_a, eis.neg_b]; ring)
+      -- Pairwise coprimality of f0, f1, f2 from `eis.coprime alpha beta'`!
+      have hcop'_u := hcop'
+      unfold eis.coprime at hcop'_u
+      have hcf01 : eis.coprime f0 f1
+        unfold eis.coprime
+        obtain ⟨sa, sb, hsab⟩ := hcop'_u
+        have hdf_b : eis.sub f0 f1 = beta'
+          apply eis.mul_cancel_left eis.lam hlam_nz
+          rw [eis.mul_sub_l, ← hf0, ← hf1]
+          apply eis.ext <;> (unfold eis.sub eis.add eis.mul eis.lam eis.omega; simp; ring)
+        have hdf_a : eis.sub f1 (eis.mul eis.omega f0) = alpha
+          apply eis.mul_cancel_left eis.lam hlam_nz
+          rw [eis.mul_sub_l, ← hf1]
+          have hwf0 : eis.mul eis.lam (eis.mul eis.omega f0) = eis.mul eis.omega (eis.mul eis.lam f0)
+            apply eis.ext <;> (unfold eis.mul; simp; ring)
+          rw [hwf0, ← hf0]
+          apply eis.ext <;> (unfold eis.sub eis.add eis.mul eis.lam eis.omega; simp; ring)
+        use eis.sub sb (eis.mul sa eis.omega), eis.sub sa sb
+        rw [← hdf_a, ← hdf_b] at hsab
+        have hid01 : eis.add (eis.mul (eis.sub sb (eis.mul sa eis.omega)) f0) (eis.mul (eis.sub sa sb) f1) = eis.add (eis.mul sa (eis.sub f1 (eis.mul eis.omega f0))) (eis.mul sb (eis.sub f0 f1))
+          apply eis.ext <;> (unfold eis.add eis.sub eis.mul; simp; ring)
+        rw [hid01, hsab]
+      have hcf02 : eis.coprime f0 f2
+        unfold eis.coprime
+        obtain ⟨sa, sb, hsab⟩ := hcop'_u
+        have hdf_b : eis.mul (eis.neg eis.omega) (eis.sub f0 f2) = beta'
+          apply eis.mul_cancel_left eis.lam hlam_nz
+          have hl : eis.mul eis.lam (eis.mul (eis.neg eis.omega) (eis.sub f0 f2)) = eis.mul (eis.neg eis.omega) (eis.sub (eis.mul eis.lam f0) (eis.mul eis.lam f2))
+            apply eis.ext <;> (unfold eis.mul eis.sub eis.neg; simp; ring)
+          rw [hl, ← hf0, ← hf2]
+          apply eis.ext <;> (unfold eis.mul eis.sub eis.add eis.neg eis.omega eis.omega2 eis.lam; simp; ring)
+        have hdf_a : eis.sub f0 (eis.mul eis.omega f2) = alpha
+          apply eis.mul_cancel_left eis.lam hlam_nz
+          rw [eis.mul_sub_l, ← hf0]
+          have hwf2 : eis.mul eis.lam (eis.mul eis.omega f2) = eis.mul eis.omega (eis.mul eis.lam f2)
+            apply eis.ext <;> (unfold eis.mul; simp; ring)
+          rw [hwf2, ← hf2]
+          apply eis.ext <;> (unfold eis.sub eis.add eis.mul eis.lam eis.omega eis.omega2; simp; ring)
+        use eis.add sa (eis.mul sb (eis.neg eis.omega)), eis.sub (eis.mul sb eis.omega) (eis.mul sa eis.omega)
+        rw [← hdf_a, ← hdf_b] at hsab
+        have hid02 : eis.add (eis.mul (eis.add sa (eis.mul sb (eis.neg eis.omega))) f0) (eis.mul (eis.sub (eis.mul sb eis.omega) (eis.mul sa eis.omega)) f2) = eis.add (eis.mul sa (eis.sub f0 (eis.mul eis.omega f2))) (eis.mul sb (eis.mul (eis.neg eis.omega) (eis.sub f0 f2)))
+          apply eis.ext <;> (unfold eis.add eis.sub eis.mul eis.neg; simp; ring)
+        rw [hid02, hsab]
+      have hcf12 : eis.coprime f1 f2
+        unfold eis.coprime
+        obtain ⟨sa, sb, hsab⟩ := hcop'_u
+        have hdf_b : eis.mul eis.omega2 (eis.sub f1 f2) = beta'
+          apply eis.mul_cancel_left eis.lam hlam_nz
+          have hl : eis.mul eis.lam (eis.mul eis.omega2 (eis.sub f1 f2)) = eis.mul eis.omega2 (eis.sub (eis.mul eis.lam f1) (eis.mul eis.lam f2))
+            apply eis.ext <;> (unfold eis.mul eis.sub; simp; ring)
+          rw [hl, ← hf1, ← hf2]
+          apply eis.ext <;> (unfold eis.mul eis.sub eis.add eis.omega eis.omega2 eis.lam; simp; ring)
+        have hdf_a : eis.sub f2 (eis.mul eis.omega f1) = alpha
+          apply eis.mul_cancel_left eis.lam hlam_nz
+          rw [eis.mul_sub_l, ← hf2]
+          have hwf1 : eis.mul eis.lam (eis.mul eis.omega f1) = eis.mul eis.omega (eis.mul eis.lam f1)
+            apply eis.ext <;> (unfold eis.mul; simp; ring)
+          rw [hwf1, ← hf1]
+          apply eis.ext <;> (unfold eis.sub eis.add eis.mul eis.lam eis.omega eis.omega2; simp; ring)
+        use eis.sub (eis.mul sb eis.omega2) (eis.mul sa eis.omega), eis.sub sa (eis.mul sb eis.omega2)
+        rw [← hdf_a, ← hdf_b] at hsab
+        have hid12 : eis.add (eis.mul (eis.sub (eis.mul sb eis.omega2) (eis.mul sa eis.omega)) f1) (eis.mul (eis.sub sa (eis.mul sb eis.omega2)) f2) = eis.add (eis.mul sa (eis.sub f2 (eis.mul eis.omega f1))) (eis.mul sb (eis.mul eis.omega2 (eis.sub f1 f2)))
+          apply eis.ext <;> (unfold eis.add eis.sub eis.mul; simp; ring)
+        rw [hid12, hsab]
+      -- Step D: Divide f0 by (lambda^3)^m1!
+      have hcop_lam_f12 : eis.coprime (eis.pow (eis.cube eis.lam) m1) (eis.mul f1 f2)
+        have hbase : ∀ z : Eisenstein, ¬ eis.dvd eis.lam z → eis.coprime eis.lam z
+          intro z hndz
+          obtain ⟨w, s, t, hwl, hwz, hwb⟩ := eis.bezout_gcd eis.lam z
+          unfold eis.dvd at hwl hwz
+          obtain ⟨ql, hql⟩ := hwl
+          have hn3 : 3 = eis.norm w * eis.norm ql
+            have hnl : eis.norm eis.lam = 3 := by unfold eis.norm eis.lam; simp
+            rw [← hnl, hql, eis.norm_mul]
+          have hnw_nn := eis.norm_nonneg w
+          have hnq_nn := eis.norm_nonneg ql
+          have hnq_ne1 : eis.norm ql ≠ 1
+            intro hq1; apply hndz
+            unfold eis.dvd
+            obtain ⟨kz, hkz⟩ := hwz
+            use eis.mul (eis.conj ql) kz
+            have hunit : eis.mul ql (eis.conj ql) = eis.one := by rw [eis.mul_conj, hq1]; unfold eis.of_int eis.one; simp
+            calc z = eis.mul w kz := hkz
+              _ = eis.mul (eis.mul w eis.one) kz := by rw [eis.mul_one_r]
+              _ = eis.mul (eis.mul w (eis.mul ql (eis.conj ql))) kz := by rw [hunit]
+              _ = eis.mul eis.lam (eis.mul (eis.conj ql) kz) := by rw [← eis.mul_assoc w ql, ← hql, eis.mul_assoc]
+          have hnw1 : eis.norm w = 1
+            by_contra hnw_ne1
+            by_cases hnw0 : eis.norm w = 0; (rw [hnw0] at hn3; linarith)
+            by_cases hnq0 : eis.norm ql = 0; (rw [hnq0] at hn3; linarith)
+            have hm := mul_le_mul.int 2 (eis.norm w) 2 (eis.norm ql) (by omega) (by omega) (by decide) (by omega)
+            linarith
+          unfold eis.coprime
+          use eis.mul (eis.conj w) s, eis.mul (eis.conj w) t
+          have hunit : eis.mul (eis.conj w) w = eis.one := by rw [eis.mul_comm, eis.mul_conj, hnw1]; unfold eis.of_int eis.one; simp
+          have hid_wb : eis.add (eis.mul (eis.mul (eis.conj w) s) eis.lam) (eis.mul (eis.mul (eis.conj w) t) z) = eis.mul (eis.conj w) (eis.add (eis.mul s eis.lam) (eis.mul t z))
+            apply eis.ext <;> (unfold eis.mul eis.add; simp; ring)
+          rw [hid_wb, ← hwb, hunit]
+        have hc_lam_12 : eis.coprime (eis.cube eis.lam) (eis.mul f1 f2)
+          exact eis.coprime_cube_l eis.lam (eis.mul f1 f2) (eis.coprime_mul_r eis.lam f1 f2 (hbase f1 hndf1) (hbase f2 hndf2))
+        have hpow_cop : ∀ k : ℕ, eis.coprime (eis.pow (eis.cube eis.lam) k) (eis.mul f1 f2)
+          intro k; induction k with j ihj
+          · simp [eis.pow]; unfold eis.coprime; use eis.one, eis.zero; rw [eis.mul_one_r, eis.mul_comm eis.zero (eis.mul f1 f2), eis.mul_zero_r, eis.add_zero_r]
+          · rw [succ_eq_add_one.nat]; simp [eis.pow]
+            apply eis.coprime_symm
+            exact eis.coprime_mul_r (eis.mul f1 f2) (eis.pow (eis.cube eis.lam) j) (eis.cube eis.lam) (eis.coprime_symm (eis.pow (eis.cube eis.lam) j) (eis.mul f1 f2) ihj) (eis.coprime_symm (eis.cube eis.lam) (eis.mul f1 f2) hc_lam_12)
+        exact hpow_cop m1
+      have hdvd_f0_all : eis.dvd (eis.pow (eis.cube eis.lam) m1) (eis.mul (eis.mul f1 f2) f0)
+        unfold eis.dvd
+        use eis.mul (eis.neg u) (eis.cube gamma)
+        have hcomm : eis.mul (eis.mul f1 f2) f0 = eis.mul (eis.mul f0 f1) f2
+          apply eis.ext <;> (unfold eis.mul; simp; ring)
+        rw [hcomm, hf_prod]
+        apply eis.ext <;> (unfold eis.mul; simp; ring)
+      have hg0_d := eis.coprime_dvd_mul (eis.pow (eis.cube eis.lam) m1) (eis.mul f1 f2) f0 hcop_lam_f12 hdvd_f0_all
+      unfold eis.dvd at hg0_d
+      obtain ⟨g0, hg0⟩ := hg0_d
+      have hpow_m1_nz : eis.pow (eis.cube eis.lam) m1 ≠ eis.zero
+        intro hz
+        have hpos_pow : ∀ k : ℕ, 0 < eis.norm (eis.pow (eis.cube eis.lam) k)
+          intro k; induction k with j ihj
+          · simp [eis.pow]; unfold eis.norm eis.one; simp
+          · rw [succ_eq_add_one.nat]; simp [eis.pow]; rw [eis.norm_mul, eis.lam_cube_coords.2.2]; linarith
+        have hn0 := (eis.norm_eq_zero_iff (eis.pow (eis.cube eis.lam) m1)).mpr hz
+        linarith [hpos_pow m1]
+      have hg_prod : eis.mul (eis.mul g0 f1) f2 = eis.mul (eis.neg u) (eis.cube gamma)
+        apply eis.mul_cancel_left (eis.pow (eis.cube eis.lam) m1) hpow_m1_nz
+        have hl : eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.mul (eis.mul g0 f1) f2) = eis.mul (eis.mul f0 f1) f2
+          rw [hg0]; apply eis.ext <;> (unfold eis.mul; simp; ring)
+        have hr : eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.mul (eis.neg u) (eis.cube gamma)) =
+            eis.mul (eis.neg u) (eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.cube gamma))
+          apply eis.ext <;> (unfold eis.mul; simp; ring)
+        rw [hl, hr, hf_prod]
+      have hgamma_nz : gamma ≠ eis.zero
+        intro hgz; rw [hgz] at hng; apply hng; unfold eis.dvd; exact ⟨eis.zero, by rw [eis.mul_zero_r]⟩
+      have hnu_neg : eis.norm (eis.neg u) = 1
+        unfold eis.norm eis.neg; simp; unfold eis.norm at hu; linarith
+      have hd_g0 : eis.dvd g0 f0 := by unfold eis.dvd; exact ⟨eis.pow (eis.cube eis.lam) m1, by rw [hg0, eis.mul_comm]⟩
+      have hcg01 : eis.coprime g0 f1 := eis.coprime_of_dvd_left g0 f0 f1 hd_g0 hcf01
+      have hcg02 : eis.coprime g0 f2 := eis.coprime_of_dvd_left g0 f0 f2 hd_g0 hcf02
+      -- Step E: Factor g0 = u0 * gamma0^3, f1 = u1 * alpha1^3, f2 = u2 * beta1^3!
+      obtain ⟨u0, u1, u2, gamma0, alpha1, beta1, hu0, hu1, hu2, heg0, hef1, hef2⟩ := eis.coprime_three_eq_unit_cube (nat_of_int (eis.norm gamma)) gamma hgamma_nz (int_of_nat_of_int (eis.norm gamma) (eis.norm_nonneg gamma)).symm g0 f1 f2 (eis.neg u) hnu_neg hcg01 hcg02 hcf12 hg_prod
+      -- Step F: Substitute into Kummer's linear relation f0 + omega * f1 + omega^2 * f2 = 0!
+      have hkummer : eis.add (eis.add f0 (eis.mul eis.omega f1)) (eis.mul eis.omega2 f2) = eis.zero
+        apply eis.mul_cancel_left eis.lam hlam_nz
+        have hl : eis.mul eis.lam (eis.add (eis.add f0 (eis.mul eis.omega f1)) (eis.mul eis.omega2 f2)) =
+            eis.add (eis.add (eis.mul eis.lam f0) (eis.mul eis.omega (eis.mul eis.lam f1))) (eis.mul eis.omega2 (eis.mul eis.lam f2))
+          apply eis.ext <;> (unfold eis.mul eis.add; simp; ring)
+        rw [hl, ← hf0, ← hf1, ← hf2, eis.mul_zero_r]
+        apply eis.ext <;> (unfold eis.add eis.mul eis.omega eis.omega2 eis.zero; simp; ring)
+      set wu1 := eis.mul eis.omega u1 with hwu1_def
+      have hn_wu1 : eis.norm wu1 = 1
+        rw [hwu1_def, eis.norm_mul, hu1]; unfold eis.norm eis.omega; simp
+      set v2 := eis.mul (eis.conj wu1) (eis.mul eis.omega2 u2) with hv2_def
+      set v0 := eis.mul (eis.conj wu1) u0 with hv0_def
+      have hnv2 : eis.norm v2 = 1
+        rw [hv2_def, eis.norm_mul, eis.norm_conj, hn_wu1, eis.norm_mul, hu2]; unfold eis.norm eis.omega2; simp
+      have hnv0 : eis.norm v0 = 1
+        rw [hv0_def, eis.norm_mul, eis.norm_conj, hn_wu1, hu0]; ring
+      have heq_v2 : eis.add (eis.add (eis.cube alpha1) (eis.mul v2 (eis.cube beta1))) (eis.mul v0 (eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.cube gamma0))) = eis.zero
+        have hmul_k : eis.mul (eis.conj wu1) (eis.add (eis.add f0 (eis.mul eis.omega f1)) (eis.mul eis.omega2 f2)) = eis.zero
+          rw [hkummer, eis.mul_zero_r]
+        have hunit_wu1 : eis.mul (eis.conj wu1) wu1 = eis.one
+          rw [eis.mul_comm, eis.mul_conj, hn_wu1]; unfold eis.of_int eis.one; simp
+        have h1_term : eis.mul (eis.conj wu1) (eis.mul eis.omega f1) = eis.cube alpha1
+          rw [hef1]
+          have h1_assoc : eis.mul (eis.conj wu1) (eis.mul eis.omega (eis.mul u1 (eis.cube alpha1))) = eis.mul (eis.mul (eis.conj wu1) wu1) (eis.cube alpha1)
+            rw [hwu1_def]; apply eis.ext <;> (unfold eis.mul; simp; ring)
+          rw [h1_assoc, hunit_wu1, eis.mul_one_l]
+        have h2_term : eis.mul (eis.conj wu1) (eis.mul eis.omega2 f2) = eis.mul v2 (eis.cube beta1)
+          rw [hef2, hv2_def]; apply eis.ext <;> (unfold eis.mul; simp; ring)
+        have h0_term : eis.mul (eis.conj wu1) f0 = eis.mul v0 (eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.cube gamma0))
+          rw [hg0, heg0, hv0_def]; apply eis.ext <;> (unfold eis.mul; simp; ring)
+        have hdist : eis.mul (eis.conj wu1) (eis.add (eis.add f0 (eis.mul eis.omega f1)) (eis.mul eis.omega2 f2)) =
+            eis.add (eis.add (eis.mul (eis.conj wu1) (eis.mul eis.omega f1)) (eis.mul (eis.conj wu1) (eis.mul eis.omega2 f2))) (eis.mul (eis.conj wu1) f0)
+          apply eis.ext <;> (unfold eis.mul eis.add; simp; ring)
+        rw [hdist, h1_term, h2_term, h0_term] at hmul_k
+        exact hmul_k
+      have hna1 : ¬ eis.dvd eis.lam alpha1
+        intro hda; unfold eis.dvd at hda; obtain ⟨qa, hqa⟩ := hda; apply hndf1; unfold eis.dvd
+        use eis.mul u1 (eis.mul qa (eis.mul alpha1 alpha1))
+        rw [hef1, eis.cube_eq alpha1, hqa]; apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b]; ring)
+      have hnb1 : ¬ eis.dvd eis.lam beta1
+        intro hdb; unfold eis.dvd at hdb; obtain ⟨qb, hqb⟩ := hdb; apply hndf2; unfold eis.dvd
+        use eis.mul u2 (eis.mul qb (eis.mul beta1 beta1))
+        rw [hef2, eis.cube_eq beta1, hqb]; apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b]; ring)
+      have hng0 : ¬ eis.dvd eis.lam gamma0
+        intro hdg; unfold eis.dvd at hdg; obtain ⟨qg, hqg⟩ := hdg; apply hng
+        have hg0_div : ∃ kw : Eisenstein, eis.mul (eis.neg u) (eis.cube gamma) = eis.mul eis.lam kw
+          use eis.mul (eis.mul (eis.mul u0 qg) (eis.mul gamma0 gamma0)) (eis.mul f1 f2)
+          rw [← hg_prod, heg0, eis.cube_eq gamma0, hqg]
+          apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b]; ring)
+        obtain ⟨kw, hkw⟩ := hg0_div
+        have hn_div : eis.norm (eis.cube gamma) = 3 * eis.norm kw
+          have h1 : eis.norm (eis.mul (eis.neg u) (eis.cube gamma)) = eis.norm (eis.mul eis.lam kw) := by rw [hkw]
+          have hnl : eis.norm eis.lam = 3 := by unfold eis.norm eis.lam; simp
+          rw [eis.norm_mul, hnu_neg, eis.norm_mul, hnl] at h1; linarith
+        have hng3 : eis.norm (eis.cube gamma) = eis.norm gamma * (eis.norm gamma * eis.norm gamma)
+          unfold eis.cube; rw [eis.norm_mul, eis.norm_mul]
+        have hmod3_ng : eis.norm gamma % 3 = 0
+          have hd := div_add_mod.int (eis.norm gamma) 3
+          have h0 := mod_nonneg.int (eis.norm gamma) 3 (by decide)
+          have hlt := mod_lt.int (eis.norm gamma) 3 (by decide)
+          set qm := eis.norm gamma / 3; set rm := eis.norm gamma % 3
+          have he : eis.norm gamma = 3 * qm + rm := by linarith
+          by_cases hr0 : rm = 0; exact hr0
+          by_cases hr1 : rm = 1
+          · have h1 : eis.norm (eis.cube gamma) = 1 + 3 * (9 * qm^3 + 9 * qm^2 + 3 * qm) := by rw [hng3, he, hr1]; ring
+            exfalso; exact int.ne_zero_of_mod3_rem 1 (9 * qm^3 + 9 * qm^2 + 3 * qm - eis.norm kw) (by left; decide) (by linarith)
+          · have hr2 : rm = 2 := by omega
+            have h2 : eis.norm (eis.cube gamma) = 2 + 3 * (9 * qm^3 + 18 * qm^2 + 12 * qm + 2) := by rw [hng3, he, hr2]; ring
+            exfalso; exact int.ne_zero_of_mod3_rem 2 (9 * qm^3 + 18 * qm^2 + 12 * qm + 2 - eis.norm kw) (by right; decide) (by linarith)
+        have hsum_sq : (gamma.a + gamma.b) * (gamma.a + gamma.b) = eis.norm gamma + 3 * (gamma.a * gamma.b)
+          unfold eis.norm; ring
+        have hmod3_s : (gamma.a + gamma.b) % 3 = 0
+          have hd := div_add_mod.int (gamma.a + gamma.b) 3
+          have h0 := mod_nonneg.int (gamma.a + gamma.b) 3 (by decide)
+          have hlt := mod_lt.int (gamma.a + gamma.b) 3 (by decide)
+          have hd_ng := div_add_mod.int (eis.norm gamma) 3; rw [hmod3_ng] at hd_ng
+          set qs := (gamma.a + gamma.b) / 3; set rs := (gamma.a + gamma.b) % 3
+          have he : gamma.a + gamma.b = 3 * qs + rs := by linarith
+          by_cases hr0 : rs = 0; exact hr0
+          by_cases hr1 : rs = 1
+          · have h1 : (gamma.a + gamma.b) * (gamma.a + gamma.b) = 1 + 3 * (3 * qs^2 + 2 * qs) := by rw [he, hr1]; ring
+            exfalso; exact int.ne_zero_of_mod3_rem 1 (3 * qs^2 + 2 * qs - (eis.norm gamma / 3) - gamma.a * gamma.b) (by left; decide) (by linarith)
+          · have hr2 : rs = 2 := by omega
+            have h2 : (gamma.a + gamma.b) * (gamma.a + gamma.b) = 1 + 3 * (3 * qs^2 + 4 * qs + 1) := by rw [he, hr2]; ring
+            exfalso; exact int.ne_zero_of_mod3_rem 1 (3 * qs^2 + 4 * qs + 1 - (eis.norm gamma / 3) - gamma.a * gamma.b) (by left; decide) (by linarith)
+        exact (eis.lam_dvd_iff gamma).mpr hmod3_s
+      -- Step G: Modulo 3 on the `.b` coordinate forces v2.b = 0 => v2 in {+1, -1}!
+      obtain ⟨s1, ka1, kb1, hs1, ha1_a, ha1_b⟩ := eis.cube_mod9_of_not_lam_dvd alpha1 hna1
+      obtain ⟨s2, ka2, kb2, hs2, hb1_a, hb1_b⟩ := eis.cube_mod9_of_not_lam_dvd beta1 hnb1
+      have hm1_split : eis.pow (eis.cube eis.lam) m1 = eis.mul (eis.cube eis.lam) (eis.pow (eis.cube eis.lam) (m1 - 1))
+        have he : m1 = (m1 - 1) + 1 := by omega
+        have hp_step : eis.pow (eis.cube eis.lam) ((m1 - 1) + 1) = eis.mul (eis.cube eis.lam) (eis.pow (eis.cube eis.lam) (m1 - 1))
+          simp [eis.pow]; exact eis.mul_comm (eis.pow (eis.cube eis.lam) (m1 - 1)) (eis.cube eis.lam)
+        rw [← he] at hp_step; exact hp_step
+      obtain ⟨t1, t2, _, htb⟩ := eis.lam_cube_mul_div3 (eis.mul v0 (eis.mul (eis.pow (eis.cube eis.lam) (m1 - 1)) (eis.cube gamma0)))
+      have hb_zero : (eis.add (eis.add (eis.cube alpha1) (eis.mul v2 (eis.cube beta1)))
+          (eis.mul v0 (eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.cube gamma0)))).b = 0
+        rw [heq_v2]; unfold eis.zero; simp
+      have hrhs_re : eis.mul v0 (eis.mul (eis.pow (eis.cube eis.lam) m1) (eis.cube gamma0)) =
+          eis.mul (eis.cube eis.lam) (eis.mul v0 (eis.mul (eis.pow (eis.cube eis.lam) (m1 - 1)) (eis.cube gamma0)))
+        rw [hm1_split]; apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b]; ring)
+      rw [hrhs_re] at hb_zero
+      unfold eis.add at hb_zero; simp at hb_zero
+      have hv2b_eq : (eis.mul v2 (eis.cube beta1)).b = v2.b * s2 + 9 * (v2.a * kb2 + v2.b * ka2 - v2.b * kb2)
+        unfold eis.mul; simp; rw [hb1_a, hb1_b]; ring
+      rw [ha1_b, hv2b_eq, htb] at hb_zero
+      have hv2_range := eis.unit_b_range v2 hnv2
+      have hv2_b0 : v2.b = 0
+        obtain hb_m1 | hb_0 | hb_1 := hv2_range.1
+        · exfalso
+          obtain h_1 | h_m1 := hs2
+          · rw [hb_m1, h_1] at hb_zero
+            exact int.ne_zero_of_mod3_rem 2 (3 * kb1 + 3 * (v2.a * kb2 + -1 * ka2 - -1 * kb2) + t2 - 1) (by right; decide) (by linarith)
+          · rw [hb_m1, h_m1] at hb_zero
+            exact int.ne_zero_of_mod3_rem 1 (3 * kb1 + 3 * (v2.a * kb2 + -1 * ka2 - -1 * kb2) + t2) (by left; decide) (by linarith)
+        · exact hb_0
+        · exfalso
+          obtain h_1 | h_m1 := hs2
+          · rw [hb_1, h_1] at hb_zero
+            exact int.ne_zero_of_mod3_rem 1 (3 * kb1 + 3 * (v2.a * kb2 + 1 * ka2 - 1 * kb2) + t2) (by left; decide) (by linarith)
+          · rw [hb_1, h_m1] at hb_zero
+            exact int.ne_zero_of_mod3_rem 2 (3 * kb1 + 3 * (v2.a * kb2 + 1 * ka2 - 1 * kb2) + t2 - 1) (by right; decide) (by linarith)
+      have hcop_ab1 : eis.coprime alpha1 beta1
+        have hd_a1 : eis.dvd alpha1 f1 := by unfold eis.dvd; exact ⟨eis.mul u1 (eis.mul alpha1 alpha1), by rw [hef1, eis.cube_eq alpha1]; apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b]; ring)⟩
+        have hd_b1 : eis.dvd beta1 f2 := by unfold eis.dvd; exact ⟨eis.mul u2 (eis.mul beta1 beta1), by rw [hef2, eis.cube_eq beta1]; apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b]; ring)⟩
+        have hc_a1_f2 : eis.coprime alpha1 f2 := eis.coprime_of_dvd_left alpha1 f1 f2 hd_a1 hcf12
+        apply eis.coprime_symm
+        exact eis.coprime_of_dvd_left beta1 f2 alpha1 hd_b1 (eis.coprime_symm alpha1 f2 hc_a1_f2)
+      obtain hv2_pos | hv2_neg := hv2_range.2 hv2_b0
+      · rw [hv2_pos, eis.mul_one_l] at heq_v2
+        exact ih hm1_ge1 alpha1 beta1 gamma0 v0 hnv0 hcop_ab1 hna1 hnb1 hng0 heq_v2
+      · have hneg_cube : eis.mul eis.neg_one (eis.cube beta1) = eis.cube (eis.neg beta1)
+          rw [eis.cube_eq beta1, eis.cube_eq (eis.neg beta1)]
+          have hn1a : eis.neg_one.a = -1 := by unfold eis.neg_one; simp
+          have hn1b : eis.neg_one.b = 0 := by unfold eis.neg_one; simp
+          apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b, eis.neg_a, eis.neg_b, hn1a, hn1b]; ring)
+        rw [hv2_neg, hneg_cube] at heq_v2
+        have hcop_neg : eis.coprime alpha1 (eis.neg beta1)
+          have hcop_ab1_u := hcop_ab1
+          unfold eis.coprime at hcop_ab1_u ⊢
+          obtain ⟨sa, sb, hsab⟩ := hcop_ab1_u
+          use sa, eis.neg sb
+          have he : eis.mul (eis.neg sb) (eis.neg beta1) = eis.mul sb beta1
+            apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b, eis.neg_a, eis.neg_b]; ring)
+          rw [he, hsab]
+        have hnb1_neg : ¬ eis.dvd eis.lam (eis.neg beta1)
+          intro hdn; unfold eis.dvd at hdn; obtain ⟨qn, hqn⟩ := hdn; apply hnb1; unfold eis.dvd
+          use eis.neg qn
+          have he : beta1 = eis.neg (eis.neg beta1) := by apply eis.ext <;> (simp only [eis.neg_a, eis.neg_b]; ring)
+          rw [he, hqn]; apply eis.ext <;> (simp only [eis.neg_a, eis.neg_b, eis.mul_a, eis.mul_b]; ring)
+        exact ih hm1_ge1 alpha1 (eis.neg beta1) gamma0 v0 hnv0 hcop_neg hna1 hnb1_neg hng0 heq_v2
+
++ eis.gauss_lambda_descent (m : ℕ) (hm : 1 ≤ m)
+    (alpha beta gamma u : Eisenstein)
+    (hu : eis.norm u = 1) (hcop : eis.coprime alpha beta)
+    (hna : ¬ eis.dvd eis.lam alpha) (hnb : ¬ eis.dvd eis.lam beta) (hng : ¬ eis.dvd eis.lam gamma) :
+    eis.add (eis.add (eis.cube alpha) (eis.cube beta)) (eis.mul u (eis.mul (eis.pow (eis.cube eis.lam) m) (eis.cube gamma))) ≠ eis.zero
+  have h := eis.gauss_lambda_descent_aux m
+  unfold eis.gauss_descent_at at h
+  exact h hm alpha beta gamma u hu hcop hna hnb hng
+
+-- ====================================================================================
+-- 4. EULER'S COMPLETE n = 3 FERMAT THEOREM (`flt.exp_three`) & MASTER REDUCTION!
+-- ====================================================================================
+
+-> int.bezout_at_nat (N : ℕ) : Prop :=
+  ∀ x y : ℕ, y ≤ N → 0 < x →
+    ∃ d : ℕ, 0 < d ∧ d ∣ x ∧ d ∣ y ∧ ∃ u v : ℤ, (d : ℤ) = u * (x : ℤ) + v * (y : ℤ)
+
++ int.bezout_pos (a b : ℕ) (ha : 0 < a) (hb : 0 < b) :
+    ∃ d : ℕ, 0 < d ∧ d ∣ a ∧ d ∣ b ∧ ∃ u v : ℤ, (d : ℤ) = u * (a : ℤ) + v * (b : ℤ)
+  have hstrong : ∀ N : ℕ, int.bezout_at_nat N
+    intro N; induction N with M ihM
+    · unfold int.bezout_at_nat; intro x y hy0 hx
+      have hyz : y = 0 := by omega
+      have hxx : x ∣ x := (dvd.iff_exists x x hx).mpr ⟨1, by ring⟩
+      have hxy : x ∣ y := (dvd.iff_exists x y hx).mpr ⟨0, by rw [hyz]; ring⟩
+      have hbz : (x : ℤ) = 1 * (x : ℤ) + 0 * (y : ℤ) := by ring
+      exact ⟨x, hx, hxx, hxy, ⟨1, 0, hbz⟩⟩
+    · unfold int.bezout_at_nat at ihM ⊢; intro x y hyM hx
+      rw [succ_eq_add_one.nat] at hyM
+      by_cases hy0 : y = 0
+      · have hxx : x ∣ x := (dvd.iff_exists x x hx).mpr ⟨1, by ring⟩
+        have hxy : x ∣ y := (dvd.iff_exists x y hx).mpr ⟨0, by rw [hy0]; ring⟩
+        have hbz : (x : ℤ) = 1 * (x : ℤ) + 0 * (y : ℤ) := by ring
+        exact ⟨x, hx, hxx, hxy, ⟨1, 0, hbz⟩⟩
+      · have hy_pos : 0 < y := by omega
+        have hdm := div_add_mod.nat x y
+        have hlt := mod_lt.nat x y hy_pos
+        obtain ⟨d, hd_pos, hdy, hdr, u1, v1, hbez⟩ := ihM y (x % y) (by omega) hy_pos
+        have hdx : d ∣ x
+          obtain ⟨qy, hqy⟩ := (dvd.iff_exists d y hd_pos).mp hdy
+          obtain ⟨qr, hqr⟩ := (dvd.iff_exists d (x % y) hd_pos).mp hdr
+          have hquot : x = d * (qy * (x / y) + qr)
+            have he : d * (qy * (x / y) + qr) = (d * qy) * (x / y) + d * qr := by ring
+            rw [he, ← hqy, ← hqr]
+            exact hdm.symm
+          exact (dvd.iff_exists d x hd_pos).mpr ⟨qy * (x / y) + qr, hquot⟩
+        have hbz : (d : ℤ) = v1 * (x : ℤ) + (u1 - v1 * ((x / y : ℕ) : ℤ)) * (y : ℤ)
+          have hc : (x : ℤ) = (y : ℤ) * ((x / y : ℕ) : ℤ) + ((x % y : ℕ) : ℤ)
+            have h1 : ((y * (x / y) + x % y : ℕ) : ℤ) = (x : ℤ) := by rw [hdm]
+            rw [cast_add.int, cast_mul.int] at h1; linarith
+          have hid : v1 * ((y : ℤ) * ((x / y : ℕ) : ℤ) + ((x % y : ℕ) : ℤ)) + (u1 - v1 * ((x / y : ℕ) : ℤ)) * (y : ℤ) = u1 * (y : ℤ) + v1 * ((x % y : ℕ) : ℤ) := by ring
+          rw [hbez, hc, hid]
+        exact ⟨d, hd_pos, hdx, hdy, ⟨v1, u1 - v1 * ((x / y : ℕ) : ℤ), hbz⟩⟩
+  have hb_at := hstrong b
+  unfold int.bezout_at_nat at hb_at
+  exact hb_at a b (by omega) ha
+
++ eis.coprime_of_nat_coprime (a b : ℕ) (ha : 0 < a) (hb : 0 < b) (hcop : nat.coprime_primes a b) :
+    eis.coprime (eis.of_int (a : ℤ)) (eis.of_int (b : ℤ))
+  unfold nat.coprime_primes at hcop
+  obtain ⟨d, hd_pos, hda, hdb, u, v, hbez⟩ := int.bezout_pos a b ha hb
+  have hd1 : d = 1
+    by_contra hne1
+    have hd2 : 2 ≤ d := by omega
+    have hsp := min_fac.spec d hd2
+    have hp := prime.to_is_prime_nat (min_fac d) (min_fac.prime d hd2)
+    exact hcop (min_fac d) hp ⟨dvd.trans_nat (min_fac d) d a (by linarith [hsp.1]) hd_pos hsp.2.2.1 hda,
+                               dvd.trans_nat (min_fac d) d b (by linarith [hsp.1]) hd_pos hsp.2.2.1 hdb⟩
+  rw [hd1, cast_one.int] at hbez
+  unfold eis.coprime
+  use eis.of_int u, eis.of_int v
+  apply eis.ext
+  · unfold eis.add eis.mul eis.of_int eis.one; simp; linarith
+  · unfold eis.add eis.mul eis.of_int eis.one; simp
+
++ nat.cube_mod9_of_not_div3 (n : ℕ) (hnd : n % 3 ≠ 0) : (n ^ 3) % 9 = 1 ∨ (n ^ 3) % 9 = 8
+  have hd := div_add_mod.nat n 3
+  have hlt := mod_lt.nat n 3 (by decide)
+  set q := n / 3
+  set r := n % 3
+  by_cases hr1 : r = 1
+  · left
+    have hn : n = 3 * q + 1 := by omega
+    have he : n ^ 3 = 1 + 9 * (3 * q^3 + 3 * q^2 + q) := by rw [hn]; ring
+    rw [he, add_mul_mod.nat]; decide
+  · right
+    have hn : n = 3 * q + 2 := by omega
+    have he : n ^ 3 = 8 + 9 * (3 * q^3 + 6 * q^2 + 4 * q) := by rw [hn]; ring
+    rw [he, add_mul_mod.nat]; decide
+
+-> fermat3_at (m : ℕ) : Prop :=
+  ∃ a b : ℕ, 0 < a ∧ 0 < b ∧ a ^ 3 + b ^ 3 = m ^ 3
+
++ nat.cube_le_cube (x y : ℕ) (hxy : x ≤ y) : x ^ 3 ≤ y ^ 3
+  have h2 := mul_le_mul.nat x y x y hxy hxy (by omega) (by omega)
+  have h3 := mul_le_mul.nat (x * x) (y * y) x y h2 hxy (by omega) (by omega)
+  have hx3 : x * x * x = x ^ 3 := by ring
+  have hy3 : y * y * y = y ^ 3 := by ring
+  linarith
+
++ nat.le_of_cube_le_cube (x y : ℕ) (h : x ^ 3 ≤ y ^ 3) : x ≤ y
+  by_contra hgt
+  have hc := nat.cube_le_cube (y + 1) x (by omega)
+  have hexp : (y + 1) ^ 3 = y ^ 3 + 3 * y ^ 2 + 3 * y + 1 := by ring
+  have hy2 : 0 ≤ y ^ 2 := by positivity
+  linarith
+
++ nat.div_le_of_mul_le (p q1 q2 : ℕ) (hp : 0 < p) (h : p * q1 ≤ p * q2) : q1 ≤ q2
+  by_contra hgt
+  have hm := mul_le_mul_of_nonneg_left.nat (q2 + 1) q1 p (by omega) (by omega)
+  have hexp : p * (q2 + 1) = p * q2 + p := by ring
+  linarith
+
++ eis.of_int_mul (x y : ℤ) : eis.of_int (x * y) = eis.mul (eis.of_int x) (eis.of_int y)
+  unfold eis.of_int eis.mul
+  apply eis.ext
+  · simp; ring
+  · simp
+
+-- THEOREM 4A (EULER'S COMPLETE n = 3 FERMAT THEOREM — 0 CUSTOM AXIOMS!):
++ flt.exp_three (x y z : ℕ) (hx : 0 < x) (hy : 0 < y) : x ^ 3 + y ^ 3 ≠ z ^ 3
+  intro heq_init
+  obtain ⟨z0, hz0P, hz0_min⟩ := nat.exists_least fermat3_at ⟨z, ⟨x, y, hx, hy, heq_init⟩⟩
+  unfold fermat3_at at hz0P
+  obtain ⟨a, b, ha, hb, habz⟩ := hz0P
+  have ha_le_z0 : a ≤ z0 := nat.le_of_cube_le_cube a z0 (by linarith [pow_pos.nat b 3 hb])
+  have hb_le_z0 : b ≤ z0 := nat.le_of_cube_le_cube b z0 (by linarith [pow_pos.nat a 3 ha])
+  have hz0_pos : 0 < z0
+    by_contra h0; have hzz : z0 = 0 := by omega
+    rw [hzz] at habz
+    have ha3 := pow_pos.nat a 3 ha; have h03 : 0 ^ 3 = 0 := by decide; rw [h03] at habz; omega
+  have hcop_ab : nat.coprime_primes a b
+    unfold nat.coprime_primes
+    intro p hp hboth
+    obtain ⟨hpa, hpb⟩ := hboth
+    have hp2 : 2 ≤ p := hp.1
+    obtain ⟨a1, ha1⟩ := (dvd.iff_exists p a (by omega)).mp hpa
+    obtain ⟨b1, hb1⟩ := (dvd.iff_exists p b (by omega)).mp hpb
+    have hp_z3 : p ∣ (z0 ^ 3)
+      rw [← habz]
+      exact (dvd.iff_exists p (a ^ 3 + b ^ 3) (by omega)).mpr ⟨p ^ 2 * (a1 ^ 3 + b1 ^ 3), by rw [ha1, hb1]; ring⟩
+    have hp_z : p ∣ z0 := prime_dvd_of_dvd_pow.nat p z0 3 (is_prime_nat.to_prime p hp) hp_z3
+    obtain ⟨z1, hz1⟩ := (dvd.iff_exists p z0 (by omega)).mp hp_z
+    have hz1_pos : 0 < z1 := by by_contra h0; have hz : z1 = 0 := by omega; rw [hz] at hz1; omega
+    have hz1_lt : z1 < z0
+      have hge := mul_le_mul_of_nonneg_right.nat 2 p z1 hp2 (by omega)
+      rw [← hz1] at hge; omega
+    apply hz0_min z1 hz1_lt
+    unfold fermat3_at
+    have ha1_pos : 0 < a1 := by by_contra h0; have hz : a1 = 0 := by omega; rw [hz] at ha1; omega
+    have hb1_pos : 0 < b1 := by by_contra h0; have hz : b1 = 0 := by omega; rw [hz] at hb1; omega
+    have heq1 : a1 ^ 3 + b1 ^ 3 = z1 ^ 3
+      apply nat.mul_cancel_left_pos (p ^ 3) (a1 ^ 3 + b1 ^ 3) (z1 ^ 3) (pow_pos.nat p 3 (by omega))
+      have hl : p ^ 3 * (a1 ^ 3 + b1 ^ 3) = a ^ 3 + b ^ 3 := by rw [ha1, hb1]; ring
+      have hr : p ^ 3 * z1 ^ 3 = z0 ^ 3 := by rw [hz1]; ring
+      rw [hl, hr, habz]
+    exact ⟨a1, b1, ha1_pos, hb1_pos, heq1⟩
+  -- Step 2: Modulo 9 forces 3 | a or 3 | b or 3 | z0!
+  have h3_div : a % 3 = 0 ∨ b % 3 = 0 ∨ z0 % 3 = 0
+    by_contra hnone
+    have hna : a % 3 ≠ 0
+      intro h; apply hnone; left; exact h
+    have hnb : b % 3 ≠ 0
+      intro h; apply hnone; right; left; exact h
+    have hnz : z0 % 3 ≠ 0
+      intro h; apply hnone; right; right; exact h
+    have hsum9 : (a ^ 3 + b ^ 3) % 9 = (z0 ^ 3) % 9 := by rw [habz]
+    rw [add_mod.nat (a ^ 3) (b ^ 3) 9] at hsum9
+    obtain ha1 | ha8 := nat.cube_mod9_of_not_div3 a hna
+    · obtain hb1 | hb8 := nat.cube_mod9_of_not_div3 b hnb
+      · obtain hz1 | hz8 := nat.cube_mod9_of_not_div3 z0 hnz
+        · rw [ha1, hb1, hz1] at hsum9; have hc : (1 + 1) % 9 ≠ 1 := by decide; exact hc hsum9
+        · rw [ha1, hb1, hz8] at hsum9; have hc : (1 + 1) % 9 ≠ 8 := by decide; exact hc hsum9
+      · obtain hz1 | hz8 := nat.cube_mod9_of_not_div3 z0 hnz
+        · rw [ha1, hb8, hz1] at hsum9; have hc : (1 + 8) % 9 ≠ 1 := by decide; exact hc hsum9
+        · rw [ha1, hb8, hz8] at hsum9; have hc : (1 + 8) % 9 ≠ 8 := by decide; exact hc hsum9
+    · obtain hb1 | hb8 := nat.cube_mod9_of_not_div3 b hnb
+      · obtain hz1 | hz8 := nat.cube_mod9_of_not_div3 z0 hnz
+        · rw [ha8, hb1, hz1] at hsum9; have hc : (8 + 1) % 9 ≠ 1 := by decide; exact hc hsum9
+        · rw [ha8, hb1, hz8] at hsum9; have hc : (8 + 1) % 9 ≠ 8 := by decide; exact hc hsum9
+      · obtain hz1 | hz8 := nat.cube_mod9_of_not_div3 z0 hnz
+        · rw [ha8, hb8, hz1] at hsum9; have hc : (8 + 8) % 9 ≠ 1 := by decide; exact hc hsum9
+        · rw [ha8, hb8, hz8] at hsum9; have hc : (8 + 8) % 9 ≠ 8 := by decide; exact hc hsum9
+  have h3p : is_prime_nat 3 := is_prime_nat_three
+  have hcop_ab_u := hcop_ab
+  unfold nat.coprime_primes at hcop_ab_u
+  have hex_int : ∃ A B : Eisenstein, ∃ C_nat : ℕ, 0 < C_nat ∧ C_nat % 3 = 0 ∧
+      eis.coprime A B ∧ ¬ eis.dvd eis.lam A ∧ ¬ eis.dvd eis.lam B ∧
+      (∃ sC : ℤ, (sC = 1 ∨ sC = -1) ∧
+        eis.add (eis.add (eis.cube A) (eis.cube B)) (eis.mul (eis.of_int sC) (eis.cube (eis.of_int (C_nat : ℤ)))) = eis.zero)
+    obtain h3a | h3b | h3z := h3_div
+    · -- 3 | a => (b)^3 + (-z0)^3 + (+1)*(a)^3 = 0!
+      have h3nb : b % 3 ≠ 0
+        intro h; exact hcop_ab_u 3 h3p ⟨h3a, h⟩
+      have h3nz : z0 % 3 ≠ 0
+        intro h
+        obtain ⟨qa, hqa⟩ := (dvd.iff_exists 3 a (by decide)).mp h3a
+        obtain ⟨qz, hqz⟩ := (dvd.iff_exists 3 z0 (by decide)).mp h
+        have h3_b3 : 3 ∣ (b ^ 3)
+          have hb3 : b ^ 3 = z0 ^ 3 - a ^ 3 := by omega
+          have h1 : qa ≤ qz := nat.div_le_of_mul_le 3 qa qz (by decide) (by rw [← hqa, ← hqz]; exact ha_le_z0)
+          have hle := nat.cube_le_cube qa qz h1
+          have hfac : z0 ^ 3 - a ^ 3 = 3 * (9 * (qz ^ 3 - qa ^ 3))
+            have he : (qz ^ 3 - qa ^ 3) + qa ^ 3 = qz ^ 3 := by omega
+            have hadd : 3 * (9 * (qz ^ 3 - qa ^ 3)) + (3 * qa) ^ 3 = (3 * qz) ^ 3
+              calc 3 * (9 * (qz ^ 3 - qa ^ 3)) + (3 * qa) ^ 3 = 27 * ((qz ^ 3 - qa ^ 3) + qa ^ 3) := by ring
+                _ = 27 * qz ^ 3 := by rw [he]
+                _ = (3 * qz) ^ 3 := by ring
+            rw [← hqa, ← hqz] at hadd; omega
+          rw [hb3]
+          exact (dvd.iff_exists 3 (z0 ^ 3 - a ^ 3) (by decide)).mpr ⟨9 * (qz ^ 3 - qa ^ 3), hfac⟩
+        exact h3nb (prime_dvd_of_dvd_pow.nat 3 b 3 (is_prime_nat.to_prime 3 h3p) h3_b3)
+      have hcop_bz : nat.coprime_primes b z0
+        unfold nat.coprime_primes; intro p hp hboth; obtain ⟨hpb, hpz⟩ := hboth
+        obtain ⟨qb, hqb⟩ := (dvd.iff_exists p b (by linarith [hp.1])).mp hpb
+        obtain ⟨qz, hqz⟩ := (dvd.iff_exists p z0 (by linarith [hp.1])).mp hpz
+        have hpa3 : p ∣ (a ^ 3)
+          have ha3 : a ^ 3 = z0 ^ 3 - b ^ 3 := by omega
+          have h1 : qb ≤ qz := nat.div_le_of_mul_le p qb qz (by linarith [hp.1]) (by rw [← hqb, ← hqz]; exact hb_le_z0)
+          have hle := nat.cube_le_cube qb qz h1
+          have hfac : z0 ^ 3 - b ^ 3 = p * (p ^ 2 * (qz ^ 3 - qb ^ 3))
+            have he : (qz ^ 3 - qb ^ 3) + qb ^ 3 = qz ^ 3 := by omega
+            have hadd : p * (p ^ 2 * (qz ^ 3 - qb ^ 3)) + (p * qb) ^ 3 = (p * qz) ^ 3
+              calc p * (p ^ 2 * (qz ^ 3 - qb ^ 3)) + (p * qb) ^ 3 = p ^ 3 * ((qz ^ 3 - qb ^ 3) + qb ^ 3) := by ring
+                _ = p ^ 3 * qz ^ 3 := by rw [he]
+                _ = (p * qz) ^ 3 := by ring
+            rw [← hqb, ← hqz] at hadd; omega
+          rw [ha3]
+          exact (dvd.iff_exists p (z0 ^ 3 - b ^ 3) (by linarith [hp.1])).mpr ⟨p ^ 2 * (qz ^ 3 - qb ^ 3), hfac⟩
+        exact hcop_ab_u p hp ⟨prime_dvd_of_dvd_pow.nat p a 3 (is_prime_nat.to_prime p hp) hpa3, hpb⟩
+      have hce : eis.coprime (eis.of_int (b : ℤ)) (eis.neg (eis.of_int (z0 : ℤ)))
+        have hcbz := eis.coprime_of_nat_coprime b z0 hb hz0_pos hcop_bz
+        unfold eis.coprime at hcbz ⊢
+        obtain ⟨su, sv, hsuv⟩ := hcbz
+        use su, eis.neg sv
+        have he : eis.mul (eis.neg sv) (eis.neg (eis.of_int (z0 : ℤ))) = eis.mul sv (eis.of_int (z0 : ℤ))
+          apply eis.ext <;> (unfold eis.mul eis.neg; simp; ring)
+        rw [he, hsuv]
+      have hn_b : ¬ eis.dvd eis.lam (eis.of_int (b : ℤ))
+        intro hc; have hm := (eis.lam_dvd_iff (eis.of_int (b : ℤ))).mp hc
+        unfold eis.of_int at hm; simp at hm
+        have hc3 := cast_mod.int b 3; have h3c : ((3 : ℕ) : ℤ) = 3 := by decide
+        rw [h3c, hm] at hc3; exact h3nb ((cast_inj.int (b % 3) 0).mp hc3)
+      have hn_z : ¬ eis.dvd eis.lam (eis.neg (eis.of_int (z0 : ℤ)))
+        intro hc; have hm := (eis.lam_dvd_iff (eis.neg (eis.of_int (z0 : ℤ)))).mp hc
+        unfold eis.neg eis.of_int at hm; simp at hm
+        have hd := div_add_mod.nat z0 3
+        have hlt := mod_lt.nat z0 3 (by decide)
+        have hcast : (z0 : ℤ) = 3 * ((z0 / 3 : ℕ) : ℤ) + ((z0 % 3 : ℕ) : ℤ)
+          have h1 : ((3 * (z0 / 3) + z0 % 3 : ℕ) : ℤ) = (z0 : ℤ) := by rw [hd]
+          rw [cast_add.int, cast_mul.int] at h1; linarith
+        have hneg_m : -(z0 : ℤ) = (3 - ((z0 % 3 : ℕ) : ℤ)) + 3 * (-((z0 / 3 : ℕ) : ℤ) - 1) := by linarith
+        rw [hneg_m, add_mul_mod.int (3 - ((z0 % 3 : ℕ) : ℤ)) (-((z0 / 3 : ℕ) : ℤ) - 1) 3 (by decide)] at hm
+        by_cases hr1 : z0 % 3 = 1
+        · rw [hr1] at hm; have hne : (3 - ((1 : ℕ) : ℤ)) % 3 ≠ 0 := by decide; exact hne hm
+        · have hr2 : z0 % 3 = 2 := by omega
+          rw [hr2] at hm; have hne : (3 - ((2 : ℕ) : ℤ)) % 3 ≠ 0 := by decide; exact hne hm
+      have heq_e : eis.add (eis.add (eis.cube (eis.of_int (b : ℤ))) (eis.cube (eis.neg (eis.of_int (z0 : ℤ))))) (eis.mul (eis.of_int 1) (eis.cube (eis.of_int (a : ℤ)))) = eis.zero
+        apply eis.ext
+        · unfold eis.add eis.cube eis.mul eis.neg eis.of_int eis.zero; simp
+          have hc : ((a ^ 3 + b ^ 3 : ℕ) : ℤ) = ((z0 ^ 3 : ℕ) : ℤ) := by rw [habz]
+          rw [cast_add.int, cast_pow.int a 3, cast_pow.int b 3, cast_pow.int z0 3] at hc
+          have p1 : (b : ℤ) * ((b : ℤ) * (b : ℤ)) = (b : ℤ) ^ 3 := by ring
+          have p2 : -(z0 : ℤ) * (-(z0 : ℤ) * -(z0 : ℤ)) = -((z0 : ℤ) ^ 3) := by ring
+          have p3 : (a : ℤ) * ((a : ℤ) * (a : ℤ)) = (a : ℤ) ^ 3 := by ring
+          linarith
+        · unfold eis.add eis.cube eis.mul eis.neg eis.of_int eis.zero; simp
+      have hs1 : (1 : ℤ) = 1 ∨ (1 : ℤ) = -1 := by left; decide
+      exact ⟨eis.of_int (b : ℤ), eis.neg (eis.of_int (z0 : ℤ)), a, ha, h3a, hce, hn_b, hn_z, ⟨1, hs1, heq_e⟩⟩
+    · -- 3 | b => (a)^3 + (-z0)^3 + (+1)*(b)^3 = 0!
+      have h3na : a % 3 ≠ 0
+        intro h; exact hcop_ab_u 3 h3p ⟨h, h3b⟩
+      have h3nz : z0 % 3 ≠ 0
+        intro h
+        obtain ⟨qb, hqb⟩ := (dvd.iff_exists 3 b (by decide)).mp h3b
+        obtain ⟨qz, hqz⟩ := (dvd.iff_exists 3 z0 (by decide)).mp h
+        have h3_a3 : 3 ∣ (a ^ 3)
+          have ha3 : a ^ 3 = z0 ^ 3 - b ^ 3 := by omega
+          have h1 : qb ≤ qz := nat.div_le_of_mul_le 3 qb qz (by decide) (by rw [← hqb, ← hqz]; exact hb_le_z0)
+          have hle := nat.cube_le_cube qb qz h1
+          have hfac : z0 ^ 3 - b ^ 3 = 3 * (9 * (qz ^ 3 - qb ^ 3))
+            have he : (qz ^ 3 - qb ^ 3) + qb ^ 3 = qz ^ 3 := by omega
+            have hadd : 3 * (9 * (qz ^ 3 - qb ^ 3)) + (3 * qb) ^ 3 = (3 * qz) ^ 3
+              calc 3 * (9 * (qz ^ 3 - qb ^ 3)) + (3 * qb) ^ 3 = 27 * ((qz ^ 3 - qb ^ 3) + qb ^ 3) := by ring
+                _ = 27 * qz ^ 3 := by rw [he]
+                _ = (3 * qz) ^ 3 := by ring
+            rw [← hqb, ← hqz] at hadd; omega
+          rw [ha3]
+          exact (dvd.iff_exists 3 (z0 ^ 3 - b ^ 3) (by decide)).mpr ⟨9 * (qz ^ 3 - qb ^ 3), hfac⟩
+        exact h3na (prime_dvd_of_dvd_pow.nat 3 a 3 (is_prime_nat.to_prime 3 h3p) h3_a3)
+      have hcop_az : nat.coprime_primes a z0
+        unfold nat.coprime_primes; intro p hp hboth; obtain ⟨hpa, hpz⟩ := hboth
+        obtain ⟨qa, hqa⟩ := (dvd.iff_exists p a (by linarith [hp.1])).mp hpa
+        obtain ⟨qz, hqz⟩ := (dvd.iff_exists p z0 (by linarith [hp.1])).mp hpz
+        have hpb3 : p ∣ (b ^ 3)
+          have hb3 : b ^ 3 = z0 ^ 3 - a ^ 3 := by omega
+          have h1 : qa ≤ qz := nat.div_le_of_mul_le p qa qz (by linarith [hp.1]) (by rw [← hqa, ← hqz]; exact ha_le_z0)
+          have hle := nat.cube_le_cube qa qz h1
+          have hfac : z0 ^ 3 - a ^ 3 = p * (p ^ 2 * (qz ^ 3 - qa ^ 3))
+            have he : (qz ^ 3 - qa ^ 3) + qa ^ 3 = qz ^ 3 := by omega
+            have hadd : p * (p ^ 2 * (qz ^ 3 - qa ^ 3)) + (p * qa) ^ 3 = (p * qz) ^ 3
+              calc p * (p ^ 2 * (qz ^ 3 - qa ^ 3)) + (p * qa) ^ 3 = p ^ 3 * ((qz ^ 3 - qa ^ 3) + qa ^ 3) := by ring
+                _ = p ^ 3 * qz ^ 3 := by rw [he]
+                _ = (p * qz) ^ 3 := by ring
+            rw [← hqa, ← hqz] at hadd; omega
+          rw [hb3]
+          exact (dvd.iff_exists p (z0 ^ 3 - a ^ 3) (by linarith [hp.1])).mpr ⟨p ^ 2 * (qz ^ 3 - qa ^ 3), hfac⟩
+        exact hcop_ab_u p hp ⟨hpa, prime_dvd_of_dvd_pow.nat p b 3 (is_prime_nat.to_prime p hp) hpb3⟩
+      have hce : eis.coprime (eis.of_int (a : ℤ)) (eis.neg (eis.of_int (z0 : ℤ)))
+        have hcaz := eis.coprime_of_nat_coprime a z0 ha hz0_pos hcop_az
+        unfold eis.coprime at hcaz ⊢
+        obtain ⟨su, sv, hsuv⟩ := hcaz
+        use su, eis.neg sv
+        have he : eis.mul (eis.neg sv) (eis.neg (eis.of_int (z0 : ℤ))) = eis.mul sv (eis.of_int (z0 : ℤ))
+          apply eis.ext <;> (unfold eis.mul eis.neg; simp; ring)
+        rw [he, hsuv]
+      have hn_a : ¬ eis.dvd eis.lam (eis.of_int (a : ℤ))
+        intro hc; have hm := (eis.lam_dvd_iff (eis.of_int (a : ℤ))).mp hc
+        unfold eis.of_int at hm; simp at hm
+        have hc3 := cast_mod.int a 3; have h3c : ((3 : ℕ) : ℤ) = 3 := by decide
+        rw [h3c, hm] at hc3; exact h3na ((cast_inj.int (a % 3) 0).mp hc3)
+      have hn_z : ¬ eis.dvd eis.lam (eis.neg (eis.of_int (z0 : ℤ)))
+        intro hc; have hm := (eis.lam_dvd_iff (eis.neg (eis.of_int (z0 : ℤ)))).mp hc
+        unfold eis.neg eis.of_int at hm; simp at hm
+        have hd := div_add_mod.nat z0 3
+        have hlt := mod_lt.nat z0 3 (by decide)
+        have hcast : (z0 : ℤ) = 3 * ((z0 / 3 : ℕ) : ℤ) + ((z0 % 3 : ℕ) : ℤ)
+          have h1 : ((3 * (z0 / 3) + z0 % 3 : ℕ) : ℤ) = (z0 : ℤ) := by rw [hd]
+          rw [cast_add.int, cast_mul.int] at h1; linarith
+        have hneg_m : -(z0 : ℤ) = (3 - ((z0 % 3 : ℕ) : ℤ)) + 3 * (-((z0 / 3 : ℕ) : ℤ) - 1) := by linarith
+        rw [hneg_m, add_mul_mod.int (3 - ((z0 % 3 : ℕ) : ℤ)) (-((z0 / 3 : ℕ) : ℤ) - 1) 3 (by decide)] at hm
+        by_cases hr1 : z0 % 3 = 1
+        · rw [hr1] at hm; have hne : (3 - ((1 : ℕ) : ℤ)) % 3 ≠ 0 := by decide; exact hne hm
+        · have hr2 : z0 % 3 = 2 := by omega
+          rw [hr2] at hm; have hne : (3 - ((2 : ℕ) : ℤ)) % 3 ≠ 0 := by decide; exact hne hm
+      have heq_e : eis.add (eis.add (eis.cube (eis.of_int (a : ℤ))) (eis.cube (eis.neg (eis.of_int (z0 : ℤ))))) (eis.mul (eis.of_int 1) (eis.cube (eis.of_int (b : ℤ)))) = eis.zero
+        apply eis.ext
+        · unfold eis.add eis.cube eis.mul eis.neg eis.of_int eis.zero; simp
+          have hc : ((a ^ 3 + b ^ 3 : ℕ) : ℤ) = ((z0 ^ 3 : ℕ) : ℤ) := by rw [habz]
+          rw [cast_add.int, cast_pow.int a 3, cast_pow.int b 3, cast_pow.int z0 3] at hc
+          have p1 : (a : ℤ) * ((a : ℤ) * (a : ℤ)) = (a : ℤ) ^ 3 := by ring
+          have p2 : -(z0 : ℤ) * (-(z0 : ℤ) * -(z0 : ℤ)) = -((z0 : ℤ) ^ 3) := by ring
+          have p3 : (b : ℤ) * ((b : ℤ) * (b : ℤ)) = (b : ℤ) ^ 3 := by ring
+          linarith
+        · unfold eis.add eis.cube eis.mul eis.neg eis.of_int eis.zero; simp
+      have hs1 : (1 : ℤ) = 1 ∨ (1 : ℤ) = -1 := by left; decide
+      exact ⟨eis.of_int (a : ℤ), eis.neg (eis.of_int (z0 : ℤ)), b, hb, h3b, hce, hn_a, hn_z, ⟨1, hs1, heq_e⟩⟩
+    · -- 3 | z0 => a^3 + b^3 + (-1)*z0^3 = 0!
+      have h3na : a % 3 ≠ 0
+        intro h
+        obtain ⟨qa, hqa⟩ := (dvd.iff_exists 3 a (by decide)).mp h
+        obtain ⟨qz, hqz⟩ := (dvd.iff_exists 3 z0 (by decide)).mp h3z
+        have h3_b3 : 3 ∣ (b ^ 3)
+          have hb3 : b ^ 3 = z0 ^ 3 - a ^ 3 := by omega
+          have h1 : qa ≤ qz := nat.div_le_of_mul_le 3 qa qz (by decide) (by rw [← hqa, ← hqz]; exact ha_le_z0)
+          have hle := nat.cube_le_cube qa qz h1
+          have hfac : z0 ^ 3 - a ^ 3 = 3 * (9 * (qz ^ 3 - qa ^ 3))
+            have he : (qz ^ 3 - qa ^ 3) + qa ^ 3 = qz ^ 3 := by omega
+            have hadd : 3 * (9 * (qz ^ 3 - qa ^ 3)) + (3 * qa) ^ 3 = (3 * qz) ^ 3
+              calc 3 * (9 * (qz ^ 3 - qa ^ 3)) + (3 * qa) ^ 3 = 27 * ((qz ^ 3 - qa ^ 3) + qa ^ 3) := by ring
+                _ = 27 * qz ^ 3 := by rw [he]
+                _ = (3 * qz) ^ 3 := by ring
+            rw [← hqa, ← hqz] at hadd; omega
+          rw [hb3]
+          exact (dvd.iff_exists 3 (z0 ^ 3 - a ^ 3) (by decide)).mpr ⟨9 * (qz ^ 3 - qa ^ 3), hfac⟩
+        exact hcop_ab_u 3 h3p ⟨h, prime_dvd_of_dvd_pow.nat 3 b 3 (is_prime_nat.to_prime 3 h3p) h3_b3⟩
+      have h3nb : b % 3 ≠ 0
+        intro h
+        obtain ⟨qb, hqb⟩ := (dvd.iff_exists 3 b (by decide)).mp h
+        obtain ⟨qz, hqz⟩ := (dvd.iff_exists 3 z0 (by decide)).mp h3z
+        have h3_a3 : 3 ∣ (a ^ 3)
+          have ha3 : a ^ 3 = z0 ^ 3 - b ^ 3 := by omega
+          have h1 : qb ≤ qz := nat.div_le_of_mul_le 3 qb qz (by decide) (by rw [← hqb, ← hqz]; exact hb_le_z0)
+          have hle := nat.cube_le_cube qb qz h1
+          have hfac : z0 ^ 3 - b ^ 3 = 3 * (9 * (qz ^ 3 - qb ^ 3))
+            have he : (qz ^ 3 - qb ^ 3) + qb ^ 3 = qz ^ 3 := by omega
+            have hadd : 3 * (9 * (qz ^ 3 - qb ^ 3)) + (3 * qb) ^ 3 = (3 * qz) ^ 3
+              calc 3 * (9 * (qz ^ 3 - qb ^ 3)) + (3 * qb) ^ 3 = 27 * ((qz ^ 3 - qb ^ 3) + qb ^ 3) := by ring
+                _ = 27 * qz ^ 3 := by rw [he]
+                _ = (3 * qz) ^ 3 := by ring
+            rw [← hqb, ← hqz] at hadd; omega
+          rw [ha3]
+          exact (dvd.iff_exists 3 (z0 ^ 3 - b ^ 3) (by decide)).mpr ⟨9 * (qz ^ 3 - qb ^ 3), hfac⟩
+        exact hcop_ab_u 3 h3p ⟨prime_dvd_of_dvd_pow.nat 3 a 3 (is_prime_nat.to_prime 3 h3p) h3_a3, h⟩
+      have hn_a : ¬ eis.dvd eis.lam (eis.of_int (a : ℤ))
+        intro hc; have hm := (eis.lam_dvd_iff (eis.of_int (a : ℤ))).mp hc
+        unfold eis.of_int at hm; simp at hm
+        have hc3 := cast_mod.int a 3; have h3c : ((3 : ℕ) : ℤ) = 3 := by decide
+        rw [h3c, hm] at hc3; exact h3na ((cast_inj.int (a % 3) 0).mp hc3)
+      have hn_b : ¬ eis.dvd eis.lam (eis.of_int (b : ℤ))
+        intro hc; have hm := (eis.lam_dvd_iff (eis.of_int (b : ℤ))).mp hc
+        unfold eis.of_int at hm; simp at hm
+        have hc3 := cast_mod.int b 3; have h3c : ((3 : ℕ) : ℤ) = 3 := by decide
+        rw [h3c, hm] at hc3; exact h3nb ((cast_inj.int (b % 3) 0).mp hc3)
+      have heq_e : eis.add (eis.add (eis.cube (eis.of_int (a : ℤ))) (eis.cube (eis.of_int (b : ℤ)))) (eis.mul (eis.of_int (-1)) (eis.cube (eis.of_int (z0 : ℤ)))) = eis.zero
+        apply eis.ext
+        · unfold eis.add eis.cube eis.mul eis.of_int eis.zero; simp
+          have hc : ((a ^ 3 + b ^ 3 : ℕ) : ℤ) = ((z0 ^ 3 : ℕ) : ℤ) := by rw [habz]
+          rw [cast_add.int, cast_pow.int a 3, cast_pow.int b 3, cast_pow.int z0 3] at hc
+          have p1 : (a : ℤ) * ((a : ℤ) * (a : ℤ)) = (a : ℤ) ^ 3 := by ring
+          have p2 : (b : ℤ) * ((b : ℤ) * (b : ℤ)) = (b : ℤ) ^ 3 := by ring
+          have p3 : (z0 : ℤ) * ((z0 : ℤ) * (z0 : ℤ)) = (z0 : ℤ) ^ 3 := by ring
+          linarith
+        · unfold eis.add eis.cube eis.mul eis.of_int eis.zero; simp
+      have hsm1 : (-1 : ℤ) = 1 ∨ (-1 : ℤ) = -1 := by right; decide
+      exact ⟨eis.of_int (a : ℤ), eis.of_int (b : ℤ), z0, hz0_pos, h3z, eis.coprime_of_nat_coprime a b ha hb hcop_ab, hn_a, hn_b, ⟨-1, hsm1, heq_e⟩⟩
+  -- Step 4: Write C_nat = 3^k * C0 (k >= 1, 3 nmid C0); 3^k = (-omega^2)^k * lambda^(2*k),
+  -- so C_nat^3 = (-1)^k * (lambda^3)^(2*k) * C0^3!
+  obtain ⟨A, B, C_nat, hC_pos, hC_div3, hcop_AB, hnA, hnB, sC, hsC, heq_ABC⟩ := hex_int
+  set k := vp 3 C_nat with hk_def
+  have hsp3 := vp.spec 3 C_nat (by decide) hC_pos
+  rw [← hk_def] at hsp3
+  have hk_ge1 : 1 ≤ k
+    have h31 : 3 ^ 1 = 3 := by decide
+    have hd3_pow : 3 ^ 1 ∣ C_nat := by rw [h31]; exact hC_div3
+    rw [hk_def]; exact (vp.le_iff_pow_dvd 3 C_nat 1 (by decide) hC_pos).mpr hd3_pow
+  obtain ⟨C0, hC0⟩ := (dvd.iff_exists (3 ^ k) C_nat (pow_pos.nat 3 k (by decide))).mp hsp3.1
+  have hC0_ndiv3 : C0 % 3 ≠ 0
+    intro hc0
+    obtain ⟨w, hw⟩ := (dvd.iff_exists 3 C0 (by decide)).mp hc0
+    apply hsp3.2
+    exact (dvd.iff_exists (3 ^ (k + 1)) C_nat (pow_pos.nat 3 (k + 1) (by decide))).mpr ⟨w, by rw [pow_succ.nat, hC0, hw]; ring⟩
+  have hnC0 : ¬ eis.dvd eis.lam (eis.of_int (C0 : ℤ))
+    intro hc
+    have hm := (eis.lam_dvd_iff (eis.of_int (C0 : ℤ))).mp hc
+    unfold eis.of_int at hm; simp at hm
+    have hc3 := cast_mod.int C0 3; have h3c : ((3 : ℕ) : ℤ) = 3 := by decide
+    rw [h3c, hm] at hc3; exact hC0_ndiv3 ((cast_inj.int (C0 % 3) 0).mp hc3)
+  have h3_cube_pow : ∀ j : ℕ, ∃ sj : ℤ, (sj = 1 ∨ sj = -1) ∧
+      eis.cube (eis.of_int ((3 ^ j : ℕ) : ℤ)) = eis.mul (eis.of_int sj) (eis.pow (eis.cube eis.lam) (2 * j))
+    intro j; induction j with r ihr
+    · exact ⟨1, by left; decide, by decide⟩
+    · obtain ⟨sr, hsr, her⟩ := ihr
+      use -sr
+      have hsr_neg : -sr = 1 ∨ -sr = -1
+        obtain h1 | hm1 := hsr; (right; linarith); (left; linarith)
+      have he_step : eis.cube (eis.of_int ((3 ^ succ r : ℕ) : ℤ)) = eis.mul (eis.of_int (-sr)) (eis.pow (eis.cube eis.lam) (2 * succ r))
+        rw [succ_eq_add_one.nat, pow_succ.nat, cast_mul.int]
+        have h3z : ((3 : ℕ) : ℤ) = 3 := by decide
+        rw [h3z, eis.of_int_mul ((3 ^ r : ℕ) : ℤ) 3]
+        have he2 : 2 * (r + 1) = (2 * r + 1) + 1 := by omega
+        have hp_a : eis.pow (eis.cube eis.lam) ((2 * r + 1) + 1) = eis.mul (eis.pow (eis.cube eis.lam) (2 * r + 1)) (eis.cube eis.lam) := by simp [eis.pow]
+        have hp_b : eis.pow (eis.cube eis.lam) (2 * r + 1) = eis.mul (eis.pow (eis.cube eis.lam) (2 * r)) (eis.cube eis.lam) := by simp [eis.pow]
+        have hc27 : eis.cube (eis.of_int 3) = Eisenstein.mk 27 0 := by decide
+        have hlam6 : eis.mul (eis.cube eis.lam) (eis.cube eis.lam) = Eisenstein.mk (-27) 0 := by decide
+        rw [← he2] at hp_a
+        rw [hp_b, eis.mul_assoc (eis.pow (eis.cube eis.lam) (2 * r)) (eis.cube eis.lam) (eis.cube eis.lam), hlam6] at hp_a
+        rw [eis.cube_mul, her, hp_a, hc27]
+        unfold eis.of_int
+        apply eis.ext <;> (simp only [eis.mul_a, eis.mul_b]; simp; ring)
+      exact ⟨hsr_neg, he_step⟩
+  obtain ⟨sk, hsk, h3k_eq⟩ := h3_cube_pow k
+  set u_fin := eis.of_int (sC * sk) with hufin_def
+  have hnu_fin : eis.norm u_fin = 1
+    rw [hufin_def]; unfold eis.norm eis.of_int; simp
+    obtain hc1 | hcm1 := hsC
+    · obtain hk1 | hkm1 := hsk
+      · rw [hc1, hk1]; ring
+      · rw [hc1, hkm1]; ring
+    · obtain hk1 | hkm1 := hsk
+      · rw [hcm1, hk1]; ring
+      · rw [hcm1, hkm1]; ring
+  have hfinal_eq : eis.add (eis.add (eis.cube A) (eis.cube B)) (eis.mul u_fin (eis.mul (eis.pow (eis.cube eis.lam) (2 * k)) (eis.cube (eis.of_int (C0 : ℤ))))) = eis.zero
+    have hC_cast : eis.of_int (C_nat : ℤ) = eis.mul (eis.of_int ((3 ^ k : ℕ) : ℤ)) (eis.of_int (C0 : ℤ))
+      rw [hC0, cast_mul.int, eis.of_int_mul ((3 ^ k : ℕ) : ℤ) (C0 : ℤ)]
+    rw [hC_cast, eis.cube_mul, h3k_eq] at heq_ABC
+    have hassoc : eis.mul (eis.of_int sC) (eis.mul (eis.mul (eis.of_int sk) (eis.pow (eis.cube eis.lam) (2 * k))) (eis.cube (eis.of_int (C0 : ℤ)))) =
+        eis.mul u_fin (eis.mul (eis.pow (eis.cube eis.lam) (2 * k)) (eis.cube (eis.of_int (C0 : ℤ))))
+      rw [hufin_def]; apply eis.ext <;> (unfold eis.mul eis.of_int; simp; ring)
+    rw [hassoc] at heq_ABC
+    exact heq_ABC
+  exact eis.gauss_lambda_descent (2 * k) (by omega) A B (eis.of_int (C0 : ℤ)) u_fin hnu_fin hcop_AB hnA hnB hnC0 hfinal_eq
+
+-- COROLLARY 4B (ALL-EXPONENT REDUCTION TO PRIMES p >= 5 — 0 CUSTOM AXIOMS!):
+-- Combining `flt.exp_three` and `flt.exp_four` reduces Fermat's Last Theorem for ALL n >= 3
+-- unconditionally (0 axioms!) to odd prime exponents p >= 5!
++ flt.reduce_to_primes_ge_5
+    (hp5 : ∀ p : ℕ, is_prime_nat p → 5 ≤ p → flt_at p) :
+    ∀ n : ℕ, 3 ≤ n → flt_at n
+  exact flt.reduce_to_three_and_primes_ge_5 flt.exp_three hp5

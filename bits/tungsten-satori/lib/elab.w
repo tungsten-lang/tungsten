@@ -6,7 +6,7 @@
 # become universally quantified variables ("auto-bound").
 
 + Elab
-  ro :k, :autobound
+  ro :k, :autobound, :laws, :classes, :instances
   rw :allow_auto
 
   -> new(@k)
@@ -20,11 +20,27 @@
     @type_params = []
     @aliases = {"True" => "⊤", "False" => "⊥"}
     @fields = {}
+    @laws = {}
     @ctor_names = {}
     @classes = {}
     @instances = {}
     @op_classes = {"+" => ["Add", "Add.add"], "-" => ["Sub", "Sub.sub"], "*" => ["Mul", "Mul.mul"], "/" => ["Div", "Div.div"]}
     @unop_classes = {"neg" => ["Neg", "Neg.neg"]}
+
+  -> register_laws(sname, law_names)
+    @laws[sname] = law_names
+
+  -> has_laws?(sname)
+    @laws.has_key?(sname) && @laws[sname].size > 0
+
+  -> laws_of(sname)
+    @laws.has_key?(sname) ? @laws[sname] : []
+
+  -> set_type_params(params)
+    @type_params = params + []
+
+  -> dispatch_ty?(t)
+    (t.tag == :c && !["nat", "int", "rat", "real"].include?(t.name)) || (t.tag == :v && !meta?(t))
 
   -> register_class(name, params, fields)
     @classes[name] = [params, fields]
@@ -520,6 +536,14 @@
     raise "no field " + field + " for type " + ty_show(ty)
 
   -> elab_ascribe(e, ty)
+    rty = resolve(ty)
+    if e.kind == :num && (e.s == "0" || e.s == "1") && dispatch_ty?(rty)
+      cname = e.s == "0" ? "Zero" : "One"
+      pname = e.s == "0" ? "Zero.zero" : "One.one"
+      if @classes.has_key?(cname)
+        dict = synth_instance(ty_con(cname, [rty]))
+        if dict != nil
+          return app(const_inst(pname), dict)
     t = elab(e)
     tt = tyof(t)
     if meta?(tt) || ty_eq(tt, ty)
@@ -572,7 +596,7 @@
     when "neg"
       t = elab(x)
       tt = resolve(tyof(t))
-      if tt.tag == :c && !["nat", "int", "rat", "real"].include?(tt.name)
+      if dispatch_ty?(tt)
         uop = @unop_classes["neg"]
         if uop != nil && @classes.has_key?(uop[0])
           dict = synth_instance(ty_con(uop[0], [tt]))
@@ -594,8 +618,8 @@
     b = elab(r)
     ta = resolve(tyof(a))
     tb = resolve(tyof(b))
-    t_op = ta.tag == :c ? ta : tb
-    if t_op.tag == :c && !["nat", "int", "rat", "real"].include?(t_op.name)
+    t_op = dispatch_ty?(ta) ? ta : tb
+    if dispatch_ty?(t_op)
       bop = @op_classes[name]
       if bop != nil && @classes.has_key?(bop[0])
         dict = synth_instance(ty_con(bop[0], [t_op]))
@@ -711,6 +735,10 @@
     push_local(b.name, v)
     inner = elab_quant(q, bs, body, i + 1)
     pop_local
+    if guard == nil
+      vt = resolve(v.ty)
+      if vt.tag == :c && has_laws?(vt.name)
+        guard = app(const_inst(vt.name + ".Valid"), v)
     if q == "∃!"
       # ∃ x, P x ∧ ∀ y, P y → y = x
       px = inner
@@ -859,6 +887,12 @@
     body = elab(e)
     unify(tyof(body), ty_bool)
     @allow_auto = false
+    valid_terms = []
+    vars.each -> (p)
+      vt = resolve(p[1].ty)
+      if vt.tag == :c && has_laws?(vt.name)
+        valid_terms.push([p[0] + "_valid", app(const_inst(vt.name + ".Valid"), p[1])])
+    hyp_terms = valid_terms + hyp_terms
     # statement = ∀ autobound, ∀ vars, hyps → body
     stmt = body
     i = hyp_terms.size - 1

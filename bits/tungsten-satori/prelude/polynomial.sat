@@ -1,0 +1,275 @@
+-- Univariate Polynomials over ℚ (`qpoly`) in Satori HOL (`tungsten/core/algebra/field.w`).
+-- Proves evaluation linearity, exact Remainder/Factor Theorem, Lagrange's Root Bound
+-- (`vanish_of_distinct_roots`), and Lagrange Interpolation Existence & Uniqueness.
+
+import arith
+
++ sum_congr.rat (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i) :
+    (∑ i < n, f i) = ∑ i < n, g i := sum_below.congr f g n h
+
++ sum_range_succ'.rat (f : ℕ → ℚ) (n : ℕ) :
+    (∑ i < n + 1, f i) = (∑ i < n, f (i + 1)) + f 0
+  induction n with k ih
+  · rw [sum_below_succ 0, sum_below_zero, sum_below_zero]
+  · rw [succ_eq_add_one.nat, sum_below_succ (k + 1), ih, sum_below_succ k]; ring
+
++ sum_swap.rat (F : ℕ → ℕ → ℚ) (m n : ℕ) :
+    (∑ i < m, ∑ j < n, F i j) = ∑ j < n, ∑ i < m, F i j
+  induction m with k ih
+  · rw [sum_below_zero]
+    symm
+    have hz : (∑ j < n, ∑ i < 0, F i j) = ∑ j < n, (0 : ℚ)
+      apply sum_congr.rat; intro j hj; exact sum_below_zero (fun i => F i j)
+    rw [hz, sum_const.rat]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ k, ih, ← sum_add.rat]
+    apply sum_congr.rat; intro j hj; rw [sum_below_succ k]
+
+-> qpoly.eval (d : ℕ) (c : ℕ → ℚ) (x : ℚ) : ℚ := ∑ k < d + 1, c k * x ^ k
+-> qpoly.add (c1 c2 : ℕ → ℚ) (k : ℕ) : ℚ := c1 k + c2 k
+-> qpoly.scale (s : ℚ) (c : ℕ → ℚ) (k : ℕ) : ℚ := s * c k
+
++ qpoly.eval_add (d : ℕ) (c1 c2 : ℕ → ℚ) (x : ℚ) :
+    qpoly.eval d (qpoly.add c1 c2) x = qpoly.eval d c1 x + qpoly.eval d c2 x
+  unfold qpoly.eval qpoly.add; rw [← sum_add.rat]
+  apply sum_congr.rat; intro k hk; ring
+
++ qpoly.eval_scale (d : ℕ) (s : ℚ) (c : ℕ → ℚ) (x : ℚ) :
+    qpoly.eval d (qpoly.scale s c) x = s * qpoly.eval d c x
+  unfold qpoly.eval qpoly.scale; rw [← sum_const_mul.rat]
+  apply sum_congr.rat; intro k hk; ring
+
++ qpoly.linear_factor (d : ℕ) (hd : 1 ≤ d) (c : ℕ → ℚ) (r : ℚ) :
+    ∃ q : ℕ → ℚ, q (d - 1) = c d ∧
+      ∀ x : ℚ, qpoly.eval d c x - qpoly.eval d c r = (x - r) * qpoly.eval (d - 1) q x
+  have hgen : ∀ m : ℕ, ∃ q : ℕ → ℚ, q m = c (m + 1) ∧
+      ∀ x : ℚ, qpoly.eval (m + 1) c x - qpoly.eval (m + 1) c r = (x - r) * qpoly.eval m q x
+    intro m; induction m with k ihk
+    · use (fun _ => c 1)
+      constructor; rfl
+      intro x; unfold qpoly.eval
+      have h01 : (0 + 1 : ℕ) = 1 := by decide
+      have h12 : (1 + 1 : ℕ) = 2 := by decide
+      rw [← h12, sum_below_succ 1, sum_below_succ 1, ← h01, sum_below_succ 0, sum_below_zero, sum_below_succ 0, sum_below_zero, sum_below_succ 0, sum_below_zero, h01]; ring
+    · rw [succ_eq_add_one.nat]
+      obtain ⟨q0, hq0_lead, hq0_eq⟩ := ihk
+      have hpow_fac : ∀ (t : ℕ) (x : ℚ), x ^ (t + 1) - r ^ (t + 1) = (x - r) * ∑ j < t + 1, r ^ (t - j) * x ^ j
+        intro t x; induction t with s ihs
+        · rw [sum_below_succ 0, sum_below_zero]
+          have h0 : 0 - 0 = 0 := by decide
+          have h01 : (0 + 1 : ℕ) = 1 := by decide
+          rw [h0, h01]; ring
+        · rw [succ_eq_add_one.nat, sum_below_succ (s + 1)]
+          have htop : (s + 1) - (s + 1) = 0 := by omega
+          rw [htop, pow_zero.rat]
+          have hshift : (∑ j < s + 1, r ^ ((s + 1) - j) * x ^ j) = r * ∑ j < s + 1, r ^ (s - j) * x ^ j
+            rw [← sum_const_mul.rat]; apply sum_congr.rat; intro j hj
+            have hsj : (s + 1) - j = (s - j) + 1 := by omega
+            rw [hsj, pow_succ.rat]; ring
+          have hdist : (x - r) * (r * (∑ j < s + 1, r ^ (s - j) * x ^ j) + 1 * x ^ (s + 1)) = r * ((x - r) * (∑ j < s + 1, r ^ (s - j) * x ^ j)) + (x - r) * x ^ (s + 1) := by ring
+          rw [hshift, hdist, ← ihs, pow_succ.rat x (s + 1), pow_succ.rat r (s + 1)]; ring
+      set q1 : ℕ → ℚ := fun j => (if j < k + 1 then q0 j else 0) + c (k + 2) * r ^ ((k + 1) - j) with hq1_def
+      use q1
+      constructor
+      · rw [hq1_def]
+        have hnl : ¬ (k + 1 < k + 1) := by omega
+        have hsub : (k + 1) - (k + 1) = 0 := by omega
+        have hk2 : (k + 1) + 1 = k + 2 := by omega
+        rw [if_neg hnl, hsub, pow_zero.rat, hk2]; ring
+      · intro x; unfold qpoly.eval
+        have hk2 : (k + 1) + 1 = k + 2 := by omega
+        rw [hk2, sum_below_succ (k + 2) (fun j => c j * x ^ j), sum_below_succ (k + 2) (fun j => c j * r ^ j)]
+        have hprev := hq0_eq x; unfold qpoly.eval at hprev
+        have hpf := hpow_fac (k + 1) x
+        have hq1_eval : (∑ j < (k + 1) + 1, q1 j * x ^ j) = (∑ j < k + 1, q0 j * x ^ j) + c (k + 2) * (∑ j < (k + 1) + 1, r ^ ((k + 1) - j) * x ^ j)
+          have hsp : (∑ j < (k + 1) + 1, q1 j * x ^ j) = (∑ j < (k + 1) + 1, (if j < k + 1 then q0 j else 0) * x ^ j) + (∑ j < (k + 1) + 1, c (k + 2) * (r ^ ((k + 1) - j) * x ^ j))
+            rw [← sum_add.rat]; apply sum_congr.rat; intro j hj; rw [hq1_def]; ring
+          rw [hsp, sum_const_mul.rat, sum_below_succ (k + 1) (fun j => (if j < k + 1 then q0 j else 0) * x ^ j)]
+          have hnl : ¬ (k + 1 < k + 1) := by omega
+          rw [if_neg hnl]
+          have hcon : (∑ j < k + 1, (if j < k + 1 then q0 j else 0) * x ^ j) = ∑ j < k + 1, q0 j * x ^ j
+            apply sum_congr.rat; intro j hj; rw [if_pos hj]
+          rw [hcon]; ring
+        rw [hk2] at hprev hq1_eval hpf
+        rw [hq1_eval]; linear_combination hprev + c (k + 2) * hpf
+  have hd1 : d = (d - 1) + 1 := by omega
+  obtain ⟨q, hq_lead, hq_eq⟩ := hgen (d - 1)
+  rw [← hd1] at hq_lead hq_eq
+  exact ⟨q, hq_lead, hq_eq⟩
+
++ qpoly.vanish_of_distinct_roots :
+    ∀ (d : ℕ) (c x : ℕ → ℚ),
+      (∀ i < d + 1, ∀ j < d + 1, i ≠ j → x i ≠ x j) →
+      (∀ i < d + 1, qpoly.eval d c (x i) = 0) →
+      ∀ k < d + 1, c k = 0
+  intro d; induction d with c x hdist hroots k hk m ihm c x hdist hroots k hk
+  · have hk0 : k = 0 := by omega; rw [hk0]
+    have hr0 := hroots 0 (by omega); unfold qpoly.eval at hr0
+    have h01 : (0 + 1 : ℕ) = 1 := by decide
+    rw [← h01, sum_below_succ 0, sum_below_zero, pow_zero.rat] at hr0; linarith
+  · rw [succ_eq_add_one.nat] at hdist hroots hk
+    obtain ⟨q, hq_lead, hq_eq⟩ := qpoly.linear_factor (m + 1) (by omega) c (x (m + 1))
+    have hsub : (m + 1) - 1 = m := by omega; rw [hsub] at hq_lead hq_eq
+    have hq_roots : ∀ i < m + 1, qpoly.eval m q (x i) = 0
+      intro i hi; have h1 := hq_eq (x i)
+      rw [hroots i (by omega), hroots (m + 1) (by omega)] at h1
+      have hne : x i - x (m + 1) ≠ 0 := by intro hz; apply hdist i (by omega) (m + 1) (by omega) (by omega); linarith
+      have hc := mul_inv_cancel.rat (x i - x (m + 1)) hne
+      linear_combination -(1 / (x i - x (m + 1))) * h1 - qpoly.eval m q (x i) * hc
+    have hq_zero := ihm q x (by intro i hi j hj hij; exact hdist i (by omega) j (by omega) hij) hq_roots
+    have hcm1 : c (m + 1) = 0 := by rw [← hq_lead]; exact hq_zero m (by omega)
+    by_cases htop : k = m + 1
+    · rw [htop]; exact hcm1
+    · have hc_roots_m : ∀ i < m + 1, qpoly.eval m c (x i) = 0
+        intro i hi; have h1 := hroots i (by omega); unfold qpoly.eval at h1 ⊢
+        rw [sum_below_succ (m + 1), hcm1] at h1; linarith
+      exact ihm c x (by intro i hi j hj hij; exact hdist i (by omega) j (by omega) hij) hc_roots_m k (by omega)
+
+-> qpoly.mul_linear (a : ℚ) (c : ℕ → ℚ) (k : ℕ) : ℚ := (if k = 0 then 0 else c (k - 1)) - a * c k
+
++ qpoly.eval_mul_linear (d : ℕ) (a : ℚ) (c : ℕ → ℚ) (hc_top : c (d + 1) = 0) (x : ℚ) :
+    qpoly.eval (d + 1) (qpoly.mul_linear a c) x = (x - a) * qpoly.eval d c x
+  unfold qpoly.eval qpoly.mul_linear
+  have hsplit : (∑ k < (d + 1) + 1, ((if k = 0 then 0 else c (k - 1)) - a * c k) * x ^ k) = (∑ k < (d + 1) + 1, (if k = 0 then 0 else c (k - 1)) * x ^ k) - a * (∑ k < (d + 1) + 1, c k * x ^ k)
+    rw [← sum_const_mul.rat, ← sum_sub.rat]; apply sum_congr.rat; intro k hk; ring
+  rw [hsplit]
+  have hpart1 : (∑ k < (d + 1) + 1, (if k = 0 then 0 else c (k - 1)) * x ^ k) = x * (∑ k < d + 1, c k * x ^ k)
+    rw [sum_range_succ'.rat (fun k => (if k = 0 then 0 else c (k - 1)) * x ^ k) (d + 1)]
+    have h0 : (if (0 : ℕ) = 0 then (0 : ℚ) else c (0 - 1)) * x ^ 0 = 0 := by simp
+    rw [h0, ← sum_const_mul.rat]
+    have hcon : (∑ k < d + 1, (if k + 1 = 0 then 0 else c ((k + 1) - 1)) * x ^ (k + 1)) = ∑ k < d + 1, x * (c k * x ^ k)
+      apply sum_congr.rat; intro k hk
+      have hne : k + 1 ≠ 0 := by omega; have hsub : (k + 1) - 1 = k := by omega
+      rw [if_neg hne, hsub, pow_succ.rat]; ring
+    rw [hcon]; ring
+  have hpart2 : (∑ k < (d + 1) + 1, c k * x ^ k) = ∑ k < d + 1, c k * x ^ k
+    rw [sum_below_succ (d + 1), hc_top]; ring
+  rw [hpart1, hpart2]; ring
+
+-> qprod (m : ℕ) (f : ℕ → ℚ) : ℚ := nat_rec 1 (fun k acc => acc * f k) m
++ qprod.zero (f : ℕ → ℚ) : qprod 0 f = 1 := by unfold qprod; rfl
++ qprod.succ (m : ℕ) (f : ℕ → ℚ) : qprod (m + 1) f = qprod m f * f m := by unfold qprod; rfl
+
+-> qpoly.vanish_except_go (x : ℕ → ℚ) (skip : ℕ) : ℕ → ℕ → ℚ
+  | 0 => fun k => if k = 0 then 1 else 0
+  | m + 1 => if m = skip then qpoly.vanish_except_go x skip m else qpoly.mul_linear (x m) (qpoly.vanish_except_go x skip m)
+
++ qpoly.vanish_except_go.zero_above (x : ℕ → ℚ) (skip : ℕ) :
+    ∀ m k : ℕ, (m < k ∨ (skip < m ∧ m ≤ k)) → qpoly.vanish_except_go x skip m k = 0
+  intro m; induction m with k hk r ihr k hk
+  · unfold qpoly.vanish_except_go
+    have hne : k ≠ 0 := by obtain ha | hb := hk <;> omega
+    rw [if_neg hne]
+  · rw [succ_eq_add_one.nat] at hk ⊢
+    by_cases hskip : r = skip
+    · have h1 : qpoly.vanish_except_go x skip (r + 1) k = qpoly.vanish_except_go x skip r k := by unfold qpoly.vanish_except_go; simp [hskip]; rfl
+      rw [h1]; exact ihr k (by obtain ha | hb := hk <;> omega)
+    · have h1 : qpoly.vanish_except_go x skip (r + 1) k = qpoly.mul_linear (x r) (qpoly.vanish_except_go x skip r) k := by unfold qpoly.vanish_except_go; simp [hskip]; rfl
+      rw [h1]; unfold qpoly.mul_linear
+      have hk0 : k ≠ 0 := by obtain ha | hb := hk <;> omega
+      rw [if_neg hk0]
+      have hz1 : qpoly.vanish_except_go x skip r (k - 1) = 0 := ihr (k - 1) (by obtain ha | hb := hk; (left; omega); (right; exact ⟨by omega, by omega⟩))
+      have hz2 : qpoly.vanish_except_go x skip r k = 0 := ihr k (by obtain ha | hb := hk; (left; omega); (right; exact ⟨by omega, by omega⟩))
+      rw [hz1, hz2]; ring
+
++ qpoly.vanish_except_go.eval_eq (x : ℕ → ℚ) (skip : ℕ) :
+    ∀ m : ℕ, ∀ t : ℚ, qpoly.eval m (qpoly.vanish_except_go x skip m) t = qprod m (fun j => if j = skip then (1 : ℚ) else t - x j)
+  intro m; induction m with t r ihr t
+  · unfold qpoly.eval qpoly.vanish_except_go
+    have h01 : (0 + 1 : ℕ) = 1 := by decide
+    rw [qprod.zero, ← h01, sum_below_succ 0, sum_below_zero, pow_zero.rat]; simp
+  · rw [succ_eq_add_one.nat, qprod.succ]
+    by_cases hskip : r = skip
+    · have hcon : ∀ k, qpoly.vanish_except_go x skip (r + 1) k = qpoly.vanish_except_go x skip r k := by intro k; unfold qpoly.vanish_except_go; simp [hskip]; rfl
+      have hev : qpoly.eval (r + 1) (qpoly.vanish_except_go x skip (r + 1)) t = qpoly.eval r (qpoly.vanish_except_go x skip r) t
+        unfold qpoly.eval; rw [sum_below_succ (r + 1)]
+        have htop := qpoly.vanish_except_go.zero_above x skip (r + 1) (r + 1) (by right; exact ⟨by omega, by omega⟩)
+        rw [htop]
+        have hc : (∑ k < r + 1, qpoly.vanish_except_go x skip (r + 1) k * t ^ k) = ∑ k < r + 1, qpoly.vanish_except_go x skip r k * t ^ k
+          apply sum_congr.rat; intro k hk; rw [hcon k]
+        rw [hc]; ring
+      rw [hev, ihr t, if_pos hskip]; ring
+    · have hcon : ∀ k, qpoly.vanish_except_go x skip (r + 1) k = qpoly.mul_linear (x r) (qpoly.vanish_except_go x skip r) k := by intro k; unfold qpoly.vanish_except_go; simp [hskip]; rfl
+      have hev : qpoly.eval (r + 1) (qpoly.vanish_except_go x skip (r + 1)) t = qpoly.eval (r + 1) (qpoly.mul_linear (x r) (qpoly.vanish_except_go x skip r)) t
+        unfold qpoly.eval; apply sum_congr.rat; intro k hk; rw [hcon k]
+      have htop := qpoly.vanish_except_go.zero_above x skip r (r + 1) (by left; omega)
+      rw [hev, qpoly.eval_mul_linear r (x r) (qpoly.vanish_except_go x skip r) htop t, ihr t, if_neg hskip]; ring
+
++ qpoly.lagrange_interp (n : ℕ) (hn : 1 ≤ n) (x y : ℕ → ℚ)
+    (hdist : ∀ i < n, ∀ j < n, i ≠ j → x i ≠ x j) :
+    (∃ c : ℕ → ℚ, ∀ i < n, qpoly.eval (n - 1) c (x i) = y i) ∧
+    (∀ c1 c2 : ℕ → ℚ, (∀ i < n, qpoly.eval (n - 1) c1 (x i) = y i) →
+      (∀ i < n, qpoly.eval (n - 1) c2 (x i) = y i) → ∀ k < n, c1 k = c2 k)
+  have hprod_ne : ∀ (m : ℕ) (f : ℕ → ℚ), (∀ j < m, f j ≠ 0) → qprod m f ≠ 0
+    intro m f; induction m with hf hz r ihr hf hz
+    · rw [qprod.zero] at hz; linarith
+    · rw [succ_eq_add_one.nat] at hf hz; rw [qprod.succ] at hz
+      have h1 := ihr (by intro j hj; exact hf j (by omega))
+      have h2 := hf r (by omega)
+      have hc1 := mul_inv_cancel.rat (qprod r f) h1; have hc2 := mul_inv_cancel.rat (f r) h2
+      have h0 : (1 : ℚ) = 0
+        calc (1 : ℚ) = (qprod r f * (1 / qprod r f)) * (f r * (1 / f r)) := by rw [hc1, hc2]; ring
+          _ = (qprod r f * f r) * ((1 / qprod r f) * (1 / f r)) := by ring
+          _ = 0 := by rw [hz]; ring
+      linarith
+  have hprod_zero_of : ∀ (m idx : ℕ) (f : ℕ → ℚ), idx < m → f idx = 0 → qprod m f = 0
+    intro m idx f; induction m with hidx hz r ihr hidx hz
+    · omega
+    · rw [succ_eq_add_one.nat] at hidx ⊢; rw [qprod.succ]
+      by_cases hri : r = idx
+      · rw [hri, hz]; ring
+      · rw [ihr (by omega) hz]; ring
+  constructor
+  · set denom : ℕ → ℚ := fun j => qprod n (fun l => if l = j then (1 : ℚ) else x j - x l) with hden_def
+    have hden_ne : ∀ j < n, denom j ≠ 0
+      intro j hj; rw [hden_def]; apply hprod_ne; intro l hl
+      by_cases hlj : l = j
+      · rw [if_pos hlj]; decide
+      · rw [if_neg hlj]; intro hz; apply hdist j hj l hl (by omega); linarith
+    set c : ℕ → ℚ := fun k => ∑ j < n, (y j / denom j) * qpoly.vanish_except_go x j n k with hc_def
+    use c; intro i hi; unfold qpoly.eval
+    have h1 : (∑ k < (n - 1) + 1, c k * x i ^ k) = ∑ j < n, (y j / denom j) * qpoly.eval (n - 1) (qpoly.vanish_except_go x j n) (x i)
+      have hcon : (∑ k < (n - 1) + 1, c k * x i ^ k) = ∑ k < (n - 1) + 1, ∑ j < n, (y j / denom j) * (qpoly.vanish_except_go x j n k * x i ^ k)
+        apply sum_congr.rat; intro k hk; rw [hc_def, ← sum_mul_const.rat]; apply sum_congr.rat; intro j hj; ring
+      rw [hcon, sum_swap.rat]; apply sum_congr.rat; intro j hj; unfold qpoly.eval; rw [← sum_const_mul.rat]
+    rw [h1]
+    have hev_eq : ∀ j < n, qpoly.eval (n - 1) (qpoly.vanish_except_go x j n) (x i) = if j = i then denom i else 0
+      intro j hj; have hn1 : (n - 1) + 1 = n := by omega
+      have hdrop : qpoly.eval (n - 1) (qpoly.vanish_except_go x j n) (x i) = qpoly.eval n (qpoly.vanish_except_go x j n) (x i)
+        unfold qpoly.eval; rw [hn1, sum_below_succ n]
+        have hz := qpoly.vanish_except_go.zero_above x j n n (by right; exact ⟨hj, by omega⟩); rw [hz]; ring
+      rw [hdrop, qpoly.vanish_except_go.eval_eq x j n (x i)]
+      by_cases hji : j = i
+      · rw [hji, hden_def]; simp; unfold qprod; trivial
+      · rw [if_neg hji]; apply hprod_zero_of n i (fun l => if l = j then (1 : ℚ) else x i - x l) hi
+        have hne : i ≠ j := by omega; rw [if_neg hne]; ring
+    have h2 : (∑ j < n, (y j / denom j) * qpoly.eval (n - 1) (qpoly.vanish_except_go x j n) (x i)) = ∑ j < n, if j = i then y i else 0
+      apply sum_congr.rat; intro j hj; rw [hev_eq j hj]
+      by_cases hji : j = i
+      · rw [hji, div_def.rat]; simp
+        have hcd := mul_inv_cancel.rat (denom i) (hden_ne i hi)
+        have hre : y i * (1 / denom i) * denom i = y i * (denom i * (1 / denom i)) := by ring
+        rw [hre, hcd]; ring
+      · rw [if_neg hji, if_neg hji]; ring
+    rw [h2]
+    have hsing : ∀ (M idx : ℕ) (v : ℚ), idx < M → (∑ j < M, if j = idx then v else 0) = v
+      intro M; induction M with idx v hidx r ihr idx v hidx
+      · omega
+      · rw [succ_eq_add_one.nat] at hidx ⊢; rw [sum_below_succ]
+        by_cases hri : r = idx
+        · rw [hri]
+          have h0 : (∑ j < idx, if j = idx then v else 0) = ∑ j < idx, (0 : ℚ)
+            apply sum_congr.rat; intro j hj; have hne : j ≠ idx := by omega; rw [if_neg hne]
+          rw [h0, sum_const.rat]; simp
+        · rw [ihr idx v (by omega), if_neg hri]; ring
+    exact hsing n i (y i) hi
+  · intro c1 c2 h1 h2 k hk
+    set diff : ℕ → ℚ := fun j => c1 j - c2 j with hdiff_def
+    have hn1 : (n - 1) + 1 = n := by omega
+    have hdist' : ∀ i < (n - 1) + 1, ∀ j < (n - 1) + 1, i ≠ j → x i ≠ x j := by rw [hn1]; exact hdist
+    have hroots : ∀ i < (n - 1) + 1, qpoly.eval (n - 1) diff (x i) = 0
+      intro i hi; rw [hn1] at hi
+      have hev : qpoly.eval (n - 1) diff (x i) = qpoly.eval (n - 1) c1 (x i) - qpoly.eval (n - 1) c2 (x i)
+        unfold qpoly.eval; rw [← sum_sub.rat]; apply sum_congr.rat; intro j hj; rw [hdiff_def]; ring
+      rw [hev, h1 i hi, h2 i hi]; ring
+    have hvan := qpoly.vanish_of_distinct_roots (n - 1) diff x hdist' hroots k (by omega)
+    rw [hdiff_def] at hvan; linarith

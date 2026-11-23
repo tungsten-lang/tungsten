@@ -1,10 +1,16 @@
--- Algebraic typeclasses in Satori HOL (elaborated to dictionary passing,
--- zero kernel axioms added).
+-- Bundled law-bearing algebraic structures and typeclasses in Satori HOL.
 --
--- Operators `+`, `-`, `*`, `/`, and unary `-` automatically dispatch through
--- `Add`, `Sub`, `Mul`, `Div`, and `Neg` on any non-builtin type with an instance.
+-- Aligned with `tungsten/core/algebra`: every algebraic `class` and `structure`
+-- bundles its carrier operations together with its equational/logical laws via
+-- Satori's sound HOL `.Valid` elaboration (zero added kernel axioms).
+--
+-- Operators `+`, `-`, `*`, `/`, unary `-`, and ascribed `(0 : α)`, `(1 : α)`
+-- dispatch automatically through `Add`, `Sub`, `Mul`, `Div`, `Neg`, `Zero`, `One`
+-- on both concrete user types and polymorphic type variables `[CommRing α]`, `[Field α]`, etc.
 
 import real
+
+-- ---- operational notation classes (no laws, pure dispatch) -------------------------
 
 class Zero α := (zero : α)
 class One  α := (one  : α)
@@ -14,12 +20,114 @@ class Neg  α := (neg  : α → α)
 class Mul  α := (mul  : α → α → α)
 class Div  α := (div  : α → α → α)
 
+class Normed α :=
+  (norm : α → ℝ)
+
+-- ---- bundled law-bearing algebraic typeclasses -------------------------------------
+
+class Monoid α :=
+  (one : α)
+  (mul : α → α → α)
+  (mul_assoc : ∀ x y z : α, mul (mul x y) z = mul x (mul y z))
+  (one_mul   : ∀ x : α, mul one x = x)
+  (mul_one   : ∀ x : α, mul x one = x)
+
+class CommMonoid α :=
+  (one : α)
+  (mul : α → α → α)
+  (mul_assoc : ∀ x y z : α, mul (mul x y) z = mul x (mul y z))
+  (mul_comm  : ∀ x y : α, mul x y = mul y x)
+  (one_mul   : ∀ x : α, mul one x = x)
+
+class Group α :=
+  (one : α)
+  (mul : α → α → α)
+  (inv : α → α)
+  (mul_assoc    : ∀ x y z : α, mul (mul x y) z = mul x (mul y z))
+  (one_mul      : ∀ x : α, mul one x = x)
+  (mul_left_inv : ∀ x : α, mul (inv x) x = one)
+
+class CommGroup α :=
+  (one : α)
+  (mul : α → α → α)
+  (inv : α → α)
+  (mul_assoc    : ∀ x y z : α, mul (mul x y) z = mul x (mul y z))
+  (mul_comm     : ∀ x y : α, mul x y = mul y x)
+  (one_mul      : ∀ x : α, mul one x = x)
+  (mul_left_inv : ∀ x : α, mul (inv x) x = one)
+
+class AddCommGroup α :=
+  (zero : α)
+  (add  : α → α → α)
+  (neg  : α → α)
+  (add_assoc     : ∀ x y z : α, add (add x y) z = add x (add y z))
+  (add_comm      : ∀ x y : α, add x y = add y x)
+  (zero_add      : ∀ x : α, add zero x = x)
+  (add_right_neg : ∀ x : α, add x (neg x) = zero)
+
+class Semiring α :=
+  (zero : α)
+  (one  : α)
+  (add  : α → α → α)
+  (mul  : α → α → α)
+  (add_assoc     : ∀ x y z : α, add (add x y) z = add x (add y z))
+  (add_comm      : ∀ x y : α, add x y = add y x)
+  (zero_add      : ∀ x : α, add zero x = x)
+  (mul_assoc     : ∀ x y z : α, mul (mul x y) z = mul x (mul y z))
+  (one_mul       : ∀ x : α, mul one x = x)
+  (mul_one       : ∀ x : α, mul x one = x)
+  (mul_zero      : ∀ x : α, mul x zero = zero)
+  (zero_mul      : ∀ x : α, mul zero x = zero)
+  (left_distrib  : ∀ x y z : α, mul x (add y z) = add (mul x y) (mul x z))
+  (right_distrib : ∀ x y z : α, mul (add x y) z = add (mul x z) (mul y z))
+
 class Ring α :=
   (zero : α)
   (one  : α)
   (add  : α → α → α)
   (neg  : α → α)
   (mul  : α → α → α)
+  (add_assoc     : ∀ x y z : α, add (add x y) z = add x (add y z))
+  (add_comm      : ∀ x y : α, add x y = add y x)
+  (zero_add      : ∀ x : α, add zero x = x)
+  (add_right_neg : ∀ x : α, add x (neg x) = zero)
+  (mul_assoc     : ∀ x y z : α, mul (mul x y) z = mul x (mul y z))
+  (one_mul       : ∀ x : α, mul one x = x)
+  (mul_one       : ∀ x : α, mul x one = x)
+  (left_distrib  : ∀ x y z : α, mul x (add y z) = add (mul x y) (mul x z))
+  (right_distrib : ∀ x y z : α, mul (add x y) z = add (mul x z) (mul y z))
+
+class CommRing α :=
+  (zero : α)
+  (one  : α)
+  (add  : α → α → α)
+  (neg  : α → α)
+  (mul  : α → α → α)
+  (add_assoc     : ∀ x y z : α, add (add x y) z = add x (add y z))
+  (add_comm      : ∀ x y : α, add x y = add y x)
+  (zero_add      : ∀ x : α, add zero x = x)
+  (add_right_neg : ∀ x : α, add x (neg x) = zero)
+  (mul_assoc     : ∀ x y z : α, mul (mul x y) z = mul x (mul y z))
+  (mul_comm      : ∀ x y : α, mul x y = mul y x)
+  (one_mul       : ∀ x : α, mul one x = x)
+  (left_distrib  : ∀ x y z : α, mul x (add y z) = add (mul x y) (mul x z))
+
+class IntegralDomain α :=
+  (zero : α)
+  (one  : α)
+  (add  : α → α → α)
+  (neg  : α → α)
+  (mul  : α → α → α)
+  (add_assoc     : ∀ x y z : α, add (add x y) z = add x (add y z))
+  (add_comm      : ∀ x y : α, add x y = add y x)
+  (zero_add      : ∀ x : α, add zero x = x)
+  (add_right_neg : ∀ x : α, add x (neg x) = zero)
+  (mul_assoc     : ∀ x y z : α, mul (mul x y) z = mul x (mul y z))
+  (mul_comm      : ∀ x y : α, mul x y = mul y x)
+  (one_mul       : ∀ x : α, mul one x = x)
+  (left_distrib  : ∀ x y z : α, mul x (add y z) = add (mul x y) (mul x z))
+  (one_ne_zero   : one ≠ zero)
+  (mul_ne_zero   : ∀ x y : α, x ≠ zero → y ≠ zero → mul x y ≠ zero)
 
 class Field α :=
   (zero : α)
@@ -28,47 +136,306 @@ class Field α :=
   (neg  : α → α)
   (mul  : α → α → α)
   (inv  : α → α)
+  (add_assoc      : ∀ x y z : α, add (add x y) z = add x (add y z))
+  (add_comm       : ∀ x y : α, add x y = add y x)
+  (zero_add       : ∀ x : α, add zero x = x)
+  (add_right_neg  : ∀ x : α, add x (neg x) = zero)
+  (mul_assoc      : ∀ x y z : α, mul (mul x y) z = mul x (mul y z))
+  (mul_comm       : ∀ x y : α, mul x y = mul y x)
+  (one_mul        : ∀ x : α, mul one x = x)
+  (left_distrib   : ∀ x y z : α, mul x (add y z) = add (mul x y) (mul x z))
+  (one_ne_zero    : one ≠ zero)
+  (mul_inv_cancel : ∀ x : α, x ≠ zero → mul x (inv x) = one)
 
-class Normed α :=
-  (norm : α → ℝ)
+-- ---- superclass projections (declared before concrete instances) -------------------
+
+instance group_to_one [G : Group α] : One α := One.mk G.one
+instance group_to_mul [G : Group α] : Mul α := Mul.mk G.mul
+
+instance add_comm_group_to_zero [G : AddCommGroup α] : Zero α := Zero.mk G.zero
+instance add_comm_group_to_add  [G : AddCommGroup α] : Add  α := Add.mk  G.add
+instance add_comm_group_to_neg  [G : AddCommGroup α] : Neg  α := Neg.mk  G.neg
+instance add_comm_group_to_sub  [G : AddCommGroup α] : Sub  α := Sub.mk  (fun x y => G.add x (G.neg y))
+
+instance ring_to_zero [R : Ring α] : Zero α := Zero.mk R.zero
+instance ring_to_one  [R : Ring α] : One  α := One.mk  R.one
+instance ring_to_add  [R : Ring α] : Add  α := Add.mk  R.add
+instance ring_to_neg  [R : Ring α] : Neg  α := Neg.mk  R.neg
+instance ring_to_sub  [R : Ring α] : Sub  α := Sub.mk  (fun x y => R.add x (R.neg y))
+instance ring_to_mul  [R : Ring α] : Mul  α := Mul.mk  R.mul
+
+instance comm_ring_to_ring [R : CommRing α] : Ring α :=
+  Ring.mk R.zero R.one R.add R.neg R.mul
+  proof
+    unfold CommRing.Valid at R_valid
+    obtain ⟨haa, hac, hza, han, hma, hmc, hmo, hld⟩ := R_valid
+    unfold Ring.Valid comm_ring_to_ring
+    simp
+    exact ⟨haa, hac, hza, han, hma, hmo, by intro x; rw [hmc x R.one]; exact hmo x, hld, by intro x y z; rw [hmc (R.add x y) z, hld z x y, hmc z x, hmc z y]⟩
+
+instance domain_to_comm_ring [D : IntegralDomain α] : CommRing α :=
+  CommRing.mk D.zero D.one D.add D.neg D.mul
+  proof
+    unfold IntegralDomain.Valid at D_valid
+    obtain ⟨haa, hac, hza, han, hma, hmc, hmo, hld, _⟩ := D_valid
+    unfold CommRing.Valid domain_to_comm_ring
+    simp
+    exact ⟨haa, hac, hza, han, hma, hmc, hmo, hld⟩
+
+instance field_to_comm_ring [F : Field α] : CommRing α :=
+  CommRing.mk F.zero F.one F.add F.neg F.mul
+  proof
+    unfold Field.Valid at F_valid
+    obtain ⟨haa, hac, hza, han, hma, hmc, hmo, hld, _⟩ := F_valid
+    unfold CommRing.Valid field_to_comm_ring
+    simp
+    exact ⟨haa, hac, hza, han, hma, hmc, hmo, hld⟩
+
+instance field_to_div [F : Field α] : Div α := Div.mk (fun x y => F.mul x (F.inv y))
+
+-- ---- generic theorems proved once for all bundled groups / rings / fields ----------
+
++ Group.mul_left_cancel [G : Group α] (a x y : α) (h : G.mul a x = G.mul a y) : x = y
+  calc x = G.mul G.one x := (G.one_mul x).symm
+    _ = G.mul (G.mul (G.inv a) a) x := by rw [G.mul_left_inv a]
+    _ = G.mul (G.inv a) (G.mul a x) := G.mul_assoc (G.inv a) a x
+    _ = G.mul (G.inv a) (G.mul a y) := by rw [h]
+    _ = G.mul (G.mul (G.inv a) a) y := (G.mul_assoc (G.inv a) a y).symm
+    _ = G.mul G.one y := by rw [G.mul_left_inv a]
+    _ = y := G.one_mul y
+
++ Group.mul_right_inv [G : Group α] (x : α) : G.mul x (G.inv x) = G.one
+  have h1 : G.mul (G.inv x) (G.mul x (G.inv x)) = G.inv x
+    rw [← G.mul_assoc, G.mul_left_inv x, G.one_mul]
+  calc G.mul x (G.inv x) = G.mul G.one (G.mul x (G.inv x)) := (G.one_mul (G.mul x (G.inv x))).symm
+    _ = G.mul (G.mul (G.inv (G.inv x)) (G.inv x)) (G.mul x (G.inv x)) := by rw [G.mul_left_inv (G.inv x)]
+    _ = G.mul (G.inv (G.inv x)) (G.mul (G.inv x) (G.mul x (G.inv x))) := G.mul_assoc (G.inv (G.inv x)) (G.inv x) (G.mul x (G.inv x))
+    _ = G.mul (G.inv (G.inv x)) (G.inv x) := by rw [h1]
+    _ = G.one := G.mul_left_inv (G.inv x)
+
++ Group.mul_one [G : Group α] (x : α) : G.mul x G.one = x
+  rw [← G.mul_left_inv x, ← G.mul_assoc, Group.mul_right_inv x, G.one_mul]
+
++ Group.inv_inv [G : Group α] (x : α) : G.inv (G.inv x) = x
+  apply Group.mul_left_cancel (G.inv x)
+  rw [Group.mul_right_inv (G.inv x), G.mul_left_inv x]
+
++ Ring.add_zero [R : Ring α] (x : α) : R.add x R.zero = x
+  rw [R.add_comm x R.zero, R.zero_add x]
+
++ Ring.add_left_neg [R : Ring α] (x : α) : R.add (R.neg x) x = R.zero
+  rw [R.add_comm (R.neg x) x, R.add_right_neg x]
+
++ Ring.add_left_cancel [R : Ring α] (a x y : α) (h : R.add a x = R.add a y) : x = y
+  calc x = R.add R.zero x := (R.zero_add x).symm
+    _ = R.add (R.add (R.neg a) a) x := by rw [Ring.add_left_neg a]
+    _ = R.add (R.neg a) (R.add a x) := R.add_assoc (R.neg a) a x
+    _ = R.add (R.neg a) (R.add a y) := by rw [h]
+    _ = R.add (R.add (R.neg a) a) y := (R.add_assoc (R.neg a) a y).symm
+    _ = R.add R.zero y := by rw [Ring.add_left_neg a]
+    _ = y := R.zero_add y
+
++ Ring.mul_zero [R : Ring α] (x : α) : R.mul x R.zero = R.zero
+  apply Ring.add_left_cancel (R.mul x R.zero)
+  rw [← R.left_distrib x R.zero R.zero, R.zero_add R.zero, Ring.add_zero]
+
++ Ring.zero_mul [R : Ring α] (x : α) : R.mul R.zero x = R.zero
+  apply Ring.add_left_cancel (R.mul R.zero x)
+  rw [← R.right_distrib R.zero R.zero x, R.zero_add R.zero, Ring.add_zero]
+
++ Ring.neg_eq_of_add_eq_zero [R : Ring α] (x y : α) (h : R.add x y = R.zero) : R.neg x = y
+  apply Ring.add_left_cancel x
+  rw [R.add_right_neg x, h]
+
++ Ring.neg_neg [R : Ring α] (x : α) : R.neg (R.neg x) = x
+  exact Ring.neg_eq_of_add_eq_zero (R.neg x) x (Ring.add_left_neg x)
+
++ Ring.mul_neg [R : Ring α] (x y : α) : R.mul x (R.neg y) = R.neg (R.mul x y)
+  symm
+  apply Ring.neg_eq_of_add_eq_zero (R.mul x y) (R.mul x (R.neg y))
+  rw [← R.left_distrib x y (R.neg y), R.add_right_neg y, Ring.mul_zero x]
+
++ Ring.neg_mul [R : Ring α] (x y : α) : R.mul (R.neg x) y = R.neg (R.mul x y)
+  symm
+  apply Ring.neg_eq_of_add_eq_zero (R.mul x y) (R.mul (R.neg x) y)
+  rw [← R.right_distrib x (R.neg x) y, R.add_right_neg x, Ring.zero_mul y]
+
++ CommRing.mul_one [R : CommRing α] (x : α) : R.mul x R.one = x
+  rw [R.mul_comm x R.one, R.one_mul x]
+
++ CommRing.right_distrib [R : CommRing α] (x y z : α) :
+    R.mul (R.add x y) z = R.add (R.mul x z) (R.mul y z)
+  rw [R.mul_comm (R.add x y) z, R.left_distrib z x y, R.mul_comm z x, R.mul_comm z y]
+
++ CommRing.add_left_neg [R : CommRing α] (x : α) : R.add (R.neg x) x = R.zero
+  rw [R.add_comm (R.neg x) x, R.add_right_neg x]
+
++ CommRing.mul_zero [R : CommRing α] (x : α) : R.mul x R.zero = R.zero
+  have h := Ring.mul_zero (comm_ring_to_ring R) x
+  unfold comm_ring_to_ring at h; simp at h; exact h
+
++ CommRing.mul_neg [R : CommRing α] (x y : α) : R.mul x (R.neg y) = R.neg (R.mul x y)
+  have h := Ring.mul_neg (comm_ring_to_ring R) x y
+  unfold comm_ring_to_ring at h; simp at h; exact h
+
++ CommRing.sq_sub_sq [R : CommRing α] (a b : α) :
+    (a + b) * (a - b) = a * a - b * b
+  unfold ring_to_mul ring_to_add ring_to_sub comm_ring_to_ring
+  simp
+  rw [CommRing.right_distrib a b (R.add a (R.neg b))]
+  rw [R.left_distrib a a (R.neg b), R.left_distrib b a (R.neg b)]
+  rw [CommRing.mul_neg a b, R.mul_comm b a]
+  rw [R.add_assoc (R.mul a a) (R.neg (R.mul a b)) (R.add (R.mul a b) (R.mul b (R.neg b)))]
+  rw [← R.add_assoc (R.neg (R.mul a b)) (R.mul a b) (R.mul b (R.neg b))]
+  rw [CommRing.add_left_neg (R.mul a b), R.zero_add, CommRing.mul_neg b b]
+
++ IntegralDomain.mul_zero [D : IntegralDomain α] (x : α) : D.mul x D.zero = D.zero
+  have h := CommRing.mul_zero (domain_to_comm_ring D) x
+  unfold domain_to_comm_ring at h
+  simp at h
+  exact h
+
++ IntegralDomain.zero_mul [D : IntegralDomain α] (x : α) : D.mul D.zero x = D.zero
+  rw [D.mul_comm D.zero x]
+  exact IntegralDomain.mul_zero x
+
++ IntegralDomain.mul_eq_zero [D : IntegralDomain α] (x y : α) :
+    D.mul x y = D.zero ↔ x = D.zero ∨ y = D.zero
+  constructor
+  · intro h
+    by_cases hx : x = D.zero
+    · left; exact hx
+    · right
+      by_contra hy
+      exact D.mul_ne_zero x y hx hy h
+  · intro h
+    obtain hx | hy := h
+    · rw [hx]; exact IntegralDomain.zero_mul y
+    · rw [hy]; exact IntegralDomain.mul_zero x
+
++ Field.inv_mul_cancel [F : Field α] (x : α) (hx : x ≠ F.zero) : F.mul (F.inv x) x = F.one
+  rw [F.mul_comm (F.inv x) x]
+  exact F.mul_inv_cancel x hx
+
++ Field.mul_ne_zero [F : Field α] (x y : α) (hx : x ≠ F.zero) (hy : y ≠ F.zero) :
+    F.mul x y ≠ F.zero
+  intro h0
+  have hz_mul : F.mul F.zero (F.inv y) = F.zero
+    have h := CommRing.mul_zero (field_to_comm_ring F) (F.inv y)
+    unfold field_to_comm_ring at h; simp at h
+    rw [F.mul_comm F.zero (F.inv y)]; exact h
+  have h1 : F.mul (F.mul x y) (F.inv y) = F.mul F.zero (F.inv y) := by rw [h0]
+  rw [F.mul_assoc x y (F.inv y), F.mul_inv_cancel y hy, F.mul_comm x F.one, F.one_mul x, hz_mul] at h1
+  exact hx h1
+
+instance field_to_domain [F : Field α] : IntegralDomain α :=
+  IntegralDomain.mk F.zero F.one F.add F.neg F.mul
+  proof
+    have hmul_nz : ∀ x y : α, x ≠ F.zero → y ≠ F.zero → F.mul x y ≠ F.zero
+      intro x y hx hy
+      exact Field.mul_ne_zero x y hx hy
+    unfold Field.Valid at F_valid
+    obtain ⟨haa, hac, hza, han, hma, hmc, hmo, hld, hne, _⟩ := F_valid
+    unfold IntegralDomain.Valid field_to_domain
+    simp
+    exact ⟨haa, hac, hza, han, hma, hmc, hmo, hld, hne, hmul_nz⟩
+
+-- ---- bundled morphisms & substructures (`tungsten/core/algebra`) -------------------
+
+structure Subgroup G :=
+  (mul     : G → G → G)
+  (one     : G)
+  (inv     : G → G)
+  (carrier : set G)
+  (one_mem : carrier one)
+  (mul_mem : ∀ x y : G, carrier x → carrier y → carrier (mul x y))
+  (inv_mem : ∀ x : G, carrier x → carrier (inv x))
+
+structure RingHom α β :=
+  (r_zero : α)
+  (r_one  : α)
+  (r_add  : α → α → α)
+  (r_mul  : α → α → α)
+  (s_zero : β)
+  (s_one  : β)
+  (s_add  : β → β → β)
+  (s_mul  : β → β → β)
+  (to_fun : α → β)
+  (map_zero : to_fun r_zero = s_zero)
+  (map_one  : to_fun r_one = s_one)
+  (map_add  : ∀ x y : α, to_fun (r_add x y) = s_add (to_fun x) (to_fun y))
+  (map_mul  : ∀ x y : α, to_fun (r_mul x y) = s_mul (to_fun x) (to_fun y))
 
 -- ---- built-in numeric instances ----------------------------------------------------
 
-instance nat_zero : Zero ℕ := Zero.mk 0
-instance nat_one  : One  ℕ := One.mk  1
-instance nat_add  : Add  ℕ := Add.mk  (fun x y => x + y)
-instance nat_mul  : Mul  ℕ := Mul.mk  (fun x y => x * y)
+instance nat_zero     : Zero       ℕ := Zero.mk 0
+instance nat_one      : One        ℕ := One.mk  1
+instance nat_add      : Add        ℕ := Add.mk  (fun x y => x + y)
+instance nat_mul      : Mul        ℕ := Mul.mk  (fun x y => x * y)
+instance nat_monoid   : CommMonoid ℕ := CommMonoid.mk 1 (fun x y => x * y)
+instance nat_semiring : Semiring   ℕ := Semiring.mk 0 1 (fun x y => x + y) (fun x y => x * y)
 
-instance int_zero : Zero ℤ := Zero.mk 0
-instance int_one  : One  ℤ := One.mk  1
-instance int_add  : Add  ℤ := Add.mk  (fun x y => x + y)
-instance int_sub  : Sub  ℤ := Sub.mk  (fun x y => x - y)
-instance int_neg  : Neg  ℤ := Neg.mk  (fun x => 0 - x)
-instance int_mul  : Mul  ℤ := Mul.mk  (fun x y => x * y)
-instance int_ring : Ring ℤ := Ring.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
+instance int_zero      : Zero           ℤ := Zero.mk 0
+instance int_one       : One            ℤ := One.mk  1
+instance int_add       : Add            ℤ := Add.mk  (fun x y => x + y)
+instance int_sub       : Sub            ℤ := Sub.mk  (fun x y => x - y)
+instance int_neg       : Neg            ℤ := Neg.mk  (fun x => 0 - x)
+instance int_mul       : Mul            ℤ := Mul.mk  (fun x y => x * y)
+instance int_add_group : AddCommGroup   ℤ := AddCommGroup.mk 0 (fun x y => x + y) (fun x => 0 - x)
+instance int_ring      : Ring           ℤ := Ring.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
+instance int_comm_ring : CommRing       ℤ := CommRing.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
+instance int_domain    : IntegralDomain ℤ := IntegralDomain.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
 
-instance rat_zero  : Zero  ℚ := Zero.mk  0
-instance rat_one   : One   ℚ := One.mk   1
-instance rat_add   : Add   ℚ := Add.mk   (fun x y => x + y)
-instance rat_sub   : Sub   ℚ := Sub.mk   (fun x y => x - y)
-instance rat_neg   : Neg   ℚ := Neg.mk   (fun x => 0 - x)
-instance rat_mul   : Mul   ℚ := Mul.mk   (fun x y => x * y)
-instance rat_div   : Div   ℚ := Div.mk   (fun x y => x / y)
-instance rat_ring  : Ring  ℚ := Ring.mk  0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
-instance rat_field : Field ℚ := Field.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y) (fun x => 1 / x)
+instance rat_zero      : Zero           ℚ := Zero.mk  0
+instance rat_one       : One            ℚ := One.mk   1
+instance rat_add       : Add            ℚ := Add.mk   (fun x y => x + y)
+instance rat_sub       : Sub            ℚ := Sub.mk   (fun x y => x - y)
+instance rat_neg       : Neg            ℚ := Neg.mk   (fun x => 0 - x)
+instance rat_mul       : Mul            ℚ := Mul.mk   (fun x y => x * y)
+instance rat_div       : Div            ℚ := Div.mk   (fun x y => x / y)
+instance rat_add_group : AddCommGroup   ℚ := AddCommGroup.mk 0 (fun x y => x + y) (fun x => 0 - x)
+instance rat_ring      : Ring           ℚ := Ring.mk  0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
+instance rat_comm_ring : CommRing       ℚ := CommRing.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
+instance rat_field     : Field          ℚ :=
+  Field.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y) (fun x => 1 / x)
+  proof
+    unfold Field.Valid rat_field
+    simp
+    exact ⟨by intros; ring, by intros; ring, by intros; trivial, by intros; ring, by intros; ring, by intros; ring, by intros; trivial, by intros; ring, by intro x hx; exact mul_inv_cancel.rat x hx⟩
 
-instance real_zero   : Zero   ℝ := Zero.mk   0
-instance real_one    : One    ℝ := One.mk    1
-instance real_add    : Add    ℝ := Add.mk    (fun x y => x + y)
-instance real_sub    : Sub    ℝ := Sub.mk    (fun x y => x - y)
-instance real_neg    : Neg    ℝ := Neg.mk    (fun x => 0 - x)
-instance real_mul    : Mul    ℝ := Mul.mk    (fun x y => x * y)
-instance real_div    : Div    ℝ := Div.mk    (fun x y => x / y)
-instance real_ring   : Ring   ℝ := Ring.mk   0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
-instance real_field  : Field  ℝ := Field.mk  0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y) (fun x => 1 / x)
-instance real_normed : Normed ℝ := Normed.mk (fun x => abs x)
+instance real_zero      : Zero         ℝ := Zero.mk   0
+instance real_one       : One          ℝ := One.mk    1
+instance real_add       : Add          ℝ := Add.mk    (fun x y => x + y)
+instance real_sub       : Sub          ℝ := Sub.mk    (fun x y => x - y)
+instance real_neg       : Neg          ℝ := Neg.mk    (fun x => 0 - x)
+instance real_mul       : Mul          ℝ := Mul.mk    (fun x y => x * y)
+instance real_div       : Div          ℝ := Div.mk    (fun x y => x / y)
+instance real_add_group : AddCommGroup ℝ := AddCommGroup.mk 0 (fun x y => x + y) (fun x => 0 - x)
+instance real_ring      : Ring         ℝ := Ring.mk   0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
+instance real_comm_ring : CommRing     ℝ := CommRing.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
+instance real_field     : Field        ℝ :=
+  Field.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y) (fun x => 1 / x)
+  proof
+    unfold Field.Valid real_field
+    simp
+    exact ⟨by intros; ring, by intros; ring, by intros; trivial, by intros; ring, by intros; ring, by intros; ring, by intros; trivial, by intros; ring, by intro x hx; exact mul_inv_cancel.real x hx⟩
+instance real_normed    : Normed       ℝ := Normed.mk (fun x => abs x)
 
--- ---- polymorphic product instance (tests recursive dictionary synthesis) -----------
+-- ---- polymorphic product instances (recursive dictionary & law synthesis) ----------
 
 instance prod_add [A : Add α] [B : Add β] : Add (α × β) :=
   Add.mk (fun (p q : α × β) => (Add.add A p.1 q.1, Add.add B p.2 q.2))
+
+instance prod_comm_ring [A : CommRing α] [B : CommRing β] : CommRing (α × β) :=
+  CommRing.mk (A.zero, B.zero) (A.one, B.one)
+    (fun (p q : α × β) => (A.add p.1 q.1, B.add p.2 q.2))
+    (fun (p : α × β) => (A.neg p.1, B.neg p.2))
+    (fun (p q : α × β) => (A.mul p.1 q.1, B.mul p.2 q.2))
+  proof
+    have ha1 := A.add_assoc; have ha2 := A.add_comm; have ha3 := A.zero_add; have ha4 := A.add_right_neg
+    have ha5 := A.mul_assoc; have ha6 := A.mul_comm; have ha7 := A.one_mul; have ha8 := A.left_distrib
+    have hb1 := B.add_assoc; have hb2 := B.add_comm; have hb3 := B.zero_add; have hb4 := B.add_right_neg
+    have hb5 := B.mul_assoc; have hb6 := B.mul_comm; have hb7 := B.one_mul; have hb8 := B.left_distrib
+    unfold CommRing.Valid prod_comm_ring
+    simp
+    exact ⟨by intro x y z; ext; exact ha1 x.1 y.1 z.1; exact hb1 x.2 y.2 z.2, by intro x y; ext; exact ha2 x.1 y.1; exact hb2 x.2 y.2, by intro x; ext; exact ha3 x.1; exact hb3 x.2, by intro x; ext; exact ha4 x.1; exact hb4 x.2, by intro x y z; ext; exact ha5 x.1 y.1 z.1; exact hb5 x.2 y.2 z.2, by intro x y; ext; exact ha6 x.1 y.1; exact hb6 x.2 y.2, by intro x; ext; exact ha7 x.1; exact hb7 x.2, by intro x y z; ext; exact ha8 x.1 y.1 z.1; exact hb8 x.2 y.2 z.2⟩

@@ -122,9 +122,23 @@
       @conversions = ApplicationConversions.new
     @conversions
 
-  -> fresh_hyp_name
+  -> goal_has_name?(goal, nm)
+    if goal == nil
+      return false
+    if goal.hyp(nm) != nil
+      return true
+    goal.fixes.each -> (f)
+      if f[0] == nm
+        return true
+    false
+
+  -> fresh_hyp_name(goal = nil)
     @hcount += 1
-    "h" + @hcount.to_s
+    nm = "h" + @hcount.to_s
+    while goal_has_name?(goal, nm)
+      @hcount += 1
+      nm = "h" + @hcount.to_s
+    nm
 
   -> fail(msg)
     raise msg
@@ -291,8 +305,11 @@
       run_all_goals(arr_sub(toks, 1, toks.size - 1), n.line)
       run_block(n.block)
       return
-    # t1 <;> t2 : run t2 on every goal t1 produces (left-associative)
-    k = find_top_last(toks, "<;>")
+    # t1 <;> t2 : run t2 on every goal t1 produces (left-associative),
+    # except that `<;>` after a top-level `by` belongs to that `by` subproof.
+    by_idx = find_top(toks, "by", 0)
+    search_toks = by_idx >= 0 ? arr_sub(toks, 0, by_idx) : toks
+    k = find_top_last(search_toks, "<;>")
     if k >= 0
       run_then_all(arr_sub(toks, 0, k), arr_sub(toks, k + 1, toks.size - k - 1), n.line)
       run_block(n.block)
@@ -469,6 +486,8 @@
       tac_norm_num(g, args)
     when "ring"
       tac_ring(g)
+    when "field_simp"
+      tac_field_simp(g, args)
     when "linear_combination"
       tac_linear_combination(g, args)
     when "linarith", "arith"
@@ -483,6 +502,8 @@
       @omega_mode = false
     when "positivity"
       tac_positivity(g, args)
+    when "continuity"
+      tac_continuity(g, args)
     when "nlinarith"
       @nl_mode = true
       begin
@@ -599,13 +620,171 @@
     th = @session.theorem(name)
     if th != nil
       return th
-    # projections h.1 h.2 h.mp h.mpr h.symm
+    # projections h.1 h.2 h.mp h.mpr h.symm, or bundled structure/class law x.<law>
     if name.include?(".")
       parts = name.split(".")
-      base = lookup_proof(goal, arr_sub(parts, 0, parts.size - 1).join("."))
-      if base != nil
-        return project_proof(base, parts[parts.size - 1])
+      prefix_name = arr_sub(parts, 0, parts.size - 1).join(".")
+      field = parts[parts.size - 1]
+      if ["1", "2", "left", "right", "mp", "mpr", "symm"].include?(field)
+        base = lookup_proof(goal, prefix_name)
+        if base != nil
+          return project_proof(base, field)
+      law_th = lookup_term_law_by_name(goal, prefix_name, field)
+      if law_th != nil
+        return law_th
     nil
+
+  -> lookup_term_law_by_name(goal, prefix_name, field)
+    tm = nil
+    goal.fixes.each -> (f)
+      if f[0] == prefix_name
+        tm = f[1]
+    if tm == nil
+      begin
+        tm = elab_term(goal, [Tok.new(:id, prefix_name, 0, 0)], nil)
+      rescue _e
+        tm = nil
+    if tm == nil
+      return nil
+    project_term_law(goal, tm, field)
+
+  -> project_term_law(goal, base_tm, field)
+    ty = type_of(base_tm)
+    if ty.tag != :c || !@session.elab.laws_of(ty.name).include?(field)
+      return nil
+    law_th = @session.theorem(ty.name + "." + field)
+    if law_th == nil
+      return nil
+    val_th = synth_valid(goal, base_tm, 0)
+    if val_th == nil
+      return nil
+    q = dest_unop(law_th.concl, "∀")
+    if q == nil
+      return nil
+    m = {}
+    if !ty_match(q.ty, ty, m)
+      return nil
+    th_i = m.size > 0 ? @k.inst_type(law_th, m) : law_th
+    @d.beta_norm_thm(@k.mp(@k.spec(base_tm, th_i), val_th))
+
+  -> synth_goal_instance(goal, cty, depth = 0)
+    if depth > 8 || cty.tag != :c || !@session.elab.is_class_ty?(cty)
+      return nil
+    i = goal.fixes.size - 1
+    while i >= 0
+      fv = goal.fixes[i][1]
+      if ty_eq(fv.ty, cty)
+        return fv
+      i -= 1
+    list = @session.elab.instances[cty.name]
+    if list == nil
+      return nil
+    j = list.size - 1
+    while j >= 0
+      entry = list[j]
+      m = {}
+      if ty_match(entry[1], cty, m)
+        ok = true
+        dep_tms = []
+        entry[2].each -> (dt)
+          sub = synth_goal_instance(goal, ty_subst(dt, m), depth + 1)
+          if sub == nil
+            ok = false
+          else
+            dep_tms.push(sub)
+        if ok
+          g_ty = @k.const_type(entry[0])
+          res = mk_const_raw(entry[0], ty_subst(g_ty, m))
+          dep_tms.each -> (dtm)
+            res = mk_app(res, dtm)
+          return res
+      j -= 1
+    nil
+
+  -> synth_valid(goal, tm, depth = 0)
+    if depth > 6
+      return nil
+    ty = type_of(tm)
+    if ty.tag != :c || !@session.elab.has_laws?(ty.name)
+      return nil
+    want = mk_app(mk_const_raw(ty.name + ".Valid", ty_fun(ty, ty_bool)), tm)
+    i = goal.hyps.size - 1
+    while i >= 0
+      if tm_eq(goal.hyps[i][1], want)
+        return @k.assume(want)
+      i -= 1
+    sp = strip_app(tm)
+    hd = sp[0]
+    args = sp[1]
+    if hd.tag == :const
+      vth = @session.theorem(hd.name + ".valid")
+      if vth != nil
+        m = {}
+        if ty_match(@k.const_type(hd.name), hd.ty, m)
+          cur = m.size > 0 ? @k.inst_type(vth, m) : vth
+          args.each -> (arg)
+            if dest_unop(cur.concl, "∀") != nil
+              cur = @k.spec(arg, cur)
+          ok = true
+          while ok && dest_binop(cur.concl, "⇒") != nil
+            prem = dest_binop(cur.concl, "⇒")[0]
+            if prem.tag == :app && prem.a.tag == :const && prem.a.name.ends_with?(".Valid")
+              sv = synth_valid(goal, prem.b, depth + 1)
+              if sv == nil
+                ok = false
+              else
+                cur = @k.mp(cur, sv)
+            else
+              ok = false
+          if ok && tm_eq(cur.concl, want)
+            return cur
+      if hd.name == ty.name + ".mk" && depth <= 2
+        begin
+          sub = Prover.new(@session)
+          root = GoalRef.new(Goal.new(goal.fixes, goal.hyps, want), nil, 0)
+          sub.goals = [root]
+          sub.auto_prove_valid_state(nil, ty.name)
+          if sub.goals.size == 0
+            return root.thm
+        rescue _e
+          0
+    nil
+
+  -> auto_prove_valid_state(const_name, sname)
+    uf_toks = []
+    if const_name != nil
+      uf_toks.push(Tok.new(:id, const_name, 0, 0))
+    uf_toks.push(Tok.new(:id, sname + ".Valid", 0, 0))
+    begin
+      tac_unfold(first_goal, uf_toks)
+    rescue _e
+      0
+    begin
+      tac_simp(first_goal, [], false)
+    rescue _e
+      0
+    guard = 0
+    while @goals.size > 0 && guard < 256
+      guard += 1
+      g = first_goal
+      if dest_binop(g.goal.concl, "∧") != nil
+        tac_constructor(g)
+        next
+      if dest_unop(g.goal.concl, "∀") != nil || dest_binop(g.goal.concl, "⇒") != nil
+        intro1(g, "_")
+        next
+      solved = false
+      ["simp", "ring", "omega", "decide", "nlinarith", "auto"].each -> (tname)
+        if !solved && @goals.size > 0 && @goals[0] == g
+          saved = @goals + []
+          begin
+            run_tactic([Tok.new(:id, tname, 0, 0)], [], 0)
+            if @goals.size == 0 || @goals[0] != g
+              solved = true
+          rescue _e
+            @goals = saved
+      if !solved
+        break
 
   # Expose a connective hidden behind a defined predicate. Only reduce the
   # applied head so evidence for its arguments keeps its original spelling.
@@ -699,6 +878,16 @@
         fail("(by …) needs a known statement here")
       return run_subproof(goal, expected, by_nodes(e.binders, [], 0))
     if e.kind == :proj
+      if !["1", "2", "left", "right", "mp", "mpr", "symm"].include?(e.s)
+        begin
+          btm = elab_term_ast(goal, e.kids[0], nil)
+          lth = project_term_law(goal, btm, e.s)
+          if lth != nil
+            if expected != nil && !tm_eq(lth.concl, expected)
+              return instantiate_to(goal, lth, [], expected, false)[0]
+            return lth
+        rescue _e
+          0
       return project_proof(proof_ast(goal, e.kids[0], nil), e.s)
     if e.kind == :id && e.s == "rfl" && expected != nil
       eq = dest_binop(expected, "=")
@@ -736,11 +925,18 @@
         return r[0]
     if e.kind == :anon
       if expected == nil
-        fail("⟨...⟩ needs a known goal")
+        return anon_conj_proof(goal, e.kids)
       return anon_proof(goal, e.kids, expected)
     if e.kind == :app && e.kids[0].kind == :id && e.kids[0].s == "by"
       fail("nested by")
     fail("cannot read proof expression")
+
+  -> anon_conj_proof(goal, items)
+    if items.size < 2
+      fail("⟨...⟩ needs a known goal")
+    a = proof_ast(goal, items[0], nil)
+    b = items.size == 2 ? proof_ast(goal, items[1], nil) : anon_conj_proof(goal, arr_sub(items, 1, items.size - 1))
+    @k.conj(a, b)
 
   -> anon_proof(goal, items, expected)
     c = expected
@@ -927,18 +1123,65 @@
     # ∀-steps filled out of order: Satori hoists every ∀ binder to the front of a statement, so in
     # `thm L a ha u hu` (declared (L a) (ha) (u) (hu)) the term u arrives while the next step is the premise of ha's kind
     filled = {}
+    has_hole = false
     maxused = -1
     while ai < args.size
       a = args[ai]
-      isproof = proof_name?(goal, a)
-      while si < steps.size && (filled.has_key?(si) || (steps[si][0] == :all && isproof))
-        si += 1
+      a_is_hole = a.kind == :hole || (a.kind == :id && a.s == "_")
+      isproof = a_is_hole ? false : proof_name?(goal, a)
+      if isproof
+        # Synthesize any now-determined leading typeclass dictionaries so `.Valid` guards can be auto-discharged
+        steps.each -> (st)
+          if st[0] == :all && !mt.tm.has_key?(var_key(st[1]))
+            cty = ty_subst(st[1].ty, mt.ty)
+            if @session.elab.is_class_ty?(cty) && !ty_vars(cty).any?(-> (tv) tvs.has_key?(tv))
+              dict = synth_goal_instance(goal, cty, 0)
+              if dict != nil
+                mt.m(st[1], dict, 0)
+      while si < steps.size
+        if filled.has_key?(si) || (steps[si][0] == :all && isproof)
+          si += 1
+        elsif isproof && steps[si][0] == :imp && !proofs.has_key?(si)
+          prem_auto = closed_or_nil(tm_subst(steps[si][1], mt.tm), pvars)
+          if prem_auto != nil
+            prem_auto = tm_inst_types(prem_auto, mt.ty)
+          if prem_auto != nil && prem_auto.tag == :app && prem_auto.a.tag == :const && prem_auto.a.name.ends_with?(".Valid")
+            vth_auto = synth_valid(goal, prem_auto.b, 0)
+            if vth_auto != nil
+              proofs[si] = vth_auto
+              if si > maxused
+                maxused = si
+              si += 1
+            else
+              break
+          else
+            break
+        else
+          break
       tstep = si
       if !isproof
-        # the earliest ∀ binder still unbound (earlier ones may have been skipped by a proof argument)
+        # Check if `a` explicitly supplies a dictionary of a class type
+        arg_class_name = nil
+        if !a_is_hole
+          begin
+            probe = elab_term_ast(goal, a, nil)
+            pty = type_of(probe)
+            if pty.tag == :c && @session.elab.is_class_ty?(pty)
+              arg_class_name = pty.name
+          rescue _e
+            arg_class_name = nil
+        # the earliest ∀ binder still unbound (skipping leading typeclass dictionaries unless explicitly passed)
         j = 0
-        while j < steps.size && !(steps[j][0] == :all && !filled.has_key?(j) && !mt.tm.has_key?(var_key(steps[j][1])))
+        while j < steps.size
+          if steps[j][0] == :all && !filled.has_key?(j) && !mt.tm.has_key?(var_key(steps[j][1]))
+            sty = steps[j][1].ty
+            if !@session.elab.is_class_ty?(sty) || (arg_class_name != nil && sty.tag == :c && sty.name == arg_class_name)
+              break
           j += 1
+        if j >= steps.size
+          j = 0
+          while j < steps.size && !(steps[j][0] == :all && !filled.has_key?(j) && !mt.tm.has_key?(var_key(steps[j][1])))
+            j += 1
         if j < steps.size
           tstep = j
       if tstep >= steps.size
@@ -951,47 +1194,60 @@
           return instantiate_to(goal, resumed, arr_sub(args, ai, args.size - ai), target, allow_open, hints)
         fail("too many arguments")
       if steps[tstep][0] == :all
-        v = steps[tstep][1]
-        vt = ty_subst(v.ty, mt.ty)
-        term = nil
-        inferred_types = {}
-        ty_vars(vt).each -> (name)
-          if tvs.has_key?(name)
-            inferred_types[name] = @session.elab.fresh_meta
-        # Keep known parts of the expected type (e.g. a projection's domain)
-        # while allowing its remaining type parameters to be inferred.
-        term = elab_term_ast(goal, a, ty_subst(vt, inferred_types))
-        if !mt.m(v, term, 0)
-          fail("argument has the wrong type")
-        if tstep > maxused
-          maxused = tstep
-        if tstep == si
+        if a_is_hole
+          has_hole = true
+          if tstep > maxused
+            maxused = tstep
+          if tstep == si
+            si += 1
+          filled[tstep] = true
+        else
+          v = steps[tstep][1]
+          vt = ty_subst(v.ty, mt.ty)
+          term = nil
+          inferred_types = {}
+          ty_vars(vt).each -> (name)
+            if tvs.has_key?(name)
+              inferred_types[name] = @session.elab.fresh_meta
+          # Keep known parts of the expected type (e.g. a projection's domain)
+          # while allowing its remaining type parameters to be inferred.
+          term = elab_term_ast(goal, a, ty_subst(vt, inferred_types))
+          if !mt.m(v, term, 0)
+            fail("argument has the wrong type")
+          if tstep > maxused
+            maxused = tstep
+          if tstep == si
+            si += 1
+          else
+            filled[tstep] = true
+      else
+        if a_is_hole && allow_open
+          if si > maxused
+            maxused = si
           si += 1
         else
-          filled[tstep] = true
-      else
-        if si > maxused
-          maxused = si
-        prem = steps[si][1]
-        prem_i = closed_or_nil(tm_subst(prem, mt.tm), pvars)
-        if prem_i != nil
-          prem_i = tm_inst_types(prem_i, mt.ty)
-        pth = proof_ast(goal, a, prem_i)
-        matched = match_application(mt, prem, pth.concl)
-        if matched == nil && prem_i != nil
-          # A hypothesis or projection can prove a definitionally equal alias.
-          # Convert the supplied proof before matching the known premise; the
-          # conversion preserves its assumptions and is replayed by the kernel.
-          converted = try_defeq(pth, prem_i)
-          if converted != nil
-            matched = match_application(mt, prem, converted.concl)
-            if matched != nil
-              pth = converted
-        if matched == nil
-          fail("argument proves " + tm_show(pth.concl) + " but the premise is " + tm_show(prem))
-        mt = matched
-        proofs[si] = pth
-        si += 1
+          if si > maxused
+            maxused = si
+          prem = steps[si][1]
+          prem_i = closed_or_nil(tm_subst(prem, mt.tm), pvars)
+          if prem_i != nil
+            prem_i = tm_inst_types(prem_i, mt.ty)
+          pth = proof_ast(goal, a, prem_i)
+          matched = match_application(mt, prem, pth.concl)
+          if matched == nil && prem_i != nil
+            # A hypothesis or projection can prove a definitionally equal alias.
+            # Convert the supplied proof before matching the known premise; the
+            # conversion preserves its assumptions and is replayed by the kernel.
+            converted = try_defeq(pth, prem_i)
+            if converted != nil
+              matched = match_application(mt, prem, converted.concl)
+              if matched != nil
+                pth = converted
+          if matched == nil
+            fail("argument proves " + tm_show(pth.concl) + " but the premise is " + tm_show(prem))
+          mt = matched
+          proofs[si] = pth
+          si += 1
       ai += 1
     if target != nil
       # Match the visible conclusions before expanding aliases in the target.
@@ -1032,8 +1288,31 @@
       if found < 0
         fail("cannot match " + tm_show(cur) + " with goal " + tm_show(target))
       steps = arr_sub(steps, 0, found)
-      if allow_open && mt.tm.size < pvars.size && (goal.hyps.size > 0 || hints.size > 0)
+      if (allow_open || has_hole) && mt.tm.size < pvars.size && (goal.hyps.size > 0 || hints.size > 0)
         mt = infer_from_premises(goal, steps, mt, hints)
+    elsif has_hole && mt.tm.size < pvars.size && (goal.hyps.size > 0 || hints.size > 0)
+      mt = infer_from_premises(goal, steps, mt, hints)
+    # Auto-synthesize leading typeclass dictionaries and bundled .Valid guards
+    steps.each -> (st)
+      if st[0] == :all && !mt.tm.has_key?(var_key(st[1]))
+        cty = ty_subst(st[1].ty, mt.ty)
+        if @session.elab.is_class_ty?(cty) && !ty_vars(cty).any?(-> (tv) tvs.has_key?(tv))
+          dict = synth_goal_instance(goal, cty, 0)
+          if dict != nil
+            mt.m(st[1], dict, 0)
+    vsi = 0
+    while vsi < steps.size
+      if steps[vsi][0] == :imp && !proofs.has_key?(vsi)
+        prem_v = closed_or_nil(tm_subst(steps[vsi][1], mt.tm), pvars)
+        if prem_v != nil
+          prem_v = tm_inst_types(prem_v, mt.ty)
+          if prem_v.tag == :app && prem_v.a.tag == :const && prem_v.a.name.ends_with?(".Valid")
+            vth = synth_valid(goal, prem_v.b, 0)
+            if vth != nil
+              proofs[vsi] = vth
+              if vsi > maxused
+                maxused = vsi
+      vsi += 1
     # build the theorem
     thx = t
     if mt.ty.size > 0
@@ -1050,7 +1329,7 @@
           # partial application (`have k := thm a b`): nothing after this binder was supplied, so keep it quantified
           if target == nil && si > maxused
             return [regen(thx, gens), open]
-          if target == nil && !allow_open
+          if target == nil
             # a later premise was supplied: instantiate with a fresh variable and generalize back at the end
             fv = mk_var(fresh_name_from_set(v.name.slice(1, v.name.size - 1), used_names), ty_subst(v.ty, mt.ty))
             gens.push(fv)
@@ -1317,23 +1596,46 @@
   # Tactics
 
   -> tac_intro(g, args, all)
-    names = []
-    args.each -> (t)
-      names.push(t.text)
-    if names.size == 0
-      names = ["_"]
     if all
-      names = []
-    count = 0
-    while (all && intro_able?(g.goal.concl)) || count < names.size
-      nm = "_"
-      if !all
-        nm = names[count]
-      g = intro1(g, nm)
-      count += 1
-      if all && count > 64
-        break
-    g
+      count = 0
+      while intro_able?(g.goal.concl) && count <= 64
+        g = intro1(g, "_")
+        count += 1
+      return g
+    if args.size == 0
+      return intro1(g, "_")
+    pats = []
+    idx = 0
+    while idx < args.size
+      tk = args[idx].text
+      if tk == "⟨" || tk == "("
+        close_tk = tk == "⟨" ? "⟩" : ")"
+        depth = 1
+        j = idx + 1
+        while j < args.size && depth > 0
+          if args[j].text == tk
+            depth += 1
+          elsif args[j].text == close_tk
+            depth -= 1
+          j += 1
+        pats.push(arr_sub(args, idx, j - idx))
+        idx = j
+      else
+        pats.push([args[idx]])
+        idx += 1
+    leaves = [g]
+    pats.each -> (pat)
+      next_leaves = []
+      leaves.each -> (lg)
+        if pat.size == 1 && pat[0].text != "rfl"
+          next_leaves.push(intro1(lg, pat[0].text))
+        else
+          tmp = fresh_hyp_name(lg.goal)
+          lg1 = intro1(lg, tmp)
+          th = @k.assume(lg1.goal.hyp(tmp))
+          next_leaves = next_leaves + destruct(lg1, th, pat)
+      leaves = next_leaves
+    leaves.size > 0 ? leaves[0] : g
 
   -> intro_able?(c)
     q = dest_unop(c, "∀")
@@ -1358,7 +1660,7 @@
     if pq != nil
       hn = nm
       if nm == "_"
-        hn = fresh_hyp_name
+        hn = fresh_hyp_name(goal)
       p = pq[0]
       ng = Goal.new(goal.fixes, goal.hyps + [[hn, p]], pq[1])
       refs = refine(g, [ng], ->(ts) @k.disch(p, ts[0]))
@@ -1367,11 +1669,15 @@
     if np != nil
       hn = nm
       if nm == "_"
-        hn = fresh_hyp_name
+        hn = fresh_hyp_name(goal)
       ng = Goal.new(goal.fixes, goal.hyps + [[hn, np]], @k.false_tm)
       refs = refine(g, [ng], ->(ts) @k.not_intro(np, ts[0]))
       return refs[0]
-    # unfold a definition at the head and retry
+    conv = proof_head_conv(c, ["∀", "⇒", "¬"], 8)
+    if conv != nil
+      unfolded = dest_binop(conv.concl, "=")[1]
+      refs = refine(g, [goal.with_concl(unfolded)], ->(ts) @k.eq_mp(@k.sym(conv), ts[0]))
+      return intro1(refs[0], nm)
     fail("intro: goal is not ∀, → or ¬: " + tm_show(c))
 
   -> tac_apply(g, args)
@@ -1487,14 +1793,36 @@
       c = gg.concl
       ex = dest_unop(c, "∃")
       if ex == nil || ex.tag != :lam
+        conv = proof_head_conv(c, ["∃"])
+        if conv != nil
+          refs0 = refine(cur, [gg.with_concl(conv.concl.b)], ->(ts) @k.eq_mp(@k.sym(conv), ts[0]))
+          cur = refs0[0]
+          gg = cur.goal
+          c = gg.concl
+          ex = dest_unop(c, "∃")
+      if ex == nil || ex.tag != :lam
         fail("use: goal is not an existential")
       w = elab_term(gg, p, ex.ty)
       body = tm_instantiate(ex.b, w, 0)
       refs = refine(cur, [gg.with_concl(body)], ->(ts) @k.exists_intro(c, w, ts[0]))
       cur = refs[0]
-    # try to close trivially
+    # try to close trivially (skip decide on open compound/quantified goals so
+    # analytic proofs do not wastefully unfold huge definitions in KEval)
     begin
-      tac_trivial(cur)
+      th = find_assumption(cur.goal)
+      if th != nil
+        close(cur, th)
+      else
+        closed_rfl = false
+        begin
+          tac_rfl(cur)
+          closed_rfl = true
+        rescue e_rfl
+          0
+        if !closed_rfl
+          cc = cur.goal.concl
+          if tm_frees(cc).empty? || (dest_binop(cc, "∧") == nil && dest_binop(cc, "⇒") == nil && dest_unop(cc, "∀") == nil && dest_unop(cc, "∃") == nil)
+            tac_decide(cur)
     rescue e
       0
     cur
@@ -1634,8 +1962,38 @@
     else
       fail("have: expected ':' or ':='")
     th = nil
+    trailing_toks = nil
     if proof_toks != nil && proof_toks.size > 0 && proof_toks[0].text == "by"
-      th = run_subproof(goal, prop, by_nodes(arr_sub(proof_toks, 1, proof_toks.size - 1), block, line))
+      inline_toks = arr_sub(proof_toks, 1, proof_toks.size - 1)
+      if block.size == 0
+        if prop == nil
+          fail("have: ':= by ...' requires a type annotation ': P'")
+        parts = []
+        split_top(inline_toks, ";").each -> (p)
+          if p.size > 0
+            parts.push(p)
+        sub = Prover.new(@session)
+        root = GoalRef.new(goal.with_concl(prop), nil, 0)
+        sub.goals = [root]
+        pi = 0
+        while pi < parts.size
+          sub.run_node(TacNode.new(parts[pi], [], line))
+          pi += 1
+          if sub.goals.size == 0
+            break
+        if sub.goals.size > 0
+          fail("unsolved goals in subproof:\n" + sub.goals[0].goal.show(@k))
+        th = root.thm
+        if pi < parts.size
+          trailing_toks = []
+          while pi < parts.size
+            if trailing_toks.size > 0
+              trailing_toks.push(Tok.new(:sym, ";", line, 0))
+            parts[pi].each -> (tk)
+              trailing_toks.push(tk)
+            pi += 1
+      else
+        th = run_subproof(goal, prop, by_nodes(inline_toks, block, line))
     elsif proof_toks != nil
       th = proof_expr(goal, proof_toks, prop)
       if prop != nil
@@ -1649,6 +2007,8 @@
       hp = prop
     ng = goal.add_hyp(name, hp)
     refine(g, [ng], ->(ts) @d.prove_hyp(th, ts[0]))
+    if trailing_toks != nil && trailing_toks.size > 0
+      run_node(TacNode.new(trailing_toks, [], line))
 
   -> by_nodes(toks, block, line)
     nodes = []
@@ -1712,6 +2072,11 @@
     goal = g.goal
     pq = dest_binop(th.concl, "∨")
     if pq == nil
+      conv = proof_head_conv(th.concl, ["∨"])
+      if conv != nil
+        th = @k.eq_mp(conv, th)
+        pq = dest_binop(th.concl, "∨")
+    if pq == nil
       fail("pattern '|' needs a disjunction, got " + tm_show(th.concl))
     first = alts[0]
     rest = nil
@@ -1726,8 +2091,8 @@
         alts[i].each -> (t)
           rest.push(t)
         i += 1
-    n1 = fresh_hyp_name
-    n2 = fresh_hyp_name
+    n1 = fresh_hyp_name(goal)
+    n2 = fresh_hyp_name(goal)
     g1 = goal.add_hyp(n1, pq[0])
     g2 = goal.add_hyp(n2, pq[1])
     c = goal.concl
@@ -1773,6 +2138,11 @@
       mp = project_proof(th, "mp")
       mpr = project_proof(th, "mpr")
       return destruct_rest(destruct(g, mp, items[0]), mpr, arr_sub(items, 1, items.size - 1))
+    conv = proof_head_conv(c, ["∃", "∧", "="])
+    if conv != nil
+      sides = dest_binop(conv.concl.b, "=")
+      if sides == nil || type_of(sides[0]).name == "bool"
+        return destruct_tuple(g, @k.eq_mp(conv, th), items)
     fail("⟨...⟩ pattern needs ∃, ∧ or ↔, got " + tm_show(c))
 
   # h : x = t (x a fixed variable) — replace x by t everywhere.
@@ -2071,6 +2441,32 @@
     th = ind
     m = {}
     q0 = dest_unop(th.concl, "∀")
+    # Count constructor + IH binders per branch from the raw induction principle before instantiating P.
+    ctor_ih_counts = []
+    total_ctor_ih = 0
+    if q0 != nil && q0.tag == :lam
+      p_var = mk_var("__ind_P", q0.ty)
+      raw_c = tm_instantiate(q0.b, p_var, 0)
+      while dest_binop(raw_c, "⇒") != nil
+        rpq = dest_binop(raw_c, "⇒")
+        rc = rpq[0]
+        cnt = 0
+        used_tmp = {}
+        tm_free_names_into(rc, used_tmp)
+        while true
+          rq = dest_unop(rc, "∀")
+          if rq != nil && rq.tag == :lam
+            fv = mk_var(fresh_name_from_set("v", used_tmp), rq.ty)
+            rc = tm_instantiate(rq.b, fv, 0)
+            cnt += 1
+          elsif dest_binop(rc, "⇒") != nil
+            rc = dest_binop(rc, "⇒")[1]
+            cnt += 1
+          else
+            break
+        ctor_ih_counts.push(cnt)
+        total_ctor_ih += cnt
+        raw_c = rpq[1]
     ty_match(q0.ty.dom, v.ty, m)
     if m.size > 0
       th = @k.inst_type(th, m)
@@ -2103,23 +2499,36 @@
       r
     refs = refine(g, subs, just)
     # introduce constructor arguments and induction hypotheses with the given names
+    preserve_rev_names = revp.size > 0 && ctor_ih_counts.size == refs.size && names.size <= total_ctor_ih
     ni = 0
+    bi = 0
     refs.each -> (rf)
       cur = rf
-      while intro_able?(cur.goal.concl) && !(dest_binop(cur.goal.concl, "⇒") != nil && rev_prefix?(cur.goal.concl, revp))
-        nm = "_"
-        if ni < names.size
-          nm = names[ni]
-          ni += 1
-        cur = intro1(cur, nm)
-      # re-introduce reverted hypotheses with their names
-      revp.each -> (h)
-        if dest_binop(cur.goal.concl, "⇒") != nil
-          cur = intro1(cur, h[0])
+      if preserve_rev_names
+        limit = ctor_ih_counts[bi]
+        step_i = 0
+        while step_i < limit && intro_able?(cur.goal.concl)
+          nm = "_"
+          if ni < names.size
+            nm = names[ni]
+            ni += 1
+          cur = intro1(cur, nm)
+          step_i += 1
+        revp.each -> (h)
+          if dest_binop(cur.goal.concl, "⇒") != nil
+            cur = intro1(cur, h[0])
+      else
+        while intro_able?(cur.goal.concl)
+          nm = "_"
+          if ni < names.size
+            nm = names[ni]
+            ni += 1
+          cur = intro1(cur, nm)
+        revp.each -> (h)
+          if dest_binop(cur.goal.concl, "⇒") != nil
+            cur = intro1(cur, h[0])
+      bi += 1
     0
-
-  -> rev_prefix?(c, revp)
-    false
 
   # rw [h1, ← h2, foo a] (at h)?
   -> tac_rw(g, args)
@@ -2577,6 +2986,13 @@
       v = mk_var(fresh_name("x", e), type_of(e[0]).dom)
       at_v = @d.beta_eta_term(@k.eq_tm(mk_app(e[0], v), mk_app(e[1], v)))
       return funext_proof(e[0], e[1], v, ring_equality_proof(at_v))
+    lhs_ty = type_of(e[0])
+    if lhs_ty.tag == :c && lhs_ty.name == "complex"
+      if tm_eq(e[0], e[1])
+        return @k.refl(e[0])
+      ext_th = @session.theorem("complex.ext")
+      if ext_th != nil
+        return complex_ring_equality_proof(e[0], e[1], lhs_ty, ext_th)
     begin
       return @k.ring_eq(e[0], e[1])
     rescue original
@@ -2604,6 +3020,891 @@
       rescue e2
         0
       fail(original.to_s)
+
+  -> complex_ring_proj_proof(proj_fn, lhs, rhs)
+    pl = mk_app(proj_fn, lhs)
+    pr = mk_app(proj_fn, rhs)
+    s = Simp.new(@d, [], @session.simp_by_head, @session.simp_general)
+    s.step_limit = 4096
+    leq = s.simp_conv(pl, 0)
+    req = s.simp_conv(pr, 0)
+    l1 = dest_binop(leq.concl, "=")[1]
+    r1 = dest_binop(req.concl, "=")[1]
+    mid = nil
+    begin
+      mid = @k.ring_eq(l1, r1)
+    rescue err1
+      mid = ring_congruence(l1, r1, [192], false)
+    if mid == nil
+      defs = auto_relation_definitions([lhs, rhs, l1, r1])
+      s2 = Simp.new(@d, defs, @session.simp_by_head, @session.simp_general)
+      s2.step_limit = 4096
+      leq2 = s2.simp_conv(l1, 0)
+      req2 = s2.simp_conv(r1, 0)
+      l2 = dest_binop(leq2.concl, "=")[1]
+      r2 = dest_binop(req2.concl, "=")[1]
+      leq = @k.trans(leq, leq2)
+      req = @k.trans(req, req2)
+      mid = ring_equality_proof(@k.eq_tm(l2, r2))
+    @k.trans(leq, @k.trans(mid, @k.sym(req)))
+
+  -> complex_ring_equality_proof(lhs, rhs, cx_ty, ext_th)
+    re_fn = @k.mk_const("complex.re", ty_fun(cx_ty, ty_real))
+    im_fn = @k.mk_const("complex.im", ty_fun(cx_ty, ty_real))
+    re_prf = complex_ring_proj_proof(re_fn, lhs, rhs)
+    im_prf = complex_ring_proj_proof(im_fn, lhs, rhs)
+    @k.mp(@k.mp(@k.spec(rhs, @k.spec(lhs, ext_th)), re_prf), im_prf)
+
+  -> field_has_div?(tm, ty)
+    if tm.tag != :app
+      return false
+    if !ty_eq(type_of(tm), ty)
+      return false
+    if tm.a.tag == :const && tm.a.op == OP_NEG
+      return field_has_div?(tm.b, ty)
+    if tm.a.tag == :app && tm.a.a.tag == :const
+      op = tm.a.a.op
+      if op == OP_DIV
+        return true
+      if op == OP_ADD || op == OP_SUB || op == OP_MUL
+        return field_has_div?(tm.a.b, ty) || field_has_div?(tm.b, ty)
+    false
+
+  -> field_extract_nat_cast(tm)
+    t = tm
+    if t.tag == :app && t.a.tag == :const && t.a.name == "real_of_rat"
+      t = t.b
+    if t.tag == :app && t.a.tag == :const && t.a.name == "rat_of_int"
+      t = t.b
+    if t.tag == :app && t.a.tag == :const && t.a.name == "int_of_nat"
+      return t.b
+    nil
+
+  -> field_prove_pos(goal, hints, tm, ty, sfx, depth = 0)
+    if depth > 8
+      return nil
+    zero = mk_lit(Q_ZERO, ty)
+    lt_c = @k.mk_const("<", ty_funs([ty, ty], TY_BOOL_SINGLETON))
+    want = mk_apps(lt_c, [zero, tm])
+    if tm.tag == :app && tm.a.tag == :app && tm.a.a.tag == :const
+      op = tm.a.a.op
+      if op == OP_MUL
+        pa = field_prove_pos(goal, hints, tm.a.b, ty, sfx, depth + 1)
+        if pa != nil
+          pb = field_prove_pos(goal, hints, tm.b, ty, sfx, depth + 1)
+          if pb != nil
+            mp_lem = @session.theorem("mul_pos" + sfx)
+            if mp_lem != nil
+              return @k.mp(@k.mp(@k.spec(tm.b, @k.spec(tm.a.b, mp_lem)), pa), pb)
+      elsif op == OP_DIV
+        pa = field_prove_pos(goal, hints, tm.a.b, ty, sfx, depth + 1)
+        if pa != nil
+          pb = field_prove_pos(goal, hints, tm.b, ty, sfx, depth + 1)
+          if pb != nil
+            dp_lem = @session.theorem("div_pos" + sfx)
+            if dp_lem != nil
+              return @k.mp(@k.mp(@k.spec(tm.b, @k.spec(tm.a.b, dp_lem)), pa), pb)
+      elsif op == OP_POW && ty_eq(type_of(tm.b), TY_NAT_SINGLETON)
+        pa = field_prove_pos(goal, hints, tm.a.b, ty, sfx, depth + 1)
+        if pa != nil
+          pp_lem = @session.theorem("pow_pos" + sfx)
+          if pp_lem != nil
+            return @k.mp(@k.spec(tm.b, @k.spec(tm.a.b, pp_lem)), pa)
+    if ty_eq(ty, ty_real)
+      sp = strip_app(tm)
+      if sp[0].tag == :const
+        if sp[0].name == "exp" && sp[1].size == 1 && @session.theorem("exp_pos") != nil
+          return @k.spec(sp[1][0], @session.theorem("exp_pos"))
+        if sp[0].name == "rpow" && sp[1].size == 2 && @session.theorem("rpow.pos") != nil
+          return @k.spec(sp[1][1], @k.spec(sp[1][0], @session.theorem("rpow.pos")))
+    nat_arg = field_extract_nat_cast(tm)
+    if nat_arg != nil
+      nsp = strip_app(nat_arg)
+      if ty_eq(ty, ty_real) && nsp[0].tag == :const && nsp[0].name == "fact" && nsp[1].size == 1 && @session.theorem("fact_cast_pos") != nil
+        return @k.spec(nsp[1][0], @session.theorem("fact_cast_pos"))
+      cp_lem = @session.theorem("cast_pos" + sfx)
+      if cp_lem != nil
+        lt_nat = @k.mk_const("<", ty_funs([TY_NAT_SINGLETON, TY_NAT_SINGLETON], TY_BOOL_SINGLETON))
+        saved_om = @omega_mode
+        @omega_mode = true
+        pnat = nil
+        begin
+          pnat = arith_prove(goal.with_concl(mk_apps(lt_nat, [mk_lit(0, TY_NAT_SINGLETON), nat_arg])), hints)
+        rescue err_om
+          pnat = nil
+        @omega_mode = saved_om
+        if pnat != nil
+          return @k.eq_mp(@k.sym(@k.spec(nat_arg, cp_lem)), pnat)
+    extra = [] + hints
+    pos_facts(tm, extra, {})
+    saved_nl = @nl_mode
+    @nl_mode = true
+    res = nil
+    begin
+      res = arith_prove(goal.with_concl(want), extra)
+    rescue err_pos
+      res = nil
+    @nl_mode = saved_nl
+    res
+
+  -> field_prove_nonzero(goal, hints, tm, ty, sfx, depth = 0)
+    if depth > 8
+      fail("field_simp: could not prove denominator nonzero: " + tm_show(tm))
+    zero = mk_lit(Q_ZERO, ty)
+    if tm.tag == :app && tm.a.tag == :app && tm.a.a.tag == :const
+      op = tm.a.a.op
+      if op == OP_MUL
+        mnz = @session.theorem("mul_ne_zero" + sfx)
+        if mnz != nil
+          begin
+            na = field_prove_nonzero(goal, hints, tm.a.b, ty, sfx, depth + 1)
+            nb = field_prove_nonzero(goal, hints, tm.b, ty, sfx, depth + 1)
+            return @k.mp(@k.mp(@k.spec(tm.b, @k.spec(tm.a.b, mnz)), na), nb)
+          rescue err_m
+            0
+      elsif op == OP_DIV
+        dei = @session.theorem("div_eq_iff" + sfx)
+        if dei != nil
+          begin
+            na = field_prove_nonzero(goal, hints, tm.a.b, ty, sfx, depth + 1)
+            nb = field_prove_nonzero(goal, hints, tm.b, ty, sfx, depth + 1)
+            mul_c = @k.mk_const("*", ty_funs([ty, ty], ty))
+            h0 = @k.eq_tm(tm, zero)
+            iff0 = @k.mp(@k.spec(tm.b, @k.spec(zero, @k.spec(tm.a.b, dei))), nb)
+            a_eq = @k.trans(@k.eq_mp(iff0, @k.assume(h0)), @k.ring_eq(mk_apps(mul_c, [zero, tm.b]), zero))
+            return @k.not_intro(h0, @k.not_elim(na, a_eq))
+          rescue err_d
+            0
+      elsif op == OP_POW && ty_eq(type_of(tm.b), TY_NAT_SINGLETON)
+        pez = @session.theorem("pow_eq_zero" + sfx)
+        if pez != nil
+          begin
+            na = field_prove_nonzero(goal, hints, tm.a.b, ty, sfx, depth + 1)
+            h0 = @k.eq_tm(tm, zero)
+            a0 = @k.mp(@k.spec(tm.b, @k.spec(tm.a.b, pez)), @k.assume(h0))
+            return @k.not_intro(h0, @k.not_elim(na, a0))
+          rescue err_p
+            0
+    p = field_prove_pos(goal, hints, tm, ty, sfx, depth)
+    if p != nil
+      return arith_prove(Goal.new([], [], @k.neg_tm(@k.eq_tm(tm, zero))), [p])
+    extra = [] + hints
+    pos_facts(tm, extra, {})
+    saved_nl = @nl_mode
+    @nl_mode = true
+    res = nil
+    begin
+      res = arith_prove(goal.with_concl(@k.neg_tm(@k.eq_tm(tm, zero))), extra)
+    rescue err_nz
+      @nl_mode = saved_nl
+      fail("field_simp: could not prove denominator nonzero: " + tm_show(tm))
+    @nl_mode = saved_nl
+    res
+
+  # Prove (a / b) * c = (a * c) / b using div_def and ring_eq.
+  -> field_shift_div_mul(a, b, c, ty, div_def)
+    mul_c = @k.mk_const("*", ty_funs([ty, ty], ty))
+    ac = mk_apps(mul_c, [a, c])
+    e1 = @k.spec(b, @k.spec(a, div_def))
+    e2 = @k.spec(b, @k.spec(ac, div_def))
+    lhs_step = combination_binop("*", ty, e1, @k.refl(c))
+    mid = @k.ring_eq(dest_binop(lhs_step.concl, "=")[1], dest_binop(e2.concl, "=")[1])
+    @k.trans(lhs_step, @k.trans(mid, @k.sym(e2)))
+
+  # Build prop equality: ⊢ (n_l / d_l = n_r / d_r) = (n_l * d_r = n_r * d_l)
+  -> field_frac_eq_iff(n_l, d_l, ne_l, n_r, d_r, ne_r, ty, div_def, div_eq_iff, eq_div_iff)
+    div_c = @k.mk_const("/", ty_funs([ty, ty], ty))
+    mul_c = @k.mk_const("*", ty_funs([ty, ty], ty))
+    eq_c = @k.mk_const("=", ty_funs([ty, ty], TY_BOOL_SINGLETON))
+    rhs_frac = mk_apps(div_c, [n_r, d_r])
+    iff1 = @k.mp(@k.spec(d_l, @k.spec(rhs_frac, @k.spec(n_l, div_eq_iff))), ne_l)
+    sh = field_shift_div_mul(n_r, d_r, d_l, ty, div_def)
+    iff2 = @d.ap_term(mk_app(eq_c, n_l), sh)
+    iff3 = @k.mp(@k.spec(d_r, @k.spec(mk_apps(mul_c, [n_r, d_l]), @k.spec(n_l, eq_div_iff))), ne_r)
+    @k.trans(iff1, @k.trans(iff2, iff3))
+
+  # Normalize tm into [num, den, eq_thm (⊢ tm = num / den), ne_thm (⊢ den ≠ 0)].
+  -> field_norm(goal, hints, tm, ty, sfx)
+    one = mk_lit(Q_ONE, ty)
+    zero = mk_lit(Q_ZERO, ty)
+    add_c = @k.mk_const("+", ty_funs([ty, ty], ty))
+    sub_c = @k.mk_const("-", ty_funs([ty, ty], ty))
+    mul_c = @k.mk_const("*", ty_funs([ty, ty], ty))
+    div_c = @k.mk_const("/", ty_funs([ty, ty], ty))
+    neg_c = @k.mk_const("neg", ty_fun(ty, ty))
+    eq_div_iff = @session.theorem("eq_div_iff" + sfx)
+    div_eq_iff = @session.theorem("div_eq_iff" + sfx)
+    div_def = @session.theorem("div_def" + sfx)
+    mul_ne_zero = @session.theorem("mul_ne_zero" + sfx)
+    ne1 = arith_prove(Goal.new([], [], @k.neg_tm(@k.eq_tm(one, zero))), [])
+    if !field_has_div?(tm, ty)
+      iff = @k.mp(@k.spec(one, @k.spec(tm, @k.spec(tm, eq_div_iff))), ne1)
+      eq_th = @k.eq_mp(@k.sym(iff), @k.ring_eq(mk_apps(mul_c, [tm, one]), tm))
+      return [tm, one, eq_th, ne1]
+    if tm.a.tag == :const && tm.a.op == OP_NEG
+      r1 = field_norm(goal, hints, tm.b, ty, sfx)
+      n1 = r1[0]
+      d1 = r1[1]
+      nn1 = mk_app(neg_c, n1)
+      step1 = @d.ap_term(neg_c, r1[2])
+      e_in = @d.ap_term(neg_c, @k.spec(d1, @k.spec(n1, div_def)))
+      e_out = @k.spec(d1, @k.spec(nn1, div_def))
+      mid = @k.ring_eq(dest_binop(e_in.concl, "=")[1], dest_binop(e_out.concl, "=")[1])
+      return [nn1, d1, @k.trans(step1, @k.trans(e_in, @k.trans(mid, @k.sym(e_out)))), r1[3]]
+    op = tm.a.a.op
+    a = tm.a.b
+    b = tm.b
+    if op == OP_ADD || op == OP_SUB
+      r1 = field_norm(goal, hints, a, ty, sfx)
+      r2 = field_norm(goal, hints, b, ty, sfx)
+      n1 = r1[0]
+      d1 = r1[1]
+      n2 = r2[0]
+      d2 = r2[1]
+      op_str = op == OP_ADD ? "+" : "-"
+      comb = combination_binop(op_str, ty, r1[2], r2[2])
+      if tm_eq(d1, d2)
+        num = mk_apps(op == OP_ADD ? add_c : sub_c, [n1, n2])
+        lem = @session.theorem((op == OP_ADD ? "add_div" : "sub_div") + sfx)
+        return [num, d1, @k.trans(comb, @k.sym(@k.spec(d1, @k.spec(n2, @k.spec(n1, lem))))), r1[3]]
+      num = mk_apps(op == OP_ADD ? add_c : sub_c, [mk_apps(mul_c, [n1, d2]), mk_apps(mul_c, [d1, n2])])
+      den = mk_apps(mul_c, [d1, d2])
+      ne12 = @k.mp(@k.mp(@k.spec(d2, @k.spec(d1, mul_ne_zero)), r1[3]), r2[3])
+      if op == OP_ADD
+        dad = @session.theorem("div_add_div" + sfx)
+        step = @k.mp(@k.mp(@k.spec(d2, @k.spec(n2, @k.spec(d1, @k.spec(n1, dad)))), r1[3]), r2[3])
+        return [num, den, @k.trans(comb, step), ne12]
+      # For subtraction: prove n1 / d1 - n2 / d2 = (n1 * d2 - d1 * n2) / (d1 * d2) via eq_div_iff + div_add_div on -n2
+      nn2 = mk_app(neg_c, n2)
+      dad = @session.theorem("div_add_div" + sfx)
+      e_sub = combination_binop("-", ty, @k.spec(d1, @k.spec(n1, div_def)), @k.spec(d2, @k.spec(n2, div_def)))
+      e_add = combination_binop("+", ty, @k.spec(d1, @k.spec(n1, div_def)), @k.spec(d2, @k.spec(nn2, div_def)))
+      to_add = @k.trans(e_sub, @k.trans(@k.ring_eq(dest_binop(e_sub.concl, "=")[1], dest_binop(e_add.concl, "=")[1]), @k.sym(e_add)))
+      dad_th = @k.mp(@k.mp(@k.spec(d2, @k.spec(nn2, @k.spec(d1, @k.spec(n1, dad)))), r1[3]), r2[3])
+      num_eq = @k.ring_eq(mk_apps(add_c, [mk_apps(mul_c, [n1, d2]), mk_apps(mul_c, [d1, nn2])]), num)
+      tail = @k.trans(to_add, @k.trans(dad_th, @d.ap_thm(@d.ap_term(div_c, num_eq), den)))
+      return [num, den, @k.trans(comb, tail), ne12]
+    if op == OP_MUL
+      if !field_has_div?(a, ty)
+        r2 = field_norm(goal, hints, b, ty, sfx)
+        mda = @session.theorem("mul_div_assoc" + sfx)
+        step1 = combination_binop("*", ty, @k.refl(a), r2[2])
+        return [mk_apps(mul_c, [a, r2[0]]), r2[1], @k.trans(step1, @k.sym(@k.spec(r2[1], @k.spec(r2[0], @k.spec(a, mda))))), r2[3]]
+      if !field_has_div?(b, ty)
+        r1 = field_norm(goal, hints, a, ty, sfx)
+        step1 = combination_binop("*", ty, r1[2], @k.refl(b))
+        sh = field_shift_div_mul(r1[0], r1[1], b, ty, div_def)
+        return [mk_apps(mul_c, [r1[0], b]), r1[1], @k.trans(step1, sh), r1[3]]
+      r1 = field_norm(goal, hints, a, ty, sfx)
+      r2 = field_norm(goal, hints, b, ty, sfx)
+      dmd = @session.theorem("div_mul_div" + sfx)
+      comb = combination_binop("*", ty, r1[2], r2[2])
+      ne12 = @k.mp(@k.mp(@k.spec(r2[1], @k.spec(r1[1], mul_ne_zero)), r1[3]), r2[3])
+      return [mk_apps(mul_c, [r1[0], r2[0]]), mk_apps(mul_c, [r1[1], r2[1]]), @k.trans(comb, @k.spec(r2[1], @k.spec(r2[0], @k.spec(r1[1], @k.spec(r1[0], dmd))))), ne12]
+    # op == OP_DIV
+    hb_ne = field_prove_nonzero(goal, hints, b, ty, sfx)
+    if !field_has_div?(a, ty) && !field_has_div?(b, ty)
+      return [a, b, @k.refl(tm), hb_ne]
+    if !field_has_div?(b, ty)
+      r1 = field_norm(goal, hints, a, ty, sfx)
+      dd = @session.theorem("div_div" + sfx)
+      step1 = @d.ap_thm(@d.ap_term(div_c, r1[2]), b)
+      ne_db = @k.mp(@k.mp(@k.spec(b, @k.spec(r1[1], mul_ne_zero)), r1[3]), hb_ne)
+      return [r1[0], mk_apps(mul_c, [r1[1], b]), @k.trans(step1, @k.spec(b, @k.spec(r1[1], @k.spec(r1[0], dd)))), ne_db]
+    r1 = field_norm(goal, hints, a, ty, sfx)
+    r2 = field_norm(goal, hints, b, ty, sfx)
+    n1 = r1[0]
+    d1 = r1[1]
+    n2 = r2[0]
+    d2 = r2[1]
+    eq_c = @k.mk_const("=", ty_funs([ty, ty], TY_BOOL_SINGLETON))
+    frac2 = mk_apps(div_c, [n2, d2])
+    f2_zero = @k.eq_tm(frac2, zero)
+    f2_to_b = @d.ap_thm(@d.ap_term(eq_c, @k.sym(r2[2])), zero)
+    h_f2_ne = @k.not_intro(f2_zero, @k.not_elim(hb_ne, @k.eq_mp(f2_to_b, @k.assume(f2_zero))))
+    n2_zero = @k.eq_tm(n2, zero)
+    z_div = @k.trans(@d.ap_thm(@d.ap_term(div_c, @k.assume(n2_zero)), d2), @k.trans(@k.spec(d2, @k.spec(zero, div_def)), @k.ring_eq(mk_apps(mul_c, [zero, mk_apps(div_c, [one, d2])]), zero)))
+    hn2_ne = @k.not_intro(n2_zero, @k.not_elim(h_f2_ne, z_div))
+    den = mk_apps(mul_c, [d1, n2])
+    num = mk_apps(mul_c, [n1, d2])
+    ne_den = @k.mp(@k.mp(@k.spec(n2, @k.spec(d1, mul_ne_zero)), r1[3]), hn2_ne)
+    comb = @k.mk_comb(@d.ap_term(div_c, r1[2]), r2[2])
+    iff_outer = @k.mp(@k.spec(frac2, @k.spec(mk_apps(div_c, [num, den]), @k.spec(mk_apps(div_c, [n1, d1]), div_eq_iff))), h_f2_ne)
+    dmd = @session.theorem("div_mul_div" + sfx)
+    mul_rhs = @k.spec(d2, @k.spec(n2, @k.spec(den, @k.spec(num, dmd))))
+    ne_big = @k.mp(@k.mp(@k.spec(d2, @k.spec(den, mul_ne_zero)), ne_den), r2[3])
+    iff_inner = field_frac_eq_iff(n1, d1, r1[3], mk_apps(mul_c, [num, n2]), mk_apps(mul_c, [den, d2]), ne_big, ty, div_def, div_eq_iff, eq_div_iff)
+    ring_ok = @k.ring_eq(mk_apps(mul_c, [n1, mk_apps(mul_c, [den, d2])]), mk_apps(mul_c, [mk_apps(mul_c, [num, n2]), d1]))
+    inner_eq = @k.eq_mp(@k.sym(iff_inner), ring_ok)
+    outer_eq = @k.eq_mp(@k.sym(iff_outer), @k.trans(inner_eq, @k.sym(mul_rhs)))
+    [num, den, @k.trans(comb, outer_eq), ne_den]
+
+  -> tac_field_simp(g, args)
+    hints = []
+    if args.size > 0
+      if args.size < 2 || args[0].text != "\[" || args[args.size - 1].text != "]"
+        fail("field_simp: expected optional [h1, h2, ...] hints")
+      inner = arr_sub(args, 1, args.size - 2)
+      if inner.size > 0
+        split_top(inner, ",").each -> (item)
+          hints.push(proof_expr(g.goal, item))
+    c = @d.beta_eta_term(g.goal.concl)
+    rel = nil
+    sides = dest_binop(c, "=")
+    if sides != nil
+      rel = "="
+    else
+      sides = dest_binop(c, "≤")
+      if sides != nil
+        rel = "≤"
+      else
+        sides = dest_binop(c, "<")
+        if sides != nil
+          rel = "<"
+    if rel == nil
+      fail("field_simp: goal must be =, ≤, or < over ℝ or ℚ")
+    ty = type_of(sides[0])
+    if !ty_eq(ty, ty_real) && !ty_eq(ty, ty_rat)
+      fail("field_simp: expected ℝ or ℚ terms, got " + ty_show(ty))
+    sfx = ty_eq(ty, ty_real) ? ".real" : ".rat"
+    if @session.theorem("eq_div_iff" + sfx) == nil
+      fail("field_simp: requires 'import arith'")
+    one = mk_lit(Q_ONE, ty)
+    mul_c = @k.mk_const("*", ty_funs([ty, ty], ty))
+    div_c = @k.mk_const("/", ty_funs([ty, ty], ty))
+    rel_c = @k.mk_const(rel, ty_funs([ty, ty], TY_BOOL_SINGLETON))
+    div_def = @session.theorem("div_def" + sfx)
+    r_l = field_norm(g.goal, hints, sides[0], ty, sfx)
+    r_r = field_norm(g.goal, hints, sides[1], ty, sfx)
+    n_l = r_l[0]
+    d_l = r_l[1]
+    n_r = r_r[0]
+    d_r = r_r[1]
+    lhs_has = field_has_div?(sides[0], ty)
+    rhs_has = field_has_div?(sides[1], ty)
+    if !lhs_has && !rhs_has
+      if rel == "="
+        return tac_ring(g)
+      fail("field_simp: no field divisions found in goal")
+    if rel == "="
+      div_eq_iff = @session.theorem("div_eq_iff" + sfx)
+      eq_div_iff = @session.theorem("eq_div_iff" + sfx)
+      prop_step = nil
+      new_lhs = nil
+      new_rhs = nil
+      if lhs_has && !rhs_has
+        to_frac = @d.ap_thm(@d.ap_term(rel_c, r_l[2]), sides[1])
+        iff1 = @k.mp(@k.spec(d_l, @k.spec(sides[1], @k.spec(n_l, div_eq_iff))), r_l[3])
+        prop_step = @k.trans(to_frac, iff1)
+        new_lhs = n_l
+        new_rhs = mk_apps(mul_c, [sides[1], d_l])
+      elsif !lhs_has && rhs_has
+        to_frac = @k.mk_comb(@d.ap_term(rel_c, @k.refl(sides[0])), r_r[2])
+        iff1 = @k.mp(@k.spec(d_r, @k.spec(n_r, @k.spec(sides[0], eq_div_iff))), r_r[3])
+        prop_step = @k.trans(to_frac, iff1)
+        new_lhs = mk_apps(mul_c, [sides[0], d_r])
+        new_rhs = n_r
+      else
+        to_frac = @k.mk_comb(@d.ap_term(rel_c, r_l[2]), r_r[2])
+        iff_both = field_frac_eq_iff(n_l, d_l, r_l[3], n_r, d_r, r_r[3], ty, div_def, div_eq_iff, eq_div_iff)
+        prop_step = @k.trans(to_frac, iff_both)
+        new_lhs = mk_apps(mul_c, [n_l, d_r])
+        new_rhs = mk_apps(mul_c, [n_r, d_l])
+      new_concl = @k.eq_tm(new_lhs, new_rhs)
+      ring_prf = nil
+      begin
+        ring_prf = ring_equality_proof(new_concl)
+      rescue err_r
+        ring_prf = nil
+      if ring_prf == nil && new_concl.has_widening_cast?
+        cast_rules = []
+        ["int_of_nat", "rat_of_int", "real_of_rat"].each -> (cast)
+          bucket = @session.simp_by_head[cast]
+          if bucket != nil
+            bucket.each -> (rule)
+              if (rule.name == cast + "_add" || rule.name == cast + "_mul") && rule.th.tags.size == 0
+                cast_rules.push(rule)
+        if cast_rules.size > 0
+          cfold = Simp.new(@d, cast_rules)
+          cl_eq = cfold.simp_conv(new_lhs, 0)
+          cr_eq = cfold.simp_conv(new_rhs, 0)
+          cl_rhs = dest_binop(cl_eq.concl, "=")[1]
+          cr_rhs = dest_binop(cr_eq.concl, "=")[1]
+          begin
+            cmid = ring_equality_proof(@k.eq_tm(cl_rhs, cr_rhs))
+            ring_prf = @k.trans(cl_eq, @k.trans(cmid, @k.sym(cr_eq)))
+          rescue err_cr
+            ring_prf = nil
+      if ring_prf != nil
+        return close(g, fit_concl(@k.eq_mp(@k.sym(prop_step), ring_prf), g.goal.concl))
+      return refine(g, [g.goal.with_concl(new_concl)], ->(ts) fit_concl(@k.eq_mp(@k.sym(prop_step), ts[0]), g.goal.concl))
+    # Inequality clearing (≤ or <): requires strictly positive denominators
+    div_rel_iff = @session.theorem((rel == "≤" ? "div_le_iff" : "div_lt_iff") + sfx)
+    rel_div_iff = @session.theorem((rel == "≤" ? "le_div_iff" : "lt_div_iff") + sfx)
+    if lhs_has && !rhs_has
+      pos_l = field_prove_pos(g.goal, hints, d_l, ty, sfx)
+      if pos_l == nil
+        fail("field_simp: could not prove denominator > 0 for inequality: " + tm_show(d_l))
+      to_frac = @d.ap_thm(@d.ap_term(rel_c, r_l[2]), sides[1])
+      iff1 = @k.mp(@k.spec(d_l, @k.spec(sides[1], @k.spec(n_l, div_rel_iff))), pos_l)
+      prop_step = @k.trans(to_frac, iff1)
+      new_concl = mk_apps(rel_c, [n_l, mk_apps(mul_c, [sides[1], d_l])])
+      return refine(g, [g.goal.with_concl(new_concl)], ->(ts) fit_concl(@k.eq_mp(@k.sym(prop_step), ts[0]), g.goal.concl))
+    if !lhs_has && rhs_has
+      pos_r = field_prove_pos(g.goal, hints, d_r, ty, sfx)
+      if pos_r == nil
+        fail("field_simp: could not prove denominator > 0 for inequality: " + tm_show(d_r))
+      to_frac = @k.mk_comb(@d.ap_term(rel_c, @k.refl(sides[0])), r_r[2])
+      iff1 = @k.mp(@k.spec(d_r, @k.spec(n_r, @k.spec(sides[0], rel_div_iff))), pos_r)
+      prop_step = @k.trans(to_frac, iff1)
+      new_concl = mk_apps(rel_c, [mk_apps(mul_c, [sides[0], d_r]), n_r])
+      return refine(g, [g.goal.with_concl(new_concl)], ->(ts) fit_concl(@k.eq_mp(@k.sym(prop_step), ts[0]), g.goal.concl))
+    pos_l = field_prove_pos(g.goal, hints, d_l, ty, sfx)
+    if pos_l == nil
+      fail("field_simp: could not prove denominator > 0 for inequality: " + tm_show(d_l))
+    pos_r = field_prove_pos(g.goal, hints, d_r, ty, sfx)
+    if pos_r == nil
+      fail("field_simp: could not prove denominator > 0 for inequality: " + tm_show(d_r))
+    to_frac = @k.mk_comb(@d.ap_term(rel_c, r_l[2]), r_r[2])
+    rhs_frac = mk_apps(div_c, [n_r, d_r])
+    iff1 = @k.mp(@k.spec(d_l, @k.spec(rhs_frac, @k.spec(n_l, div_rel_iff))), pos_l)
+    sh = field_shift_div_mul(n_r, d_r, d_l, ty, div_def)
+    iff2 = @d.ap_term(mk_app(rel_c, n_l), sh)
+    iff3 = @k.mp(@k.spec(d_r, @k.spec(mk_apps(mul_c, [n_r, d_l]), @k.spec(n_l, rel_div_iff))), pos_r)
+    prop_step = @k.trans(to_frac, @k.trans(iff1, @k.trans(iff2, iff3)))
+    new_concl = mk_apps(rel_c, [mk_apps(mul_c, [n_l, d_r]), mk_apps(mul_c, [n_r, d_l])])
+    refine(g, [g.goal.with_concl(new_concl)], ->(ts) fit_concl(@k.eq_mp(@k.sym(prop_step), ts[0]), g.goal.concl))
+
+  # ---- continuity tactic ----------------------------------------------------
+
+  -> cont_congr(f_tm, g_tm, x, hf, y_var, eq_mid)
+    congr_th = @session.theorem("continuous_at.congr")
+    if congr_th == nil
+      return nil
+    bg = @d.beta_norm_conv(mk_app(g_tm, y_var))
+    bf = @d.beta_norm_conv(mk_app(f_tm, y_var))
+    eq_app = @k.trans(bg, @k.trans(eq_mid, @k.sym(bf)))
+    agree = @k.gen(y_var, eq_app)
+    @k.mp(@k.mp(@k.spec(x, @k.spec(g_tm, @k.spec(f_tm, congr_th))), hf), agree)
+
+  -> cont_discharge_cond(goal, hints, extra_rules, cond, depth)
+    if depth > 6
+      return nil
+    goal.hyps.each -> (h)
+      if tm_eq(h[1], cond)
+        return @k.assume(h[1])
+    hints.each -> (th)
+      if tm_eq(th.concl, cond)
+        return th
+    sp = strip_app(cond)
+    if (sp[0].tag == :const && (sp[0].name == "continuous_at" || sp[0].name == "continuous_within_at")) || dest_binop(cond, "∧") != nil
+      csub = cont_solve_goal(goal.with_concl(cond), hints, extra_rules, depth + 1)
+      if csub != nil
+        return csub
+    extra = [] + hints
+    pos_facts(cond, extra, {})
+    saved_nl = @nl_mode
+    @nl_mode = true
+    res = nil
+    begin
+      res = arith_prove(goal.with_concl(cond), extra)
+    rescue err_cd
+      res = nil
+    @nl_mode = saved_nl
+    res
+
+  -> cont_try_thm(goal, hints, extra_rules, th, v, body, x, depth)
+    if th.concl.tv
+      return nil
+    avoid = goal.all_terms + [v, body, x, th.concl]
+    steps = []
+    qvars = []
+    pvars = {}
+    cur = th.concl
+    while true
+      q = dest_unop(cur, "∀")
+      if q != nil && q.tag == :lam
+        vp = dest_lam_fresh(q, avoid)
+        avoid.push(vp[0])
+        qvars.push(vp[0])
+        pvars[vp[0].vkey] = true
+        steps.push([:all, vp[0]])
+        cur = vp[1]
+      else
+        imp = dest_binop(cur, "⇒")
+        if imp != nil
+          steps.push([:imp])
+          cur = imp[1]
+        else
+          break
+    leaves = []
+    stk = [[[], cur]]
+    while stk.size > 0
+      it = stk.pop
+      cj = dest_binop(it[1], "∧")
+      if cj != nil
+        stk.push([it[0] + [false], cj[1]])
+        stk.push([it[0] + [true], cj[0]])
+      else
+        leaves.push(it)
+    li = 0
+    while li < leaves.size
+      path = leaves[li][0]
+      ltm = leaves[li][1]
+      lsp = strip_app(ltm)
+      if lsp[0].tag == :const && lsp[0].name == "continuous_at" && lsp[1].size == 2 && ty_eq(type_of(lsp[1][1]), ty_real)
+        g_pat = lsp[1][0]
+        pt_pat = lsp[1][1]
+        app_pat = @d.beta_norm_term(mk_app(g_pat, v))
+        mat = Matcher.new(pvars, {})
+        if mat.m(pt_pat, x, 0, true) && mat.m(app_pat, body, 0, true)
+          ok = true
+          qi = 0
+          while qi < qvars.size
+            bval = mat.tm[qvars[qi].vkey]
+            if bval == nil || tm_free_in?(v, bval)
+              ok = false
+              break
+            qi += 1
+          if ok
+            inst_th = th
+            si = 0
+            while si < steps.size
+              st = steps[si]
+              if st[0] == :all
+                inst_th = @k.spec(mat.tm[st[1].vkey], inst_th)
+              else
+                imp_now = dest_binop(@d.beta_norm_term(inst_th.concl), "⇒")
+                if imp_now == nil
+                  ok = false
+                  break
+                inst_th = @d.beta_norm_thm(inst_th)
+                cprf = cont_discharge_cond(goal, hints, extra_rules, imp_now[0], depth + 1)
+                if cprf == nil
+                  ok = false
+                  break
+                inst_th = @k.mp(inst_th, cprf)
+              si += 1
+            if ok
+              inst_th = @d.beta_norm_thm(inst_th)
+              pi = 0
+              while pi < path.size
+                inst_th = path[pi] ? @k.conj1(inst_th) : @k.conj2(inst_th)
+                pi += 1
+              f_lam = mk_lam(v, body)
+              g_inst = strip_app(inst_th.concl)[1][0]
+              if tm_eq(g_inst, f_lam)
+                return inst_th
+              return cont_congr(g_inst, f_lam, x, inst_th, v, @k.refl(body))
+      li += 1
+    nil
+
+  -> cont_from_hyps(goal, hints, extra_rules, v, body, x, depth)
+    hi = 0
+    while hi < hints.size
+      r = cont_try_thm(goal, hints, extra_rules, hints[hi], v, body, x, depth)
+      if r != nil
+        return r
+      hi += 1
+    gi = goal.hyps.size - 1
+    while gi >= 0
+      hth = @k.assume(goal.hyps[gi][1])
+      r = cont_try_thm(goal, hints, extra_rules, hth, v, body, x, depth)
+      if r != nil
+        return r
+      gi -= 1
+    nil
+
+  -> cont_prove_fn(goal, hints, extra_rules, f_fn, pt, depth)
+    v = mk_var(fresh_name("y", goal.all_terms + [f_fn, pt]), ty_real)
+    body = @d.beta_norm_term(mk_app(f_fn, v))
+    res_lam = cont_prove(goal, hints, extra_rules, v, body, pt, depth)
+    if res_lam == nil
+      return nil
+    lam_v = mk_lam(v, body)
+    if tm_eq(lam_v, f_fn)
+      return res_lam
+    if f_fn.tag != :lam
+      eta_eq = @k.eta(mk_lam(v, mk_app(f_fn, v)))
+      ca_c = @k.mk_const("continuous_at", ty_funs([ty_fun(ty_real, ty_real), ty_real], TY_BOOL_SINGLETON))
+      if tm_eq(body, mk_app(f_fn, v))
+        return @k.eq_mp(@d.ap_thm(@d.ap_term(ca_c, eta_eq), pt), res_lam)
+    cont_congr(lam_v, f_fn, pt, res_lam, v, @k.refl(body))
+
+  -> cont_prove(goal, hints, extra_rules, v, raw_body, x, depth)
+    if depth > 24
+      return nil
+    bb = @d.beta_norm_conv(raw_body)
+    body = dest_binop(bb.concl, "=")[1]
+    res = cont_prove_norm(goal, hints, extra_rules, v, body, x, depth)
+    if res == nil
+      return nil
+    if tm_eq(raw_body, body)
+      return res
+    cont_congr(mk_lam(v, body), mk_lam(v, raw_body), x, res, v, @k.refl(body))
+
+  -> cont_prove_norm(goal, hints, extra_rules, v, body, x, depth)
+    if !tm_free_in?(v, body)
+      cth = @session.theorem("continuous_at.const")
+      return cth == nil ? nil : @k.spec(x, @k.spec(body, cth))
+    if tm_eq(body, v)
+      ith = @session.theorem("continuous_at.id")
+      return ith == nil ? nil : @k.spec(x, ith)
+    from_h = cont_from_hyps(goal, hints, extra_rules, v, body, x, depth)
+    if from_h != nil
+      return from_h
+    zero_r = mk_lit(Q_ZERO, ty_real)
+    one_r = mk_lit(Q_ONE, ty_real)
+    sub_c = @k.mk_const("-", ty_funs([ty_real, ty_real], ty_real))
+    mul_c = @k.mk_const("*", ty_funs([ty_real, ty_real], ty_real))
+    div_c = @k.mk_const("/", ty_funs([ty_real, ty_real], ty_real))
+    if body.tag == :app && body.a.tag == :const && body.a.op == OP_NEG && ty_eq(type_of(body), ty_real)
+      alt = mk_apps(sub_c, [zero_r, body.b])
+      p_alt = cont_prove_norm(goal, hints, extra_rules, v, alt, x, depth + 1)
+      if p_alt != nil
+        return cont_congr(mk_lam(v, alt), mk_lam(v, body), x, p_alt, v, @k.ring_eq(body, alt))
+    if body.tag == :app && body.a.tag == :app && body.a.a.tag == :const && ty_eq(type_of(body), ty_real)
+      op = body.a.a.op
+      a = body.a.b
+      b = body.b
+      if op == OP_ADD || op == OP_SUB || op == OP_MUL
+        lem_nm = op == OP_ADD ? "continuous_at.add" : (op == OP_SUB ? "continuous_at.sub" : "continuous_at.mul")
+        lem = @session.theorem(lem_nm)
+        if lem != nil
+          pa = cont_prove(goal, hints, extra_rules, v, a, x, depth + 1)
+          if pa != nil
+            pb = cont_prove(goal, hints, extra_rules, v, b, x, depth + 1)
+            if pb != nil
+              return @d.beta_norm_thm(@k.mp(@k.mp(@k.spec(x, @k.spec(mk_lam(v, b), @k.spec(mk_lam(v, a), lem))), pa), pb))
+      elsif op == OP_DIV
+        div_def = @session.theorem("div_def.real")
+        if div_def != nil
+          if !tm_free_in?(v, b)
+            alt = mk_apps(mul_c, [a, mk_apps(div_c, [one_r, b])])
+            p_alt = cont_prove(goal, hints, extra_rules, v, alt, x, depth + 1)
+            if p_alt != nil
+              return cont_congr(mk_lam(v, alt), mk_lam(v, body), x, p_alt, v, @k.spec(b, @k.spec(a, div_def)))
+          else
+            inv_pos_th = @session.theorem("continuous_at.inv_of_pos")
+            if inv_pos_th != nil
+              bx = tm_subst(b, {v.vkey => x})
+              pos_b = field_prove_pos(goal, hints, bx, ty_real, ".real")
+              if pos_b != nil
+                pb = cont_prove(goal, hints, extra_rules, v, b, x, depth + 1)
+                if pb != nil
+                  inv_inst = @d.beta_norm_thm(@k.spec(x, @k.spec(mk_lam(v, b), inv_pos_th)))
+                  inv_prf = @d.beta_norm_thm(@k.mp(@k.mp(inv_inst, pb), pos_b))
+                  if tm_eq(a, one_r)
+                    return inv_prf
+                  mul_th = @session.theorem("continuous_at.mul")
+                  pa = cont_prove(goal, hints, extra_rules, v, a, x, depth + 1)
+                  if mul_th != nil && pa != nil
+                    inv_b = mk_apps(div_c, [one_r, b])
+                    alt = mk_apps(mul_c, [a, inv_b])
+                    p_alt = @d.beta_norm_thm(@k.mp(@k.mp(@k.spec(x, @k.spec(mk_lam(v, inv_b), @k.spec(mk_lam(v, a), mul_th))), pa), inv_prf))
+                    return cont_congr(mk_lam(v, alt), mk_lam(v, body), x, p_alt, v, @k.spec(b, @k.spec(a, div_def)))
+      elsif op == OP_POW && !tm_free_in?(v, b) && ty_eq(type_of(b), TY_NAT_SINGLETON)
+        pow_th = @session.theorem("continuous_at.pow")
+        if pow_th != nil
+          pa = cont_prove(goal, hints, extra_rules, v, a, x, depth + 1)
+          if pa != nil
+            return @d.beta_norm_thm(@k.mp(@k.spec(x, @k.spec(b, @k.spec(mk_lam(v, a), pow_th))), pa))
+    sp = strip_app(body)
+    if sp[0].tag == :const
+      if sp[0].op == OP_ABS && sp[1].size == 1 && ty_eq(type_of(sp[1][0]), ty_real)
+        abs_th = @session.theorem("continuous_at.abs")
+        if abs_th != nil
+          pa = cont_prove(goal, hints, extra_rules, v, sp[1][0], x, depth + 1)
+          if pa != nil
+            return @d.beta_norm_thm(@k.mp(@k.spec(x, @k.spec(mk_lam(v, sp[1][0]), abs_th)), pa))
+      elsif (sp[0].name == "min" || sp[0].name == "max") && sp[1].size == 2 && ty_eq(type_of(body), ty_real)
+        mm_th = @session.theorem("continuous_at." + sp[0].name)
+        if mm_th != nil
+          pa = cont_prove(goal, hints, extra_rules, v, sp[1][0], x, depth + 1)
+          if pa != nil
+            pb = cont_prove(goal, hints, extra_rules, v, sp[1][1], x, depth + 1)
+            if pb != nil
+              return @d.beta_norm_thm(@k.mp(@k.mp(@k.spec(x, @k.spec(mk_lam(v, sp[1][1]), @k.spec(mk_lam(v, sp[1][0]), mm_th))), pa), pb))
+      elsif sp[0].name == "sum_below" && sp[1].size == 2 && !tm_free_in?(v, sp[1][0]) && sp[1][1].tag == :lam && ty_eq(type_of(body), ty_real)
+        sb_th = @session.theorem("continuous_at.sum_below")
+        if sb_th != nil
+          n_tm = sp[1][0]
+          i_lp = dest_lam_fresh(sp[1][1], goal.all_terms + [v, body, x, n_tm])
+          i_var = i_lp[0]
+          body_i = i_lp[1]
+          lt_nat = @k.mk_const("<", ty_funs([TY_NAT_SINGLETON, TY_NAT_SINGLETON], TY_BOOL_SINGLETON))
+          i_lt_n = mk_apps(lt_nat, [i_var, n_tm])
+          sub_goal = goal.add_fix(i_var.name, i_var).add_hyp(fresh_hyp_name(goal), i_lt_n)
+          pi_prf = cont_prove(sub_goal, hints, extra_rules, v, body_i, x, depth + 1)
+          if pi_prf != nil
+            f_2 = mk_lam(i_var, mk_lam(v, body_i))
+            b_conv = @d.beta_norm_conv(mk_app(f_2, i_var))
+            ca_c = @k.mk_const("continuous_at", ty_funs([ty_fun(ty_real, ty_real), ty_real], TY_BOOL_SINGLETON))
+            pi_adj = @k.eq_mp(@k.sym(@d.ap_thm(@d.ap_term(ca_c, b_conv), x)), pi_prf)
+            all_i = @k.gen(i_var, @k.disch(i_lt_n, pi_adj))
+            raw_sb = @d.beta_norm_thm(@k.mp(@k.spec(x, @k.spec(n_tm, @k.spec(f_2, sb_th))), all_i))
+            sb_fn = strip_app(raw_sb.concl)[1][0]
+            if tm_eq(sb_fn, mk_lam(v, body))
+              return raw_sb
+            return cont_congr(sb_fn, mk_lam(v, body), x, raw_sb, v, @k.refl(body))
+      elsif sp[0].name == "exp" && sp[1].size == 1
+        exp_comp_th = @session.theorem("continuous_at.exp_comp")
+        if exp_comp_th != nil
+          pa = cont_prove(goal, hints, extra_rules, v, sp[1][0], x, depth + 1)
+          if pa != nil
+            return @d.beta_norm_thm(@k.mp(@k.spec(x, @k.spec(mk_lam(v, sp[1][0]), exp_comp_th)), pa))
+      elsif (sp[0].name == "sin" || sp[0].name == "cos") && sp[1].size == 1
+        comp_th = @session.theorem("continuous_at.comp")
+        sc_th = @session.theorem("continuous_at." + sp[0].name)
+        if comp_th != nil && sc_th != nil
+          arg_x = tm_subst(sp[1][0], {v.vkey => x})
+          pa = cont_prove(goal, hints, extra_rules, v, sp[1][0], x, depth + 1)
+          if pa != nil
+            comp_inst = @d.beta_norm_thm(@k.spec(x, @k.spec(mk_lam(v, sp[1][0]), @k.spec(sp[0], comp_th))))
+            return @d.beta_norm_thm(@k.mp(@k.mp(comp_inst, @k.spec(arg_x, sc_th)), pa))
+      elsif sp[0].name == "log" && sp[1].size == 1
+        comp_th = @session.theorem("continuous_at.comp")
+        log_th = @session.theorem("continuous_at.log")
+        if comp_th != nil && log_th != nil
+          arg_x = tm_subst(sp[1][0], {v.vkey => x})
+          pos_arg = field_prove_pos(goal, hints, arg_x, ty_real, ".real")
+          if pos_arg != nil
+            pa = cont_prove(goal, hints, extra_rules, v, sp[1][0], x, depth + 1)
+            if pa != nil
+              comp_inst = @d.beta_norm_thm(@k.spec(x, @k.spec(mk_lam(v, sp[1][0]), @k.spec(sp[0], comp_th))))
+              return @d.beta_norm_thm(@k.mp(@k.mp(comp_inst, @k.mp(@k.spec(arg_x, log_th), pos_arg)), pa))
+    if body.tag == :app && ty_eq(type_of(body.b), ty_real) && !tm_free_in?(v, body.a) && tm_free_in?(v, body.b)
+      comp_th = @session.theorem("continuous_at.comp")
+      if comp_th != nil
+        arg_x = tm_subst(body.b, {v.vkey => x})
+        prf_f = cont_prove_fn(goal, hints, extra_rules, body.a, arg_x, depth + 1)
+        if prf_f != nil
+          prf_arg = cont_prove(goal, hints, extra_rules, v, body.b, x, depth + 1)
+          if prf_arg != nil
+            comp_inst = @d.beta_norm_thm(@k.spec(x, @k.spec(mk_lam(v, body.b), @k.spec(body.a, comp_th))))
+            return @d.beta_norm_thm(@k.mp(@k.mp(comp_inst, prf_f), prf_arg))
+    # Fallback 1: simplify body with @session [simp] + explicit extra_rules
+    s1 = Simp.new(@d, extra_rules, @session.simp_by_head, @session.simp_general)
+    s1.hyp_rules = hyp_thms(goal)
+    prover = self
+    s1.discharger = ->(c) prover.try_arith_discharge(goal, c)
+    s1_eq = s1.simp_conv(body, 0)
+    s1_rhs = @d.beta_norm_term(dest_binop(s1_eq.concl, "=")[1])
+    if !tm_eq(body, s1_rhs)
+      ba = @d.beta_norm_conv(dest_binop(s1_eq.concl, "=")[1])
+      p_s1 = cont_prove_norm(goal, hints, extra_rules, v, s1_rhs, x, depth + 1)
+      if p_s1 != nil
+        return cont_congr(mk_lam(v, s1_rhs), mk_lam(v, body), x, p_s1, v, @k.trans(s1_eq, ba))
+    # Fallback 2: unfold local `set` bindings (variables not protected by a continuous_at hypothesis)
+    protected_vars = {}
+    goal.hyps.each -> (h)
+      if tm_contains_const_name?(h[1], "continuous_at") || tm_contains_const_name?(h[1], "continuous_within_at")
+        tm_frees(h[1]).each -> (fv)
+          protected_vars[fv.vkey] = true
+    set_rules = [] + extra_rules
+    goal.hyps.each -> (h)
+      eq_sides = dest_binop(h[1], "=")
+      if eq_sides != nil && eq_sides[0].tag == :var && !protected_vars.has_key?(eq_sides[0].vkey) && !tm_free_in?(eq_sides[0], eq_sides[1])
+        set_rules.push(make_rule(@d, @k.assume(h[1]), h[0]))
+    if set_rules.size > extra_rules.size
+      s2 = Simp.new(@d, set_rules, @session.simp_by_head, @session.simp_general)
+      s2.hyp_rules = hyp_thms(goal)
+      s2.discharger = ->(c) prover.try_arith_discharge(goal, c)
+      s2_eq = s2.simp_conv(body, 0)
+      s2_rhs = @d.beta_norm_term(dest_binop(s2_eq.concl, "=")[1])
+      if !tm_eq(body, s2_rhs)
+        ba2 = @d.beta_norm_conv(dest_binop(s2_eq.concl, "=")[1])
+        p_s2 = cont_prove_norm(goal, hints, extra_rules, v, s2_rhs, x, depth + 1)
+        if p_s2 != nil
+          return cont_congr(mk_lam(v, s2_rhs), mk_lam(v, body), x, p_s2, v, @k.trans(s2_eq, ba2))
+    # Fallback 3: unfold head non-primitive definition once (e.g. rpow)
+    if sp[0].tag == :const && @session.k.defs.has_key?(sp[0].name)
+      hd_nm = sp[0].name
+      def_rules = [make_rule(@d, @session.k.defs[hd_nm], hd_nm, false)] + extra_rules
+      @session.eqns_of(hd_nm).each -> (eqth)
+        def_rules.push(named_equation(eqth, hd_nm))
+      s3 = Simp.new(@d, def_rules, @session.simp_by_head, @session.simp_general)
+      s3.hyp_rules = hyp_thms(goal)
+      s3.discharger = ->(c) prover.try_arith_discharge(goal, c)
+      s3_eq = s3.simp_conv(body, 0)
+      s3_rhs = @d.beta_norm_term(dest_binop(s3_eq.concl, "=")[1])
+      if !tm_eq(body, s3_rhs)
+        ba3 = @d.beta_norm_conv(dest_binop(s3_eq.concl, "=")[1])
+        p_s3 = cont_prove_norm(goal, hints, extra_rules, v, s3_rhs, x, depth + 1)
+        if p_s3 != nil
+          return cont_congr(mk_lam(v, s3_rhs), mk_lam(v, body), x, p_s3, v, @k.trans(s3_eq, ba3))
+    nil
+
+  -> tm_contains_const_name?(t, nm)
+    if t.tag == :const
+      return t.name == nm
+    if t.tag == :app
+      return tm_contains_const_name?(t.a, nm) || tm_contains_const_name?(t.b, nm)
+    t.tag == :lam && tm_contains_const_name?(t.b, nm)
+
+  -> cont_solve_goal(goal, hints, extra_rules, depth)
+    if depth > 16
+      return nil
+    bc = @d.beta_norm_conv(goal.concl)
+    ct = dest_binop(bc.concl, "=")[1]
+    q = dest_unop(ct, "∀")
+    if q != nil && q.tag == :lam
+      vp = dest_lam_fresh(q, goal.all_terms + [ct])
+      sub = cont_solve_goal(goal.add_fix(vp[0].name, vp[0]).with_concl(vp[1]), hints, extra_rules, depth + 1)
+      return sub == nil ? nil : @k.eq_mp(@k.sym(bc), @k.gen(vp[0], sub))
+    imp = dest_binop(ct, "⇒")
+    if imp != nil
+      sub = cont_solve_goal(goal.add_hyp(fresh_hyp_name(goal), imp[0]).with_concl(imp[1]), hints, extra_rules, depth + 1)
+      return sub == nil ? nil : @k.eq_mp(@k.sym(bc), @k.disch(imp[0], sub))
+    cj = dest_binop(ct, "∧")
+    if cj != nil
+      p1 = cont_solve_goal(goal.with_concl(cj[0]), hints, extra_rules, depth + 1)
+      if p1 == nil
+        return nil
+      p2 = cont_solve_goal(goal.with_concl(cj[1]), hints, extra_rules, depth + 1)
+      if p2 == nil
+        return nil
+      return @k.eq_mp(@k.sym(bc), @k.conj(p1, p2))
+    sp = strip_app(ct)
+    if sp[0].tag == :const && sp[0].name == "continuous_within_at" && sp[1].size == 3
+      within_th = @session.theorem("continuous_at.within")
+      if within_th == nil
+        return nil
+      ca_c = @k.mk_const("continuous_at", ty_funs([ty_fun(ty_real, ty_real), ty_real], TY_BOOL_SINGLETON))
+      ca_prf = cont_solve_goal(goal.with_concl(mk_apps(ca_c, [sp[1][0], sp[1][2]])), hints, extra_rules, depth + 1)
+      if ca_prf == nil
+        return nil
+      return @k.eq_mp(@k.sym(bc), @k.mp(@k.spec(sp[1][2], @k.spec(sp[1][1], @k.spec(sp[1][0], within_th))), ca_prf))
+    if sp[0].tag == :const && sp[0].name == "continuous_at" && sp[1].size == 2 && ty_eq(type_of(sp[1][1]), ty_real)
+      res = cont_prove_fn(goal, hints, extra_rules, sp[1][0], sp[1][1], 0)
+      return res == nil ? nil : @k.eq_mp(@k.sym(bc), res)
+    nil
+
+  -> tac_continuity(g, args)
+    hints = []
+    extra_rules = []
+    if args.size > 0
+      if args.size < 2 || args[0].text != "\[" || args[args.size - 1].text != "]"
+        fail("continuity: expected optional [h1, h2, ...] hints")
+      inner = arr_sub(args, 1, args.size - 2)
+      if inner.size > 0
+        split_top(inner, ",").each -> (item)
+          if item.size == 1 && @session.k.defs.has_key?(item[0].text)
+            nm = item[0].text
+            extra_rules.push(make_rule(@d, @session.k.defs[nm], nm, false))
+            @session.eqns_of(nm).each -> (eqth)
+              extra_rules.push(named_equation(eqth, nm))
+            if @session.theorem(nm) != nil
+              hints.push(@session.theorem(nm))
+          else
+            th = proof_expr(g.goal, item)
+            hints.push(th)
+            if dest_binop(th.concl, "=") != nil
+              extra_rules.push(make_rule(@d, th, "hint"))
+    prf = cont_solve_goal(g.goal, hints, extra_rules, 0)
+    if prf == nil
+      fail("continuity failed")
+    close(g, fit_concl(prf, g.goal.concl))
 
   # Lift a polynomial identity through matching applications and binders.
   # A fresh variable opens both functions; eta also admits an unapplied side.
@@ -2912,18 +4213,62 @@
 
   -> linarith_proof(goal, extra)
     c = goal.concl
+    if @omega_mode
+      pq = dest_binop(c, "∨")
+      if pq != nil
+        begin
+          neg_l = @k.neg_tm(pq[0])
+          rhs_th = linarith_proof(Goal.new(goal.fixes, goal.hyps + [["_not_or_l", neg_l]], pq[1]), extra)
+          em = @k.excluded_middle(pq[0])
+          return @k.disj_cases(em, @k.disj1(@k.assume(pq[0]), pq[1]), @k.disj2(pq[0], rhs_th))
+        rescue _e
+          0
     e = dest_binop(c, "=")
     if e != nil && numeric_type?(type_of(e[0]))
       # prove ≤ both ways then antisymmetry
-      ty = type_of(e[0])
-      le = @k.mk_const("≤", ty_funs([ty, ty], ty_bool))
-      a = mk_apps(le, [e[0], e[1]])
-      b = mk_apps(le, [e[1], e[0]])
-      t1 = arith_prove(goal.with_concl(a), extra)
-      t2 = arith_prove(goal.with_concl(b), extra)
-      anti = @session.lemma_at("le_antisymm", ty)
-      return @k.mp(@k.mp(@k.spec(e[1], @k.spec(e[0], anti)), t1), t2)
-    arith_prove(goal, extra)
+      begin
+        ty = type_of(e[0])
+        le = @k.mk_const("≤", ty_funs([ty, ty], ty_bool))
+        a = mk_apps(le, [e[0], e[1]])
+        b = mk_apps(le, [e[1], e[0]])
+        t1 = arith_prove(goal.with_concl(a), extra)
+        t2 = arith_prove(goal.with_concl(b), extra)
+        anti = @session.lemma_at("le_antisymm", ty)
+        return @k.mp(@k.mp(@k.spec(e[1], @k.spec(e[0], anti)), t1), t2)
+      rescue eq_err
+        if @omega_mode
+          res_th = omega_residue_fallback(goal, extra)
+          if res_th != nil
+            return res_th
+        raise eq_err
+    begin
+      arith_prove(goal, extra)
+    rescue ord_err
+      if @omega_mode
+        res_th = omega_residue_fallback(goal, extra)
+        if res_th != nil
+          return res_th
+      raise ord_err
+
+  -> omega_residue_fallback(goal, extra)
+    begin
+      facts = []
+      goal.hyps.each -> (h)
+        facts.push(@k.assume(h[1]))
+      extra.each -> (th)
+        facts.push(th)
+      target = literal_residue(goal.concl)
+      r = auto_residue_facts(goal.concl, target, facts)
+      if r != nil
+        return r
+      if goal.concl.op != OP_FALSE
+        neg_g = @k.neg_tm(goal.concl)
+        bot = auto_residue_facts(@k.false_tm, nil, facts + [@k.assume(neg_g)])
+        if bot != nil
+          return classical_by_contra(goal.concl, bot)
+    rescue _e
+      0
+    nil
 
   -> numeric_type?(ty)
     ty.tag == :c && ["nat", "int", "rat", "real"].include?(ty.name)
@@ -2954,7 +4299,17 @@
         if numeric_disequality?(h[1]) || dest_binop(h[1], "∧") != nil
           collect_disequalities(@k.assume(h[1]), facts)
       extra.each -> (th) collect_disequalities(th, facts)
+      goal_vars = {}
+      tm_frees(goal.concl).each -> (v)
+        goal_vars[var_key(v)] = true
+      rel_facts = []
+      other_facts = []
       facts.each -> (th)
+        if tm_frees(th.concl).any?(-> (v) goal_vars.has_key?(var_key(v)))
+          rel_facts.push(th)
+        else
+          other_facts.push(th)
+      (rel_facts + other_facts).each -> (th)
         key = tm_key(th.concl)
         if !@split_ne.include?(key)
           sides = @k.dest_eq(th.concl.b)
@@ -2963,17 +4318,56 @@
             disj = @k.mp(@k.spec(sides[1], @k.spec(sides[0], lem)), th)
             pq = dest_binop(disj.concl, "∨")
             @split_ne.push(key)
+            ok_ne = false
+            left = nil
+            right = nil
             begin
               left = arith_prove(goal.add_hyp("_lt", pq[0]), extra)
               right = arith_prove(goal.add_hyp("_gt", pq[1]), extra)
+              ok_ne = true
+            rescue _ne_err
+              ok_ne = false
             ensure
               @split_ne.pop
-            if !hyps_has?(left.hyps, pq[0])
-              return left
-            if !hyps_has?(right.hyps, pq[1])
-              return right
-            return @k.disj_cases(disj, left, right)
+            if ok_ne
+              if !hyps_has?(left.hyps, pq[0])
+                return left
+              if !hyps_has?(right.hyps, pq[1])
+                return right
+              return @k.disj_cases(disj, left, right)
+      if @omega_mode
+        or_facts = []
+        goal.hyps.each -> (h)
+          collect_disjunctions(@k.assume(h[1]), or_facts)
+        extra.each -> (th)
+          collect_disjunctions(th, or_facts)
+        or_facts.each -> (dth)
+          key = "or:" + tm_key(dth.concl)
+          if !@split_ne.include?(key)
+            pq = dest_binop(dth.concl, "∨")
+            @split_ne.push(key)
+            ok_or = false
+            left = nil
+            right = nil
+            begin
+              left = linarith_proof(goal.add_hyp("_or_l", pq[0]), extra)
+              right = linarith_proof(goal.add_hyp("_or_r", pq[1]), extra)
+              ok_or = true
+            rescue _or_err
+              ok_or = false
+            ensure
+              @split_ne.pop
+            if ok_or
+              return @k.disj_cases(dth, left, right)
       raise failure
+
+  -> collect_disjunctions(th, out)
+    if dest_binop(th.concl, "∨") != nil
+      out.push(th)
+    elsif dest_binop(th.concl, "∧") != nil
+      collect_disjunctions(@k.conj1(th), out)
+      collect_disjunctions(@k.conj2(th), out)
+    0
 
   -> collect_disequalities(th, out)
     if numeric_disequality?(th.concl)
@@ -2991,9 +4385,15 @@
 
   -> arith_prove_order(goal, extra)
     c = goal.concl
-    # omega: split a truncated ℕ subtraction a - b into b ≤ a (a - b + b = a) and a ≤ b (a - b = 0), at most 3 deep
-    if @omega_mode && @split_sub.size < 3
-      s = find_nat_sub(goal, extra)
+    # omega: split nonlinearities (ℕ sub, ℤ abs, ite/min/max), prioritizing goal.concl before hypotheses, at most 5 deep
+    if @omega_mode && @split_sub.size < 5
+      s = nat_sub_in(c)
+      ab = s == nil ? int_abs_in(c) : nil
+      it = (s == nil && ab == nil) ? omega_ite_in(c) : nil
+      if s == nil && ab == nil && it == nil
+        s = find_nat_sub(goal, extra)
+        ab = s == nil ? find_int_abs(goal, extra) : nil
+        it = (s == nil && ab == nil) ? find_omega_ite(goal, extra) : nil
       if s != nil
         d = dest_binop(s, "-")
         tot = @session.lemma_at("le_total", ty_nat)
@@ -3013,15 +4413,136 @@
             raise e
           @split_sub.pop
           return @k.disj_cases(disj, t1, t2)
+      if ab != nil
+        x = ab.b
+        aon = @session.lemma_at("abs_of_nonneg", ty_int)
+        aog = @session.lemma_at("abs_of_neg", ty_int)
+        nle = @session.lemma_at("not_le", ty_int)
+        if aon != nil && aog != nil && nle != nil
+          @split_sub.push(tm_key(ab))
+          le_tm = mk_apps(@k.mk_const("≤", ty_funs([ty_int, ty_int], ty_bool)), [mk_lit(0, ty_int), x])
+          nle_tm = @k.neg_tm(le_tm)
+          f1 = @k.mp(@k.spec(x, aon), @k.assume(le_tm))
+          hlt = @k.mp(@k.spec(x, @k.spec(mk_lit(0, ty_int), nle)), @k.assume(nle_tm))
+          f2 = @k.mp(@k.spec(x, aog), hlt)
+          begin
+            t1 = arith_prove(Goal.new(goal.fixes, goal.hyps + [["_abs_nn", le_tm]], c), extra + [f1])
+            t2 = arith_prove(Goal.new(goal.fixes, goal.hyps + [["_abs_neg", nle_tm]], c), extra + [f2])
+          ensure
+            @split_sub.pop
+          return @k.disj_cases(@k.excluded_middle(le_tm), t1, t2)
+      if it != nil
+        ip = @session.theorem("if_pos")
+        ineg = @session.theorem("if_neg")
+        if ip != nil && ineg != nil
+          @split_sub.push(tm_key(it[0]))
+          cond_tm = it[1]
+          ncond_tm = @k.neg_tm(cond_tm)
+          ty_i = type_of(it[0])
+          ip_i = @k.inst_type(ip, {tm_tyvars(ip.concl)[0] => ty_i})
+          in_i = @k.inst_type(ineg, {tm_tyvars(ineg.concl)[0] => ty_i})
+          f1 = @k.mp(@k.spec(it[3], @k.spec(it[2], @k.spec(cond_tm, ip_i))), @k.assume(cond_tm))
+          f2 = @k.mp(@k.spec(it[3], @k.spec(it[2], @k.spec(cond_tm, in_i))), @k.assume(ncond_tm))
+          if it[4] != nil
+            f1 = @k.trans(it[4], f1)
+            f2 = @k.trans(it[4], f2)
+          begin
+            t1 = arith_prove(Goal.new(goal.fixes, goal.hyps + [["_ite_t", cond_tm]], c), extra + [f1])
+            t2 = arith_prove(Goal.new(goal.fixes, goal.hyps + [["_ite_f", ncond_tm]], c), extra + [f2])
+          ensure
+            @split_sub.pop
+          return @k.disj_cases(@k.excluded_middle(cond_tm), t1, t2)
     arith_prove_core(goal, extra + divmod_facts(goal, extra))
+
+  -> prioritize_goal_terms(goal, extra)
+    gvars = {}
+    tm_frees(goal.concl).each -> (v)
+      gvars[var_key(v)] = true
+    if gvars.size == 0
+      ts = [goal.concl]
+      goal.hyps.each -> (h) ts.push(h[1])
+      extra.each -> (t) ts.push(t.concl)
+      return ts
+    rel = [goal.concl]
+    other = []
+    hi = goal.hyps.size - 1
+    while hi >= 0
+      h = goal.hyps[hi]
+      if tm_frees(h[1]).any?(-> (v) gvars.has_key?(var_key(v)))
+        rel.push(h[1])
+      else
+        other.push(h[1])
+      hi -= 1
+    ei = extra.size - 1
+    while ei >= 0
+      t = extra[ei]
+      if tm_frees(t.concl).any?(-> (v) gvars.has_key?(var_key(v)))
+        rel.push(t.concl)
+      else
+        other.push(t.concl)
+      ei -= 1
+    rel + other
+
+  -> find_int_abs(goal, extra)
+    ts = prioritize_goal_terms(goal, extra)
+    found = nil
+    ts.each -> (t)
+      if found == nil
+        found = int_abs_in(t)
+    found
+
+  -> int_abs_in(t)
+    if t.tag != :app
+      return nil
+    if t.a.tag == :const && t.a.op == OP_ABS && ty_eq(type_of(t), ty_int) && !@split_sub.include?(tm_key(t))
+      return t
+    r = int_abs_in(t.a)
+    r != nil ? r : int_abs_in(t.b)
+
+  -> find_omega_ite(goal, extra)
+    ts = prioritize_goal_terms(goal, extra)
+    found = nil
+    ts.each -> (t)
+      if found == nil
+        found = omega_ite_in(t)
+    found
+
+  -> omega_ite_in(t)
+    if t.tag != :app
+      return nil
+    sp = strip_app(t)
+    h = sp[0]
+    ty = type_of(t)
+    if h.tag == :const && numeric_type?(ty) && !@split_sub.include?(tm_key(t))
+      if h.name == "ite" && sp[1].size == 3
+        return [t, sp[1][0], sp[1][1], sp[1][2], nil]
+      if (h.name == "min" || h.name == "max") && sp[1].size == 2 && @k.defs.has_key?(h.name)
+        conv = nil
+        u0 = Simp.new(@d, [make_rule(@d, @k.defs[h.name], h.name)]).rewrite_top(h, 0)
+        if u0 != nil
+          u1 = @d.ap_thm(u0, sp[1][0])
+          r1 = dest_binop(u1.concl, "=")[1]
+          if r1.tag == :app && r1.a.tag == :lam
+            u1 = @k.trans(u1, @k.beta(r1))
+          u2 = @d.ap_thm(u1, sp[1][1])
+          r2 = dest_binop(u2.concl, "=")[1]
+          if r2.tag == :app && r2.a.tag == :lam
+            conv = @k.trans(u2, @k.beta(r2))
+        if conv == nil
+          conv = @d.compute_conv(t)
+        rhs = dest_binop(conv.concl, "=")[1]
+        rsp = strip_app(rhs)
+        if rsp[0].tag == :const && rsp[0].name == "ite" && rsp[1].size == 3
+          return [t, rsp[1][0], rsp[1][1], rsp[1][2], conv]
+    r = nil
+    sp[1].each -> (a)
+      if r == nil
+        r = omega_ite_in(a)
+    r
 
   # the first ℕ subtraction a - b in the goal, hypotheses or extra facts that is not already being split
   -> find_nat_sub(goal, extra)
-    ts = [goal.concl]
-    goal.hyps.each -> (h)
-      ts.push(h[1])
-    extra.each -> (t)
-      ts.push(t.concl)
+    ts = prioritize_goal_terms(goal, extra)
     found = nil
     ts.each -> (t)
       if found == nil
@@ -3373,6 +4894,12 @@
     successor = @session.lemma_at("succ_eq_add_one", ty_nat)
     if successor != nil
       rules.push(make_rule(@d, successor, "succ_eq_add_one.nat"))
+    if @omega_mode
+      [ty_nat, ty_int, ty_rat, ty_real].each -> (nty)
+        ["mul_one", "one_mul", "mul_zero", "zero_mul", "add_zero", "zero_add"].each -> ( stem )
+          lem_u = @session.lemma_at(stem, nty)
+          if lem_u != nil && lem_u.tags.size == 0
+            rules.push(make_rule(@d, lem_u, stem + "." + nty.name))
     # Fold closed numeric subterms (1 / 2 ^ 4 ↦ 1/16) on the same traversal.
     folder = Simp.new(@d, rules)
     folded = []
@@ -3528,6 +5055,18 @@
           out.push(@k.spec(args[0], l))
       elsif h.name == "sqrt" && args.size == 1
         l = @session.theorem("sqrt_nonneg")
+        if l != nil
+          out.push(@k.spec(args[0], l))
+      elsif h.name == "rpow" && args.size == 2
+        l = @session.theorem("rpow.pos")
+        if l != nil
+          out.push(@k.spec(args[1], @k.spec(args[0], l)))
+      elsif h.name == "complex.norm_sq" && args.size == 1
+        l = @session.theorem("complex.norm_sq_nonneg")
+        if l != nil
+          out.push(@k.spec(args[0], l))
+      elsif h.name == "complex.abs" && args.size == 1
+        l = @session.theorem("complex.abs_nonneg")
         if l != nil
           out.push(@k.spec(args[0], l))
       elsif h.op == OP_POW && args.size == 2 && args[1].tag == :lit

@@ -161,6 +161,16 @@ theorem eq_comm (a b : α) : a = b ↔ b = a
     exfalso
     exact h
 
+-- polymorphic conditional (`if p then a else b`) lemmas
+theorem if_pos (h : p) : (if p then a else b) = a := by simp [h]
+
+theorem if_neg (h : ¬ p) : (if p then a else b) = b := by simp [h]
+
+@[simp] theorem ite_self (p : Prop) (a : α) : (if p then a else a) = a
+  by_cases h : p
+  · simp [h]
+  · simp [h]
+
 -- pairs (α × β is written as a tuple type; (a, b) builds a pair)
 inductive prod (α β) | pair (a : α) (b : β)
 

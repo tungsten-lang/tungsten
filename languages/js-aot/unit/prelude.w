@@ -204,3 +204,94 @@ fn jsu_gcell_fast(cb) (i64) i64
     e = wvalue_from_bits(jsr_ivar(jsr_ivar(fb, 2), 8))
     return ccall("w_closure_call_8", e, f, this, argc, a0, a1, a2, a3, more) if e != 0
   jsu_c8(ctx, 11, f, this, argc, a0, a1, a2, a3, more)
+
+-> jsu_div(ctx, a, b)
+  ab = wvalue_bits(a) ## i64
+  bb = wvalue_bits(b) ## i64
+  return wvalue_from_bits(jsr_fdiv(ab, bb)) if jsr_nn(ab, bb) != 0
+  jsu_c2(ctx, 22, a, b)
+
+-> jsu_mod(ctx, a, b)
+  ab = wvalue_bits(a) ## i64
+  bb = wvalue_bits(b) ## i64
+  return wvalue_from_bits(jsr_fmod(ab, bb)) if jsr_nn(ab, bb) != 0
+  jsu_c2(ctx, 23, a, b)
+
+# Int32 lanes (runtime/ops.w): both operands Numbers that are already int32 values.
+-> jsu_bitor(ctx, a, b)
+  ab = wvalue_bits(a) ## i64
+  bb = wvalue_bits(b) ## i64
+  if jsr_nn(ab, bb) != 0
+    x = jsr_i32(ab)
+    y = jsr_i32(bb)
+    return wvalue_from_bits(jsr_box_int(x | y)) if x != 1099511627776 && y != 1099511627776
+  jsu_c2(ctx, 16, a, b)
+
+-> jsu_bitand(ctx, a, b)
+  ab = wvalue_bits(a) ## i64
+  bb = wvalue_bits(b) ## i64
+  if jsr_nn(ab, bb) != 0
+    x = jsr_i32(ab)
+    y = jsr_i32(bb)
+    return wvalue_from_bits(jsr_box_int(x & y)) if x != 1099511627776 && y != 1099511627776
+  jsu_c2(ctx, 17, a, b)
+
+-> jsu_bitxor(ctx, a, b)
+  ab = wvalue_bits(a) ## i64
+  bb = wvalue_bits(b) ## i64
+  if jsr_nn(ab, bb) != 0
+    x = jsr_i32(ab)
+    y = jsr_i32(bb)
+    return wvalue_from_bits(jsr_box_int(x ^ y)) if x != 1099511627776 && y != 1099511627776
+  jsu_c2(ctx, 18, a, b)
+
+-> jsu_shl(ctx, a, b)
+  ab = wvalue_bits(a) ## i64
+  bb = wvalue_bits(b) ## i64
+  if jsr_nn(ab, bb) != 0
+    x = jsr_i32(ab)
+    y = jsr_i32(bb)
+    if x != 1099511627776 && y != 1099511627776
+      r = (x << (y & 31)) & 4294967295
+      r = r - 4294967296 if r >= 2147483648
+      return wvalue_from_bits(jsr_box_int(r))
+  jsu_c2(ctx, 19, a, b)
+
+-> jsu_sar(ctx, a, b)
+  ab = wvalue_bits(a) ## i64
+  bb = wvalue_bits(b) ## i64
+  if jsr_nn(ab, bb) != 0
+    x = jsr_i32(ab)
+    y = jsr_i32(bb)
+    return wvalue_from_bits(jsr_box_int(x >> (y & 31))) if x != 1099511627776 && y != 1099511627776
+  jsu_c2(ctx, 20, a, b)
+
+-> jsu_shr(ctx, a, b)
+  ab = wvalue_bits(a) ## i64
+  bb = wvalue_bits(b) ## i64
+  if jsr_nn(ab, bb) != 0
+    x = jsr_i32(ab)
+    y = jsr_i32(bb)
+    return wvalue_from_bits(jsr_box_int((x & 4294967295) >> (y & 31))) if x != 1099511627776 && y != 1099511627776
+  jsu_c2(ctx, 21, a, b)
+
+# o[key] on a JS array without holes and an in-bounds index (runtime/array.w).
+-> jsu_getv(ctx, o, key)
+  ob = wvalue_bits(o) ## i64
+  if (jsr_aflags(ob) & 3) == 1
+    ix = jsr_index(wvalue_bits(key) ## i64)
+    if ix >= 0
+      r = jsr_aget(ob, ix)
+      return wvalue_from_bits(r) if r != 6
+  jsu_c2(ctx, 13, o, key)
+
+# Environment slots below seven are ivars 1..7 of JS:Env and JS:EnvN (runtime/support.w).
+-> jsu_env_get(ctx, e, i)
+  return wvalue_from_bits(jsr_ivar(wvalue_bits(e) ## i64, i + 1)) if i < 7
+  jsu_c2(ctx, 14, e, i)
+
+-> jsu_env_set(ctx, e, i, v)
+  if i < 7
+    ccall("w_ivar_set_idx", e, i + 1, v)
+    return v
+  jsu_c3(ctx, 15, e, i, v)

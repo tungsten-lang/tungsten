@@ -25,12 +25,12 @@ use ../runtime/unit_id
 JSU_IC_ARG = {"js_getp" => 2, "js_setp" => 3, "js_call_method" => 2, "js_new" => 1}
 
 # Entries every context has at these indices: the slow paths of the prelude's fast forms.
-JSU_FIXED = ["js_add/2", "js_sub/2", "js_mul/2", "js_lt/2", "js_gt/2", "js_le/2", "js_ge/2", "js_seq/2", "js_truthy/1", "js_getp_t/4", "js_setp_t/5", "js_call/8", "js_gget/1"]
+JSU_FIXED = ["js_add/2", "js_sub/2", "js_mul/2", "js_lt/2", "js_gt/2", "js_le/2", "js_ge/2", "js_seq/2", "js_truthy/1", "js_getp_t/4", "js_setp_t/5", "js_call/8", "js_gget/1", "js_getv/2", "js_env_get/2", "js_env_set/3", "js_bitor/2", "js_bitand/2", "js_bitxor/2", "js_shl/2", "js_sar/2", "js_shr/2", "js_div/2", "js_mod/2"]
 
 # Runtime calls that go through the prelude's fast form jsu_<name> (inline lanes for
 # numbers, booleans, cached properties, plain globals, and calls of compiled functions,
 # which go straight to their entries).
-JSU_FAST = {"js_add" => 2, "js_sub" => 2, "js_mul" => 2, "js_lt" => 2, "js_gt" => 2, "js_le" => 2, "js_ge" => 2, "js_seq" => 2, "js_truthy" => 1, "js_call" => 8, "js_gget" => 1}
+JSU_FAST = {"js_add" => 2, "js_sub" => 2, "js_mul" => 2, "js_lt" => 2, "js_gt" => 2, "js_le" => 2, "js_ge" => 2, "js_seq" => 2, "js_truthy" => 1, "js_call" => 8, "js_gget" => 1, "js_getv" => 2, "js_env_get" => 2, "js_env_set" => 3, "js_bitor" => 2, "js_bitand" => 2, "js_bitxor" => 2, "js_shl" => 2, "js_sar" => 2, "js_shr" => 2, "js_div" => 2, "js_mod" => 2}
 
 # Names translated code reads as host values.
 JSU_CONSTS = {"JSR" => true, "JS_HOLE" => true, "JS_NULL" => true, "JS_NO_ARGS" => true, "JS_ITER_DONE" => true}

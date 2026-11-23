@@ -42,6 +42,7 @@ JS_THROW_LOG = [Env.get("JSRUN_THROWS", "") == "1" || Env.get("BLADE_JS_THROWS",
 # The JS value of anything raised: a JS throw, or a runtime error turned into a JS error.
 -> js_error_value(e)
   return e.value if e.is_a?(JS:Throw)
+  ccall("w_eputs", "\[js internal error] " + (e.is_a?(String) ? e : e.message.to_s) + "\n" + js_stack_lines()) if JS_THROW_LOG[0]
   js_make_error("Error", e.is_a?(String) ? e : e.message.to_s)
 
 JS_NAN = [nil]

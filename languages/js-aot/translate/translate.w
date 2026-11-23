@@ -325,7 +325,8 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
       stmts = f.script ? n.list : n.b
       body = body + hoist_functions(stmts, f.body_scope)
       body = body + tr_stmts(stmts, f.body_scope)
-      body.push(emit_return(ta_nil))
+      # a script answers its completion value (eval, a host's script runner)
+      body.push(emit_return(f.script ? ta_var("jscv") : ta_nil))
     emit_function(f, body)
     nil
 
@@ -352,7 +353,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
 
   # Script top level: its var names become properties of the global object.
   -> script_prologue(f)
-    out = []
+    out = [ta_set("jscv", ta_nil)]
     vn = @an.var_names(@an.program.list, [], f.strict, true)
     i = 0
     while i < vn.size
@@ -643,6 +644,16 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
     out
 
   -> tr_stmt(s, sc)
+    k = s.kind
+    if k == :expr_stmt
+      return [ta_set("jscv", tr_expr(s.a, sc))] if @f.script
+      return [tr_void(s.a, sc)]
+    if @f.script && (k == :if || k == :for || k == :while || k == :do_while || k == :try || k == :switch || k == :for_in || k == :for_of)
+      # these complete with undefined when nothing inside produced a value (UpdateEmpty)
+      return [ta_set("jscv", ta_nil)] + tr_stmt_inner(s, sc)
+    tr_stmt_inner(s, sc)
+
+  -> tr_stmt_inner(s, sc)
     k = s.kind
     if k == :expr_stmt
       return [tr_void(s.a, sc)]

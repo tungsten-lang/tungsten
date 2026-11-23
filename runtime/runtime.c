@@ -47484,6 +47484,12 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
     uint8_t *stub_base = code + stub_region;
     size_t stub_n = 0;
     int ok = 1;
+    /* one stub per distinct far target (a big object calls the same runtime function
+     * from thousands of sites): open-addressed target -> stub index */
+    enum { STUB_TAB = 8192 };
+    uint64_t *stub_key = (uint64_t *)calloc(STUB_TAB, sizeof(uint64_t));
+    uint32_t *stub_idx = (uint32_t *)calloc(STUB_TAB, sizeof(uint32_t));
+    if (!stub_key || !stub_idx) { free(stub_key); free(stub_idx); munmap(code, code_pages); munmap(data, data_pages); free(fb); return W_NIL; }
 
     /* loaded address of symbol index `idx`: undefined → host (dlsym), else the
      * split base of its defining section + the symbol's offset within it. */
@@ -47534,12 +47540,22 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
             case ARM64_RELOC_BRANCH26: {
                 int64_t disp = (int64_t)tgt - (int64_t)(uintptr_t)loc;
                 if (disp > (1 << 27) - 1 || disp < -(1 << 27)) {  /* out of BL ±128MB → stub */
-                    if (stub_n >= MAX_STUBS) { ok = 0; break; }
-                    uint8_t *stub = stub_base + stub_n * 16;
-                    stub_n++;
-                    ((uint32_t *)stub)[0] = 0x58000050;   /* ldr x16, [pc, #8] */
-                    ((uint32_t *)stub)[1] = 0xd61f0200;   /* br  x16          */
-                    *(uint64_t *)(stub + 8) = tgt;
+                    uint64_t h = (tgt >> 2) * 0x9E3779B97F4A7C15ull;
+                    size_t slot = (size_t)(h >> 51) & (STUB_TAB - 1);
+                    while (stub_key[slot] != 0 && stub_key[slot] != tgt) slot = (slot + 1) & (STUB_TAB - 1);
+                    uint8_t *stub;
+                    if (stub_key[slot] == tgt) {
+                        stub = stub_base + (size_t)stub_idx[slot] * 16;
+                    } else {
+                        if (stub_n >= MAX_STUBS) { ok = 0; break; }
+                        stub = stub_base + stub_n * 16;
+                        stub_key[slot] = tgt;
+                        stub_idx[slot] = (uint32_t)stub_n;
+                        stub_n++;
+                        ((uint32_t *)stub)[0] = 0x58000050;   /* ldr x16, [pc, #8] */
+                        ((uint32_t *)stub)[1] = 0xd61f0200;   /* br  x16          */
+                        *(uint64_t *)(stub + 8) = tgt;
+                    }
                     disp = (int64_t)(uintptr_t)stub - (int64_t)(uintptr_t)loc;
                 }
                 uint32_t ins = *(uint32_t *)loc;
@@ -47574,6 +47590,8 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
         }
     }
     #undef JIT_RESOLVE
+    free(stub_key);
+    free(stub_idx);
     /* NB: keep `fb` alive — the symbol/string tables scanned below live in it,
      * not in the loaded regions (only section *data* was copied). */
     if (!ok) { munmap(code, code_pages); munmap(data, data_pages); free(fb); return W_NIL; }

@@ -256,12 +256,17 @@ fn jsr_is_notplain(b) (i64) i64
   b == 3 ? 1 : 0
 
 + GlobalObject < JS:Base
-  rw :cells, :order
+  rw :cells, :order, :cls, :internal, :priv_handlers
 
+  # (cls, internal and priv_handlers are the host's, as on host objects: a browser's
+  # global is its Window)
   -> new(@shape)
     @ext = nil
     @cells = {}
     @order = []
+    @cls = "global"
+    @internal = nil
+    @priv_handlers = nil
     jsr_set_kind(wvalue_bits(self) ## i64, KIND_EXOTIC)
 
   -> cell(key)

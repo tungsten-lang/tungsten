@@ -232,10 +232,19 @@ NF_INLINE = 2
     @v5 = nil
     @v6 = nil
 
+# More than seven: the first seven inline like JS:Env (same ivar positions, so a slot
+# below seven reads the same way in both), the rest in @vars (slot 7 is vars[0]).
 + EnvN
-  rw :up, :vars
+  rw :up, :v0, :v1, :v2, :v3, :v4, :v5, :v6, :vars
   -> new(@up, n)
-    @vars = Array.new(n, nil)
+    @v0 = nil
+    @v1 = nil
+    @v2 = nil
+    @v3 = nil
+    @v4 = nil
+    @v5 = nil
+    @v6 = nil
+    @vars = Array.new(n > 7 ? n - 7 : 0, nil)
 
 # A new closure over env for code.
 -> js_closure(code, env)

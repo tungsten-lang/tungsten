@@ -6,10 +6,14 @@ in JS
 # ---- environments (JS:Env: @up then seven variables; JS:EnvN beyond seven) ----
 
 -> js_env_get(e, i)
+  return e.vars[i - 7] if i >= 7
   eb = wvalue_bits(e) ## i64
   wvalue_from_bits(jsr_ivar(eb, i + 1))
 
 -> js_env_set(e, i, v)
+  if i >= 7
+    e.vars[i - 7] = v
+    return v
   ccall("w_ivar_set_idx", e, i + 1, v)
   v
 
@@ -19,11 +23,12 @@ in JS
 
 # A copy of a loop's environment for the next iteration (per-iteration let bindings).
 -> js_env_copy(e)
+  n = nil
   if e.is_a?(JS:EnvN)
     n = JS:EnvN.new(e.up, 0)
     n.vars = e.vars.dup
-    return n
-  n = JS:Env.new(e.up)
+  else
+    n = JS:Env.new(e.up)
   n.v0 = e.v0
   n.v1 = e.v1
   n.v2 = e.v2
@@ -233,11 +238,8 @@ JS_T0 = [clock_ms()]
 
 -> js_report_uncaught(e)
   v = js_error_value(e)
-  if v.is_a?(JS:Base)
-    st = v.get("stack", v)
-    << "Uncaught " + (js_string?(st) ? st : js_to_display(v))
-  else
-    << "Uncaught " + js_to_display(v)
+  # an error prints as toString and its stack (frames only, as JavaScriptCore keeps them)
+  << "Uncaught " + js_inspect(v, 1)
   JS_EXIT[0] = 1
   nil
 

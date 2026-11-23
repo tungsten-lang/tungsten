@@ -556,9 +556,9 @@ js_install(->(r) js_install_object(r))
     e.define("stack", js_error_to_string(e), ATTR_W + ATTR_C)
     return nil
   loc = js_top_location()
-  e.define("line", loc[1].to_f, ATTR_DEFAULT)
-  e.define("column", loc[2].to_f, ATTR_DEFAULT)
-  e.define("sourceURL", loc[0], ATTR_DEFAULT) if loc[0] != ""
+  e.define("line", loc[1].to_f, ATTR_W + ATTR_C)
+  e.define("column", loc[2].to_f, ATTR_W + ATTR_C)
+  e.define("sourceURL", loc[0], ATTR_W + ATTR_C) if loc[0] != ""
   e.define("stack", js_stack_lines(), ATTR_W + ATTR_C)
   nil
 

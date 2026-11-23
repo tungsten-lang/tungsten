@@ -238,6 +238,11 @@ JS_NAN = [nil]
   if js_callable?(v)
     n = js_get_value(v, "name")
     return "\[Function: " + (n == nil || n == "" ? "(anonymous)" : js_to_string(n)) + "]"
+  if v.is_a?(JS:Special) && v.cls == "Error"
+    # an error shows as its toString and stack, as consoles print one
+    st = v.get_own("stack")
+    t = js_error_to_string(v)
+    return js_string?(st) && st.size > 0 && st != t ? t + "\n" + st : t
   return "\[Object]" if depth <= 0
   parts = []
   v.own_keys.each ->(k)

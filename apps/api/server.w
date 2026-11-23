@@ -12,12 +12,12 @@
 #
 # Request body is either the bare source (Content-Type: text/plain) or JSON
 # {"source": "..."}. Response is always application/json — see
-# services/api/lib/exec.w, which owns compilation, timeouts, output caps,
+# apps/api/lib/exec.w, which owns compilation, timeouts, output caps,
 # diagnostic parsing, and outcome classification. This file is only the HTTP
 # surface, and it calls the engine in-process.
 #
 # Build and run (from the repo root):
-#   bin/tungsten -o /tmp/tungsten_api services/api/server.w
+#   bin/tungsten -o /tmp/tungsten_api apps/api/server.w
 #   /tmp/tungsten_api 18099
 #
 #   curl -sS --data-binary '<< 1 + 1' http://127.0.0.1:18099/api/run
@@ -67,7 +67,7 @@ MAX_SOURCE_BYTES = 262144
     return nil
   raw
 
-# Shared path for both modes. The engine runs IN-PROCESS (services/api/lib/exec.w)
+# Shared path for both modes. The engine runs IN-PROCESS (apps/api/lib/exec.w)
 # and returns the response document as a Hash, so there is no second interpreter
 # to shell out to and no JSON round-trip between layers. The program text never
 # reaches a shell: the engine writes it to a file and passes only that path.

@@ -26,7 +26,7 @@ scratch spec does not change the suite.
 - `numeric/` - numeric tower and floating-point behavior specs.
 - `repl/` - PTY/system specs for the compiled REPL.
 - `api/` - response-shape contract for the `/api/run` + `/api/check` execution
-  engine (`services/api/lib/exec.w`). Opt-in via `RUN_API_SPECS=1`.
+  engine (`apps/api/lib/exec.w`). Opt-in via `RUN_API_SPECS=1`.
 - `fixtures/` - sample programs and legacy expression fixtures. These are not
   discovered as runnable specs.
 

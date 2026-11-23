@@ -1,5 +1,5 @@
 # Contract spec for the /api/run and /api/check execution engine
-# (services/api/lib/exec.w).
+# (apps/api/lib/exec.w).
 #
 # Agents consume these fields directly, so the shape is a contract: stdout and
 # stderr must stay separate, and outcome/raised/exception must classify how a
@@ -11,7 +11,7 @@
 # Run: `RUN_API_SPECS=1 make specs`, or directly:
 #   bin/tungsten -o /tmp/api_spec spec/api/api_exec_spec.w && /tmp/api_spec
 
-use ../../services/api/lib/exec
+use ../../apps/api/lib/exec
 
 failures = 0 ## i64
 
@@ -33,7 +33,7 @@ check("clean.no_diagnostics", r[:diagnostics].size() == 0)
 check("clean.compiled", r[:compiled] == true)
 
 # --- stdout and stderr stay on separate channels -----------------------------
-r = ApiExec.run("<< \"to stdout\"\neprint(\"to stderr\\n\")\n")
+r = ApiExec.run("<< \"to stdout\"\nccall(\"w_eputs\", \"to stderr\")\n")
 check("streams.stdout_only", r[:stdout] == "to stdout\n")
 check("streams.stderr_only", r[:stderr].strip == "to stderr")
 check("streams.outcome_ok", r[:outcome] == "ok")

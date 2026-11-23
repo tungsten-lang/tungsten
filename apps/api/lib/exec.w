@@ -20,7 +20,7 @@
 #
 # This bounds CPU time and output size, and the sandbox bounds reach. It is NOT
 # a complete jail: ccall can call any linked symbol, and nothing here caps
-# memory or stops a fork bomb. See services/api/README.md.
+# memory or stops a fork bomb. See apps/api/README.md.
 #
 # Compiled programs only: Process and File externs are not in the interpreter's
 # ccall whitelist.
@@ -116,7 +116,7 @@
 
   # A capture file is absent when the child produced nothing on that stream.
   -> .slurp(path)
-    text = File.read(path)
+    text = read_file(path)
     return "" if text == nil
     text
 
@@ -294,7 +294,7 @@
   # The sandbox writes one JSON object per gated attempt.
   -> .read_sandbox_log(path)
     entries = []
-    text = File.read(path)
+    text = read_file(path)
     return entries if text == nil || text == ""
     text.split("\n").each -> (line)
       trimmed = line.strip

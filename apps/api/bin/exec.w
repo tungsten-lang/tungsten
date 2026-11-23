@@ -3,7 +3,7 @@
 # The same engine the HTTP service uses, exposed for scripting and for the
 # contract spec (spec/api/api_exec_spec.w).
 #
-#   bin/tungsten -o /tmp/api_exec services/api/bin/exec.w
+#   bin/tungsten -o /tmp/api_exec apps/api/bin/exec.w
 #   /tmp/api_exec check program.w
 #   /tmp/api_exec run   program.w
 #
@@ -13,17 +13,17 @@ use ../lib/exec
 
 args = argv()
 if args.size < 2
-  eprint("usage: exec {check|run} SOURCE.w\n")
+  ccall("w_eputs", "usage: exec {check|run} SOURCE.w")
   exit 2
 
 mode = args[0]
 path = args[1]
 
 unless mode == "check" || mode == "run"
-  eprint("usage: exec {check|run} SOURCE.w\n")
+  ccall("w_eputs", "usage: exec {check|run} SOURCE.w")
   exit 2
 
-source = File.read(path)
+source = read_file(path)
 if source == nil
   << JSON.encode({ok: false, error: "cannot read source", diagnostics: []})
   exit 1

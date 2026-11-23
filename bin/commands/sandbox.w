@@ -7,7 +7,7 @@
 #
 #   {"sandbox":"block","op":"read_file","detail":"/etc/passwd"}
 #
-# See core/sandbox.w for the op list, and services/api/ for the HTTP service
+# See core/sandbox.w for the op list, and apps/api/ for the HTTP service
 # built on the same gate.
 #
 # The child inherits this process's environment, so the gate is latched with

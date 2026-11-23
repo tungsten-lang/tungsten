@@ -83,7 +83,7 @@ cannot turn the gate off partway through.
 | `TUNGSTEN_SANDBOX_LOG=PATH` | Append the attempt log to PATH instead of stderr. |
 
 The CLI sets both for the child, so the child inherits the gate. That is also
-how the HTTP service does it — see `services/api/`.
+how the HTTP service does it — see `apps/api/`.
 
 ## What it does not protect against
 
@@ -206,6 +206,6 @@ were `T_*`), so they no longer collide with a host's own `T_*` globals.
 
 - `core/sandbox.w` — the class, and the authoritative op list
 - `bin/commands/sandbox.w` — the CLI
-- `services/api/` — the HTTP execution service built on this gate, which adds
+- `apps/api/` — the HTTP execution service built on this gate, which adds
   per-phase timeouts, output caps, and returns the attempt log to the caller
 - `doc/TUNGSTEN.md` — the `sandbox` subcommand in the man page

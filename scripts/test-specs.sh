@@ -949,7 +949,7 @@ else
 fi
 
 # Response-shape contract for the /api/run + /api/check engine
-# (services/api/lib/exec.w). Opt-in because each check compiles and runs a small
+# (apps/api/lib/exec.w). Opt-in because each check compiles and runs a small
 # program of its own, so it is slower than a normal spec.
 if [[ "${RUN_API_SPECS:-0}" == "1" ]]; then
   run_parallel compiled "${api_specs[@]}"

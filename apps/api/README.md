@@ -82,9 +82,9 @@ exactly what a program reached for:
 
 | Path | Role |
 | --- | --- |
-| `services/api/server.w` | HTTP surface (Forge). Routing, body parsing, response encoding. |
-| `services/api/lib/exec.w` | Execution engine. Compiles, enforces per-phase timeouts and output caps, parses diagnostics, classifies the outcome, builds the response document. |
-| `services/api/bin/exec.w` | CLI wrapper around the engine; prints the response JSON. |
+| `apps/api/server.w` | HTTP surface (Forge). Routing, body parsing, response encoding. |
+| `apps/api/lib/exec.w` | Execution engine. Compiles, enforces per-phase timeouts and output caps, parses diagnostics, classifies the outcome, builds the response document. |
+| `apps/api/bin/exec.w` | CLI wrapper around the engine; prints the response JSON. |
 | `core/sandbox.w` + runtime gate | Containment: blocks/stubs outside-world syscalls and logs every attempt. |
 | `spec/api/api_exec_spec.w` | Contract spec for the response shape. `RUN_API_SPECS=1 make specs` |
 
@@ -100,7 +100,7 @@ through, so the contract lives in exactly one place.
 ## Running it
 
 ```sh
-bin/tungsten -o /tmp/tungsten_api services/api/server.w
+bin/tungsten -o /tmp/tungsten_api apps/api/server.w
 /tmp/tungsten_api 18099
 ```
 

@@ -126,8 +126,15 @@ JSU_CONSTS = {"JSR" => true, "JS_HOLE" => true, "JS_NULL" => true, "JS_NO_ARGS" 
     ccall("w_eputs", "jsc: unit: no runtime constructor for " + cls)
     rt_call("js_tier0_only", [ta_int(-1)])
 
-  # Other sends are core methods on unit values (Arrays) and compile to code in the unit.
+  # Method sends: a unit makes none (dynamic dispatch would look in the host program's
+  # method tables, which have only what the host itself sends). The few the translator
+  # emits, on Arrays and Floats, become runtime calls.
   -> send(recv, name, args)
+    return rt_call("js_list_at", [recv] + args) if name == "\[]" && args.size == 1
+    return rt_call("js_list_size", [recv]) if name == "size" && args.size == 0
+    return rt_call("js_list_push", [recv] + args) if name == "push" && args.size == 1
+    return call("js_div", [recv] + args) if name == "/" && args.size == 1
+    ccall("w_eputs", "jsc: unit: no runtime form for a send of " + name)
     nil
 
   # The unit's jsu_init(ctx): an Array of [index, closure, …], one closure per entry,

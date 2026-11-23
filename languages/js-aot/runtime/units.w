@@ -43,6 +43,17 @@ JSU_UNITS = []
 -> js_object_proto
   js_realm().object_proto
 
+# The Array operations translated code does on its own lists (argument and key lists).
+-> js_list_at(l, i)
+  l[i]
+
+-> js_list_size(l)
+  l.size
+
+-> js_list_push(l, x)
+  l.push(x)
+  l
+
 # js_getp, js_setp, js_call_method and js_new with the unit's own cache table.
 -> js_getp_t(o, key, ic, k)
   r = jsr_ic_get(ic, k, wvalue_bits(o) ## i64, JS_EPOCH[0])

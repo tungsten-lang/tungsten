@@ -596,6 +596,8 @@ VB_CHMAP = [[0], [0, 1], [0, 2, 1], [0, 1, 2, 3], [0, 2, 1, 3, 4], [0, 2, 1, 5, 
   ro :rate, :channels
 
   -> new(cfg)
+    @reuse = cfg.is_a?(CodecConfig) && cfg.reuse_output == true
+    @obuf = nil
     hs = cfg.extra
     vb_err("need 3 header packets") if hs == nil || hs.size < 3
     @st = i64[3]
@@ -1132,7 +1134,8 @@ VB_CHMAP = [[0], [0, 1], [0, 2, 1], [0, 1, 2, 3], [0, 2, 1, 3, 4], [0, 2, 1, 5, 
     cnt = 0
     if !@first
       cnt = @prev_n / 4 + n / 4
-      out = f32[cnt * nch]
+      @obuf = audio_out(@obuf, @reuse, cnt * nch)
+      out = @obuf ## f32[]
     cmap = nil
     cmap = VB_CHMAP[nch - 1] if nch <= 8
     c = 0
@@ -1156,7 +1159,9 @@ VB_CHMAP = [[0], [0, 1], [0, 2, 1], [0, 1, 2, 3], [0, 2, 1, 3, 4], [0, 2, 1, 5, 
     was_first = @first
     @first = false
     return nil if was_first
-    AudioBlock.new(out, cnt, nch, @rate, sample.pts)
+    blk = AudioBlock.new(out, cnt, nch, @rate, sample.pts)
+    blk.owned = !@reuse
+    blk
 
   -> vb_floor1_decode_into(b, fi, c)
     y = @ys_ch

@@ -620,7 +620,7 @@
   # of the first-run dyld closure on every plain CLI binary.
   if detect_target()[:os] == "macos"
     if bridges_needed
-      clang_cmd << " -framework Metal -framework Foundation -framework AppKit -framework QuartzCore -framework CoreGraphics -framework IOKit -framework CoreFoundation"
+      clang_cmd << " -framework Metal -framework Foundation -framework AppKit -framework QuartzCore -framework CoreGraphics -framework CoreVideo -framework IOKit -framework CoreFoundation"
     if blas_needed || sparse_needed
       clang_cmd << " -framework Accelerate"
     if quartz_needed

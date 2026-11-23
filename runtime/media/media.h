@@ -142,6 +142,10 @@
     X(w_media_vtdec_info, 2)           \
     X(w_media_vtdec_reset, 1)          \
     X(w_media_vtdec_close, 1)          \
+    X(w_media_vtdec_take_surface, 2)   \
+    X(w_media_surface_planes, 2)       \
+    X(w_media_surface_release, 1)      \
+    X(w_media_surface_ptr, 1)          \
     X(w_media_atdec_new, 3)            \
     X(w_media_atdec_decode, 3)         \
     X(w_media_atdec_info, 2)           \
@@ -180,7 +184,7 @@ W_MEDIA_CCALLS(W_MEDIA_PROTOTYPE)
 enum { W_MEDIA_KIND_ENCODER = 1, W_MEDIA_KIND_SEGMENT = 2, W_MEDIA_KIND_MUX = 3, W_MEDIA_KIND_SCALER = 4,
        W_MEDIA_KIND_DECODER = 5, W_MEDIA_KIND_TRANSCODE = 6, W_MEDIA_KIND_PLAYER = 7,
        W_MEDIA_KIND_MIDIOUT = 8, W_MEDIA_KIND_MIDIIN = 9, W_MEDIA_KIND_LIVE = 10, W_MEDIA_KIND_PCM = 11,
-       W_MEDIA_KIND_SYSVIDEO = 12, W_MEDIA_KIND_SYSAUDIO = 13, W_MEDIA_KIND_COUNT = 14 };
+       W_MEDIA_KIND_SYSVIDEO = 12, W_MEDIA_KIND_SYSAUDIO = 13, W_MEDIA_KIND_SURFACE = 14, W_MEDIA_KIND_COUNT = 15 };
 
 /* One compressed sample of a segment, in decode order. pts/dts are frame
  * indices relative to the segment's first frame (dts == pts without

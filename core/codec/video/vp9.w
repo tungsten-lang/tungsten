@@ -26,7 +26,7 @@ use vp9_dsp
     @message
 
 + VP9Frame
-  rw :y, :u, :v, :w, :h, :ys, :uvs, :mv, :segmap, :pts, :dur, :ah, :sb_cols
+  rw :y, :u, :v, :w, :h, :ys, :uvs, :mv, :segmap, :pts, :dur, :ah, :sb_cols, :seg
 
   -> new(@w, @h)
     @pts = ~0.0
@@ -120,6 +120,7 @@ VC_UVMODE = 324
   -> new(cfg)
     @frames_out = 0
     @refs = [nil, nil, nil, nil, nil, nil, nil, nil]
+    @spare = []          # buffer sets [y, u, v, mv, seg] of dead frames, reused (bury_dead)
     @out = []
     @last = nil
     @seg_ref = nil
@@ -718,7 +719,12 @@ VC_UVMODE = 324
     src_prev = @keyframe == 0 && @intraonly == 0 && @errorres == 0
     if !retain || @keyframe == 1 || @intraonly == 1
       if src_prev && @last != nil && @last.segmap != nil
-        @ref_seg = @last.segmap
+        # a copy: the map may stay in use after its frame's buffers were recycled
+        sm = @last.segmap ## u8[]
+        if @ref_seg.size != sm.size
+          ccall("w_value_free_w", @ref_seg)
+          @ref_seg = u8[sm.size]
+        vp9_copy8(@ref_seg, sm, sm.size)
         @have_ref_seg = 1
       else
         @have_ref_seg = 0
@@ -778,10 +784,16 @@ VC_UVMODE = 324
   -> bury_dead
     if @grave != nil
       @grave.each ->(q)
-        ccall("w_value_free_w", q.y) if q.y != nil
-        ccall("w_value_free_w", q.u) if q.u != nil
-        ccall("w_value_free_w", q.v) if q.v != nil
-        ccall("w_value_free_w", q.mv) if q.mv != nil
+        if q.y != nil && q.seg != nil && @spare.size < 4 && q.ys == @sb_cols * 64 && q.ah == @sb_rows * 64
+          @spare.push([q.y, q.u, q.v, q.mv, q.seg])
+        else
+          ccall("w_value_free_w", q.y) if q.y != nil
+          ccall("w_value_free_w", q.u) if q.u != nil
+          ccall("w_value_free_w", q.v) if q.v != nil
+          ccall("w_value_free_w", q.mv) if q.mv != nil
+          ccall("w_value_free_w", q.seg) if q.seg != nil
+        q.seg = nil
+        q.segmap = nil
         q.y = nil
         q.u = nil
         q.v = nil
@@ -843,11 +855,8 @@ VC_UVMODE = 324
     f.uvs = @sb_cols * 32
     f.ah = @sb_rows * 64
     f.sb_cols = @sb_cols
-    @cur_y = u8[@sb_cols * 64 * @sb_rows * 64]
-    @cur_u = u8[@sb_cols * 32 * @sb_rows * 32]
-    @cur_v = u8[@sb_cols * 32 * @sb_rows * 32]
-    @cur_mv = i32[@sb_cols * 8 * @sb_rows * 8 * 6]
-    @cur_seg = u8[@sb_cols * 8 * @sb_rows * 8]
+    take_buffers()
+    f.seg = @cur_seg
     f.y = @cur_y
     f.u = @cur_u
     f.v = @cur_v
@@ -857,6 +866,32 @@ VC_UVMODE = 324
     @ys = f.ys
     @uvs = f.uvs
     @curf = f
+    0
+
+  # The current frame's buffers: a pooled set of this size, cleared as fresh
+  # ones are, or new ones.
+  -> take_buffers
+    ny = @sb_cols * 64 * @sb_rows * 64
+    while @spare.size > 0
+      b = @spare.pop
+      if b[0].size == ny && b[3].size == @sb_cols * 8 * @sb_rows * 8 * 6
+        @cur_y = b[0] ## u8[]
+        @cur_u = b[1] ## u8[]
+        @cur_v = b[2] ## u8[]
+        @cur_mv = b[3] ## i32[]
+        @cur_seg = b[4] ## u8[]
+        @cur_y.fill(0)
+        @cur_u.fill(0)
+        @cur_v.fill(0)
+        @cur_mv.fill(0)
+        @cur_seg.fill(0)
+        return 0
+      b.each ->(a) ccall("w_value_free_w", a)
+    @cur_y = u8[ny]
+    @cur_u = u8[@sb_cols * 32 * @sb_rows * 32]
+    @cur_v = u8[@sb_cols * 32 * @sb_rows * 32]
+    @cur_mv = i32[@sb_cols * 8 * @sb_rows * 8 * 6]
+    @cur_seg = u8[@sb_cols * 8 * @sb_rows * 8]
     0
 
   -> read_compressed_header
@@ -3085,3 +3120,10 @@ VC_UVMODE = 324
   0
 
 vcodec_register("vp09", ->(cfg) VP9Dec.new(cfg))
+
+-> vp9_copy8(dst, src, n) (u8[] u8[] i64) i64
+  i = 0
+  while i < n
+    dst[i] = src[i]
+    i += 1
+  n

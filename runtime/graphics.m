@@ -60,6 +60,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import <CoreVideo/CoreVideo.h>
 #include <stdio.h>
 #include <string.h>
 #include <dlfcn.h>
@@ -438,6 +439,14 @@ typedef struct WGfxWindow {
     float    tex_yuv[GFX_MAX_TEX][24];
     uint8_t  tex_planar[GFX_MAX_TEX];
     uint8_t  tex_fmt[GFX_MAX_TEX];
+    /* yuv slots drawn straight from a decoder's CVPixelBuffer (w_gfx_tex_set_surface):
+     * [CVMetalTexture luma, CVMetalTexture chroma, CVPixelBuffer]; tex_cb == tex_cr then
+     * (the interleaved CbCr plane). A replaced surface the GPU may still be sampling
+     * waits in surf_dead until its command buffer completes. */
+    void    *tex_surf[GFX_MAX_TEX][3];
+    void    *cv_cache;
+    struct { uint64_t seq; void *r[3]; } surf_dead[64];
+    int      n_surf_dead;
     /* colour management: the layer's colour space (0 sRGB, 1 Display P3) and
      * each RGBA texture's (0 sRGB: converted by the shader when the layer is
      * P3; 1 Display P3: drawn as is) */
@@ -449,6 +458,9 @@ typedef struct WGfxWindow {
     int32_t  capture_w, capture_h;
     GfxInput input;
 } WGfxWindow;
+
+static void gfx_surf_release3(void **r);
+static void gfx_surf_retire(WGfxWindow *gw, int slot);
 
 static WGfxWindow *as_gfx_window(WValue v) {
     if (!w_is_obj(v) || w_subtag(v) != W_SUBTAG_GENERIC) return NULL;
@@ -1009,9 +1021,13 @@ WValue w_gfx_close(WValue window_v) {
         }
         if (gw->tex_cb[i]) { [(id<MTLTexture>)gw->tex_cb[i] release]; gw->tex_cb[i] = NULL; }
         if (gw->tex_cr[i]) { [(id<MTLTexture>)gw->tex_cr[i] release]; gw->tex_cr[i] = NULL; }
+        gfx_surf_release3(gw->tex_surf[i]);
         gw->tex_planar[i] = 0;
         gw->tex_space[i] = 0;
     }
+    for (int i = 0; i < gw->n_surf_dead; i++) gfx_surf_release3(gw->surf_dead[i].r);
+    gw->n_surf_dead = 0;
+    if (gw->cv_cache) { CFRelease((CVMetalTextureCacheRef)gw->cv_cache); gw->cv_cache = NULL; }
     [win setDelegate:nil];
     [win orderOut:nil];
     [win close];
@@ -2167,8 +2183,9 @@ static NSString * const kGfxLayerMSL =
      "static inline float3 gfx_yuv_rgb(float2 uv, texture2d<float> ty, texture2d<float> tu,\n"
      "                                 texture2d<float> tv, sampler lin, constant GfxYuv &p) {\n"
      "    float y = ty.sample(lin, uv).r * p.a.x;\n"
-     "    float u = tu.sample(lin, uv).r * p.a.x;\n"
-     "    float v = tv.sample(lin, uv).r * p.a.x;\n"
+     "    float2 c2 = tu.sample(lin, uv).rg;\n"
+     "    float u = c2.x * p.a.x;\n"
+     "    float v = (p.c.w != 0.0f ? c2.y : tv.sample(lin, uv).r) * p.a.x;\n"
      "    float3 rgb;\n"
      "    if (p.c.x == 2.0f) {\n"
      "        rgb = float3(v, y, u) * p.a.y;\n"
@@ -2465,6 +2482,7 @@ WValue w_gfx_tex_free(WValue window_v, WValue tex_id_v) {
     int slot = (int)gfx_int(tex_id_v) - 1;
     if (slot < 0 || slot >= GFX_MAX_TEX || !gw->tex[slot]) return w_bool(0);
     @autoreleasepool {
+        gfx_surf_retire(gw, slot);
         [(id<MTLTexture>)gw->tex[slot] release];
         gw->tex[slot] = NULL;
         gw->tex_used_seq[slot] = 0;
@@ -2560,6 +2578,39 @@ static id<MTLTexture> gfx_make_plane(id<MTLDevice> dev, int w, int h, int fmt16)
     return [dev newTextureWithDescriptor:td];
 }
 
+/* surface-backed slots: release what a slot holds of a decoder surface, now
+ * or (when an in-flight frame still samples it) once that frame completes */
+static void gfx_surf_release3(void **r) {
+    if (r[0]) CFRelease((CVMetalTextureRef)r[0]);
+    if (r[1]) CFRelease((CVMetalTextureRef)r[1]);
+    if (r[2]) CVPixelBufferRelease((CVPixelBufferRef)r[2]);
+    r[0] = r[1] = r[2] = NULL;
+}
+
+static void gfx_surf_reap(WGfxWindow *gw) {
+    uint64_t done = __atomic_load_n(&gw->done_cb_seq, __ATOMIC_ACQUIRE);
+    int k = 0;
+    for (int i = 0; i < gw->n_surf_dead; i++) {
+        if (gw->surf_dead[i].seq <= done) gfx_surf_release3(gw->surf_dead[i].r);
+        else gw->surf_dead[k++] = gw->surf_dead[i];
+    }
+    gw->n_surf_dead = k;
+}
+
+static void gfx_surf_retire(WGfxWindow *gw, int slot) {
+    void **r = gw->tex_surf[slot];
+    if (!r[0] && !r[1] && !r[2]) return;
+    gfx_surf_reap(gw);
+    uint64_t done = __atomic_load_n(&gw->done_cb_seq, __ATOMIC_ACQUIRE);
+    if (gw->tex_used_seq[slot] > done && gw->n_surf_dead < 64) {
+        int n = gw->n_surf_dead++;
+        gw->surf_dead[n].seq = gw->tex_used_seq[slot];
+        for (int i = 0; i < 3; i++) { gw->surf_dead[n].r[i] = r[i]; r[i] = NULL; }
+    } else {
+        gfx_surf_release3(r);
+    }
+}
+
 /* w_gfx_tex_new_yuv(window, width, height, chroma_w, chroma_h, sixteen) -> id */
 WValue w_gfx_tex_new_yuv(WValue window_v, WValue width_v, WValue height_v,
                          WValue cw_v, WValue ch_v, WValue sixteen_v) {
@@ -2646,7 +2697,21 @@ WValue w_gfx_tex_upload_yuv(WValue window_v, WValue tex_id_v, WValue planes_v, W
     }
     @autoreleasepool {
         uint64_t done = __atomic_load_n(&gw->done_cb_seq, __ATOMIC_ACQUIRE);
-        if (gw->tex_used_seq[slot] > done) {
+        if (gw->tex_surf[slot][2]) {
+            /* the slot shows a decoder surface: never write into it, draw into new planes */
+            gfx_surf_retire(gw, slot);
+            id<MTLDevice> dev = (id<MTLDevice>)gw->device;
+            int f16 = gw->tex_fmt[slot];
+            [ty release]; [tu release]; [tv release];
+            ty = gfx_make_plane(dev, (int)w, (int)h, f16);
+            tu = gfx_make_plane(dev, (int)cw, (int)ch, f16);
+            tv = gfx_make_plane(dev, (int)cw, (int)ch, f16);
+            gw->tex[slot] = (void *)ty;
+            gw->tex_cb[slot] = (void *)tu;
+            gw->tex_cr[slot] = (void *)tv;
+            gw->tex_used_seq[slot] = 0;
+            if (!ty || !tu || !tv) return w_bool(0);
+        } else if (gw->tex_used_seq[slot] > done) {
             id<MTLDevice> dev = (id<MTLDevice>)gw->device;
             id<MTLTexture> ny = gfx_make_plane(dev, (int)w, (int)h, gw->tex_fmt[slot]);
             id<MTLTexture> nu = gfx_make_plane(dev, (int)cw, (int)ch, gw->tex_fmt[slot]);
@@ -2678,6 +2743,76 @@ WValue w_gfx_tex_upload_yuv(WValue window_v, WValue tex_id_v, WValue planes_v, W
         p[10] = (pr[15] == 16.0 || pr[15] == 18.0) ? 1.0f : 0.0f;  /* hdr shoulder */
         for (int r = 0; r < 3; r++)
             for (int k = 0; k < 3; k++) p[12 + r * 4 + k] = (float)pr[16 + r * 3 + k];
+    }
+    return w_bool(1);
+}
+
+/* w_gfx_tex_set_surface(window, id, pixel_buffer, params): show a decoder's
+ * CVPixelBuffer (NV12 / P010, IOSurface-backed: core/codec/system with
+ * cfg.surfaces; pixel_buffer is runtime/media's w_media_surface_ptr) in a yuv
+ * slot with no copy: its planes become the slot's textures through a
+ * CVMetalTextureCache (luma R8/R16, interleaved chroma RG8/RG16) and the
+ * shader reads Cb/Cr from one texture. The slot retains the buffer until it is
+ * replaced and the GPU is done with it. params as for w_gfx_tex_upload_yuv
+ * (strides and crop are ignored; scale is the code value of 1.0 at the
+ * stream's bit depth). The slot's size follows the buffer's. Returns false
+ * when the buffer cannot be wrapped (the caller copies the planes instead). */
+WValue w_gfx_tex_set_surface(WValue window_v, WValue tex_id_v, WValue pb_v, WValue params_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.tex_set_surface");
+    int slot = (int)gfx_int(tex_id_v) - 1;
+    if (slot < 0 || slot >= GFX_MAX_TEX || !gw->tex[slot] || !gw->tex_planar[slot]) return w_bool(0);
+    CVPixelBufferRef pb = (CVPixelBufferRef)(intptr_t)gfx_int(pb_v);
+    if (!pb || CVPixelBufferGetPlaneCount(pb) != 2) return w_bool(0);
+    if (!w_is_array(params_v) || w_as_array(params_v)->size < 15) w_raise(w_string("gfx.tex_set_surface: params needs 15 numbers"));
+    double pr[25] = {0};
+    int npr = w_as_array(params_v)->size >= 25 ? 25 : 15;
+    for (int i = 0; i < npr; i++) pr[i] = gfx_num(w_array_get(params_v, w_int(i)), "param");
+    OSType f = CVPixelBufferGetPixelFormatType(pb);
+    int f16 = (f == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange || f == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange) ? 1 : 0;
+    if (!f16 && f != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange && f != kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) return w_bool(0);
+    @autoreleasepool {
+        if (!gw->cv_cache) {
+            CVMetalTextureCacheRef c = NULL;
+            if (CVMetalTextureCacheCreate(NULL, NULL, (id<MTLDevice>)gw->device, NULL, &c) != kCVReturnSuccess) return w_bool(0);
+            gw->cv_cache = c;
+        }
+        CVMetalTextureCacheRef cache = (CVMetalTextureCacheRef)gw->cv_cache;
+        CVMetalTextureRef cy = NULL, cc = NULL;
+        size_t w0 = CVPixelBufferGetWidthOfPlane(pb, 0), h0 = CVPixelBufferGetHeightOfPlane(pb, 0);
+        size_t w1 = CVPixelBufferGetWidthOfPlane(pb, 1), h1 = CVPixelBufferGetHeightOfPlane(pb, 1);
+        CVReturn r0 = CVMetalTextureCacheCreateTextureFromImage(NULL, cache, pb, NULL, f16 ? MTLPixelFormatR16Unorm : MTLPixelFormatR8Unorm, w0, h0, 0, &cy);
+        CVReturn r1 = CVMetalTextureCacheCreateTextureFromImage(NULL, cache, pb, NULL, f16 ? MTLPixelFormatRG16Unorm : MTLPixelFormatRG8Unorm, w1, h1, 1, &cc);
+        id<MTLTexture> ty = cy ? CVMetalTextureGetTexture(cy) : nil, tc = cc ? CVMetalTextureGetTexture(cc) : nil;
+        if (r0 != kCVReturnSuccess || r1 != kCVReturnSuccess || !ty || !tc) {
+            if (cy) CFRelease(cy);
+            if (cc) CFRelease(cc);
+            return w_bool(0);
+        }
+        gfx_surf_retire(gw, slot);
+        [(id<MTLTexture>)gw->tex[slot] release];
+        if (gw->tex_cb[slot]) [(id<MTLTexture>)gw->tex_cb[slot] release];
+        if (gw->tex_cr[slot]) [(id<MTLTexture>)gw->tex_cr[slot] release];
+        gw->tex[slot] = (void *)[ty retain];
+        gw->tex_cb[slot] = (void *)[tc retain];
+        gw->tex_cr[slot] = (void *)[tc retain];
+        gw->tex_used_seq[slot] = 0;
+        gw->tex_fmt[slot] = (uint8_t)f16;
+        gw->tex_surf[slot][0] = cy;
+        gw->tex_surf[slot][1] = cc;
+        gw->tex_surf[slot][2] = CVPixelBufferRetain(pb);
+        float *p = gw->tex_yuv[slot];
+        memset(p, 0, sizeof gw->tex_yuv[slot]);
+        for (int i = 0; i < 8; i++) p[i] = (float)pr[6 + i];
+        /* R16 samples of P010 hold the code in their top 10 bits */
+        p[0] = (float)(f16 ? 65535.0 / 64.0 : 255.0);
+        p[8] = (float)pr[14];
+        p[9] = (float)pr[15];
+        p[10] = (pr[15] == 16.0 || pr[15] == 18.0) ? 1.0f : 0.0f;
+        p[11] = 1.0f;                                           /* interleaved Cb/Cr */
+        for (int r = 0; r < 3; r++)
+            for (int k = 0; k < 3; k++) p[12 + r * 4 + k] = (float)pr[16 + r * 3 + k];
+        static int flushes;
+        if ((++flushes & 63) == 0) CVMetalTextureCacheFlush(cache, 0);
     }
     return w_bool(1);
 }

@@ -297,6 +297,9 @@ OPUS_MODE_CELT = 1002
     @celt = OpusCeltDec.new(@channels)
     @silk = OpusSilkDec.new(@channels)
     @softclip = f64[2]
+    # range-decoder state of a frame with data (decode_frame only re-enters itself for lost
+    # frames, which get their own)
+    @st_main = i64[EC_N]
     reset()
 
   -> reset
@@ -317,14 +320,14 @@ OPUS_MODE_CELT = 1002
   -> decode_frame(data, len0, pcm, po, frame_size0, decode_fec)
     cc = @channels
     len = len0
-    frame_size = [frame_size0, 2880].min
+    frame_size = frame_size0 < 2880 ? frame_size0 : 2880
     if len <= 1
       data = nil
-      frame_size = [frame_size, @frame_size].min
+      frame_size = @frame_size if @frame_size < frame_size
     audiosize = 0
     mode = 0
     bandwidth = 0
-    st = i64[EC_N]
+    st = data != nil && len > 1 ? @st_main : i64[EC_N]
     if data != nil
       audiosize = @frame_size
       mode = @mode
@@ -504,6 +507,8 @@ OPUS_MODE_CELT = 1002
   ro :streams, :last_ranges, :errors, :last_error
 
   -> new(cfg)
+    @reuse = cfg.is_a?(CodecConfig) && cfg.reuse_output == true
+    @obuf = nil
     @sample_rate = 48000
     @errors = 0
     @last_error = nil
@@ -557,6 +562,7 @@ OPUS_MODE_CELT = 1002
       i += 1
     @order = opus_wave_order(ch, family)
     @last_ranges = []
+    @pcm64 = nil
     @last_duration = 960
     @softclip = f64[[ch, 1].max]
 
@@ -582,15 +588,20 @@ OPUS_MODE_CELT = 1002
     total = fsz * count
     raise MediaError.new("opus: bad packet") if total <= 0 || total > 5760
     cc = @channels
-    out = f64[total * cc]
     if @nstreams == 1 && @family == 0
+      # one stream: into the reused PCM buffer (decode copies it out before the next packet)
+      @pcm64 = f64[5760 * cc] if @pcm64 == nil
+      out = @pcm64 ## f64[]
+      opus_fill(out, 0, total * cc, ~0.0 ## f64)
       s = @streams[0]
       r = s.decode_packet(data, 0, data.size, out, 0, total, false)
       n = r[0]
-      @last_ranges = [s.range_final]
+      @last_ranges = [s.range_final] if @last_ranges.size != 1
+      @last_ranges[0] = s.range_final
       finish(out, n, s)
       @last_duration = n
       return [out, n]
+    out = f64[total * cc]
     off = 0
     sbufs = []
     @last_ranges = []
@@ -669,9 +680,12 @@ OPUS_MODE_CELT = 1002
         r = [f64[n0 * @channels], n0]
     pts = sample == nil ? ~0.0 : sample.pts
     n = r[1] * @channels
-    out = f32[n < 1 ? 1 : n]
+    @obuf = audio_out(@obuf, @reuse, n)
+    out = @obuf ## f32[]
     opus_to_f32(r[0], out, n)
-    AudioBlock.new(out, r[1], @channels, 48000, pts)
+    blk = AudioBlock.new(out, r[1], @channels, 48000, pts)
+    blk.owned = !@reuse
+    blk
 
 -> opus_to_f32(a, b, n) (f64[] f32[] i64) i64
   i = 0 ## i64

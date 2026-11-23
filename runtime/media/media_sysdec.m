@@ -21,6 +21,14 @@
  *       8-bit, u16[] for 10-bit, tightly packed) receive it de-interleaved
  *       from NV12/P010, or nil to drop it (throughput measurements).
  *       flush: true after the last sample (waits for every frame).
+ *   w_media_vtdec_take_surface(h, flush) -> [pts_us, width, height, bits, surface] or nil
+ *       the same frame without a copy: surface is a handle on the decoder's
+ *       IOSurface-backed, Metal-compatible CVPixelBuffer (NV12 / P010),
+ *       which the caller gives back with w_media_surface_release
+ *   w_media_surface_planes(surface, planes) -> true: copy it out as take does
+ *   w_media_surface_ptr(surface) -> the CVPixelBufferRef as an integer (for
+ *       runtime/graphics.m, which retains what it keeps), 0 when released
+ *   w_media_surface_release(surface)
  *   w_media_vtdec_info(h, key) -> "hw" (true when VideoToolbox decodes in
  *       hardware), "decoded", "errors", "status" (last OSStatus)
  *   w_media_vtdec_reset(h)     drop queued frames (after a seek)
@@ -229,9 +237,13 @@ WValue w_media_vtdec_new(WValue codecv, WValue cfgv, WValue optv) {
         OSType pix = d->bits > 8 ? (full ? kCVPixelFormatType_420YpCbCr10BiPlanarFullRange : kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange)
                                  : (full ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
         CFNumberRef pixn = CFNumberCreate(NULL, kCFNumberSInt32Type, &pix);
-        const void *pk[] = { kCVPixelBufferPixelFormatTypeKey };
-        const void *pv[] = { pixn };
-        CFDictionaryRef attrs = CFDictionaryCreate(NULL, pk, pv, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        /* IOSurface-backed and Metal-compatible, so a frame can be drawn
+         * straight from the decoder's buffer (w_media_vtdec_take_surface) */
+        CFDictionaryRef ios = CFDictionaryCreate(NULL, NULL, NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        const void *pk[] = { kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey };
+        const void *pv[] = { pixn, ios, kCFBooleanTrue };
+        CFDictionaryRef attrs = CFDictionaryCreate(NULL, pk, pv, 3, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFRelease(ios);
         const void *sk[] = { kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder };
         const void *sv[] = { kCFBooleanTrue };
         CFDictionaryRef spec = CFDictionaryCreate(NULL, sk, sv, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -295,13 +307,13 @@ WValue w_media_vtdec_decode(WValue hv, WValue samplev, WValue ptsv, WValue dtsv)
 }
 
 /* de-interleave one NV12 / P010 frame into planar Y, Cb, Cr */
-static void s_vid_copy(SVid *d, CVPixelBufferRef pb, WValue planes, int w, int h) {
+static void s_vid_copy(int bits, CVPixelBufferRef pb, WValue planes, int w, int h) {
     int cw = (w + 1) / 2, ch = (h + 1) / 2;
     CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
     const uint8_t *yp = CVPixelBufferGetBaseAddressOfPlane(pb, 0), *cp = CVPixelBufferGetBaseAddressOfPlane(pb, 1);
     size_t ys = CVPixelBufferGetBytesPerRowOfPlane(pb, 0), cs = CVPixelBufferGetBytesPerRowOfPlane(pb, 1);
     int64_t ny, nb, nr;
-    if (d->bits == 8) {
+    if (bits == 8) {
         uint8_t *Y = s_typed(s_arr(planes, 0), 8, &ny, "vtdec_take Y"), *B = s_typed(s_arr(planes, 1), 8, &nb, "vtdec_take Cb"),
                 *R = s_typed(s_arr(planes, 2), 8, &nr, "vtdec_take Cr");
         if (ny < (int64_t)w * h || nb < (int64_t)cw * ch || nr < (int64_t)cw * ch) { CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly); w_media_raise("vtdec_take: planes too small"); }
@@ -329,8 +341,8 @@ static void s_vid_copy(SVid *d, CVPixelBufferRef pb, WValue planes, int w, int h
     CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
 }
 
-WValue w_media_vtdec_take(WValue hv, WValue flushv, WValue planes) {
-    SVid *d = w_media_handle_get(hv, W_MEDIA_KIND_SYSVIDEO, "vtdec_take");
+/* the next final frame (retained; NULL when none is ready) */
+static CVPixelBufferRef s_vid_next(SVid *d, WValue flushv, int64_t *pts) {
     if (w_truthy(flushv)) {
         VTDecompressionSessionFinishDelayedFrames(d->vt);
         VTDecompressionSessionWaitForAsynchronousFrames(d->vt);
@@ -339,7 +351,7 @@ WValue w_media_vtdec_take(WValue hv, WValue flushv, WValue planes) {
         pthread_mutex_unlock(&d->mu);
     }
     pthread_mutex_lock(&d->mu);
-    if (d->n == 0) { pthread_mutex_unlock(&d->mu); return W_NIL; }
+    if (d->n == 0) { pthread_mutex_unlock(&d->mu); return NULL; }
     if (!d->flushing) {
         /* VideoToolbox outputs in decode order: a frame is final once no
          * later sample can precede it (its pts is at most the latest decode
@@ -348,21 +360,65 @@ WValue w_media_vtdec_take(WValue hv, WValue flushv, WValue planes) {
         int ok = p <= d->dts;
         for (int i = 0; ok && i < d->nfly; i++)
             if (d->fly[2 * i + 1] < p) ok = 0;
-        if (!ok) { pthread_mutex_unlock(&d->mu); return W_NIL; }
+        if (!ok) { pthread_mutex_unlock(&d->mu); return NULL; }
     }
     SFrame f = d->q[0];
     memmove(d->q, d->q + 1, (size_t)(d->n - 1) * sizeof *d->q);
     d->n--;
     pthread_mutex_unlock(&d->mu);
-    int w = (int)CVPixelBufferGetWidth(f.pb), h = (int)CVPixelBufferGetHeight(f.pb);
-    if (planes != W_NIL) s_vid_copy(d, f.pb, planes, w, h);
-    CVPixelBufferRelease(f.pb);
+    *pts = f.pts;
+    return f.pb;
+}
+
+static WValue s_vid_result(SVid *d, int64_t pts, int w, int h) {
     WValue r = w_array_new_empty();
-    r = w_array_push(r, w_int(f.pts));
+    r = w_array_push(r, w_int(pts));
     r = w_array_push(r, w_int(w));
     r = w_array_push(r, w_int(h));
     r = w_array_push(r, w_int(d->bits));
     return r;
+}
+
+WValue w_media_vtdec_take(WValue hv, WValue flushv, WValue planes) {
+    SVid *d = w_media_handle_get(hv, W_MEDIA_KIND_SYSVIDEO, "vtdec_take");
+    int64_t pts = 0;
+    CVPixelBufferRef pb = s_vid_next(d, flushv, &pts);
+    if (!pb) return W_NIL;
+    int w = (int)CVPixelBufferGetWidth(pb), h = (int)CVPixelBufferGetHeight(pb);
+    if (planes != W_NIL) s_vid_copy(d->bits, pb, planes, w, h);
+    CVPixelBufferRelease(pb);
+    return s_vid_result(d, pts, w, h);
+}
+
+WValue w_media_vtdec_take_surface(WValue hv, WValue flushv) {
+    SVid *d = w_media_handle_get(hv, W_MEDIA_KIND_SYSVIDEO, "vtdec_take_surface");
+    int64_t pts = 0;
+    CVPixelBufferRef pb = s_vid_next(d, flushv, &pts);
+    if (!pb) return W_NIL;
+    int w = (int)CVPixelBufferGetWidth(pb), h = (int)CVPixelBufferGetHeight(pb);
+    WValue r = s_vid_result(d, pts, w, h);
+    return w_array_push(r, w_int(w_media_handle_new(pb, W_MEDIA_KIND_SURFACE)));   /* the handle owns the retain */
+}
+
+WValue w_media_surface_planes(WValue sv, WValue planes) {
+    CVPixelBufferRef pb = w_media_handle_get(sv, W_MEDIA_KIND_SURFACE, "surface_planes");
+    OSType f = CVPixelBufferGetPixelFormatType(pb);
+    int bits = (f == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange || f == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange) ? 10 : 8;
+    s_vid_copy(bits, pb, planes, (int)CVPixelBufferGetWidth(pb), (int)CVPixelBufferGetHeight(pb));
+    return W_TRUE;
+}
+
+WValue w_media_surface_ptr(WValue sv) {
+    void *pb = w_media_handle_peek(sv, W_MEDIA_KIND_SURFACE);
+    return w_int((int64_t)(intptr_t)pb);
+}
+
+WValue w_media_surface_release(WValue sv) {
+    CVPixelBufferRef pb = w_media_handle_peek(sv, W_MEDIA_KIND_SURFACE);
+    if (!pb) return W_FALSE;
+    w_media_handle_drop(sv, W_MEDIA_KIND_SURFACE);
+    CVPixelBufferRelease(pb);
+    return W_TRUE;
 }
 
 WValue w_media_vtdec_info(WValue hv, WValue keyv) {

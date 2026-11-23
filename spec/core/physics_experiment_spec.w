@@ -148,12 +148,9 @@ rescue error
   shared_measurement_rejected = error.to_s.include?("cannot repeat")
 experiment_check("dataset.shared_measurement_rejected", shared_measurement_rejected)
 zero_run.measurement.correlate(one_run.measurement, ~0.5)
-implicit_correlation_rejected = false
-begin
-  Physics.dataset(mass, [zero_run, one_run])
-rescue error
-  implicit_correlation_rejected = error.to_s.include?("explicit covariance")
-experiment_check("dataset.declared_correlation_rejected", implicit_correlation_rejected)
+declared = Physics.dataset(mass, [zero_run, one_run])
+experiment_check("dataset.declared_correlation",
+  declared.covariance_source == :inferred && declared.covariance[0][1] == ~0.5)
 
 tiny_run = Physics.observation(mass, Measurement.new(~3.0, ~1.0e-155), "tiny")
 tiny_fit = Physics.dataset(mass, [tiny_run]).fit_constant

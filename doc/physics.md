@@ -38,14 +38,17 @@ subtraction, multiplication, division, scalar scaling, powers, and square
 roots follow this rule. For example, multiplication uses `fx = y` and
 `fy = x`; it does not add relative errors linearly.
 
-Distinct inputs are independent unless one has been linked directly to the
-other with `correlate`; using the identical `Measurement` object twice implies
-correlation one. The current object records one direct peer correlation. A
-derived result does not retain a covariance graph, so shared-input expressions
-must be reformulated or supplied through an explicit covariance matrix when
-correlation matters. Random and systematic labels are propagated by the same
-local derivative and correlation model; the labels do not create a richer
-component-specific covariance model. General arithmetic returns a symmetric
+Each new reading starts an independent uncertainty source. Arithmetic retains
+each source's signed first-order contribution, so repeated use of the same
+reading can reinforce or cancel it. Equal-valued readings constructed
+separately are independent. `a.covariance_with(b)` reports their covariance
+in product units and `a.correlation_with(b)` reports the Pearson coefficient.
+`correlate` declares a new error model for a pair; each input has one direct
+peer. Derived values retain the model used when they were calculated.
+An explicit operation-specific correlation override describes that operation
+alone and starts a new source for its result when it differs from the inferred
+correlation. Random and systematic components follow the same signed
+sensitivities. General arithmetic returns a symmetric
 standard uncertainty even when an input was asymmetric. Nonlinear propagation
 is a local linearization: it can be inaccurate for large uncertainties,
 singular points, strongly skewed distributions, or discontinuous models. A
@@ -77,8 +80,13 @@ covariance matrix. The matrix must be square, symmetric, positive definite,
 and have diagonal entries equal to the squared observation uncertainties.
 Repeated observation objects or observations sharing the same `Measurement`
 are rejected: copying a row must not manufacture independent evidence.
-Omitting covariance also rejects directly declared nonzero pair correlations;
-provide the complete covariance explicitly for correlated observations.
+Omitting the matrix infers its entries from shared sources, including declared
+pair correlations. The fit reports `:inferred` for nonzero off-diagonal
+covariance and `:independent` for a diagonal inferred model. Its measurement
+retains the fitted weights on the input readings. An explicit matrix takes
+precedence (`:supplied`); the estimate then starts a new uncertainty source
+because the matrix specifies no covariance with readings outside the dataset.
+See [the shared-tare experiment](examples/shared_tare.w).
 
 Within a relative tolerance of `1e-12`, accepted off-diagonal asymmetry is
 averaged and diagonals are snapped to the squared standard uncertainties.

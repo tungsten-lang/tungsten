@@ -27,6 +27,8 @@ module Tungsten
                 :confidence, :coverage_factor, :degrees_of_freedom, :components,
                 :provenance
 
+    alias_method :standard_uncertainty, :uncertainty
+
     def initialize(value, uncertainty, lower_uncertainty: nil, upper_uncertainty: nil,
                    confidence: nil, coverage_factor: 1.0, degrees_of_freedom: nil,
                    components: nil, provenance: nil)
@@ -39,7 +41,9 @@ module Tungsten
       @degrees_of_freedom = degrees_of_freedom
       @components = (components || {}).transform_keys(&:to_sym).freeze
       @provenance = Array(provenance).compact.freeze
-      @correlations = {}
+      @identity_token = Object.new
+      @source_terms = {@identity_token => @uncertainty}.freeze
+      @correlation_peer = nil
     end
 
     def self.with_components(value, random: 0, systematic: 0, **options)
@@ -69,9 +73,9 @@ module Tungsten
     def +(other)
       case other
       when Measurement
-        derived(@value + other.value, variance_with(other, 1, 1))
+        derived(@value + other.value, 1, other, 1)
       when Numeric
-        derived(@value + other, @uncertainty**2)
+        derived(@value + other, 1)
       else
         raise TypeError, "cannot add #{other.class} to Measurement"
       end
@@ -80,9 +84,9 @@ module Tungsten
     def -(other)
       case other
       when Measurement
-        derived(@value - other.value, variance_with(other, 1, -1))
+        derived(@value - other.value, 1, other, -1)
       when Numeric
-        derived(@value - other, @uncertainty**2)
+        derived(@value - other, 1)
       else
         raise TypeError, "cannot subtract #{other.class} from Measurement"
       end
@@ -92,10 +96,9 @@ module Tungsten
       case other
       when Measurement
         new_val = @value * other.value
-        variance = variance_with(other, other.value.to_f, @value.to_f)
-        derived(new_val, variance, other)
+        derived(new_val, other.value.to_f, other, @value.to_f)
       when Numeric
-        derived(@value * other, (@uncertainty * other.to_f.abs)**2)
+        derived(@value * other, other.to_f)
       else
         raise TypeError, "cannot multiply Measurement by #{other.class}"
       end
@@ -108,10 +111,10 @@ module Tungsten
         new_val = @value.to_f / other.value
         dx = 1.0 / other.value
         dy = -@value.to_f / (other.value.to_f**2)
-        derived(new_val, variance_with(other, dx, dy), other)
+        derived(new_val, dx, other, dy)
       when Numeric
         raise ZeroDivisionError, "Measurement division by zero" if other.zero?
-        derived(@value.to_f / other, (@uncertainty / other.to_f.abs)**2)
+        derived(@value.to_f / other, 1.0 / other)
       else
         raise TypeError, "cannot divide Measurement by #{other.class}"
       end
@@ -129,7 +132,17 @@ module Tungsten
       else
         derivative = exp * (@value.to_f ** (exp - 1))
       end
-      derived(new_val, (derivative * @uncertainty)**2)
+      derived(new_val, derivative)
+    end
+
+    def sqrt
+      raise ArgumentError, "Measurement.sqrt needs a nonnegative value" if @value.negative?
+      if @value.zero?
+        raise ArgumentError, "Measurement.sqrt is singular at uncertain zero" unless @uncertainty.zero?
+        return derived(0.0, 0.0)
+      end
+      root = Math.sqrt(@value)
+      derived(root, 0.5 / root)
     end
 
     def -@
@@ -138,7 +151,7 @@ module Tungsten
                       upper_uncertainty: @lower_uncertainty,
                       confidence: @confidence, coverage_factor: @coverage_factor,
                       degrees_of_freedom: @degrees_of_freedom,
-                      components: @components, provenance: @provenance)
+                      components: @components, provenance: @provenance).with_source_terms(@source_terms.transform_values(&:-@))
     end
 
     def +@
@@ -146,7 +159,7 @@ module Tungsten
     end
 
     def abs
-      derived(@value.abs, @uncertainty**2)
+      derived(@value.abs, @value.negative? ? -1 : 1)
     end
 
     # Declare a correlation between two input measurements. Correlation is
@@ -156,14 +169,23 @@ module Tungsten
       raise ArgumentError, "correlation needs a distinct Measurement" if equal?(other)
       rho = coefficient.to_f
       raise ArgumentError, "correlation must be between -1 and 1" unless rho.between?(-1, 1)
-      @correlations[other.object_id] = rho
-      other.__send__(:set_correlation, self, rho)
+      detach_peer
+      other.__send__(:detach_peer)
+      shared = Object.new
+      @source_terms = {shared => uncertainty}.freeze
+      residual = Math.sqrt((1.0 - rho) * (1.0 + rho))
+      other.with_source_terms({shared => rho * other.uncertainty, Object.new => residual * other.uncertainty})
+      @correlation_peer = other
+      other.__send__(:correlation_peer=, self)
       self
     end
 
     def correlation_with(other)
       return 1.0 if equal?(other)
-      @correlations.fetch(other.object_id, 0.0)
+      return 0.0 if uncertainty.zero? || other.uncertainty.zero?
+      @source_terms.sum do |source, contribution|
+        (contribution / uncertainty) * (other.source_terms.fetch(source, 0.0) / other.uncertainty)
+      end.clamp(-1.0, 1.0)
     end
 
     def interval
@@ -178,7 +200,7 @@ module Tungsten
                      upper_uncertainty: @upper_uncertainty,
                      confidence:, coverage_factor:,
                      degrees_of_freedom: @degrees_of_freedom,
-                     components: @components, provenance: @provenance)
+                     components: @components, provenance: @provenance).with_source_terms(@source_terms)
     end
 
     def calibrate(calibration)
@@ -268,25 +290,36 @@ module Tungsten
       to_s
     end
 
-    private
+    attr_reader :source_terms, :identity_token
 
-    def set_correlation(other, coefficient)
-      @correlations[other.object_id] = coefficient
+    def with_source_terms(terms)
+      @source_terms = terms.freeze
+      self
     end
 
     def covariance_with(other)
-      correlation_with(other) * @uncertainty * other.uncertainty
+      @source_terms.sum { |source, weight| weight * other.source_terms.fetch(source, 0.0) }
     end
 
-    def variance_with(other, derivative_self, derivative_other)
-      (derivative_self * @uncertainty)**2 +
-        (derivative_other * other.uncertainty)**2 +
-        2 * derivative_self * derivative_other * covariance_with(other)
+    private
+
+    attr_writer :correlation_peer
+
+    def detach_peer
+      return unless @correlation_peer
+      @correlation_peer.with_source_terms({Object.new => @correlation_peer.uncertainty})
+      @correlation_peer.__send__(:correlation_peer=, nil)
+      @correlation_peer = nil
     end
 
-    def derived(new_value, variance, other = nil)
+    def derived(new_value, dx, other = nil, dy = 0)
+      terms = @source_terms.transform_values { |contribution| dx * contribution }
+      other&.source_terms&.each do |input, contribution|
+        terms[input] = terms.fetch(input, 0.0) + dy * contribution
+      end
+      sigma = terms.values.reduce(0.0) { |norm, weight| Math.hypot(norm, weight) }
       sources = @provenance + (other&.provenance || [])
-      Measurement.new(new_value, Math.sqrt([variance, 0.0].max), provenance: sources)
+      Measurement.new(new_value, sigma, provenance: sources).with_source_terms(terms)
     end
 
     def significant_pair

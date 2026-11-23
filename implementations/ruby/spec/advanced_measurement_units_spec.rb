@@ -98,6 +98,22 @@ RSpec.describe "Advanced measurements and quantity semantics" do
       expect((x * y).uncertainty).to be_within(1e-12).of(4)
     end
 
+    it "keeps signed source contributions across Ruby arithmetic and core autoload" do
+      tare = described_class.new(12, 0.08)
+      first = described_class.new(32, 0.04) - tare
+      second = described_class.new(32, 0.04) - tare
+      expect(first.covariance_with(second)).to be_within(1e-14).of(0.0064)
+      expect((first - second).uncertainty).to be_within(1e-14).of(Math.sqrt(0.0032))
+
+      sigma = Tungsten.run(<<~W)
+        tare = ~12.0 ± ~0.08
+        net = (~32.0 ± ~0.04) - tare
+        other = Measurement.new(~32.0, ~0.04) - tare
+        (net - other).uncertainty
+      W
+      expect(sigma).to be_within(1e-14).of(Math.sqrt(0.0032))
+    end
+
     it "handles zero and identical-input propagation explicitly" do
       zero = described_class.new(0, 0.25)
       expect((zero**1).uncertainty).to eq(0.25)

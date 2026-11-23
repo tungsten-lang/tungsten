@@ -25,6 +25,10 @@
     @conditions = nil
     @traceability_chain = []
 
+  ro :coefficients, :coefficient_uncertainties, :input_unit, :output_unit
+  ro :standard_uncertainty, :valid_min, :valid_max, :certificate
+  ro :reference, :method, :conditions, :traceability_chain
+
   -> .linear(slope, intercept = ~0.0, input_unit = nil, output_unit = nil, standard_uncertainty = ~0.0, certificate = nil)
     Calibration.new([intercept, slope], [~0.0, ~0.0], input_unit, output_unit, standard_uncertainty, nil, nil, certificate)
 
@@ -62,12 +66,11 @@
     if valid_max != nil && x > valid_max
       raise "calibration input above validity range"
     sensitivity = self.derivative(x)
-    input_u = sensitivity * measurement.uncertainty
-    variance = input_u * input_u + self.coefficient_variance(x) + standard_uncertainty * standard_uncertainty
-    result_value = self.polynomial(x)
-    result_uncertainty = Math.sqrt(variance)
-    if certificate != nil
-      result_provenance = measurement.provenance.push("calibration " + certificate.to_s())
-      return Measurement.new(result_value, result_uncertainty, result_uncertainty,
-                             result_uncertainty, ~1.0, nil, nil, result_provenance)
-    Measurement.new(result_value, result_uncertainty)
+    # Retain the input reading and add the calibration budget as a new source.
+    terms = measurement.contribute_to(MeasurementSources.new, sensitivity)
+    calibration_sigma = Math.hypot(Math.sqrt(self.coefficient_variance(x)), standard_uncertainty)
+    terms.add(MeasurementSource.new, calibration_sigma, ~0.0, ~0.0)
+    sigma = terms.norm(1)
+    history = measurement.provenance
+    history.push("calibration " + certificate.to_s()) if certificate != nil
+    Measurement.new(self.polynomial(x), sigma, sigma, sigma, ~1.0, nil, nil, history).with_sources(terms)

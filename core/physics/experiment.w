@@ -2,9 +2,8 @@
 #
 # Units are observable metadata in this layer. Measurement values and standard
 # uncertainties must be expressed in that common unit before constructing a
-# dataset. Omitting covariance explicitly selects an independent diagonal
-# model; a supplied covariance is validated as symmetric positive definite.
-# This keeps the independence assumption visible at the dataset boundary.
+# dataset. By default, shared uncertainty sources determine covariance.
+# A supplied matrix overrides that model. Both paths validate the same matrix.
 
 + Physics
   # Relative comparison for covariance entries. Unlike a general numerical
@@ -225,15 +224,26 @@
         if (Measurement.same_object?(previous, observation) ||
             Measurement.same_object?(previous.measurement, observation.measurement))
           raise "dataset cannot repeat an observation or Measurement"
-        if (covariance == nil &&
-            previous.measurement.correlation_with(observation.measurement) != ~0.0)
-          raise "correlated observations need an explicit covariance matrix"
       @observations.push(observation)
 
     if covariance == nil
+      @reading_sources = []
+      @observations.each ->(entry)
+        @reading_sources.push(entry.measurement.contribute_to(MeasurementSources.new, ~1.0))
       @covariance_source = :independent
       @covariance = ExperimentalDataset.diagonal_covariance(@observations)
+      i = 0
+      while i < @observations.size
+        j = 0
+        while j < i
+          entry = @reading_sources[i].covariance(@reading_sources[j])
+          @covariance[i][j] = entry
+          @covariance[j][i] = entry
+          @covariance_source = :inferred if entry != ~0.0
+          j += 1
+        i += 1
     else
+      @reading_sources = nil
       @covariance_source = :supplied
       @covariance = covariance
     @covariance = Physics.canonical_covariance(@covariance, @observations)
@@ -292,6 +302,23 @@
       i += 1
     result
 
+  # Back-substitute through Lᵀ for the GLS weights. Combining signed
+  # sensitivities lets a fitted mass be compared with its original readings.
+  -> fit_sources(design, whitened_design, information)
+    terms = MeasurementSources.new
+    weights = whitened_design.dup
+    i = size - 1
+    while i >= 0
+      weight = weights[i]
+      j = i + 1
+      while j < size
+        weight -= @cholesky[j][i] * weights[j]
+        j += 1
+      weights[i] = weight / @cholesky[i][i]
+      @reading_sources[i].accumulate(terms, (design[i] / information) * weights[i])
+      i -= 1
+    terms
+
   # Generalized least-squares estimate of one constant shared by all rows:
   #   mu = (1^T C^-1 y)/(1^T C^-1 1), u(mu)^2 = 1/(1^T C^-1 1).
   -> gls_mean
@@ -349,6 +376,8 @@
     result_measurement = Measurement.new(
       mean, result_uncertainty, result_uncertainty, result_uncertainty,
       ~1.0, nil, degrees, provenance)
+    if @reading_sources != nil
+      result_measurement.with_sources(fit_sources(design, whitened_design, information))
     assumptions = [
       "one shared constant mean",
       "covariance is complete and fixed",

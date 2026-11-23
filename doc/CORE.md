@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(845 total), grouped by area, with its declaration, a one-line
+(848 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -391,6 +391,8 @@ summary from the source header, and a link to the source.
 | `QuantumBasisState` | `+ QuantumBasisState` | QuantumBasisState — permutation-and-phase simulation. | [`core/quantum.w`](../core/quantum.w) |
 | `QuantumState` | `+ QuantumState` | QuantumState — dense state vector over 2^width complex amplitudes. | [`core/quantum.w`](../core/quantum.w) |
 | `Measurement` | `+ Measurement` | Measurement — a scalar estimate and its standard uncertainty. | [`core/measurement.w`](../core/measurement.w) |
+| `MeasurementSource` | `+ MeasurementSource` | MeasurementSource — identity of one independent uncertainty contribution. | [`core/measurement.w`](../core/measurement.w) |
+| `MeasurementSources` | `+ MeasurementSources` | MeasurementSources — signed total, random and systematic contributions by source. | [`core/measurement.w`](../core/measurement.w) |
 | `Calibration` | `+ Calibration` | Calibration — polynomial measurement model with a standard-uncertainty | [`core/calibration.w`](../core/calibration.w) |
 | `Random` | `+ Random` | — | [`core/random.w`](../core/random.w) |
 | `Range` | `+ Range` | Integer Range over the immediate WValue encoding (Location mode 11). | [`core/range.w`](../core/range.w) |
@@ -411,6 +413,7 @@ summary from the source header, and a link to the source.
 | `System` | `+ System` | — | [`core/system.w`](../core/system.w) |
 | `Table` | `+ Table` | — | [`core/table.w`](../core/table.w) |
 | `Thread` | `+ Thread` | Thread — a native OS thread (pthread). | [`core/thread.w`](../core/thread.w) |
+| `ThreadLocal` | `+ ThreadLocal` | ThreadLocal — values private to one thread of execution. | [`core/thread_local.w`](../core/thread_local.w) |
 | `Time` | `+ Time` | Time — time-of-day value (no date component). | [`core/time.w`](../core/time.w) |
 | `Timer` | `+ Timer` | Timer — monotonic one-shot and fixed-rate timers. | [`core/timer.w`](../core/timer.w) |
 | `TLS` | `+ TLS` | TLS — verified client and configured-server transport facade. | [`core/tls.w`](../core/tls.w) |
@@ -812,7 +815,7 @@ summary from the source header, and a link to the source.
 | `AssertionError` | `+ AssertionError < Error` | AssertionError — a spec expectation or assertion failed. | [`core/errors/assertion_error.w`](../core/errors/assertion_error.w) |
 | `SystemExit` | `+ SystemExit < Exception` | SystemExit — the program is exiting; not caught by a rescue of Error. | [`core/errors/system_exit.w`](../core/errors/system_exit.w) |
 | `Interrupt` | `+ Interrupt < Exception` | Interrupt — the process received an interrupt signal; not caught by a rescue of Error. | [`core/errors/interrupt.w`](../core/errors/interrupt.w) |
-| `Zstd` | `+ Zstd` | Zstd — Zstandard (RFC 8878) decompression through the runtime's libzstd. | [`core/zstd.w`](../core/zstd.w) |
+| `Zstd` | `+ Zstd` | Zstd — Zstandard (RFC 8878) through the runtime's libzstd. | [`core/zstd.w`](../core/zstd.w) |
 
 ## Numeric tower
 

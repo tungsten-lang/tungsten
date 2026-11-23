@@ -1177,7 +1177,44 @@ module Tungsten
 
     def visit_measurement_literal(node)
       value = node.number.eval_in(self)
-      Tungsten::Measurement.new(value, node.uncertainty)
+      measurement_literal(value, node.uncertainty)
+    end
+
+    def measurement_operand(value)
+      return value.value if value.is_a?(Tungsten::Measurement)
+      if value.is_a?(Runtime::WObject) && value.w_class.name == "Measurement"
+        return call_w_method(value, value.w_class.lookup_method("value"), [])
+      end
+      value
+    end
+
+    def measurement_literal(value, sigma)
+      klass = @classes["Measurement"]
+      return instantiate(klass, [value, sigma]) if klass&.lookup_method("new", argc: 2)
+      Tungsten::Measurement.new(value, sigma)
+    end
+
+    # The Ruby embedding exposes native Measurement literals. If a later
+    # import or constructor loads the core class, adopt earlier readings and
+    # their signed contributions into the same core representation.
+    def core_reading(reading)
+      klass = @classes["Measurement"]
+      return reading unless klass&.lookup_method("new", argc: 2)
+      @adopted_readings ||= ObjectSpace::WeakKeyMap.new
+      key = reading.identity_token
+      return @adopted_readings[key] if @adopted_readings.key?(key)
+
+      result = instantiate(klass, [reading.value, reading.uncertainty,
+                                   reading.lower_uncertainty, reading.upper_uncertainty,
+                                   reading.coverage_factor, reading.confidence,
+                                   reading.degrees_of_freedom, reading.provenance])
+      sources = instantiate(@classes.fetch("MeasurementSources"), [])
+      add = sources.w_class.lookup_method("add")
+      reading.source_terms.each do |token, contribution|
+        call_w_method(sources, add, [token, contribution, 0.0, 0.0])
+      end
+      call_w_method(result, klass.lookup_method("with_sources"), [sources])
+      @adopted_readings[key] = result
     end
 
     def visit_quantity_literal(node)
@@ -1420,6 +1457,9 @@ module Tungsten
 
       right = node.right.eval_in(self)
 
+      left = core_reading(left) if left.is_a?(Tungsten::Measurement)
+      right = core_reading(right) if right.is_a?(Tungsten::Measurement)
+
       # Source-defined objects own their arithmetic and set operators as they do
       # in the self-hosted interpreter and native lowering. Ruby cannot apply
       # primitive arithmetic directly to Runtime::WObject.
@@ -1486,9 +1526,9 @@ module Tungsten
         # `5.0 ± 0.1` → Measurement(5.0, 0.1).
         # If either side already carries uncertainty, that's a layered situation
         # (e.g. `(a ± b) ± c`) — treat it as updating the sigma rather than nesting.
-        l_val = left.is_a?(Tungsten::Measurement) ? left.value : left
-        r_val = right.is_a?(Tungsten::Measurement) ? right.value : right
-        Tungsten::Measurement.new(l_val, r_val.abs)
+        l_val = measurement_operand(left)
+        r_val = measurement_operand(right)
+        measurement_literal(l_val, r_val.abs)
       when :-
         return left - right if left.is_a?(Integer) && right.is_a?(Integer)
         if percent_value?(right) && !percent_value?(left)
@@ -1757,6 +1797,24 @@ module Tungsten
       end
     end
 
+    def compound_value(current, right, node)
+      current = core_reading(current) if current.is_a?(Tungsten::Measurement)
+      right = core_reading(right) if right.is_a?(Tungsten::Measurement)
+      if current.is_a?(Runtime::WObject)
+        method = current.w_class.lookup_method(node.operator.to_s, argc: 1)
+        return call_w_method(current, method, [right], call_node: node) if method
+      end
+      case node.operator
+      when :+  then current + right
+      when :-  then current - right
+      when :*  then current * right
+      when :/  then tungsten_div(current, right)
+      when :%  then tungsten_mod(current, right)
+      when :** then tungsten_pow(current, right)
+      else runtime_error("unknown compound operator: #{node.operator}", node: node)
+      end
+    end
+
     def visit_assign_op(node)
       target = node.name
       right = node.value.eval_in(self)
@@ -1765,15 +1823,7 @@ module Tungsten
         slot = target.cached_slot
         slots = @env.slot_values
         current = slots[slot]
-        result = case node.operator
-                 when :+  then current + right
-                 when :-  then current - right
-                 when :*  then current * right
-                 when :/  then tungsten_div(current, right)
-                 when :%  then tungsten_mod(current, right)
-                 when :** then tungsten_pow(current, right)
-                 else runtime_error("unknown compound operator: #{node.operator}", node: node)
-                 end
+        result = compound_value(current, right, node)
         slots[slot] = result
         return result
       end
@@ -1782,15 +1832,7 @@ module Tungsten
         slot = target.cached_slot
         slots = ce.slot_values
         current = slots[slot]
-        result = case node.operator
-                 when :+  then current + right
-                 when :-  then current - right
-                 when :*  then current * right
-                 when :/  then tungsten_div(current, right)
-                 when :%  then tungsten_mod(current, right)
-                 when :** then tungsten_pow(current, right)
-                 else runtime_error("unknown compound operator: #{node.operator}", node: node)
-                 end
+        result = compound_value(current, right, node)
         slots[slot] = result
         return result
       end
@@ -1821,15 +1863,7 @@ module Tungsten
                   end
       end
 
-      result = case node.operator
-               when :+  then current + right
-               when :-  then current - right
-               when :*  then current * right
-               when :/  then tungsten_div(current, right)
-               when :%  then tungsten_mod(current, right)
-               when :** then tungsten_pow(current, right)
-               else runtime_error("unknown compound operator: #{node.operator}", node: node)
-               end
+      result = compound_value(current, right, node)
 
       if target.is_a?(Tungsten::AST::InstanceVar)
         obj.set_ivar(name, result)
@@ -2252,6 +2286,10 @@ module Tungsten
     def visit_call(node)
       if node.obj
         recv = node.obj.eval_in(self)
+        if recv.is_a?(Tungsten::Measurement)
+          try_autoload_core("Measurement") if node.name == "correlate"
+          recv = core_reading(recv)
+        end
         block = node.block
 
         if !@profile_enabled && !block && recv.is_a?(Runtime::WObject) &&
@@ -2286,6 +2324,10 @@ module Tungsten
         end
 
         cname = node.name
+        if (cname == "-" || cname == "+") && recv.is_a?(Runtime::WObject)
+          unary = recv.w_class.lookup_method("#{cname}@", argc: 0)
+          return call_w_method(recv, unary, [], call_node: node) if unary
+        end
         if cname == "-"
           return -recv
         elsif cname == "+"

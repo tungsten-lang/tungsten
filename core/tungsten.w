@@ -380,6 +380,8 @@
   auto :QuantumBasisState, "quantum"
   auto :QuantumState,      "quantum"
   auto :Measurement,  "measurement"
+  auto :MeasurementSource, "measurement"
+  auto :MeasurementSources, "measurement"
   auto :Calibration,  "calibration"
   auto :Random,       "random"
   auto :Range,        "range"

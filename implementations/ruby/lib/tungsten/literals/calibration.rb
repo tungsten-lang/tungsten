@@ -45,12 +45,12 @@ module Tungsten
       x = measurement.value.to_f
       validate_range!(x)
       y = polynomial(x)
-      input_variance = (derivative(x) * measurement.uncertainty)**2
       coefficient_variance = coefficient_variance_at(x)
-      uncertainty = Math.sqrt(input_variance + coefficient_variance + @standard_uncertainty**2)
+      calibration_sigma = Math.sqrt(coefficient_variance + @standard_uncertainty**2)
+      propagated = measurement * derivative(x) + Measurement.new(0, calibration_sigma)
       provenance = measurement.provenance.dup
       provenance << "calibration #{@certificate.id}" if @certificate&.id
-      result = Measurement.new(y, uncertainty, provenance:)
+      result = Measurement.new(y, propagated.uncertainty, provenance:).with_source_terms(propagated.source_terms)
       @output_unit ? Quantity.new(result, Units.parse(@output_unit)) : result
     end
 

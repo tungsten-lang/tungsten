@@ -1,3 +1,51 @@
+# MeasurementSource — identity of one independent uncertainty contribution.
++ MeasurementSource
+  -> new
+    nil
+
+# MeasurementSources — signed total, random and systematic contributions by source.
++ MeasurementSources
+  -> new
+    @terms = []
+
+  -> add(source, total, random, systematic)
+    i = 0
+    while i < @terms.size
+      term = @terms[i]
+      if term[0] == source
+        term[1] += total
+        term[2] += random
+        term[3] += systematic
+        return self
+      i += 1
+    @terms.push([source, total, random, systematic])
+    self
+
+  -> accumulate(target, scale)
+    @terms.each ->(term)
+      target.add(term[0], scale * term[1], scale * term[2], scale * term[3])
+    target
+
+  -> coefficient(source)
+    i = 0
+    while i < @terms.size
+      term = @terms[i]
+      return term[1] if term[0] == source
+      i += 1
+    ~0.0
+
+  -> covariance(other, left_scale = ~1.0, right_scale = ~1.0)
+    total = ~0.0
+    @terms.each ->(term)
+      total += (term[1] / left_scale) * (other.coefficient(term[0]) / right_scale)
+    total
+
+  -> norm(column)
+    length = ~0.0
+    @terms.each ->(term)
+      length = Math.hypot(length, term[column])
+    length
+
 # Measurement — a scalar estimate and its standard uncertainty.
 #
 # `value ± uncertainty` is desugared by the parser to
@@ -58,6 +106,7 @@
     if (@correlation_peer != nil &&
         !Measurement.measurement?(@correlation_peer))
       raise "Measurement correlation peer must be a Measurement"
+    reset_sources
     if provenance == nil
       @provenance = []
     elsif provenance.class_name == "Array"
@@ -128,6 +177,24 @@
   -> components
     {:random => random_uncertainty, :systematic => systematic_uncertainty}
 
+  -> reset_sources
+    @sources = MeasurementSources.new
+    @sources.add(MeasurementSource.new, uncertainty, random_uncertainty, systematic_uncertainty)
+    self
+
+  -> contribute_to(terms, scale)
+    @sources.accumulate(terms, scale)
+
+  -> covariance_with(other)
+    other.covariance_from(@sources)
+
+  -> covariance_from(terms)
+    @sources.covariance(terms)
+
+  -> with_sources(terms)
+    @sources = terms
+    self
+
   -> correlate(other, coefficient)
     if !Measurement.measurement?(other)
       raise "correlation needs another Measurement"
@@ -142,8 +209,21 @@
       other.correlation_peer.clear_correlation_from(other)
     @correlation_peer = other
     @correlation_coefficient = coefficient
+    # Declare a new joint error model for this pair. Earlier results retain
+    # the basis they used, including after a later correlation rebind.
+    shared = MeasurementSource.new
+    @sources = MeasurementSources.new
+    @sources.add(shared, uncertainty, random_uncertainty, systematic_uncertainty)
+    other.set_pair_sources(shared, coefficient)
     other.correlate_back(self, coefficient)
     self
+
+  -> set_pair_sources(shared, rho)
+    residual = Math.sqrt((~1.0 - rho) * (~1.0 + rho))
+    @sources = MeasurementSources.new
+    @sources.add(shared, rho * uncertainty, rho * random_uncertainty, rho * systematic_uncertainty)
+    @sources.add(MeasurementSource.new, residual * uncertainty,
+                 residual * random_uncertainty, residual * systematic_uncertainty)
 
   -> correlate_back(other, coefficient)
     @correlation_peer = other
@@ -155,24 +235,31 @@
         Measurement.same_object?(@correlation_peer, other))
       @correlation_peer = nil
       @correlation_coefficient = ~0.0
+      reset_sources
     self
 
   -> correlation_with(other)
     return ~0.0 if !Measurement.measurement?(other)
     return ~1.0 if Measurement.same_object?(self, other)
-    return ~0.0 if correlation_peer == nil
-    return ~0.0 if !Measurement.same_object?(correlation_peer, other)
-    return ~0.0 if other.correlation_peer == nil
-    return ~0.0 if !Measurement.same_object?(other.correlation_peer, self)
-    return ~0.0 if other.correlation_coefficient != correlation_coefficient
-    correlation_coefficient
+    if (correlation_peer != nil && Measurement.same_object?(correlation_peer, other) &&
+        other.correlation_peer != nil && Measurement.same_object?(other.correlation_peer, self) &&
+        other.correlation_coefficient == correlation_coefficient)
+      return correlation_coefficient
+    return ~0.0 if uncertainty == ~0.0 || other.uncertainty == ~0.0
+    rho = other.normalized_covariance_from(@sources, uncertainty)
+    return ~1.0 if rho > ~1.0
+    return ~-1.0 if rho < ~-1.0
+    rho
+
+  -> normalized_covariance_from(terms, sigma)
+    @sources.covariance(terms, uncertainty, sigma)
 
   -> expanded(k = ~2.0, confidence = nil)
     confidence = @confidence if confidence == nil
     Measurement.new(
       value, uncertainty, lower_uncertainty, upper_uncertainty,
       k, confidence, degrees_of_freedom, provenance,
-      random_uncertainty, systematic_uncertainty, nil, ~0.0)
+      random_uncertainty, systematic_uncertainty, nil, ~0.0).with_sources(@sources)
 
   -> interval
     [value - lower_uncertainty * coverage_factor,
@@ -184,53 +271,33 @@
       other.provenance.each -> (source) result.push(source)
     result
 
+  -> propagated(other, result_value, dx, dy)
+    terms = contribute_to(MeasurementSources.new, dx)
+    other.contribute_to(terms, dy)
+    sigma = terms.norm(1)
+    Measurement.new(result_value, sigma, sigma, sigma, ~1.0, nil, nil,
+                    combined_provenance(other), terms.norm(2), terms.norm(3)).with_sources(terms)
+
   # General two-input first-order propagation:
   #   var(f) = fx^2 ux^2 + fy^2 uy^2 + 2 fx fy rho ux uy.
   -> binary_result(other, result_value, derivative_self, derivative_other, rho)
     Measurement.validate_correlation(rho)
-    covariance = rho * uncertainty * other.uncertainty
-    self_variance = (
-      derivative_self * derivative_self * uncertainty * uncertainty)
-    other_variance = (
-      derivative_other * derivative_other * other.uncertainty * other.uncertainty)
-    cross_variance = ~2.0 * derivative_self * derivative_other * covariance
-    variance = self_variance + other_variance + cross_variance
-    variance = Measurement.nonnegative_variance(
-      variance,
-      self_variance.abs + other_variance.abs + cross_variance.abs)
-
-    random_covariance = (
-      rho * random_uncertainty * other.random_uncertainty)
-    random_self = (
-      derivative_self * derivative_self * random_uncertainty * random_uncertainty)
-    random_other = (
-      derivative_other * derivative_other * other.random_uncertainty * other.random_uncertainty)
-    random_cross = (
-      ~2.0 * derivative_self * derivative_other * random_covariance)
-    random_variance = random_self + random_other + random_cross
-    random_variance = Measurement.nonnegative_variance(
-      random_variance,
-      random_self.abs + random_other.abs + random_cross.abs)
-
-    systematic_covariance = (
-      rho * systematic_uncertainty * other.systematic_uncertainty)
-    systematic_self = (
-      derivative_self * derivative_self * systematic_uncertainty * systematic_uncertainty)
-    systematic_other = (
-      derivative_other * derivative_other * other.systematic_uncertainty * other.systematic_uncertainty)
-    systematic_cross = (
-      ~2.0 * derivative_self * derivative_other * systematic_covariance)
-    systematic_variance = systematic_self + systematic_other + systematic_cross
-    systematic_variance = Measurement.nonnegative_variance(
-      systematic_variance,
-      systematic_self.abs + systematic_other.abs + systematic_cross.abs)
-
-    result_uncertainty = Math.sqrt(variance)
-    Measurement.new(
-      result_value, result_uncertainty, result_uncertainty,
-      result_uncertainty, ~1.0, nil, nil,
-      combined_provenance(other), Math.sqrt(random_variance),
-      Math.sqrt(systematic_variance), nil, ~0.0)
+    if rho == correlation_with(other)
+      return propagated(other, result_value, derivative_self, derivative_other)
+    # An explicit override defines a local two-input error model. Resolve
+    # the second contribution along and perpendicular to the first.
+    residual = Math.sqrt((~1.0 - rho) * (~1.0 + rho))
+    left = derivative_self * uncertainty
+    right = derivative_other * other.uncertainty
+    sigma = Math.hypot(left + rho * right, residual * right)
+    left = derivative_self * random_uncertainty
+    right = derivative_other * other.random_uncertainty
+    random = Math.hypot(left + rho * right, residual * right)
+    left = derivative_self * systematic_uncertainty
+    right = derivative_other * other.systematic_uncertainty
+    systematic = Math.hypot(left + rho * right, residual * right)
+    Measurement.new(result_value, sigma, sigma, sigma, ~1.0, nil, nil,
+                    combined_provenance(other), random, systematic)
 
   -> unary_result(result_value, derivative)
     scale = derivative.abs
@@ -239,14 +306,14 @@
       result_value, result_uncertainty, result_uncertainty,
       result_uncertainty, ~1.0, nil, nil, provenance,
       scale * random_uncertainty, scale * systematic_uncertainty,
-      nil, ~0.0)
+      nil, ~0.0).with_sources(contribute_to(MeasurementSources.new, derivative))
 
   -> shifted(scalar, sign)
     Measurement.new(
       value + sign * scalar, uncertainty,
       lower_uncertainty, upper_uncertainty,
       coverage_factor, confidence, degrees_of_freedom, provenance,
-      random_uncertainty, systematic_uncertainty, nil, ~0.0)
+      random_uncertainty, systematic_uncertainty, nil, ~0.0).with_sources(@sources)
 
   -> scaled(scalar)
     magnitude = scalar.abs
@@ -260,16 +327,16 @@
       value * scalar, uncertainty * magnitude, lower, upper,
       coverage_factor, confidence, degrees_of_freedom, provenance,
       random_uncertainty * magnitude,
-      systematic_uncertainty * magnitude, nil, ~0.0)
+      systematic_uncertainty * magnitude, nil, ~0.0).with_sources(contribute_to(MeasurementSources.new, scalar))
 
   -> +(other)
     if Measurement.measurement?(other)
-      return self.add_correlated(other, correlation_with(other))
+      return propagated(other, value + other.value, ~1.0, ~1.0)
     shifted(other, ~1.0)
 
   -> -(other)
     if Measurement.measurement?(other)
-      return self.sub_correlated(other, correlation_with(other))
+      return propagated(other, value - other.value, ~1.0, ~-1.0)
     shifted(other, ~-1.0)
 
   -> -@
@@ -277,12 +344,13 @@
 
   -> *(other)
     if Measurement.measurement?(other)
-      return self.mul_correlated(other, correlation_with(other))
+      return propagated(other, value * other.value, other.value, value)
     scaled(other)
 
   -> /(other)
     if Measurement.measurement?(other)
-      return self.div_correlated(other, correlation_with(other))
+      raise "Measurement division by zero" if other.value == ~0.0
+      return propagated(other, value / other.value, ~1.0 / other.value, (~0.0 - value) / (other.value * other.value))
     raise "Measurement division by zero" if other == 0
     scaled(~1.0 / other)
 
@@ -332,11 +400,10 @@
   -> to_s
     suffix = ""
     if coverage_factor != ~1.0
-      suffix = " (k=" + coverage_factor.to_s + ")"
+      suffix = " (k=[coverage_factor])"
     if lower_uncertainty != upper_uncertainty
-      return (value.to_s + " +" + upper_uncertainty.to_s +
-              "/-" + lower_uncertainty.to_s + suffix)
-    value.to_s + " ± " + uncertainty.to_s + suffix
+      return "[value] +[upper_uncertainty]/-[lower_uncertainty][suffix]"
+    "[value] ± [uncertainty][suffix]"
 
   -> inspect
     to_s

@@ -104,7 +104,7 @@ measurement_check("correlated.cancellation",
   (same_a - same_b).uncertainty == ~0.0)
 
 # Rebinding the single correlation slot detaches the old reciprocal link.
-# Arithmetic must remain commutative and derived values drop the link.
+# Arithmetic remains commutative and derived values retain their sensitivities.
 rebind_a = Measurement.new(~1.0, ~0.1)
 rebind_b = Measurement.new(~2.0, ~0.2)
 rebind_c = Measurement.new(~3.0, ~0.3)
@@ -119,9 +119,9 @@ measurement_check("correlation.old_pair_detached",
 measurement_check("correlation.new_pair_active",
   measurement_close?((rebind_a + rebind_c).uncertainty, ~0.4))
 shifted_a = rebind_a + ~1.0
-measurement_check("correlation.derived_result_cleared",
-  shifted_a.correlation_with(rebind_c) == ~0.0 &&
-  rebind_c.correlation_with(shifted_a) == ~0.0)
+measurement_check("correlation.derived_result_retained",
+  measurement_close?(shifted_a.correlation_with(rebind_c), ~1.0) &&
+  measurement_close?(rebind_c.correlation_with(shifted_a), ~1.0))
 
 bad_correlation_rejected = false
 begin

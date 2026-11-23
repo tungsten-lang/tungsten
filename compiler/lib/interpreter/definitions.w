@@ -689,7 +689,13 @@
     obj = current_self()
     if obj == nil || type(obj) != "Hash" || !obj.has_key?(:rt) || obj[:rt] != :object
       raise "super outside of method"
+    # The parent of the class that defines the running method, not of the receiver's
+    # class: through an intermediate override the receiver's parent is that override,
+    # and super would call it again forever.
+    current = @method_stack.last()
     w_class = obj[:w_class]
+    if current != nil && current[:w_class] != nil
+      w_class = current[:w_class]
     super_class = w_class[:superclass]
     if super_class == nil
       raise "no superclass"
@@ -703,7 +709,6 @@
       i += 1
     # The method being executed, not "new". A value-returning override
     # such as `super + "!"` has to call the parent's method of the same name.
-    current = @method_stack.last()
     mname = "new"
     if current != nil && current[:name] != nil
       mname = current[:name]

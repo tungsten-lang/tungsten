@@ -466,7 +466,13 @@
 # Returns nil when the super target is not a plain-ABI SOURCE method — no
 # superclass, a runtime/builtin parent, a static method of the same name, or a
 # signature (defaults/keywords/splat/block/yield) outside the direct-call ABI.
--> super_target_fn(mod, class_name, method_name, argc)
+# The superclass method `super(args)` calls: [function symbol, parameter count]. The
+# devirtualization registry holds only plain signatures, so a parent method whose
+# parameters past argc all have defaults (and that takes no keywords, splat or block)
+# is found through its AST: it is called with the missing arguments as nil, which is
+# how a defaulted parameter receives "absent". (Without this, such a super returned nil
+# without calling anything.)
+-> super_target(mod, class_name, method_name, argc)
   if class_name == nil || method_name == nil
     return nil
   super_names = mod[:class_super_names]
@@ -485,11 +491,34 @@
       # means. Confirm the owner is an instance method before calling it.
       owner_ast = mod[:class_method_asts][current + key_suffix]
       if owner_ast == nil || owner_ast.is_class_method != true
-        return hit
+        return [hit, argc]
       return nil
+    if method_name != "new"
+      pc = argc
+      while pc <= argc + 16
+        ast = mod[:class_method_asts][current + "." + method_name + "/" + pc.to_s()]
+        if ast != nil && is_ast_node?(ast) && ast.is_class_method != true && super_defaults_ok?(ast, argc)
+          return [class_method_function_name(current, ast), pc]
+        pc += 1
     current = super_names[current]
     guard += 1
   nil
+
+-> super_defaults_ok?(ast, argc)
+  params = ast.params
+  if params == nil || ast.body == nil || ast.body.size() == 0
+    return false
+  if method_lowering_analysis(ast)[:yield_block_name] != nil
+    return false
+  i = 0
+  while i < params.size()
+    p = params[i]
+    if p.keyword == true || p.splat == true || p.block_param == true
+      return false
+    if i >= argc && p.default == nil
+      return false
+    i += 1
+  true
 
 # `super` had no lowering arm at all: it fell through lower_expression's
 # `else` to unsupported_node, which silently produced nil — so a subclass
@@ -505,15 +534,19 @@
   if args == nil
     args = []
   n_args = args.size()
-  fn_name = nil
+  target = nil
   if ctx[:is_class_method] != true
-    fn_name = super_target_fn(ctx[:mod], ctx[:class_name], ctx[:method_name], n_args)
-  if fn_name == nil
+    target = super_target(ctx[:mod], ctx[:class_name], ctx[:method_name], n_args)
+  if target == nil
     return typed_value(:i64, w_nil.to_s())
+  fn_name = target[0]
   call_args = [ensure_i64_value(wfn, lower_var(ctx, Tungsten:AST:Var.new("__self")))]
   i = 0
   while i < n_args
     call_args.push(ensure_i64_value(wfn, lower_expression(ctx, args[i])))
+    i += 1
+  while i < target[1]
+    call_args.push(w_nil.to_s())
     i += 1
   temp = next_temp(wfn)
   emit_wire_call_direct_i64(wfn, nil, call_args, nil, nil, fn_name, nil, nil, temp)

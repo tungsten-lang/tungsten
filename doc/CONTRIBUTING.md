@@ -123,6 +123,10 @@ Intel coverage remains on GitHub-hosted hardware. The repository's Blacksmith
 GitHub integration must be enabled before changing a job to a `blacksmith-*`
 label, or GitHub will leave that job queued without a matching runner.
 
+Patched Ruby sources live in `src/patched/ruby/<version>/`. Dependency setup
+points `src/patched/ruby/current` at the release declared in the Bitfile.
+The launcher uses that tree’s `ruby` executable when built.
+
 CI persists the build store (`~/.tungsten/cache`) and `build/cache/` (the
 downloaded CI tools and job-specific artifacts) with the upstream
 `actions/cache` action. Blacksmith redirects that action to its

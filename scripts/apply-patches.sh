@@ -1,34 +1,18 @@
-#!/bin/bash
-# Apply patches from patches/ to src/pristine/ → src/patched/
-# Usage: scripts/apply-patches.sh
-
-set -e
+#!/usr/bin/env bash
+# Apply the named Ruby release's Tungsten patch, preserving existing source edits.
+set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-
-for dep in ruby; do
-  PRISTINE=$(ls -d "$ROOT/src/pristine/${dep}-"* 2>/dev/null | head -1)
-
-  if [ -z "$PRISTINE" ] || [ ! -d "$PRISTINE" ]; then
-    echo "skip $dep: no pristine source at src/pristine/${dep}-*"
-    continue
-  fi
-
-  VERSION=$(basename "$PRISTINE" | sed "s/^${dep}-//")
-  PATCH="$ROOT/patches/$dep/$VERSION/tungsten.patch"
-
-  if [ ! -f "$PATCH" ]; then
-    echo "skip $dep $VERSION: no patch file"
-    continue
-  fi
-
-  PATCHED="$ROOT/src/patched/$dep"
-
-  echo "copying pristine $dep $VERSION → patched..."
-  rm -rf "$PATCHED"
-  cp -a "$PRISTINE" "$PATCHED"
-
-  echo "applying patches/$dep/$VERSION/tungsten.patch..."
-  cd "$PATCHED"
-  patch -p1 < "$PATCH"
-  echo "done"
-done
+version="${1:-$(readlink "$ROOT/src/patched/ruby/current" || true)}"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "usage: $0 x.y.z" >&2; exit 2; }
+patch_file="$ROOT/src/patches/ruby/$version/tungsten.patch"
+[[ -f "$patch_file" ]] || { echo "No Tungsten patch for Ruby $version"; exit 0; }
+patched="$ROOT/src/patched/ruby/$version"
+if [[ ! -d "$patched" ]]; then
+  pristine="$ROOT/src/pristine/ruby-$version"
+  [[ -d "$pristine" ]] || { echo "Missing $pristine" >&2; exit 1; }
+  patch -f --dry-run -d "$pristine" -p1 < "$patch_file"
+  mkdir -p "$(dirname "$patched")"
+  cp -a "$pristine" "$patched"
+fi
+patch -f --dry-run -d "$patched" -p1 < "$patch_file"
+patch -f -d "$patched" -p1 < "$patch_file"

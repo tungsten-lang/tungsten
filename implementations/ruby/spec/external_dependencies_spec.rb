@@ -124,10 +124,10 @@ RSpec.describe Tungsten::ExternalDependencies do
 
         manager.install_from_bitfile(path, io: StringIO.new)
 
-        ruby_patched = File.join(manager.root, "src", "patched", "ruby")
+        ruby_patched = File.join(manager.root, "src", "patched", "ruby", "4.0.2")
         openssl_patched = File.join(manager.root, "src", "patched", "openssl")
 
-        expect(File.directory?(ruby_patched)).to be true
+        expect(File.realpath(File.join(File.dirname(ruby_patched), "current"))).to eq(File.realpath(ruby_patched))
         expect(File.read(File.join(ruby_patched, "marker"))).to eq("ruby")
         expect(File.directory?(openssl_patched)).to be true
         expect(File.read(File.join(openssl_patched, "marker"))).to eq("openssl")
@@ -139,7 +139,7 @@ RSpec.describe Tungsten::ExternalDependencies do
 
       with_bitfile(%(external "ruby", "4.0.2"\n)) do |path|
         FileUtils.mkdir_p(File.join(manager.root, "src", "pristine", "ruby-4.0.2"))
-        existing = File.join(manager.root, "src", "patched", "ruby")
+        existing = File.join(manager.root, "src", "patched", "ruby", "4.0.2")
         FileUtils.mkdir_p(existing)
         File.write(File.join(existing, "user_edit"), "do not clobber")
 

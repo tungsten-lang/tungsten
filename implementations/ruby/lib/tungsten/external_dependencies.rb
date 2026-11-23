@@ -345,7 +345,7 @@ module Tungsten
 
       def ensure_alias(alias_path, target, io:)
         if File.symlink?(alias_path)
-          return if File.realpath(alias_path) == File.realpath(target)
+          return if File.exist?(alias_path) && File.identical?(alias_path, target)
           FileUtils.rm_f(alias_path)
         elsif File.exist?(alias_path)
           io.puts "skip    #{relative_path(alias_path)} already exists and is not a symlink"
@@ -361,7 +361,7 @@ module Tungsten
       end
 
       # `src/patched/<name>` is the working copy the build system edits and
-      # compiles in place (e.g. `src/patched/ruby/ruby` is the built binary,
+      # compiles in place (e.g. `src/patched/ruby/current/ruby` is the built binary,
       # `src/patched/spinel/lib/libspinel_rt.a` is its built archive). Seed
       # it from `src/pristine/<name>-<version>` the first time so users don't
       # have to copy by hand. Existing patched dirs are left untouched.
@@ -373,14 +373,18 @@ module Tungsten
           next unless File.directory?(source)
 
           patched_path = File.join(root, "src", "patched", provider.name)
+          if provider.name == "ruby"
+            ruby_alias = File.join(patched_path, "current")
+            patched_path = File.join(patched_path, version)
+          end
           if File.exist?(patched_path) || File.symlink?(patched_path)
             io.puts "present #{relative_path(patched_path)}"
-            next
+          else
+            FileUtils.mkdir_p(File.dirname(patched_path))
+            FileUtils.cp_r(source, patched_path)
+            io.puts "seed    #{relative_path(patched_path)} <- #{relative_path(source)}"
           end
-
-          FileUtils.mkdir_p(File.dirname(patched_path))
-          FileUtils.cp_r(source, patched_path)
-          io.puts "seed    #{relative_path(patched_path)} <- #{relative_path(source)}"
+          ensure_alias(ruby_alias, patched_path, io: io) if ruby_alias
         end
       end
     end

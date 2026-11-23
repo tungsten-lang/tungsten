@@ -70,7 +70,7 @@ MANPAGE = manpage_lines.join("\n")
 -> exec_ruby_driver
   ruby_cli = ROOT + "/bin/tungsten.rb"
   ruby = "ruby"
-  custom = ROOT + "/src/patched/ruby/ruby"
+  custom = ROOT + "/src/patched/ruby/current/ruby"
   if executable_file?(custom)
     ruby = custom
   cmd = sh_quote(ruby) + " " + sh_quote(ruby_cli)

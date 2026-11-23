@@ -1,0 +1,11 @@
+c CNF file path: /Users/erik/.tungsten/satbench-2026-all/reconf20_50_grid10_1_6141--042cdc726a92.cnf
+c DSR file path: build/sc2026-reconf-grid/native.drat
+c LSR file path: build/sc2026-reconf-grid/native.lsr
+c Using a STREAMING parsing strategy.
+c Doing FORWARDS proof checking.
+c The CNF formula has 548063 clauses and 139160 variables.
+c Parsing the CNF took 0.140 secs
+c Checking proof...
+c Proof checking took 7.503 secs
+s VERIFIED UNSAT
+c Total runtime took 7.682 secs

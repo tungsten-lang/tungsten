@@ -1,0 +1,2002 @@
+{
+ "001--2bbc3327d89b": {
+  "field_best": 105.51,
+  "hash": "2bbc3327d89b59591b89b5d5a486f037",
+  "verdict": "sat"
+ },
+ "01-integer-programming-20-30-40--81c36c1f55a6": {
+  "field_best": 71.65,
+  "hash": "81c36c1f55a6ee8e180f53f140ce05a3",
+  "verdict": "sat"
+ },
+ "1--9c5dd2eb0a40": {
+  "field_best": 4.85,
+  "hash": "9c5dd2eb0a40a150c686459a118c720a",
+  "verdict": "sat"
+ },
+ "1--ab2ab3a0651f": {
+  "field_best": 0.04,
+  "hash": "ab2ab3a0651f0f35ba319ad976b1b6fd",
+  "verdict": "sat"
+ },
+ "10--744238c5aade": {
+  "field_best": 0.04,
+  "hash": "744238c5aadea40f8e05db49429da576",
+  "verdict": "sat"
+ },
+ "10--9a4671d8bb65": {
+  "field_best": 14.22,
+  "hash": "9a4671d8bb658361162976c0f06cc47e",
+  "verdict": "sat"
+ },
+ "12--aca9f4faabeb": {
+  "field_best": 0.04,
+  "hash": "aca9f4faabeb57a57c678d55f5bbd2f4",
+  "verdict": "sat"
+ },
+ "128.smt2--b69132879ed9": {
+  "field_best": null,
+  "hash": "b69132879ed9ea0c8af1bc1e478d6ec3",
+  "verdict": "unknown"
+ },
+ "13--9078ea73ff67": {
+  "field_best": 0.04,
+  "hash": "9078ea73ff67edf2b6dcd007c9696ca0",
+  "verdict": "sat"
+ },
+ "13.normalised--a789d0722f1a": {
+  "field_best": 4.57,
+  "hash": "a789d0722f1aa0d44c5a38b374719c69",
+  "verdict": "sat"
+ },
+ "14--511f1794698a": {
+  "field_best": 0.04,
+  "hash": "511f1794698a8620c18a7cc32cfc7776",
+  "verdict": "sat"
+ },
+ "15--8e1cdc28bad4": {
+  "field_best": 0.04,
+  "hash": "8e1cdc28bad48753110be5bd578cb934",
+  "verdict": "sat"
+ },
+ "16--247e42e46495": {
+  "field_best": 0.04,
+  "hash": "247e42e46495f1c4b8707e497af8c93e",
+  "verdict": "sat"
+ },
+ "168.smt2--04d0ae28e10d": {
+  "field_best": null,
+  "hash": "04d0ae28e10d4a35ebab62f42f0200e8",
+  "verdict": "unknown"
+ },
+ "16_16_booth_dadda_mapped_and_and_wallace_origin_bit28--de8c42d50f1d": {
+  "field_best": 674.75,
+  "hash": "de8c42d50f1dbf43a731f1916dc6bf01",
+  "verdict": "unsat"
+ },
+ "16_16_booth_dadda_origin_and_default_mapped_ultra_bit29--fac2035ba83a": {
+  "field_best": 283.57,
+  "hash": "fac2035ba83ac2d0c2d67509d3f82b94",
+  "verdict": "unsat"
+ },
+ "170225812--8117a2ac08e1": {
+  "field_best": 0.39,
+  "hash": "8117a2ac08e1acf52f660663efe2a5ca",
+  "verdict": "sat"
+ },
+ "1x1x13_1x3x6_pair_0_0_0_2_2_1--147ae051ca72": {
+  "field_best": 262.33,
+  "hash": "147ae051ca727d5b2af87223b2299fbe",
+  "verdict": "sat"
+ },
+ "1x1x13_1x3x6_pair_2_1_1_4_2_0--2563ea83d850": {
+  "field_best": 64.48,
+  "hash": "2563ea83d8508d635cc034d80014cd72",
+  "verdict": "sat"
+ },
+ "1x1x13_1x3x6_pair_2_2_1_3_2_0--a4eec7a5fef5": {
+  "field_best": 1979.77,
+  "hash": "a4eec7a5fef59547129822f6b513d54c",
+  "verdict": "sat"
+ },
+ "1x1x13_1x3x6_pair_2_2_1_3_4_0--da6fae94ae1b": {
+  "field_best": 985.9,
+  "hash": "da6fae94ae1b1cedcced7169df02a762",
+  "verdict": "sat"
+ },
+ "1x1x13_1x3x6_pair_4_1_0_2_3_0--44452f4bac1e": {
+  "field_best": 61.73,
+  "hash": "44452f4bac1e77157bbc900c5cc0756d",
+  "verdict": "sat"
+ },
+ "1x1x13_1x3x6_pair_4_2_0_2_0_0--aa0eadb6c493": {
+  "field_best": 420.21,
+  "hash": "aa0eadb6c4935468fd6954e23a550504",
+  "verdict": "sat"
+ },
+ "1x1x13_1x3x6_pair_4_2_0_2_5_0--02a46668243d": {
+  "field_best": 358.19,
+  "hash": "02a46668243d6dabab4cf74d3811f6b6",
+  "verdict": "sat"
+ },
+ "1x1x14_1x2x9_pair_2_0_0_2_1_1--808d66b11c60": {
+  "field_best": 204.15,
+  "hash": "808d66b11c602eb1d5728f3f8e90aaef",
+  "verdict": "sat"
+ },
+ "1x1x14_1x2x9_pair_2_2_0_3_2_1--c62a1855a4db": {
+  "field_best": 418.82,
+  "hash": "c62a1855a4db8ae0b4bd625455332a4c",
+  "verdict": "sat"
+ },
+ "1x1x14_1x2x9_pair_2_4_0_2_2_0--5f729f069a23": {
+  "field_best": 1956.5,
+  "hash": "5f729f069a233fa88dfb470bbee7c924",
+  "verdict": "sat"
+ },
+ "1x1x14_1x2x9_pair_2_4_0_3_1_0--e5066e18b034": {
+  "field_best": 266.97,
+  "hash": "e5066e18b03451d92863160ed8166bdf",
+  "verdict": "sat"
+ },
+ "1x1x14_1x2x9_pair_2_4_0_3_2_0--9a4837429c65": {
+  "field_best": 1142.77,
+  "hash": "9a4837429c656a71283b8d5bb41c05a7",
+  "verdict": "sat"
+ },
+ "1x1x14_1x2x9_pair_2_4_0_3_3_0--f604f43d1f55": {
+  "field_best": 800.05,
+  "hash": "f604f43d1f5525f3dab4090190adbc66",
+  "verdict": "sat"
+ },
+ "1x1x14_1x2x9_pair_4_1_0_2_1_0--8caa9b4b72b5": {
+  "field_best": 87.43,
+  "hash": "8caa9b4b72b5f1782fe4554980978cbc",
+  "verdict": "sat"
+ },
+ "1x1x14_1x2x9_pair_4_2_0_2_3_0--44b7d2c8d085": {
+  "field_best": 449.8,
+  "hash": "44b7d2c8d08574002ac959e6d1ef30ae",
+  "verdict": "sat"
+ },
+ "1x1x14_1x2x9_pair_4_3_0_2_3_1--2c4491c50d4d": {
+  "field_best": 145.63,
+  "hash": "2c4491c50d4df86e7c1838083cedc703",
+  "verdict": "sat"
+ },
+ "2--2d89fda1bd6a": {
+  "field_best": 0.04,
+  "hash": "2d89fda1bd6a761ca5e2f4bb89202681",
+  "verdict": "sat"
+ },
+ "2--c3bc9b01e5f8": {
+  "field_best": 5.86,
+  "hash": "c3bc9b01e5f804723b74715508941bf2",
+  "verdict": "sat"
+ },
+ "289-unsat-13x32--f8a3fae231fe": {
+  "field_best": null,
+  "hash": "f8a3fae231fe11905d91db3fb6c42449",
+  "verdict": "unknown"
+ },
+ "3--57f6bbfc8be5": {
+  "field_best": 6.88,
+  "hash": "57f6bbfc8be5a981322fe9991209aa33",
+  "verdict": "sat"
+ },
+ "4--4d84e818a5ab": {
+  "field_best": 0.04,
+  "hash": "4d84e818a5ab324dde37429dd2455551",
+  "verdict": "sat"
+ },
+ "4--f554b55356a5": {
+  "field_best": 7.93,
+  "hash": "f554b55356a5e0ed39dbf8c1030ebce0",
+  "verdict": "sat"
+ },
+ "41-119494--91860f79f079": {
+  "field_best": 6.31,
+  "hash": "91860f79f079fede859034c7d76a98a2",
+  "verdict": "sat"
+ },
+ "4pipe--12cd0c319658": {
+  "field_best": 3.97,
+  "hash": "12cd0c3196589ac8105653cbfe613fc6",
+  "verdict": "unsat"
+ },
+ "5--bbcfd33f07cb": {
+  "field_best": 8.86,
+  "hash": "bbcfd33f07cbf6fefa950d8254aa34ce",
+  "verdict": "sat"
+ },
+ "51-136961--510df610f94d": {
+  "field_best": 27.89,
+  "hash": "510df610f94d5d57073a2c3b694dac4c",
+  "verdict": "sat"
+ },
+ "54-138766--a2fdd0935df1": {
+  "field_best": null,
+  "hash": "a2fdd0935df1379c67cf1bb93ef2cfad",
+  "verdict": "unknown"
+ },
+ "55-140792--6793abe982f9": {
+  "field_best": 471.34,
+  "hash": "6793abe982f9d5f9646f6657e13ecc39",
+  "verdict": "sat"
+ },
+ "56-126575--5ce7d137442b": {
+  "field_best": 27.1,
+  "hash": "5ce7d137442bd97a321a883c425e4634",
+  "verdict": "sat"
+ },
+ "59-134241--e2b819680a04": {
+  "field_best": null,
+  "hash": "e2b819680a045a8af67f82fa2f3d945a",
+  "verdict": "unknown"
+ },
+ "6--30c6fa5c4f59": {
+  "field_best": 0.04,
+  "hash": "30c6fa5c4f5910029b782b712844c93a",
+  "verdict": "sat"
+ },
+ "6--ee8c86d39745": {
+  "field_best": 10.09,
+  "hash": "ee8c86d39745aea1c1731d4f34bcaed7",
+  "verdict": "sat"
+ },
+ "60-135969--b2047f327e21": {
+  "field_best": 1363.1,
+  "hash": "b2047f327e213b5f14adb8c75ee514fb",
+  "verdict": "sat"
+ },
+ "7--bb8db7af8ede": {
+  "field_best": 11.0,
+  "hash": "bb8db7af8ede49391a66d4442d91c10b",
+  "verdict": "sat"
+ },
+ "8--5babccd4bf9b": {
+  "field_best": 12.52,
+  "hash": "5babccd4bf9b270acf0568bba32313bd",
+  "verdict": "sat"
+ },
+ "8--fed3f8d39738": {
+  "field_best": 0.04,
+  "hash": "fed3f8d39738c2e935e8ed13ddeb6967",
+  "verdict": "sat"
+ },
+ "9--4e0de8947997": {
+  "field_best": 13.29,
+  "hash": "4e0de894799790b06e8d6c3efd109ade",
+  "verdict": "sat"
+ },
+ "9--e3a132ecb810": {
+  "field_best": 0.04,
+  "hash": "e3a132ecb8108f7d8a46b6686e686b60",
+  "verdict": "sat"
+ },
+ "ACG-20-10p1--1f81f7e009f5": {
+  "field_best": 106.2,
+  "hash": "1f81f7e009f501014cb23a8c2d41836f",
+  "verdict": "sat"
+ },
+ "AProVE07-01--0cab9100cdd8": {
+  "field_best": 1011.08,
+  "hash": "0cab9100cdd8505069301d658d085899",
+  "verdict": "unsat"
+ },
+ "AProVE07-26-sc2007--b9a626da76f2": {
+  "field_best": null,
+  "hash": "b9a626da76f235aab854c6ef516b9240",
+  "verdict": "unknown"
+ },
+ "BubbleVsPancakeSort_6_7--4f09ef861ee7": {
+  "field_best": 68.79,
+  "hash": "4f09ef861ee74e50dc101765e1ce27fb",
+  "verdict": "unsat"
+ },
+ "BubbleVsPancakeSort_7_7--824cd6f379c2": {
+  "field_best": 520.11,
+  "hash": "824cd6f379c23cc863e501e397092cb9",
+  "verdict": "unsat"
+ },
+ "BubbleVsPancakeSort_8_5--8990b3506e94": {
+  "field_best": 1337.55,
+  "hash": "8990b3506e948e87b005d103d1ce6eb8",
+  "verdict": "unsat"
+ },
+ "Carry_Bits_Fast_12--6d815089fb40": {
+  "field_best": 0.04,
+  "hash": "6d815089fb4095208754622b4c44a8f7",
+  "verdict": "sat"
+ },
+ "Circuit_multiplier36--a45aefde8bb2": {
+  "field_best": 87.59,
+  "hash": "a45aefde8bb26edb9634004146d0de89",
+  "verdict": "sat"
+ },
+ "DLTM_twitter634_77_13--3005623c4df6": {
+  "field_best": 3559.69,
+  "hash": "3005623c4df6f5056a41a26d0f173e70",
+  "verdict": "unsat"
+ },
+ "DSC125.9.25--7372171e2e79": {
+  "field_best": 0.2,
+  "hash": "7372171e2e794a98cda6540676608f32",
+  "verdict": "unsat"
+ },
+ "DSC125.9.30--65bf849f3e86": {
+  "field_best": 1.29,
+  "hash": "65bf849f3e86ab275e339934f4d140a0",
+  "verdict": "unsat"
+ },
+ "DivS_568_11--0c9da400944b": {
+  "field_best": 3.35,
+  "hash": "0c9da400944b002f90fd385d4fdab385",
+  "verdict": "sat"
+ },
+ "DivS_862_11--74931e82fd20": {
+  "field_best": 5.59,
+  "hash": "74931e82fd208ed949fa44bccd80df6b",
+  "verdict": "sat"
+ },
+ "E00X23--ac3e3bb744e2": {
+  "field_best": 1107.48,
+  "hash": "ac3e3bb744e258282990aa4307c08cb8",
+  "verdict": "unsat"
+ },
+ "EDP3-60000--b697738cefe9": {
+  "field_best": null,
+  "hash": "b697738cefe9cb2dd62f24653a13b341",
+  "verdict": "unknown"
+ },
+ "ER_500_50_1.af--b6de3c794e22": {
+  "field_best": 390.0,
+  "hash": "b6de3c794e223fe515682f52e5d81272",
+  "verdict": "unsat"
+ },
+ "FmlaImplyChain_3_7_8--8d2dfc50c175": {
+  "field_best": 471.69,
+  "hash": "8d2dfc50c1759dc11a6564d5c368c6df",
+  "verdict": "unsat"
+ },
+ "GreenTao_2-3-5_528--08cf53ca00dc": {
+  "field_best": 144.91,
+  "hash": "08cf53ca00dce11f5bfc02121c9bcd33",
+  "verdict": "unsat"
+ },
+ "GreenTao_2-3-7_13850--d4a6b1a299c7": {
+  "field_best": null,
+  "hash": "d4a6b1a299c7a8ad6ea9769abcc60507",
+  "verdict": "unknown"
+ },
+ "GreenTao_2-4-5_4231--6cfd9ef85d9f": {
+  "field_best": null,
+  "hash": "6cfd9ef85d9f6e62dcbb9a4fd9334c90",
+  "verdict": "unknown"
+ },
+ "Large-result_b23.af_303--34360a677fc8": {
+  "field_best": 1.09,
+  "hash": "34360a677fc854189c982294853e6891",
+  "verdict": "sat"
+ },
+ "Large-result_b24.af_2238--80bb5209e88d": {
+  "field_best": 2.84,
+  "hash": "80bb5209e88def5643bf5593320b104f",
+  "verdict": "sat"
+ },
+ "MM-23-2-2-3-B--ebc40cf47836": {
+  "field_best": null,
+  "hash": "ebc40cf47836100655aea44ef1ed46da",
+  "verdict": "unknown"
+ },
+ "Medium-result_b10.af_252--365a02a7d781": {
+  "field_best": 0.63,
+  "hash": "365a02a7d781d655bb2a64d2273a2d0c",
+  "verdict": "sat"
+ },
+ "Medium-result_b14.af_285--8db998d5fd64": {
+  "field_best": 0.79,
+  "hash": "8db998d5fd64f85a1847115208f73873",
+  "verdict": "sat"
+ },
+ "Medium-result_b29.af_78--97af3e49faef": {
+  "field_best": 0.08,
+  "hash": "97af3e49faef7cf67794928b6690b67c",
+  "verdict": "sat"
+ },
+ "Medium-result_b30.af_61--2bb63853a9b8": {
+  "field_best": 0.32,
+  "hash": "2bb63853a9b8b9b9327a142210a9f437",
+  "verdict": "sat"
+ },
+ "Medium-result_b30.af_80--e1292f8d651e": {
+  "field_best": 0.18,
+  "hash": "e1292f8d651e022362630d34fef69312",
+  "verdict": "sat"
+ },
+ "Medium-result_b9.af_268--3b608084b3ca": {
+  "field_best": 0.46,
+  "hash": "3b608084b3caae2e9517a2d58cdcd275",
+  "verdict": "sat"
+ },
+ "QuasiGroup-4-12_c18--ddf6fff9ebbb": {
+  "field_best": 69.69,
+  "hash": "ddf6fff9ebbbe9ec2a02f70b3316db6d",
+  "verdict": "sat"
+ },
+ "SC21_Timetable_C_512_E_66_Cl_34_S_35--324b2441c6f1": {
+  "field_best": null,
+  "hash": "324b2441c6f1fa9d5f3cf3a4c8447fc7",
+  "verdict": "unknown"
+ },
+ "SC21_Timetable_C_527_E_71_Cl_35_S_35--ac6256657058": {
+  "field_best": 39.45,
+  "hash": "ac6256657058fe65dc7ddaf773ab83bf",
+  "verdict": "sat"
+ },
+ "SC23_Timetable_C_481_E_50_Cl_32_D_6_T_50--2b7e86346299": {
+  "field_best": 20.21,
+  "hash": "2b7e863462991fd008f9898eca63ebf4",
+  "verdict": "sat"
+ },
+ "SCPC-500-19--920bbe559da4": {
+  "field_best": 26.01,
+  "hash": "920bbe559da4ea37fd636605316a791c",
+  "verdict": "unsat"
+ },
+ "SDP_104_15_107--7fa502dfce37": {
+  "field_best": 5.65,
+  "hash": "7fa502dfce37c37c1cafd50b3fba263f",
+  "verdict": "sat"
+ },
+ "SDP_106_15_2616--37fa67bd34cc": {
+  "field_best": 17.98,
+  "hash": "37fa67bd34cc613f3fc6954cdee943c1",
+  "verdict": "sat"
+ },
+ "SDP_108_15_6925--dd062c307e10": {
+  "field_best": 210.15,
+  "hash": "dd062c307e10ebbb0d5641709ff26a7e",
+  "verdict": "sat"
+ },
+ "SDP_118_16_5515--a5dc08b83ff8": {
+  "field_best": 337.82,
+  "hash": "a5dc08b83ff806ac2c2c8cc23053fb07",
+  "verdict": "sat"
+ },
+ "SDP_120_17_1675--1c0fe2ac410f": {
+  "field_best": 61.49,
+  "hash": "1c0fe2ac410f3942e374ea72ec005d76",
+  "verdict": "sat"
+ },
+ "SDP_126_17_1585--5fb5e4372925": {
+  "field_best": 1708.54,
+  "hash": "5fb5e437292532efe687ac6f74a9cb76",
+  "verdict": "sat"
+ },
+ "SDP_132_18_9892--7efc1b160fb7": {
+  "field_best": 978.39,
+  "hash": "7efc1b160fb755fb1e8b6bcc70bbeb90",
+  "verdict": "sat"
+ },
+ "SDP_134_18_4334--515511be3905": {
+  "field_best": 915.03,
+  "hash": "515511be3905018ae7e6eb7ba7064d72",
+  "verdict": "sat"
+ },
+ "SDP_136_18_712--de3440b67769": {
+  "field_best": null,
+  "hash": "de3440b67769e7af00e58ec9cce9847b",
+  "verdict": "unknown"
+ },
+ "SDP_140_19_8786--654241eda3e1": {
+  "field_best": 396.83,
+  "hash": "654241eda3e1283f4b139192d1db055a",
+  "verdict": "sat"
+ },
+ "SDP_96_14_3612--33c8aca6a52d": {
+  "field_best": 19.69,
+  "hash": "33c8aca6a52d10e040da959439834d6a",
+  "verdict": "sat"
+ },
+ "SDP_98_14_7360--a9856534b6ca": {
+  "field_best": 22.31,
+  "hash": "a9856534b6ca67123d58dd5fd9c9a1b2",
+  "verdict": "sat"
+ },
+ "SGI_30_70_21_70_7-log.shuffled-as.sat03-153--5f65b4cceeb0": {
+  "field_best": null,
+  "hash": "5f65b4cceeb01c56e037df144309b29e",
+  "verdict": "unknown"
+ },
+ "SGI_30_70_22_70_7-dir.shuffled-as.sat03-154--3598c1012549": {
+  "field_best": 4089.14,
+  "hash": "3598c10125496ad7218852effc5c711f",
+  "verdict": "unsat"
+ },
+ "SocialGolfers-6-6-7-cp_c18--337ee3de87f8": {
+  "field_best": null,
+  "hash": "337ee3de87f824f99508e65faa6e1a0b",
+  "verdict": "unknown"
+ },
+ "StConn_7_128--b3c587501567": {
+  "field_best": 25.88,
+  "hash": "b3c587501567db72e6e66c6930cf15ed",
+  "verdict": "unsat"
+ },
+ "T90.2.0--a957fdb07df8": {
+  "field_best": 319.62,
+  "hash": "a957fdb07df865bb4fd24a00ceb49fdb",
+  "verdict": "unsat"
+ },
+ "T92.2.0--59b585a33d30": {
+  "field_best": 307.45,
+  "hash": "59b585a33d30e6b7a476ed52a3f0384d",
+  "verdict": "unsat"
+ },
+ "WS_500_16_70_10.apx_2_DS-ST--e67d733d9938": {
+  "field_best": 17.99,
+  "hash": "e67d733d9938c565d6359002333611ff",
+  "verdict": "sat"
+ },
+ "abw-K-dwt__234.mtx-w50--d8225a58e2ca": {
+  "field_best": 56.94,
+  "hash": "d8225a58e2ca7c2fb93c533f406c02d5",
+  "verdict": "sat"
+ },
+ "adv_gc_n100_k10_UNSAT_s42--1fac90514302": {
+  "field_best": 0.57,
+  "hash": "1fac905143027e3bf0932c09f427aa15",
+  "verdict": "unsat"
+ },
+ "adv_gc_n100_k11_UNSAT_s42--fbbfbee9e6cb": {
+  "field_best": 1.48,
+  "hash": "fbbfbee9e6cba8bca18fbcfc23dcfcb6",
+  "verdict": "unsat"
+ },
+ "adv_gc_n100_k12_UNSAT_s42--f497bda30189": {
+  "field_best": 3.62,
+  "hash": "f497bda3018958d7ba2d1cd99da3982e",
+  "verdict": "unsat"
+ },
+ "adv_gc_n100_k13_UNSAT_s42--9fbe200523c6": {
+  "field_best": 14.92,
+  "hash": "9fbe200523c648000d71b2c739093aa2",
+  "verdict": "unsat"
+ },
+ "adv_gc_n100_k14_UNSAT_s42--b13ba48e09e5": {
+  "field_best": 62.91,
+  "hash": "b13ba48e09e575d6a628c02200ac23f7",
+  "verdict": "unsat"
+ },
+ "adv_gc_n200_k12_UNSAT_s42--15e666a42158": {
+  "field_best": 6.33,
+  "hash": "15e666a42158e3304fc3979de28a5e44",
+  "verdict": "unsat"
+ },
+ "adv_gc_n200_k15_UNSAT_s42--ff706804d01a": {
+  "field_best": 252.43,
+  "hash": "ff706804d01ac07e8b8502de6331f2de",
+  "verdict": "unsat"
+ },
+ "adv_gc_n300_k10_UNSAT_s42--1397d1d4d8d8": {
+  "field_best": 0.97,
+  "hash": "1397d1d4d8d831069a2cdf911321da07",
+  "verdict": "unsat"
+ },
+ "adv_gc_n300_k12_UNSAT_s42--8aa9ffb211d1": {
+  "field_best": 4.34,
+  "hash": "8aa9ffb211d1cba850be2ee9d173b7e1",
+  "verdict": "unsat"
+ },
+ "adv_gc_n300_k13_UNSAT_s42--826a01aaab9f": {
+  "field_best": 33.04,
+  "hash": "826a01aaab9f98e8fb6d3fbbf349078b",
+  "verdict": "unsat"
+ },
+ "adv_gc_n50_k12_UNSAT_s42--981b0e855eed": {
+  "field_best": 3.66,
+  "hash": "981b0e855eed536df112bf2e4ff98807",
+  "verdict": "unsat"
+ },
+ "adv_gc_n50_k14_UNSAT_s42--117b99ffa16d": {
+  "field_best": 51.56,
+  "hash": "117b99ffa16d21cb4ccb1c66829b0c7e",
+  "verdict": "unsat"
+ },
+ "aes_equiv_encry_3_rounds.debugged--30e8b47741a4": {
+  "field_best": 329.7,
+  "hash": "30e8b47741a4104c01eeea1d00bbce9e",
+  "verdict": "unsat"
+ },
+ "af-synthesis_stb_50_120_4_unsat--e55a49d8065d": {
+  "field_best": 432.04,
+  "hash": "e55a49d8065d65650f24c0f3ecef30b6",
+  "verdict": "unsat"
+ },
+ "ais8.cnf.mis-97.debugged--262a226a4733": {
+  "field_best": 2.59,
+  "hash": "262a226a47330987f038128579967405",
+  "verdict": "unsat"
+ },
+ "ak128modbtbg2msisc--9d20bb1bd018": {
+  "field_best": 0.27,
+  "hash": "9d20bb1bd01838d70177ffd3aa284aeb",
+  "verdict": "sat"
+ },
+ "arles_thres20_p10_r7533--011984fd82d6": {
+  "field_best": 0.01,
+  "hash": "011984fd82d62d609e776fbf5de75440",
+  "verdict": "unsat"
+ },
+ "arles_thres20_p20_r4109--dd5d530ac8bf": {
+  "field_best": 0.01,
+  "hash": "dd5d530ac8bf0019412d023488b075eb",
+  "verdict": "unsat"
+ },
+ "as-p111-l36-o3-rot-II-5680-i--2ae678a4f0b8": {
+  "field_best": 574.63,
+  "hash": "2ae678a4f0b8097615160a440efbe08e",
+  "verdict": "sat"
+ },
+ "as-p123-l39-o0-rot-II-4680-i--3732b6ac50b1": {
+  "field_best": 1669.96,
+  "hash": "3732b6ac50b1c3f28d72247de89b00e8",
+  "verdict": "sat"
+ },
+ "as-p123-l39-o0-rot-II-4682-i--4430d3502b0b": {
+  "field_best": 1054.86,
+  "hash": "4430d3502b0b5e6f4ed473437519e609",
+  "verdict": "sat"
+ },
+ "as-p141-l39-o0-rot-rfl-680-i--4de5b7b3c8bf": {
+  "field_best": 1173.25,
+  "hash": "4de5b7b3c8bf44b2e8c549128bc936a3",
+  "verdict": "sat"
+ },
+ "as-p147-l51-o0-rot-rfl-68-i--0d0fabe0fbca": {
+  "field_best": 2571.25,
+  "hash": "0d0fabe0fbca67a8740ebe8b8621d465",
+  "verdict": "sat"
+ },
+ "as-p153-l57-o0-rot-rfl-II-68-i--3b0eeddcabf3": {
+  "field_best": 929.97,
+  "hash": "3b0eeddcabf36da8642c5774ac67680c",
+  "verdict": "sat"
+ },
+ "as-p31-l12-o9-56--8d0d8518a438": {
+  "field_best": 8.51,
+  "hash": "8d0d8518a438d93428257d9a38863c3c",
+  "verdict": "sat"
+ },
+ "as-p41-l15-o10-567--5d02aa18eac7": {
+  "field_best": 41.65,
+  "hash": "5d02aa18eac7304c705577f1cce07784",
+  "verdict": "sat"
+ },
+ "as-p43-l16-o9-567--776ff89b72b0": {
+  "field_best": 377.02,
+  "hash": "776ff89b72b0f6290d69af6f95e13182",
+  "verdict": "sat"
+ },
+ "as-p51-l19-o8-II-568--d5949f26c5c5": {
+  "field_best": 168.09,
+  "hash": "d5949f26c5c5128ef2d4ac4d3b432cc2",
+  "verdict": "sat"
+ },
+ "as-p61-l22-o8-II-568--a78606fdfd6c": {
+  "field_best": 1125.24,
+  "hash": "a78606fdfd6cf6ee8358bd35fa833be6",
+  "verdict": "sat"
+ },
+ "as-p75-l27-o6-rot-4568--ca18feb7d2bb": {
+  "field_best": 4769.45,
+  "hash": "ca18feb7d2bb6bee7a8ab28673fe1d62",
+  "verdict": "sat"
+ },
+ "as-p81-l27-o6-rot-568--22465e251284": {
+  "field_best": 1316.18,
+  "hash": "22465e251284b8f3e48bf9a06a94855c",
+  "verdict": "sat"
+ },
+ "as-p87-l30-o6-rot-II-5678-i--aa62e8cb5d38": {
+  "field_best": 210.43,
+  "hash": "aa62e8cb5d38ac1b2d9eeeb8394eadeb",
+  "verdict": "sat"
+ },
+ "as-p93-l27-o6-rot-rfl-5682-i--6f1b15ebd0ac": {
+  "field_best": 70.47,
+  "hash": "6f1b15ebd0ac13c05fb052e5b0453f64",
+  "verdict": "sat"
+ },
+ "as-p99-l33-o6-rot-rfl-568-i--ad6bc2d583c4": {
+  "field_best": 116.6,
+  "hash": "ad6bc2d583c43ff9ef00faad7e29a9c2",
+  "verdict": "sat"
+ },
+ "asconhashv12_opt64_H10_M2-BPHqhzNzqi_m5_6_U14.c--a8dcaf436bda": {
+  "field_best": 20.22,
+  "hash": "a8dcaf436bda091dad9ca1ff58de7287",
+  "verdict": "unsat"
+ },
+ "asconhashv12_opt64_H7_M2-K1zfAs8_m0_3_U5.c--4989239fbeb6": {
+  "field_best": 9.51,
+  "hash": "4989239fbeb6eb40fc0b664d9ba92636",
+  "verdict": "unsat"
+ },
+ "atco_enc1_opt2_20_12--37c88155822f": {
+  "field_best": 791.3,
+  "hash": "37c88155822f1934a190dd6f4614f0ce",
+  "verdict": "unsat"
+ },
+ "baseballcover11with22_and2positions--180e6d8b61fe": {
+  "field_best": 226.55,
+  "hash": "180e6d8b61fe6bab26126b78591e324e",
+  "verdict": "sat"
+ },
+ "baseballcover11with25_and6positions--b54b26f38d40": {
+  "field_best": 169.41,
+  "hash": "b54b26f38d40a687b6277c49cf85de69",
+  "verdict": "sat"
+ },
+ "bdmbwm_28_94--3e7d8073c795": {
+  "field_best": 1302.24,
+  "hash": "3e7d8073c795d263ed862db64cf9f0fb",
+  "verdict": "unsat"
+ },
+ "bdmdm_28_1--a80a252b7488": {
+  "field_best": 1426.02,
+  "hash": "a80a252b748882980d9a80ddea8c5cff",
+  "verdict": "unsat"
+ },
+ "bdoawm_28_4--c7449e5bc5ef": {
+  "field_best": 1539.1,
+  "hash": "c7449e5bc5ef75a69f8a454c13d371de",
+  "verdict": "unsat"
+ },
+ "bdobwm_28_54--5f81a9479985": {
+  "field_best": 1584.44,
+  "hash": "5f81a94799858590a2bc96db917bf894",
+  "verdict": "unsat"
+ },
+ "bdodo_28_6--932e2329dd1e": {
+  "field_best": 1618.88,
+  "hash": "932e2329dd1efeafe7151a0ebf3a343f",
+  "verdict": "unsat"
+ },
+ "bench_1277.smt2--2b35377a7b95": {
+  "field_best": 14.64,
+  "hash": "2b35377a7b95f24449a3b607b61fff05",
+  "verdict": "sat"
+ },
+ "bp5_CSO.normalised--c8cde50f32ca": {
+  "field_best": 122.9,
+  "hash": "c8cde50f32ca3f78a4c74a173c63449b",
+  "verdict": "sat"
+ },
+ "bwmdm_28_2--a08d0fcc98fe": {
+  "field_best": 1186.74,
+  "hash": "a08d0fcc98fe0ce9c53b2fd0c69ccc4b",
+  "verdict": "unsat"
+ },
+ "bwoadm_28_5--20ae1404784e": {
+  "field_best": 1514.73,
+  "hash": "20ae1404784ed226a1e3e4c9b2d61a41",
+  "verdict": "unsat"
+ },
+ "bwoawm_28_5--7ac164a9d153": {
+  "field_best": 1450.99,
+  "hash": "7ac164a9d153f0a2d9bf54a98d429636",
+  "verdict": "unsat"
+ },
+ "bwobdm_28_56--8e5da99e8323": {
+  "field_best": 1420.11,
+  "hash": "8e5da99e8323af36e983a99b4df03b92",
+  "verdict": "unsat"
+ },
+ "bwodm_28_5--a4f816482e85": {
+  "field_best": 1348.03,
+  "hash": "a4f816482e853dfad9a685ac1459e66d",
+  "verdict": "unsat"
+ },
+ "bwodo_28_7--991aec61a275": {
+  "field_best": 1326.74,
+  "hash": "991aec61a2751602d6d7b3e838035610",
+  "verdict": "unsat"
+ },
+ "cabp-M-bcsstk06.mtx.rnd-k33--1b9c308123cb": {
+  "field_best": 45.34,
+  "hash": "1b9c308123cb2b48d1894fc6d1848f1e",
+  "verdict": "sat"
+ },
+ "cabp-M-bcsstk06.mtx.rnd-k36--c300445f0f75": {
+  "field_best": 3438.59,
+  "hash": "c300445f0f756c8f5d6571ebf0bb6edc",
+  "verdict": "unsat"
+ },
+ "cabp-M-bcsstk06.mtx.rnd-k37--5f9d0127b390": {
+  "field_best": 814.02,
+  "hash": "5f9d0127b390a4686171311d38f3fbf8",
+  "verdict": "unsat"
+ },
+ "cabp-M-bcsstk06.mtx.rnd-k39--dbbcaa779714": {
+  "field_best": 96.05,
+  "hash": "dbbcaa7797145dfddfa4fe73ce91fdec",
+  "verdict": "unsat"
+ },
+ "cabp-P-can__445.mtx.rnd-k96--31fa00368fc9": {
+  "field_best": 136.08,
+  "hash": "31fa00368fc99b15c33c04eb6b257deb",
+  "verdict": "sat"
+ },
+ "cabp-T-dwt__592.mtx.rnd-k145--af9c2fb7046e": {
+  "field_best": null,
+  "hash": "af9c2fb7046eb845f185c64cd9dd1006",
+  "verdict": "unknown"
+ },
+ "cabp-V-nos6.mtx.rnd-k274--da34db9ea6b5": {
+  "field_best": 147.18,
+  "hash": "da34db9ea6b524f13708357f38432bb6",
+  "verdict": "sat"
+ },
+ "cabp-V-nos6.mtx.rnd-k275--9541d12f3e3d": {
+  "field_best": 83.75,
+  "hash": "9541d12f3e3d9201085c13f25145d2f7",
+  "verdict": "sat"
+ },
+ "cabp-V-nos6.mtx.rnd-k290--5e1f1759de9b": {
+  "field_best": 136.24,
+  "hash": "5e1f1759de9bf931a8e26dbe7dd5b212",
+  "verdict": "sat"
+ },
+ "cabp-V-nos6.mtx.rnd-k297--ef063cf2e17d": {
+  "field_best": 348.54,
+  "hash": "ef063cf2e17dd6472f514ab549a5eed5",
+  "verdict": "sat"
+ },
+ "cabp-V-nos6.mtx.rnd-k331--07df5e6f6742": {
+  "field_best": null,
+  "hash": "07df5e6f674201e2bf31bcaa8866ba75",
+  "verdict": "unknown"
+ },
+ "cabp-V-nos6.mtx.rnd-k333--aa2e02360b19": {
+  "field_best": null,
+  "hash": "aa2e02360b19c83da68e39e39c530923",
+  "verdict": "unknown"
+ },
+ "cabp-X-can__715.mtx.rnd-k102--9376a4be372c": {
+  "field_best": 47.28,
+  "hash": "9376a4be372c14aa68235831712ff3f9",
+  "verdict": "sat"
+ },
+ "cabp-X-can__715.mtx.rnd-k108--3b560b9eafce": {
+  "field_best": 302.5,
+  "hash": "3b560b9eafce79a4ac3c1062a9e72028",
+  "verdict": "sat"
+ },
+ "cabp-X-can__715.mtx.rnd-k116--49644428681a": {
+  "field_best": 704.47,
+  "hash": "49644428681a87666a68fc9380dce072",
+  "verdict": "sat"
+ },
+ "cabp-X-can__715.mtx.rnd-k118--8456155de4cd": {
+  "field_best": 1917.38,
+  "hash": "8456155de4cd22425ec479f75af089c2",
+  "verdict": "sat"
+ },
+ "case10--416e33a84639": {
+  "field_best": 17.14,
+  "hash": "416e33a8463911546e4cd87d282a7e1e",
+  "verdict": "sat"
+ },
+ "case19.normalised--77bfac6b2806": {
+  "field_best": 4.47,
+  "hash": "77bfac6b280653e63013f77d0991484e",
+  "verdict": "sat"
+ },
+ "chnl-020x061--8fcde459f828": {
+  "field_best": 0.07,
+  "hash": "8fcde459f828e0df9672933e68fa1af2",
+  "verdict": "unsat"
+ },
+ "chnl-020x101--bcdc894819cf": {
+  "field_best": 0.15,
+  "hash": "bcdc894819cf050e57849fe84a1e8cc4",
+  "verdict": "unsat"
+ },
+ "chnl-030x061--a95f0373ebf7": {
+  "field_best": 0.12,
+  "hash": "a95f0373ebf724f474fcc9ccd7197bd9",
+  "verdict": "unsat"
+ },
+ "chnl-030x091--757d64688ac6": {
+  "field_best": 0.22,
+  "hash": "757d64688ac60cba697a980dfbbf5075",
+  "verdict": "unsat"
+ },
+ "chnl-040x041--1fb646d2657b": {
+  "field_best": 0.1,
+  "hash": "1fb646d2657b6dd5f0106dbec9fd6c27",
+  "verdict": "unsat"
+ },
+ "chnl-050x051--2027301e88cb": {
+  "field_best": 0.17,
+  "hash": "2027301e88cb029e4b47b747da8a180a",
+  "verdict": "unsat"
+ },
+ "clique_n2_k10--cb2e8b7fada4": {
+  "field_best": 0.02,
+  "hash": "cb2e8b7fada420c5046f587ea754d052",
+  "verdict": "unsat"
+ },
+ "clique_n5_k10--15456f0d13b2": {
+  "field_best": 0.04,
+  "hash": "15456f0d13b26f0b4b21525ef7d0d711",
+  "verdict": "unsat"
+ },
+ "clqcl_25_7_6.normalised--5d06225b2701": {
+  "field_best": 0.06,
+  "hash": "5d06225b27017e9a703f10cb577cf3bf",
+  "verdict": "unsat"
+ },
+ "clqcl_25_8_7.normalised--4aab4f954196": {
+  "field_best": 0.07,
+  "hash": "4aab4f954196d3277d9ca7b17c52acca",
+  "verdict": "unsat"
+ },
+ "color-19-4.shuffled-as.sat05-444--6db4b3f59a1e": {
+  "field_best": null,
+  "hash": "6db4b3f59a1e530ca5309d8a7544f5c3",
+  "verdict": "unknown"
+ },
+ "connm-ue-csp-sat-n600-d0.04-s1793042357.used-as.sat04-975--d0b5d1dc96a5": {
+  "field_best": 30.42,
+  "hash": "d0b5d1dc96a5bf33d2c65106c3b179a8",
+  "verdict": "unsat"
+ },
+ "constraints_16_0.5_1--6add7e416c11": {
+  "field_best": 83.6,
+  "hash": "6add7e416c1126607afeb2666af330ac",
+  "verdict": "unsat"
+ },
+ "constraints_17_0.5_2--f8443057c188": {
+  "field_best": 70.45,
+  "hash": "f8443057c188f6c9cfb711ff3d4aa6ff",
+  "verdict": "unsat"
+ },
+ "constraints_25_4_5_12_12_0_0_0--dc7817dfa281": {
+  "field_best": 129.59,
+  "hash": "dc7817dfa2817916b266c1cfacd2ee66",
+  "verdict": "unsat"
+ },
+ "coreMQTT_MQTT_ProcessLoop.dimacs--5220b0e01fb4": {
+  "field_best": 63.08,
+  "hash": "5220b0e01fb49440531004bebbafbc44",
+  "verdict": "unsat"
+ },
+ "count_p2_M21--b0142b06940f": {
+  "field_best": 0.03,
+  "hash": "b0142b06940fb02e2b4ddb7a2101a3d6",
+  "verdict": "unsat"
+ },
+ "count_p2_M25--727ebce936c0": {
+  "field_best": 0.04,
+  "hash": "727ebce936c010888c7f71f00885e643",
+  "verdict": "unsat"
+ },
+ "count_p2_M33--35e0b5a19c88": {
+  "field_best": 0.06,
+  "hash": "35e0b5a19c88961d98dd806e805759f4",
+  "verdict": "unsat"
+ },
+ "count_p2_M41--58eaf6203404": {
+  "field_best": 0.08,
+  "hash": "58eaf62034046ed4fc52562869569b44",
+  "verdict": "unsat"
+ },
+ "count_p2_M45--fbd9968f5067": {
+  "field_best": 0.1,
+  "hash": "fbd9968f5067604694f11f14c07c5527",
+  "verdict": "unsat"
+ },
+ "count_p3_M19--0ec6bf97a96b": {
+  "field_best": 0.43,
+  "hash": "0ec6bf97a96b9840ae84f1d1da4c4dcd",
+  "verdict": "unsat"
+ },
+ "crn_40_1521_s--b358bf711108": {
+  "field_best": 0.16,
+  "hash": "b358bf7111086fd6d60b11c2f01465b8",
+  "verdict": "sat"
+ },
+ "crusti_g2io_200_0.1_127_14.af_151--958fd8bd1936": {
+  "field_best": 33.03,
+  "hash": "958fd8bd1936e5bad8cbccae492edd81",
+  "verdict": "unsat"
+ },
+ "crusti_g2io_350_0.5_255_12.af_290--44196693d2cf": {
+  "field_best": 5.03,
+  "hash": "44196693d2cfdb787ba578eef4272f74",
+  "verdict": "sat"
+ },
+ "crusti_g2io_350_0.5_255_21.af_299--d69935559539": {
+  "field_best": 5.0,
+  "hash": "d699355595398f0765c5f51c9d0ad852",
+  "verdict": "sat"
+ },
+ "crusti_g2io_350_0.5_255_42.af_264--f15a3ce898e0": {
+  "field_best": 5.05,
+  "hash": "f15a3ce898e0c66f309bf07d73744adf",
+  "verdict": "sat"
+ },
+ "dobdm_14_1--6ad453d61745": {
+  "field_best": 1988.95,
+  "hash": "6ad453d6174581d982c4e75e37a38d79",
+  "verdict": "unsat"
+ },
+ "em_8_4_5_fbc--fca71c20202e": {
+  "field_best": 0.1,
+  "hash": "fca71c20202ef404349136c3a00465eb",
+  "verdict": "sat"
+ },
+ "ex095_8--82cad197a0b7": {
+  "field_best": 2100.75,
+  "hash": "82cad197a0b7919f1f51ec51f7267e6f",
+  "verdict": "unsat"
+ },
+ "exam_75_65--12ac1c71ff04": {
+  "field_best": 0.31,
+  "hash": "12ac1c71ff0405cc150c2a2db6c4a255",
+  "verdict": "unsat"
+ },
+ "exam_75_70--aa4e80476e6a": {
+  "field_best": 0.35,
+  "hash": "aa4e80476e6a6ea1034e303e6b2e46dc",
+  "verdict": "unsat"
+ },
+ "exam_85_70--71849248b47d": {
+  "field_best": 0.42,
+  "hash": "71849248b47db583f56e77f55f31e525",
+  "verdict": "unsat"
+ },
+ "exam_90_70--92b22042a950": {
+  "field_best": 0.43,
+  "hash": "92b22042a950db2a9841f08d169d1bb5",
+  "verdict": "unsat"
+ },
+ "exam_90_80--7b9620b5d7da": {
+  "field_best": 0.55,
+  "hash": "7b9620b5d7da55bda43595fe37867acd",
+  "verdict": "unsat"
+ },
+ "exam_95_70--d27f76623aed": {
+  "field_best": 0.5,
+  "hash": "d27f76623aed2fce608c092b2aafafc5",
+  "verdict": "unsat"
+ },
+ "factorize-1022117--ba7732774961": {
+  "field_best": 30.29,
+  "hash": "ba7732774961fdf7508a998a41bd5366",
+  "verdict": "unsat"
+ },
+ "fastlec_cep_14_T27_58--3c51a565526f": {
+  "field_best": null,
+  "hash": "3c51a565526faa922fb298a2658440e9",
+  "verdict": "unknown"
+ },
+ "fermat-931960058139995587--45a09efb0260": {
+  "field_best": 0.13,
+  "hash": "45a09efb026036ff4b8d19024a7563a9",
+  "verdict": "sat"
+ },
+ "fpsol2.i.2.29--e5787bb4c8c2": {
+  "field_best": 0.36,
+  "hash": "e5787bb4c8c29aa39b14a5e11387999d",
+  "verdict": "unsat"
+ },
+ "g2-T97.2.1--cc42cc7a8022": {
+  "field_best": 1512.25,
+  "hash": "cc42cc7a8022820cbd0e98595126d07e",
+  "verdict": "unsat"
+ },
+ "gensys-ukn004.shuffled-as.sat05-3844--284dec9d0d04": {
+  "field_best": 464.61,
+  "hash": "284dec9d0d0404c8b80d8bd8064e4c68",
+  "verdict": "unsat"
+ },
+ "genurq7Sat.shuffled-as.sat03-1513.cnf.mis-135.debugged--c6487f6dfcc1": {
+  "field_best": null,
+  "hash": "c6487f6dfcc1438eccca1876a33d9a9c",
+  "verdict": "unknown"
+ },
+ "goldb-heqc-k2mul--1bb9fe12b4fb": {
+  "field_best": 16.6,
+  "hash": "1bb9fe12b4fb50e98903ee87a51d6472",
+  "verdict": "unsat"
+ },
+ "grain-53-80-0s0-seed-125-4-init-35--3e912cd2a499": {
+  "field_best": 208.24,
+  "hash": "3e912cd2a499b8f956246b866e2f9f64",
+  "verdict": "unsat"
+ },
+ "grs-96-192--40ae60a61929": {
+  "field_best": 2212.03,
+  "hash": "40ae60a61929b6bfa2ac99ab4b9a0f7e",
+  "verdict": "unsat"
+ },
+ "gus-md5-08--0aea4286a11d": {
+  "field_best": 50.16,
+  "hash": "0aea4286a11d91ee8fa356d5db046373",
+  "verdict": "unsat"
+ },
+ "hantzsche_wendt_unit_93--129162378e8a": {
+  "field_best": 0.11,
+  "hash": "129162378e8ad29b5485a9c53feee4b7",
+  "verdict": "sat"
+ },
+ "hitag2-7-60-0-0xe8fa35372ed37e2-80--d9fe50de72fb": {
+  "field_best": 622.87,
+  "hash": "d9fe50de72fb34ea94518c32d8f3077c",
+  "verdict": "unsat"
+ },
+ "hitag2-8-60-0-0xdcdbc8bf368ee73-37--b76b9699c2de": {
+  "field_best": 529.34,
+  "hash": "b76b9699c2deb74dd9b4a99a05179acd",
+  "verdict": "unsat"
+ },
+ "homer11.shuffled--1890f49a43a9": {
+  "field_best": 0.01,
+  "hash": "1890f49a43a94b97828528b68c32b78e",
+  "verdict": "unsat"
+ },
+ "homer18.shuffled--3c4ac805726d": {
+  "field_best": 0.01,
+  "hash": "3c4ac805726d78a869ff8116ee3533db",
+  "verdict": "unsat"
+ },
+ "homer20.shuffled--805a742eb8b4": {
+  "field_best": 0.02,
+  "hash": "805a742eb8b4e0df3561ca8e0670670b",
+  "verdict": "unsat"
+ },
+ "inithx.i.2.30--6ddda96839bb": {
+  "field_best": 0.72,
+  "hash": "6ddda96839bb24cd7389d5556d3ab16d",
+  "verdict": "unsat"
+ },
+ "j3037_9_rggt_bm1--0359596347da": {
+  "field_best": null,
+  "hash": "0359596347daa117da50950748bc06d1",
+  "verdict": "unknown"
+ },
+ "j3045_4_rggt_bm1--372021735d9e": {
+  "field_best": 365.38,
+  "hash": "372021735d9e46002b862aa2a038a818",
+  "verdict": "unsat"
+ },
+ "jkkk-one-one-11-38-sat--5cae5c0629ce": {
+  "field_best": 6.16,
+  "hash": "5cae5c0629ce1c724746af890410cfc1",
+  "verdict": "sat"
+ },
+ "knight_18--4551c996fc6f": {
+  "field_best": 1.94,
+  "hash": "4551c996fc6f5fbe62b43076abb25077",
+  "verdict": "sat"
+ },
+ "korf-17--ae48df6541d1": {
+  "field_best": 59.63,
+  "hash": "ae48df6541d190c096b1e5ba22d1b534",
+  "verdict": "unsat"
+ },
+ "latin_square_10.15--9ba8145e0d02": {
+  "field_best": 17.65,
+  "hash": "9ba8145e0d02318dea5507fc3ba03472",
+  "verdict": "unsat"
+ },
+ "lattice-20.19--e91253303b91": {
+  "field_best": 0.17,
+  "hash": "e91253303b915493090c1f4b59d9e969",
+  "verdict": "unsat"
+ },
+ "lattice-25.24--306a29e966fa": {
+  "field_best": 0.32,
+  "hash": "306a29e966fa6293d407bc7ebbc3ecb1",
+  "verdict": "unsat"
+ },
+ "le450_25b.col.25--1a3bef9e03ba": {
+  "field_best": 0.3,
+  "hash": "1a3bef9e03bab1ed4e9e34506d72a451",
+  "verdict": "unsat"
+ },
+ "lightsout_sat_22_unbounded_direct_planted150_4_sat--65ee6b49612e": {
+  "field_best": 12.45,
+  "hash": "65ee6b49612eccb7d213e4d950f23677",
+  "verdict": "sat"
+ },
+ "lightsout_sat_23_unbounded_direct_random50_2_unsat--0efcbd10294e": {
+  "field_best": 1052.44,
+  "hash": "0efcbd10294eb001b16b4d126923372f",
+  "verdict": "unsat"
+ },
+ "lightsout_sat_23_unbounded_totalizer_corner_0_unsat--667341ee8c1d": {
+  "field_best": 202.48,
+  "hash": "667341ee8c1dea3db613db317e2b2c33",
+  "verdict": "unsat"
+ },
+ "lightsout_sat_24_unbounded_direct_corner_0_unsat--80b163b706e0": {
+  "field_best": 3285.7,
+  "hash": "80b163b706e0a16702173ec27f3d1331",
+  "verdict": "unsat"
+ },
+ "lightsout_sat_24_unbounded_totalizer_corner_0_unsat--32e344a5ab3a": {
+  "field_best": 838.25,
+  "hash": "32e344a5ab3af245f982678d2b751c6d",
+  "verdict": "unsat"
+ },
+ "lightsout_sat_25_unbounded_direct_planted250_4_sat--01d6fa8efd18": {
+  "field_best": 146.27,
+  "hash": "01d6fa8efd18ebfecd06af408958477b",
+  "verdict": "sat"
+ },
+ "lightsout_sat_25_unbounded_totalizer_planted150_3_sat--28dcc4119e1b": {
+  "field_best": 26.96,
+  "hash": "28dcc4119e1bbb5fbd3fdd8f4140f28d",
+  "verdict": "sat"
+ },
+ "linked_list_swap_contents_safety_unwind45--878bcc11e1e2": {
+  "field_best": 10.14,
+  "hash": "878bcc11e1e243680f7946bcf428f465",
+  "verdict": "unsat"
+ },
+ "linvrinv5.shuffled-as.sat05-564--29a27e97790b": {
+  "field_best": 675.65,
+  "hash": "29a27e97790bda6c34808f631dd0418e",
+  "verdict": "unsat"
+ },
+ "lru_7--e85fb114c33f": {
+  "field_best": 25.06,
+  "hash": "e85fb114c33f450dc2622c78bc6fa019",
+  "verdict": "sat"
+ },
+ "manthey_single-ordered-initialized-w48-b9--c261941bfec8": {
+  "field_best": 791.77,
+  "hash": "c261941bfec8b89d75fee1a66a839169",
+  "verdict": "unsat"
+ },
+ "marg6x6.shuffled-as.sat03-1456.cnf.mis-119.debugged--7e21850936d6": {
+  "field_best": null,
+  "hash": "7e21850936d6127540157afaaf912c02",
+  "verdict": "unknown"
+ },
+ "marijn-philips--62060247cd0a": {
+  "field_best": 27.88,
+  "hash": "62060247cd0ad566a828c30571c2c774",
+  "verdict": "unsat"
+ },
+ "mdp-32-11-sat--db15a85651e0": {
+  "field_best": 0.31,
+  "hash": "db15a85651e0d941a11bf8640625edd8",
+  "verdict": "sat"
+ },
+ "mdp-32-12-unsat--425c81fc3af7": {
+  "field_best": null,
+  "hash": "425c81fc3af7f5124b6282583d80df11",
+  "verdict": "unknown"
+ },
+ "mdp-32-14-unsat--23daec2c71ce": {
+  "field_best": null,
+  "hash": "23daec2c71ce3c1e346e6042f3dc42eb",
+  "verdict": "unknown"
+ },
+ "mdp-36-10-unsat--16ca57f2cdff": {
+  "field_best": null,
+  "hash": "16ca57f2cdffd5b0260fc771017e1f04",
+  "verdict": "unknown"
+ },
+ "mexam_14_12_2--c44762c4b177": {
+  "field_best": 0.08,
+  "hash": "c44762c4b177ac64fd0919f37de8382e",
+  "verdict": "unsat"
+ },
+ "mexam_15_12_2--266e890b706c": {
+  "field_best": 0.07,
+  "hash": "266e890b706cf336378bf148bbda1aff",
+  "verdict": "unsat"
+ },
+ "mexam_17_15_2--860788f93fb7": {
+  "field_best": 0.08,
+  "hash": "860788f93fb766e83e00a29de84180e7",
+  "verdict": "unsat"
+ },
+ "mexam_20_18_2--a7e5d03892a1": {
+  "field_best": 0.09,
+  "hash": "a7e5d03892a17e51e22b688f51cf0aab",
+  "verdict": "unsat"
+ },
+ "mexam_23_20_2--0d082b8fa36f": {
+  "field_best": 0.1,
+  "hash": "0d082b8fa36f662217bee5524cd24d3a",
+  "verdict": "unsat"
+ },
+ "mexam_25_20_2--5d8b47745dba": {
+  "field_best": 0.11,
+  "hash": "5d8b47745dba3fe50f9c8712be389cd5",
+  "verdict": "unsat"
+ },
+ "miles1500.72--043c91001968": {
+  "field_best": 0.74,
+  "hash": "043c91001968a1fbd1ef419540fcb396",
+  "verdict": "unsat"
+ },
+ "minandmaxor128--cc436db9fe02": {
+  "field_best": 362.11,
+  "hash": "cc436db9fe0278663ce376e068069815",
+  "verdict": "unsat"
+ },
+ "mod2-rand3bip-sat-250-3.shuffled-as.sat05-2220--75429ff7acb5": {
+  "field_best": 0.01,
+  "hash": "75429ff7acb5acb597abe01aa745c2a6",
+  "verdict": "sat"
+ },
+ "mp1-Nb7T08--90937ed75ba0": {
+  "field_best": null,
+  "hash": "90937ed75ba0560158d8fe45f303868a",
+  "verdict": "unknown"
+ },
+ "mp1-bsat201-707--5ee05ef0bcb4": {
+  "field_best": 222.99,
+  "hash": "5ee05ef0bcb42cb12bd698978c05178c",
+  "verdict": "unsat"
+ },
+ "mp1-klieber2017s-0490-024-t12--8390dca25756": {
+  "field_best": 19.24,
+  "hash": "8390dca257561c53bf4eb6e158a2285f",
+  "verdict": "sat"
+ },
+ "mp1-squ_ali_s10x10_c39_bail_SAT--b1c44904cf06": {
+  "field_best": 0.31,
+  "hash": "b1c44904cf06682f973b60c8282f45e8",
+  "verdict": "sat"
+ },
+ "mp1-squ_any_s09x07_c27_abix_UNS--166e1e5a9f63": {
+  "field_best": 283.36,
+  "hash": "166e1e5a9f63fcf94ddae8533fa2a090",
+  "verdict": "unsat"
+ },
+ "mp1-tri_ali_s11_c35_bail_UNS--b023ea0eb9ad": {
+  "field_best": 43.89,
+  "hash": "b023ea0eb9adbd9182c01d7e2d443289",
+  "verdict": "unsat"
+ },
+ "mrpp_8x8_20_14--09637d3bd641": {
+  "field_best": 9.71,
+  "hash": "09637d3bd641b4d733666a862e8918ea",
+  "verdict": "sat"
+ },
+ "mulsol.i.1.48--d1335d8a6a98": {
+  "field_best": 0.31,
+  "hash": "d1335d8a6a98a1988b54e1f481a64fcf",
+  "verdict": "unsat"
+ },
+ "mulsol.i.2.30--0f1070ba60b5": {
+  "field_best": 0.18,
+  "hash": "0f1070ba60b55aa62d3a98798a14700e",
+  "verdict": "unsat"
+ },
+ "mulsol.i.4.30--997491c0cbc3": {
+  "field_best": 0.18,
+  "hash": "997491c0cbc3e558a3e3266e2a142215",
+  "verdict": "unsat"
+ },
+ "n320p5q2_n.af_239--5de866bc7ff4": {
+  "field_best": 0.11,
+  "hash": "5de866bc7ff4dfde3cd682b5aca75894",
+  "verdict": "sat"
+ },
+ "n384p5q2_vh.af_138--ee44c3f46423": {
+  "field_best": 1.47,
+  "hash": "ee44c3f464238366729bf2cb16eb412a",
+  "verdict": "sat"
+ },
+ "newpol23-4--3e44926d72e9": {
+  "field_best": 70.34,
+  "hash": "3e44926d72e94f5ceccbb69de24033b2",
+  "verdict": "unsat"
+ },
+ "newpol32-4--6e8dba16e06c": {
+  "field_best": 166.42,
+  "hash": "6e8dba16e06c793a2daca1fa440eeb4f",
+  "verdict": "unsat"
+ },
+ "ntil-90d-33--1236c1406a27": {
+  "field_best": 10.94,
+  "hash": "1236c1406a2749b8022b5196e93de589",
+  "verdict": "sat"
+ },
+ "ntil-90d-34--2b8cac8e1f5c": {
+  "field_best": 6.45,
+  "hash": "2b8cac8e1f5cad04696004e7fbf5cf2e",
+  "verdict": "sat"
+ },
+ "ntil-90d-35--e305def35c31": {
+  "field_best": 57.22,
+  "hash": "e305def35c314eec8266087e89a9ab46",
+  "verdict": "sat"
+ },
+ "ntil-90d-36--e8ccbfaa2762": {
+  "field_best": 22.43,
+  "hash": "e8ccbfaa2762cd0fc22b0ab05bacf529",
+  "verdict": "sat"
+ },
+ "ntil-90d-37--09e0775d2b51": {
+  "field_best": 73.9,
+  "hash": "09e0775d2b51c49ec1ec4d214ee7c8c8",
+  "verdict": "sat"
+ },
+ "ntil-90d-38--87dbc3302b82": {
+  "field_best": 47.4,
+  "hash": "87dbc3302b82c09e19c55059fb943191",
+  "verdict": "sat"
+ },
+ "ntil-90d-39--0e06895600b5": {
+  "field_best": 204.38,
+  "hash": "0e06895600b5cd0b6fadb87e17bf8145",
+  "verdict": "sat"
+ },
+ "ntil-90d-40--3a9dfcbcb566": {
+  "field_best": 156.66,
+  "hash": "3a9dfcbcb56689f1118fd7a2150c3c0c",
+  "verdict": "sat"
+ },
+ "ntil-90d-41--fed1f1b55b33": {
+  "field_best": 3503.7,
+  "hash": "fed1f1b55b33c7e0f8356832d571b0bf",
+  "verdict": "sat"
+ },
+ "ntil-90d-42--fd1e0ce3662b": {
+  "field_best": 333.59,
+  "hash": "fd1e0ce3662b9b25d23eb01c6e53a425",
+  "verdict": "sat"
+ },
+ "ntil-90d-43--75b23436a531": {
+  "field_best": 1238.46,
+  "hash": "75b23436a531bbc4004f43009cb4546e",
+  "verdict": "sat"
+ },
+ "ntil-90d-44--2d261a19d275": {
+  "field_best": 2478.13,
+  "hash": "2d261a19d2754d92da3ddff04fda23c8",
+  "verdict": "sat"
+ },
+ "ntil-90d-45--46dc5e955b1f": {
+  "field_best": 4605.49,
+  "hash": "46dc5e955b1fb541678d0634389353ac",
+  "verdict": "sat"
+ },
+ "ntil-90d-46--553b056f2651": {
+  "field_best": null,
+  "hash": "553b056f2651fdc182ca74174aa8ea10",
+  "verdict": "unknown"
+ },
+ "ntil-90d-47--f5bb000a2fb2": {
+  "field_best": null,
+  "hash": "f5bb000a2fb23f3a5c19df2b6613cf77",
+  "verdict": "unknown"
+ },
+ "ntil-90d-48--dc691557cfeb": {
+  "field_best": 71.69,
+  "hash": "dc691557cfebca28aefe7360768389e5",
+  "verdict": "sat"
+ },
+ "oddball_70_5_tto_zp.normalised--2c458ef30d7b": {
+  "field_best": 4.31,
+  "hash": "2c458ef30d7b670f143d6c6e175e3ee9",
+  "verdict": "sat"
+ },
+ "openstacks-sequencedstrips-nonadl-nonnegated-os-sequencedstrips-p30_1.035-NOTKNOWN--f1d1a4fee20e": {
+  "field_best": null,
+  "hash": "f1d1a4fee20e2907c33465a88d1e24f2",
+  "verdict": "unknown"
+ },
+ "or_randxor_k3_n600_m600--0be1e12a8e72": {
+  "field_best": 0.02,
+  "hash": "0be1e12a8e7282d1a4e389bb90f6dbc7",
+  "verdict": "unsat"
+ },
+ "os_fwalk_12--965ca988015c": {
+  "field_best": 0.02,
+  "hash": "965ca988015c9aee5a1a7b2136c1fe5d",
+  "verdict": "unsat"
+ },
+ "oski15a01b15s_opt--5314fd6ccb53": {
+  "field_best": 422.49,
+  "hash": "5314fd6ccb53b6f6af49a594ea68a273",
+  "verdict": "unsat"
+ },
+ "p160_1--83ced7d9ee80": {
+  "field_best": 397.04,
+  "hash": "83ced7d9ee8058c52c9a68ded7fad0a5",
+  "verdict": "sat"
+ },
+ "par32-4-c.shuffled--61fee64c8fc7": {
+  "field_best": 946.44,
+  "hash": "61fee64c8fc7f05b97a2bc14c0c2bf41",
+  "verdict": "sat"
+ },
+ "par32-4.shuffled--1eea3d913d34": {
+  "field_best": 729.77,
+  "hash": "1eea3d913d346b900252d77fc0cb25c8",
+  "verdict": "sat"
+ },
+ "php_sudoku_p15_h14--43d40ced32b5": {
+  "field_best": 0.01,
+  "hash": "43d40ced32b5be08814ef24f97379654",
+  "verdict": "unsat"
+ },
+ "php_sudoku_p20_h19--f83424f869b6": {
+  "field_best": 0.02,
+  "hash": "f83424f869b61931d720f93e5a12df3c",
+  "verdict": "unsat"
+ },
+ "post-cbmc-aes-ee-r2--5553fec254b3": {
+  "field_best": 97.65,
+  "hash": "5553fec254b32349e0e48c7ee1e2d6c7",
+  "verdict": "unsat"
+ },
+ "preimage_80r_486m_160h_seed_306--c615d49f3578": {
+  "field_best": null,
+  "hash": "c615d49f357813514966186ab834be28",
+  "verdict": "unknown"
+ },
+ "puzzle32_sat--53d23b2b464a": {
+  "field_best": 0.15,
+  "hash": "53d23b2b464a5c041114eb1f00cc4b81",
+  "verdict": "sat"
+ },
+ "quad_res_r30_m35--95f346a183b8": {
+  "field_best": null,
+  "hash": "95f346a183b890307596310fd33b4836",
+  "verdict": "unknown"
+ },
+ "quad_res_r33_m36--e4d1892db27b": {
+  "field_best": null,
+  "hash": "e4d1892db27b721b88e5ee7e5987649f",
+  "verdict": "unknown"
+ },
+ "qwh.60.1728.shuffled-as.sat03-1659--543e67dd5abc": {
+  "field_best": 31.4,
+  "hash": "543e67dd5abc272c37775b1b742a1d9a",
+  "verdict": "sat"
+ },
+ "rbsat-v945c61409gyes9-sc2009--3ed56242f55e": {
+  "field_best": 15.91,
+  "hash": "3ed56242f55e3653dbceeb4a70221787",
+  "verdict": "sat"
+ },
+ "reconf20_50_grid10_1_6141--042cdc726a92": {
+  "field_best": null,
+  "hash": "042cdc726a92bf0a2195b3b426f35bce",
+  "verdict": "unknown"
+ },
+ "rphp_p25_r25--e430acf720b6": {
+  "field_best": 0.06,
+  "hash": "e430acf720b63044e5c825a00a76b0eb",
+  "verdict": "unsat"
+ },
+ "rpoc_xits_09_UNSAT--123c397f55ee": {
+  "field_best": 10.28,
+  "hash": "123c397f55eeae78c45e8d973b8e9dce",
+  "verdict": "unsat"
+ },
+ "sat-bench-trig-bhaskara--bd0b055b890a": {
+  "field_best": 456.55,
+  "hash": "bd0b055b890a9ace598a0c4aba40de30",
+  "verdict": "unsat"
+ },
+ "satcoin-genesis-UNSAT-7200--4e64ffc14db0": {
+  "field_best": 0.86,
+  "hash": "4e64ffc14db014d5591f40865376c32a",
+  "verdict": "unsat"
+ },
+ "sbdp4_136_2--5ab5ac8d66c7": {
+  "field_best": 1771.52,
+  "hash": "5ab5ac8d66c7e375037f12a536baf721",
+  "verdict": "unsat"
+ },
+ "sbdp4_138--12535b3264a9": {
+  "field_best": 1658.43,
+  "hash": "12535b3264a9c88bac14522171b497ef",
+  "verdict": "unsat"
+ },
+ "sbdp4_138_2--2a38c5d48846": {
+  "field_best": 1620.28,
+  "hash": "2a38c5d48846ee1c35c4c40938082a16",
+  "verdict": "unsat"
+ },
+ "sbdp4_140_2--e685a5d96e1e": {
+  "field_best": 1689.79,
+  "hash": "e685a5d96e1ee9e051f191eca84b0d88",
+  "verdict": "unsat"
+ },
+ "sbdp4_61_2--27495ba00930": {
+  "field_best": 1901.81,
+  "hash": "27495ba0093076d2e39a9b218e521ee2",
+  "verdict": "unsat"
+ },
+ "sbdp4_65--211b0708454f": {
+  "field_best": 2740.99,
+  "hash": "211b0708454f7901054f5f92f525972e",
+  "verdict": "unsat"
+ },
+ "scc_6087_19_0.3_0.1_20.af_130--bf8c87610037": {
+  "field_best": 11.5,
+  "hash": "bf8c8761003704e761ce36db6665f741",
+  "verdict": "unsat"
+ },
+ "scc_7216_12_0.5_0.2_11.af--d737aeb8e2eb": {
+  "field_best": 0.98,
+  "hash": "d737aeb8e2eb9baed7f007056b3874af",
+  "verdict": "sat"
+ },
+ "scc_7216_12_0.5_0.2_11.af_463--c557ad9cb799": {
+  "field_best": 9.95,
+  "hash": "c557ad9cb79983b9d429c219e3cecbb8",
+  "verdict": "unsat"
+ },
+ "scc_9630_26_0.3_0.1_17.af_516--f2c6d035d0aa": {
+  "field_best": 24.98,
+  "hash": "f2c6d035d0aa58cc06927af6be7a821f",
+  "verdict": "unsat"
+ },
+ "scc_9630_26_0.3_0.1_17.af_76--218f0eccbff4": {
+  "field_best": 0.8,
+  "hash": "218f0eccbff400e06c9736bd759c1d3a",
+  "verdict": "sat"
+ },
+ "schooltt-5-3-8-2-4-5-10-0.1-0.2-seed1--546a73eef02d": {
+  "field_best": 104.52,
+  "hash": "546a73eef02dda3719018050b09e9392",
+  "verdict": "unsat"
+ },
+ "schooltt-5-3-8-2-4-5-10-0.1-0.2-seed2--48432767076e": {
+  "field_best": 67.7,
+  "hash": "48432767076e402d2accbf2da7260885",
+  "verdict": "unsat"
+ },
+ "schooltt-5-3-8-2-4-5-10-0.1-0.2-seed4--9aa85c5c1142": {
+  "field_best": 70.92,
+  "hash": "9aa85c5c114245c182ed6afbe3d8daed",
+  "verdict": "unsat"
+ },
+ "schooltt-5-3-9-2-4-5-10-0.1-0.1-seed3--47173e8ab499": {
+  "field_best": 41.44,
+  "hash": "47173e8ab499159d3aa301b0101fe170",
+  "verdict": "unsat"
+ },
+ "schooltt-5-3-9-2-4-5-10-0.1-0.2-seed3--ad2247443454": {
+  "field_best": 105.76,
+  "hash": "ad2247443454da1fbd4543dd1fa5b57c",
+  "verdict": "unsat"
+ },
+ "schooltt-5-3-9-2-4-5-10-0.1-0.2-seed4--b0abaa97c466": {
+  "field_best": 96.88,
+  "hash": "b0abaa97c4663edc2048d86de3e2b226",
+  "verdict": "unsat"
+ },
+ "schooltt-5-5-10-2-4-5-10-0.1-0.2-seed5--fa3e27fb7209": {
+  "field_best": null,
+  "hash": "fa3e27fb7209620b792d5c75a75d669b",
+  "verdict": "unknown"
+ },
+ "schooltt-5-5-8-2-4-5-10-0.1-0.2-seed2--03e49a528251": {
+  "field_best": null,
+  "hash": "03e49a528251af9a7b7e1ca03c33b162",
+  "verdict": "unknown"
+ },
+ "schooltt-5-5-9-2-4-5-10-0.1-0.2-seed2--1680176921ba": {
+  "field_best": null,
+  "hash": "1680176921bab3f01c4f7c33791c8c23",
+  "verdict": "unknown"
+ },
+ "schooltt-5-7-11-2-4-1.4-2.6-0.8-0.9-seed2--5faba478cb08": {
+  "field_best": 11.12,
+  "hash": "5faba478cb08194407b5ec957ab08599",
+  "verdict": "sat"
+ },
+ "schooltt-5-7-12-2-4-1.4-2.6-0.2-0.9-seed2--f52a349677a5": {
+  "field_best": 12.35,
+  "hash": "f52a349677a5b5b5315b5954b3181fe3",
+  "verdict": "sat"
+ },
+ "schooltt-5-7-12-2-4-1.4-2.6-0.8-0.9-seed2--ba14be209c2f": {
+  "field_best": 13.02,
+  "hash": "ba14be209c2fc064726025f017cef17a",
+  "verdict": "sat"
+ },
+ "sembuster_4200.af_72--af8248aa34c4": {
+  "field_best": 0.44,
+  "hash": "af8248aa34c4803bfc0add954cf2e620",
+  "verdict": "sat"
+ },
+ "sembuster_7500.af_74--6cd46641ebd4": {
+  "field_best": 0.65,
+  "hash": "6cd46641ebd4c840b8f116d14ca17dfd",
+  "verdict": "sat"
+ },
+ "sgp_7-4-6.shuffled-as.sat05-2671--8f5bca645bd8": {
+  "field_best": 157.9,
+  "hash": "8f5bca645bd8738eb74c2e1dc284774a",
+  "verdict": "sat"
+ },
+ "sha1__zeroOut_18__freeIn_22__seed_0--276c46723eeb": {
+  "field_best": 1511.73,
+  "hash": "276c46723eeb15ec37be224fbbd67574",
+  "verdict": "sat"
+ },
+ "shuffling-1-s1719683924-of-bench-sat04-310.used-as.sat04-467--93983a1211a5": {
+  "field_best": null,
+  "hash": "93983a1211a506a87907c7e2ffa4e818",
+  "verdict": "unknown"
+ },
+ "shuffling-2-s158913847-of-bench-sat04-306.used-as.sat04-610--3367ba4c01fe": {
+  "field_best": null,
+  "hash": "3367ba4c01fe07b385980a14211f250e",
+  "verdict": "unknown"
+ },
+ "shuffling-2-s504782760-of-bench-sat04-312.used-as.sat04-604--53e8a231196d": {
+  "field_best": null,
+  "hash": "53e8a231196dfdf1baebfa2f29646f14",
+  "verdict": "unknown"
+ },
+ "simon-r20-0--2fcd8533eba9": {
+  "field_best": 0.01,
+  "hash": "2fcd8533eba981967292f1b6e41f7433",
+  "verdict": "sat"
+ },
+ "simon-r22-1--7cbc3ce2052b": {
+  "field_best": 0.01,
+  "hash": "7cbc3ce2052ba7c5b501f75af58ab3c4",
+  "verdict": "sat"
+ },
+ "size_5_5_5_i116_r12--b438fa464c20": {
+  "field_best": 6.04,
+  "hash": "b438fa464c20a19fdb7788a3f0016f32",
+  "verdict": "sat"
+ },
+ "smulo128--faf4561dc9f6": {
+  "field_best": null,
+  "hash": "faf4561dc9f61c71b926d7d0aec7fb4a",
+  "verdict": "unknown"
+ },
+ "snw_16_9_CCSpre--626c368587dd": {
+  "field_best": 78.49,
+  "hash": "626c368587dd880086afc7b3fa1e6f27",
+  "verdict": "sat"
+ },
+ "snw_16_9_Encpre--67133027ab55": {
+  "field_best": 52.83,
+  "hash": "67133027ab55906e3b757148ca7011dd",
+  "verdict": "sat"
+ },
+ "snw_16_9_preOpt_pre--c15b09b9a7ce": {
+  "field_best": 2.66,
+  "hash": "c15b09b9a7ceff4d4c8fe705958f92ba",
+  "verdict": "sat"
+ },
+ "snw_17_9_CCSpreOptEncpre--bfc825d1eb06": {
+  "field_best": null,
+  "hash": "bfc825d1eb0670fd90805c546fea5c6b",
+  "verdict": "unknown"
+ },
+ "soelberg_unit_223--a42230be4432": {
+  "field_best": null,
+  "hash": "a42230be4432b010789b6f97b090343c",
+  "verdict": "unknown"
+ },
+ "spg_200_301--6e297bdb1c3f": {
+  "field_best": 17.55,
+  "hash": "6e297bdb1c3f957f6333c37804805ecb",
+  "verdict": "unsat"
+ },
+ "sqrt-mitern168--fbf3b9f8a03a": {
+  "field_best": 611.34,
+  "hash": "fbf3b9f8a03a1efedae3da04622fe96e",
+  "verdict": "unsat"
+ },
+ "st_540_25_12_12_9.af--2ca47af4ab7a": {
+  "field_best": 63.83,
+  "hash": "2ca47af4ab7a817725138b8b66e9af7f",
+  "verdict": "sat"
+ },
+ "stable-400-0.1-12-98765432140012--7b40e39148de": {
+  "field_best": 30.67,
+  "hash": "7b40e39148de4d5f8d9384d6937c287e",
+  "verdict": "sat"
+ },
+ "stable-400-0.1-2-9876543214002--db099269d468": {
+  "field_best": 117.61,
+  "hash": "db099269d468029b70419bf4a49e99a1",
+  "verdict": "sat"
+ },
+ "stable-400-0.1-7-9876543214007--62eae28dcf31": {
+  "field_best": 99.81,
+  "hash": "62eae28dcf3170b1547fb5db73e6a295",
+  "verdict": "sat"
+ },
+ "sted5_0x1e3-20--91e0db01b254": {
+  "field_best": 0.12,
+  "hash": "91e0db01b254eb78f6643328045bfeb9",
+  "verdict": "sat"
+ },
+ "sudoku-N30-11--7fe153ced2c9": {
+  "field_best": 1047.53,
+  "hash": "7fe153ced2c966dcdeb42b6714b4d6b7",
+  "verdict": "unsat"
+ },
+ "sum_of_3_cubes_50_bits_91--9ef9243ff051": {
+  "field_best": 0.75,
+  "hash": "9ef9243ff051b32795890fccd6c3f6b2",
+  "verdict": "sat"
+ },
+ "toughsat_22bits_0--0922feab75c3": {
+  "field_best": 19.35,
+  "hash": "0922feab75c35d04d9b8df69013a6df0",
+  "verdict": "sat"
+ },
+ "toughsat_factoring_inf--8da88a43b4ac": {
+  "field_best": 2102.1,
+  "hash": "8da88a43b4ac226f614dd82d4519d8c6",
+  "verdict": "sat"
+ },
+ "two-trees-1023v--7db30d12cb06": {
+  "field_best": 0.03,
+  "hash": "7db30d12cb06f0dc2f30abff80d96d6a",
+  "verdict": "sat"
+ },
+ "vdw_3_13_n160--996bd6326ca5": {
+  "field_best": 320.6,
+  "hash": "996bd6326ca560055b6fe916708dfdaa",
+  "verdict": "unsat"
+ },
+ "vdw_3_13_n161--c14f0c610d59": {
+  "field_best": 394.85,
+  "hash": "c14f0c610d59a9d5e8cec328485b916f",
+  "verdict": "unsat"
+ },
+ "vdw_4_7_n109--66204949278c": {
+  "field_best": 132.62,
+  "hash": "66204949278cdd9d81e102eace6d4669",
+  "verdict": "unsat"
+ },
+ "vdw_4_7_n110--dc3ac89f98e9": {
+  "field_best": 132.95,
+  "hash": "dc3ac89f98e9c3fc43450e256dce1154",
+  "verdict": "unsat"
+ },
+ "vdw_4_8_n145--4d6bd7b2c674": {
+  "field_best": 379.97,
+  "hash": "4d6bd7b2c674fb67b271127586914b74",
+  "verdict": "sat"
+ },
+ "vdw_4_8_n147--7cd6b940be00": {
+  "field_best": null,
+  "hash": "7cd6b940be001c46c6294d7cac9aa610",
+  "verdict": "unknown"
+ },
+ "vdwb_k5_n260--a20f076f7fce": {
+  "field_best": 19.14,
+  "hash": "a20f076f7fce54172e823c63ea7948f7",
+  "verdict": "unsat"
+ },
+ "vdwb_k6_n250--ab17eed90e4d": {
+  "field_best": 92.41,
+  "hash": "ab17eed90e4da47767f72f518e3b4a26",
+  "verdict": "sat"
+ },
+ "vdwb_k6_n300--782b29d2d691": {
+  "field_best": 131.91,
+  "hash": "782b29d2d691fdc94e0ec5b899390e10",
+  "verdict": "sat"
+ },
+ "vdwb_k6_n350--68ef4b1ed6a2": {
+  "field_best": 2144.55,
+  "hash": "68ef4b1ed6a28c75defea64bb7d53e06",
+  "verdict": "sat"
+ },
+ "vdwb_k6_n400--0757e47d262b": {
+  "field_best": null,
+  "hash": "0757e47d262b75171c0040987e6d20ce",
+  "verdict": "unknown"
+ },
+ "vdwb_k7_n3703--fe776dd02d74": {
+  "field_best": null,
+  "hash": "fe776dd02d74e0d68a3e3fc3f9d934de",
+  "verdict": "unknown"
+ },
+ "w19-20.0--7a13ffe9546c": {
+  "field_best": 111.61,
+  "hash": "7a13ffe9546cc7dfabdedebb64700e8a",
+  "verdict": "unsat"
+ },
+ "x2_64.shuffled-as.sat03-1603.cnf.mis-125.debugged--3a8409393cc1": {
+  "field_best": null,
+  "hash": "3a8409393cc1ebae1444a079d216f221",
+  "verdict": "unknown"
+ },
+ "x9-10032.sat--4ae685a11b5c": {
+  "field_best": 13.22,
+  "hash": "4ae685a11b5cecca76dc3d463481ce92",
+  "verdict": "sat"
+ },
+ "x9-11033.sat--7d311f620f4e": {
+  "field_best": 21.8,
+  "hash": "7d311f620f4ebc4adf8f4079899750eb",
+  "verdict": "sat"
+ },
+ "xor_op_n40_d3--22c8d6aa86d5": {
+  "field_best": 3.19,
+  "hash": "22c8d6aa86d51e15ef5ab37479eda22b",
+  "verdict": "unsat"
+ },
+ "xorshift_r14_110--a08c17f9a388": {
+  "field_best": 262.79,
+  "hash": "a08c17f9a3888841cf7bbc75a807ff7e",
+  "verdict": "sat"
+ },
+ "xorshift_r14_31--43c298c756ca": {
+  "field_best": 191.73,
+  "hash": "43c298c756cac6d547a0457c2da7e468",
+  "verdict": "sat"
+ },
+ "xorshift_r14_42--231f3a169120": {
+  "field_best": 712.55,
+  "hash": "231f3a169120d3cda9f8feea88a20d85",
+  "verdict": "sat"
+ },
+ "xorshift_r14_7--a110c13186ef": {
+  "field_best": 309.72,
+  "hash": "a110c13186ef5785df8da4bfa2ce9a6d",
+  "verdict": "sat"
+ },
+ "xorshift_r14_85--d418605014fd": {
+  "field_best": 390.65,
+  "hash": "d418605014fdeb1236bfa720ac460c62",
+  "verdict": "sat"
+ },
+ "xorshift_r15_104--ad5b80bb4d1b": {
+  "field_best": 547.36,
+  "hash": "ad5b80bb4d1b60bee12163df25846801",
+  "verdict": "sat"
+ },
+ "xorshift_r15_113--8d2b018a5f88": {
+  "field_best": 1235.19,
+  "hash": "8d2b018a5f8855b6ba1868a3ffff9d2f",
+  "verdict": "sat"
+ },
+ "xorshift_r15_175--d10b8bcd1bb5": {
+  "field_best": 1580.73,
+  "hash": "d10b8bcd1bb5977c5ffe2d1859e4335f",
+  "verdict": "sat"
+ },
+ "xorshift_r15_191--a60a138325ac": {
+  "field_best": 1088.34,
+  "hash": "a60a138325ac9c88ab293ec0c801a95c",
+  "verdict": "sat"
+ },
+ "xorshift_r16_119--1707c4c24e66": {
+  "field_best": 636.97,
+  "hash": "1707c4c24e66b2cfe6c03955b638bebf",
+  "verdict": "sat"
+ },
+ "xorshift_r16_180--ca7f7824a958": {
+  "field_best": 760.58,
+  "hash": "ca7f7824a958b98512a0c96d73251f8b",
+  "verdict": "sat"
+ },
+ "zeroin.i.3.29--16f8b291c8cd": {
+  "field_best": 0.17,
+  "hash": "16f8b291c8cdedb5ca7210fa0eeb34d9",
+  "verdict": "unsat"
+ }
+}

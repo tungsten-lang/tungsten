@@ -1,0 +1,6 @@
+{"input": "sbdp4_61_2--27495ba00930.cnf", "result": "VERIFIED UNSAT", "emit_s": 0.06488737498875707, "replay_s": 0.2653579580364749, "bytes": 26132, "checker": "s VERIFIED UNSAT (614 gates, 268435456 assignments)"}
+{"input": "sbdp4_65--211b0708454f.cnf", "result": "VERIFIED UNSAT", "emit_s": 0.07057124999118969, "replay_s": 0.8410964580252767, "bytes": 34154, "checker": "s VERIFIED UNSAT (951 gates, 268435456 assignments)"}
+{"input": "sbdp4_136_2--5ab5ac8d66c7.cnf", "result": "VERIFIED UNSAT", "emit_s": 1.4039498749771155, "replay_s": 95.98731241701171, "bytes": 79312, "checker": "s VERIFIED UNSAT (1723 gates, 4294967296 assignments)"}
+{"input": "sbdp4_138--12535b3264a9.cnf", "result": "VERIFIED UNSAT", "emit_s": 1.3619221249828115, "replay_s": 231.30888345802668, "bytes": 103610, "checker": "s VERIFIED UNSAT (2694 gates, 4294967296 assignments)"}
+{"input": "sbdp4_138_2--2a38c5d48846.cnf", "result": "VERIFIED UNSAT", "emit_s": 1.5018470409559086, "replay_s": 91.20681062497897, "bytes": 79304, "checker": "s VERIFIED UNSAT (1723 gates, 4294967296 assignments)"}
+{"input": "sbdp4_140_2--e685a5d96e1e.cnf", "result": "VERIFIED UNSAT", "emit_s": 1.5035235839895904, "replay_s": 93.82982170803007, "bytes": 79330, "checker": "s VERIFIED UNSAT (1723 gates, 4294967296 assignments)"}

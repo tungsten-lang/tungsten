@@ -265,18 +265,41 @@ JS_CODE_AT = {}
 # checks each key is still present before visiting it.
 -> js_for_in_keys(v)
   return [] if js_nullish?(v)
-  o = js_object?(v) ? v : js_realm().wrap_primitive(v)
-  seen = {}
+  start = js_object?(v) ? v : js_realm().wrap_primitive(v)
   out = []
+  ks = jown_keys(start)
+  i = 0
+  while i < ks.size
+    k = ks[i]
+    out.push(k) if js_string?(k) && jenumerable?(start, k)
+    i += 1
+  o = jproto(start)
+  seen = nil
   while o != nil
     ks = jown_keys(o)
     i = 0
     while i < ks.size
       k = ks[i]
-      if js_string?(k) && !seen.has_key?(k)
-        seen[k] = true
-        out.push(k) if jenumerable?(o, k)
+      if js_string?(k) && jenumerable?(o, k)
+        if seen == nil
+          seen = {}
+          cur = start
+          while cur != nil && cur != o
+            cks = jown_keys(cur)
+            j = 0
+            while j < cks.size
+              seen[cks[j]] = true if js_string?(cks[j])
+              j += 1
+            cur = jproto(cur)
+        if !seen.has_key?(k)
+          seen[k] = true
+          out.push(k)
       i += 1
+    if seen != nil
+      i = 0
+      while i < ks.size
+        seen[ks[i]] = true if js_string?(ks[i])
+        i += 1
     o = jproto(o)
   out
 

@@ -163,7 +163,7 @@ in JS
     if @head >= @list.size
       @list = []
     else
-      @list = @list.slice(@head, @list.size - @head)
+      @list = js_arr_copy(@list, @head, @list.size - @head)
     @head = 0
     nil
 
@@ -428,6 +428,13 @@ fn jsr_gcell_fast(cb) (i64) i64
   if js_array?(o)
     return js_array_get_index(o, key) if js_number?(key)
     return js_array_get(o, js_to_property_key(key))
+  if js_string?(o) && js_number?(key)
+    ix = jsr_index(wvalue_bits(key) ## i64)
+    if ix >= 0
+      if o.ascii?
+        return ix < o.size ? o.slice(ix, 1) : nil
+      u = js_units(o)
+      return ix < u.size ? js_cp_str(u[ix]) : nil
   k = js_to_property_key(key)
   return o.get(k, o) if o.is_a?(JS:Base)
   js_get_prim(o, k)
@@ -440,8 +447,10 @@ fn jsr_gcell_fast(cb) (i64) i64
       return js_str_length(o)
     if key.is_a?(String) && js_array_index?(key)
       i = key.to_i
-      return js_str_at(o, i) if i < js_str_length(o).to_i
-      return nil
+      if o.ascii?
+        return i < o.size ? o.slice(i, 1) : nil
+      u = js_units(o)
+      return i < u.size ? js_cp_str(u[i]) : nil
     return js_realm().string_proto.get(key, o)
   return js_realm().number_proto.get(key, o) if js_number?(o)
   return js_realm().boolean_proto.get(key, o) if o == true || o == false
@@ -479,23 +488,14 @@ fn jsr_gcell_fast(cb) (i64) i64
 
 -> js_str_length(s)
   return s.size.to_f if s.ascii?
-  js_str_units(s).size.to_f
+  js_units(s).size.to_f
 
 -> js_str_units(s)
-  out = []
-  s.codepoints.each ->(cp)
-    if cp >= 65536
-      c = cp - 65536
-      out.push(55296 + (c >> 10))
-      out.push(56320 + (c & 1023))
-    else
-      out.push(cp)
-  out
+  js_units(s)
 
 -> js_str_at(s, i)
   return s.slice(i, 1) if s.ascii?
-  u = js_str_units(s)[i]
-  u.chr
+  js_cp_str(js_units(s)[i])
 
 # ---- errors ----
 

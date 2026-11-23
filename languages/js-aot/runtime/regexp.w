@@ -349,7 +349,7 @@ RX_EMPTY = 19
       while @i < @n && @p[@i] != 62
         @i += 1
       fail("Invalid named reference") if !eat(62)
-      nm = js_from_units(js_rx_to_units(@p.slice(st, @i - 1 - st), @unicode))
+      nm = js_from_units(js_rx_to_units(js_arr_copy(@p, st, @i - 1 - st), @unicode))
       @backref_names.push(nm)
       n = JS:RxNode.new(RX_BACKREF)
       n.name = nm
@@ -397,7 +397,7 @@ RX_EMPTY = 19
       while @i < @n && @p[@i] != 125
         @i += 1
       fail("Invalid property name") if !eat(125)
-      spec = js_from_units(@p.slice(st, @i - 1 - st))
+      spec = js_from_units(js_arr_copy(@p, st, @i - 1 - st))
       pr = js_rx_property(spec, @src)
       return [[], c == 80, [pr]]
     nil

@@ -103,17 +103,19 @@ JS_NAN = [nil]
   return v if !js_object?(v)
   ex = js_get_value(v, SYM_TO_PRIMITIVE)
   if ex != nil && ex != JS_NULL
-    r = js_call_arr(ex, v, [hint])
+    r = js_call(ex, v, 1, hint, nil, nil, nil, nil)
     js_throw_type("Cannot convert object to primitive value") if js_object?(r)
     return r
-  order = hint == "string" ? ["toString", "valueOf"] : ["valueOf", "toString"]
-  i = 0
-  while i < 2
-    f = js_get_value(v, order[i])
-    if js_callable?(f)
-      r = js_call_arr(f, v, [])
-      return r if !js_object?(r)
-    i += 1
+  k0 = hint == "string" ? "toString" : "valueOf"
+  k1 = hint == "string" ? "valueOf" : "toString"
+  f = js_get_value(v, k0)
+  if js_callable?(f)
+    r = js_call(f, v, 0, nil, nil, nil, nil, nil)
+    return r if !js_object?(r)
+  f = js_get_value(v, k1)
+  if js_callable?(f)
+    r = js_call(f, v, 0, nil, nil, nil, nil, nil)
+    return r if !js_object?(r)
   js_throw_type("Cannot convert object to primitive value")
 
 -> js_to_number(v)

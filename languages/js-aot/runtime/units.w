@@ -21,6 +21,8 @@ use unit_id
 
 # Everything a loaded unit's context points at stays reachable from here.
 JSU_UNITS = []
+# Loaded object files cached by path (one mmap per .o; jsu_init builds closures per ctx).
+JSU_OBJ_FP = {}
 
 + Unit
   rw :path, :ctx, :keep, :nentries
@@ -173,8 +175,11 @@ fn jsu_raw(t) (i64[]) i64
       u.keep.push(v)
       ctx[1024 + j] = wvalue_bits(v) ## i64
     j += 1
-  fp = ccall("w_jit_load_object", obj_path, "jsu_init")
-  return "cannot load " + obj_path if fp == nil
+  fp = JSU_OBJ_FP[obj_path]
+  if fp == nil
+    fp = ccall("w_jit_load_object", obj_path, "jsu_init")
+    return "cannot load " + obj_path if fp == nil
+    JSU_OBJ_FP[obj_path] = fp
   ctxi = jsu_raw(ctx)
   # jsu_init(ctx) answers [index, closure, …]: a function's entry is its closure (over ctx)
   pairs = wvalue_from_bits(jsu_call_init(fp ## i64, wvalue_bits(ctxi) ## i64))

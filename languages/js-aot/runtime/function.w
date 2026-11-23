@@ -312,6 +312,9 @@ JS_NO_ARGS = []
 
 # f(...args) with an Array of arguments (runtime and builtin callers).
 -> js_call_arr(f, this, args)
+  fb = wvalue_bits(f) ## i64
+  if (jsr_kind(fb) & 15) == KIND_NATIVE
+    return f.fn.call(this, args, nil)
   n = args.size
   if n > 4
     return js_call(f, this, n, args[0], args[1], args[2], args[3], args)

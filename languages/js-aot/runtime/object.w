@@ -120,15 +120,16 @@ JS_IC_SCRATCH = 0
       s = s.parent
     out.reverse
 
-  # Keys in slot order (property creation order).
+  # Spec-ordered own keys (cached on immutable non-dict shapes).
   -> key_list
+    return JS_NO_ARGS if @count == 0
     if @keys == nil
       out = []
       s = self
       while s != nil && s.count > 0
         out.push(s.key)
         s = s.parent
-      @keys = out.reverse
+      @keys = js_order_own_keys(out.reverse, false)
     @keys
 
   # The child shape adding key with attrs.
@@ -476,24 +477,9 @@ JS_PROTO_INDEX = [false]
   # Own keys in spec order: integer-like keys ascending, then strings, then symbols
   # (private names never appear).
   -> own_keys
-    ks = @shape.dict ? @shape.keys : @shape.key_list
-    ints = []
-    strs = []
-    syms = []
-    i = 0
-    while i < ks.size
-      k = ks[i]
-      if js_string?(k)
-        if js_array_index?(k)
-          ints.push(k)
-        else
-          strs.push(k)
-      elsif !k.is_a?(JS:PrivateName)
-        syms.push(k)
-      i += 1
-    if ints.size > 1
-      ints = ints.sort_by(->(k) k.to_i)
-    ints + strs + syms
+    return @shape.key_list if !@shape.dict
+    return JS_NO_ARGS if @shape.keys.size == 0
+    js_order_own_keys(@shape.keys, true)
 
   -> get_own_property(key)
     i = @shape.slot_of(key)
@@ -732,13 +718,50 @@ JS_NULL = JS:Null.new
   -> new(@getter, @setter)
     nil
 
+-> js_order_own_keys(ks, copy)
+  n = ks.size
+  return JS_NO_ARGS if n == 0
+  # Fast path: all non-index string keys (the common case for JS objects).
+  simple = true
+  i = 0
+  while i < n
+    k = ks[i]
+    if !js_string?(k) || js_array_index?(k)
+      simple = false
+      break
+    i += 1
+  if simple
+    return copy ? ks.dup : ks
+  ints = []
+  strs = []
+  syms = []
+  i = 0
+  while i < n
+    k = ks[i]
+    if js_string?(k)
+      if js_array_index?(k)
+        ints.push(k)
+      else
+        strs.push(k)
+    elsif !k.is_a?(JS:PrivateName)
+      syms.push(k)
+    i += 1
+  if ints.size > 1
+    ints = ints.sort_by(->(k) k.to_i)
+  return strs if ints.size == 0 && syms.size == 0
+  return ints if strs.size == 0 && syms.size == 0
+  return syms if ints.size == 0 && strs.size == 0
+  return ints + strs if syms.size == 0
+  return strs + syms if ints.size == 0
+  ints + strs + syms
+
 -> js_accessor_get(acc, receiver)
   return nil if !acc.is_a?(JS:Accessor) || acc.getter == nil
-  js_call_arr(acc.getter, receiver, [])
+  js_call(acc.getter, receiver, 0, nil, nil, nil, nil, nil)
 
 -> js_accessor_set(acc, receiver, v)
   return false if !acc.is_a?(JS:Accessor) || acc.setter == nil
-  js_call_arr(acc.setter, receiver, [v])
+  js_call(acc.setter, receiver, 1, v, nil, nil, nil, nil)
   true
 
 # ---- inline cache fast paths ----

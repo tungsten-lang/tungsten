@@ -718,8 +718,8 @@ TWO32_INT = 4294967296
   n = a.size
   return a if n < 2
   mid = n / 2
-  l = js_merge_sort_num(a.slice(0, mid).dup)
-  r = js_merge_sort_num(a.slice(mid, n - mid).dup)
+  l = js_merge_sort_num(js_arr_copy(a, 0, mid))
+  r = js_merge_sort_num(js_arr_copy(a, mid, n - mid))
   out = []
   i = 0
   j = 0

@@ -323,20 +323,27 @@ BF_INLINE = 3
 -> js_ascii?(s)
   s.ascii?
 
-# UTF-16 code units of s, as an Array of Ints. The last two conversions are cached, so a
-# loop over charCodeAt(i) of one non-ASCII string converts it once.
+# UTF-16 code units of s, as an Array of Ints. The last eight conversions are cached by
+# WValue bits (O(1) identity check; strong ref kept in JS_UNITS_STRS), so loops over
+# length / [i] / charCodeAt(i) of non-ASCII strings convert each string once.
 # TODO(js-aot): per thread once workers run JS.
-JS_UNITS_CACHE = [nil, nil, nil, nil]
+JS_UNITS_BITS = i64[8]
+JS_UNITS_STRS = Array.new(8, nil)
+JS_UNITS_VALS = Array.new(8, nil)
+JS_UNITS_NEXT = [0]
 
 -> js_units(s)
-  c = JS_UNITS_CACHE
-  return c[1] if c[0] != nil && c[0] == s
-  return c[3] if c[2] != nil && c[2] == s
+  b = wvalue_bits(s) ## i64
+  i = 0
+  while i < 8
+    return JS_UNITS_VALS[i] if JS_UNITS_STRS[i] != nil && JS_UNITS_BITS[i] == b
+    i += 1
   u = js_units_raw(s)
-  c[2] = c[0]
-  c[3] = c[1]
-  c[0] = s
-  c[1] = u
+  slot = JS_UNITS_NEXT[0]
+  JS_UNITS_NEXT[0] = (slot + 1) & 7
+  JS_UNITS_BITS[slot] = b
+  JS_UNITS_STRS[slot] = s
+  JS_UNITS_VALS[slot] = u
   u
 
 -> js_units_raw(s)
@@ -393,12 +400,34 @@ JS_UNITS_CACHE = [nil, nil, nil, nil]
       i += 1
   sb.to_s
 
+# Copy a[start, len] into a fresh Array without Array#slice (which registers a persistent view).
+-> js_arr_copy(a, start, len)
+  return [] if len <= 0
+  out = Array.new(len, nil)
+  i = 0
+  while i < len
+    out[i] = a[start + i]
+    i += 1
+  out
+
 # s.substring(a, b) in UTF-16 units.
 -> js_substring(s, a, b)
   return "" if b <= a
   return s.slice(a, b - a) if s.ascii?
   u = js_units(s)
-  js_from_units(u.slice(a, b - a))
+  sb = StringBuffer()
+  i = a
+  n = b < u.size ? b : u.size
+  while i < n
+    c = u[i]
+    if c >= 55296 && c <= 56319 && i + 1 < n && u[i + 1] >= 56320 && u[i + 1] <= 57343
+      cp = 65536 + ((c - 55296) << 10) + (u[i + 1] - 56320)
+      sb.append(js_cp_str(cp))
+      i += 2
+    else
+      sb.append(js_cp_str(c))
+      i += 1
+  sb.to_s
 
 -> js_char_at(s, i)
   return s.slice(i, 1) if s.ascii?

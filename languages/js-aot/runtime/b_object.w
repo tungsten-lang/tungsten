@@ -164,9 +164,9 @@ in JS
     i += 1
   r.adopt_array(out)
 
--> js_object_assign(target, sources)
+-> js_object_assign(target, sources, start = 0)
   to = js_to_obj(target)
-  j = 0
+  j = start
   while j < sources.size
     src = sources[j]
     if !js_nullish?(src)
@@ -325,6 +325,19 @@ in JS
   return jget_own_property(o, key) != nil if js_proxy?(o)
   jhas_own?(o, key)
 
+-> js_fn_call(f, args)
+  js_throw_type("Function.prototype.call is not a function") if !js_callable?(f)
+  n = args.size
+  return js_call(f, nil, 0, nil, nil, nil, nil, nil) if n == 0
+  this = args[0]
+  return js_call(f, this, 0, nil, nil, nil, nil, nil) if n == 1
+  return js_call(f, this, 1, args[1], nil, nil, nil, nil) if n == 2
+  return js_call(f, this, 2, args[1], args[2], nil, nil, nil) if n == 3
+  return js_call(f, this, 3, args[1], args[2], args[3], nil, nil) if n == 4
+  return js_call(f, this, 4, args[1], args[2], args[3], args[4], nil) if n == 5
+  rest = js_arr_copy(args, 1, n - 1)
+  js_call(f, this, n - 1, rest[0], rest[1], rest[2], rest[3], rest)
+
 # o[key](...args) for any value o.
 -> js_invoke(o, key, args)
   f = js_get_value(o, key)
@@ -340,7 +353,7 @@ js_install(->(r) js_install_object(r))
   r.method(oc, "keys", 1, ->(this, args, nt) js_object_keys(js_arg(args, 0), :keys))
   r.method(oc, "values", 1, ->(this, args, nt) js_object_keys(js_arg(args, 0), :values))
   r.method(oc, "entries", 1, ->(this, args, nt) js_object_keys(js_arg(args, 0), :entries))
-  r.method(oc, "assign", 2, ->(this, args, nt) js_object_assign(js_arg(args, 0), args.size > 1 ? args.slice(1, args.size - 1).dup : []))
+  r.method(oc, "assign", 2, ->(this, args, nt) js_object_assign(js_arg(args, 0), args, 1))
   r.method(oc, "freeze", 1, ->(this, args, nt) js_freeze(js_arg(args, 0)))
   r.method(oc, "seal", 1, ->(this, args, nt) js_set_integrity(js_arg(args, 0), :sealed))
   r.method(oc, "preventExtensions", 1, ->(this, args, nt) js_prevent_ext(js_arg(args, 0)))
@@ -376,10 +389,10 @@ js_install(->(r) js_install_object(r))
   r.constructor("Function", 1, ->(this, args, nt) js_function_ctor(args, :normal), fp)
   fp.define("name", "", ATTR_C)
   fp.define("length", ~0.0, ATTR_C)
-  # (copies, not slices: a slice borrows the caller's argument list)
-  r.method(fp, "call", 1, ->(this, args, nt) js_call_named(this, js_arg(args, 0), args.size > 1 ? args.slice(1, args.size - 1).dup : [], "Function.prototype.call"))
+  # (copies, not slices: a slice registers a persistent view and borrows the caller's list)
+  r.method(fp, "call", 1, ->(this, args, nt) js_fn_call(this, args))
   r.method(fp, "apply", 2, ->(this, args, nt) js_call_named(this, js_arg(args, 0), js_list_from_array_like(js_arg(args, 1)), "Function.prototype.apply"))
-  r.method(fp, "bind", 1, ->(this, args, nt) js_bind(this, js_arg(args, 0), args.size > 1 ? args.slice(1, args.size - 1).dup : []))
+  r.method(fp, "bind", 1, ->(this, args, nt) js_bind(this, js_arg(args, 0), args.size > 1 ? js_arr_copy(args, 1, args.size - 1) : JS_NO_ARGS))
   r.method(fp, "toString", 0, ->(this, args, nt) js_fn_to_string(this))
   hi = r.native("\[Symbol.hasInstance]", 1, ->(this, args, nt) js_ordinary_has_instance(this, js_arg(args, 0)))
   fp.define(SYM_HAS_INSTANCE, hi, 0)

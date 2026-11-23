@@ -47464,10 +47464,11 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
 
     size_t code_pages = (code_sz + 0x3fff) & ~(size_t)0x3fff; if (!code_pages) code_pages = 0x4000;
     size_t data_pages = (data_sz + 0x3fff) & ~(size_t)0x3fff; if (!data_pages) data_pages = 0x4000;
-    uint8_t *code = (uint8_t *)mmap(NULL, code_pages, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    /* Keep code and data adjacent in one mapping so ADRP (±4GB) always reaches data. */
+    size_t total_pages = code_pages + data_pages;
+    uint8_t *code = (uint8_t *)mmap(NULL, total_pages, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (code == MAP_FAILED) { free(fb); return W_NIL; }
-    uint8_t *data = (uint8_t *)mmap(NULL, data_pages, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (data == MAP_FAILED) { munmap(code, code_pages); free(fb); return W_NIL; }
+    uint8_t *data = code + code_pages;
 
     uint8_t *sect_base[128];
     for (int i = 0; i < nsect; i++)
@@ -47489,7 +47490,7 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
     enum { STUB_TAB = 8192 };
     uint64_t *stub_key = (uint64_t *)calloc(STUB_TAB, sizeof(uint64_t));
     uint32_t *stub_idx = (uint32_t *)calloc(STUB_TAB, sizeof(uint32_t));
-    if (!stub_key || !stub_idx) { free(stub_key); free(stub_idx); munmap(code, code_pages); munmap(data, data_pages); free(fb); return W_NIL; }
+    if (!stub_key || !stub_idx) { free(stub_key); free(stub_idx); munmap(code, total_pages); free(fb); return W_NIL; }
 
     /* loaded address of symbol index `idx`: undefined → host (dlsym), else the
      * split base of its defining section + the symbol's offset within it. */
@@ -47594,10 +47595,10 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
     free(stub_idx);
     /* NB: keep `fb` alive — the symbol/string tables scanned below live in it,
      * not in the loaded regions (only section *data* was copied). */
-    if (!ok) { munmap(code, code_pages); munmap(data, data_pages); free(fb); return W_NIL; }
+    if (!ok) { munmap(code, total_pages); free(fb); return W_NIL; }
 
     if (mprotect(code, code_pages, PROT_READ | PROT_EXEC) != 0) {
-        munmap(code, code_pages); munmap(data, data_pages); free(fb); return W_NIL;
+        munmap(code, total_pages); free(fb); return W_NIL;
     }
     sys_icache_invalidate(code, code_pages);  /* data region stays R-W (inline caches) */
 

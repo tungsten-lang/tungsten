@@ -451,7 +451,7 @@ JS_JOIN_GUARD = []
   a = js_rel_index(js_arg(args, 0), n, 0)
   b = js_rel_index(js_arg(args, 1), n, n)
   if js_default_species?(o) && b <= o.size && (js_array_flags(o) & JS_AF_HOLES) == 0
-    return js_mark_array(b > a ? o.slice(a, b - a).dup : [])
+    return js_mark_array(b > a ? js_arr_copy(o, a, b - a) : [])
   res = js_species_create(o, b > a ? b - a : 0)
   k = a
   j = 0
@@ -475,13 +475,13 @@ JS_JOIN_GUARD = []
     d = js_to_integer(args[1])
     d = ~0.0 if d < ~0.0
     dc = d > (n - start) + ~0.0 ? n - start : d.to_i
-  items = args.size > 2 ? args.slice(2, args.size - 2).dup : []
+  items = args.size > 2 ? js_arr_copy(args, 2, args.size - 2) : JS_NO_ARGS
   js_throw_type("Splice result length exceeds 2^53-1") if n + items.size - dc > 9007199254740991
   if js_default_species?(o) && (js_array_flags(o) & JS_AF_HOLES) == 0 && js_array_protos_clean?
     el = o
-    # copies: slices may share el's storage, which the pushes below overwrite
-    removed = el.slice(start, dc).dup
-    tail = el.slice(start + dc, el.size - start - dc).dup
+    # copies: avoid Array#slice views and keep storage independent of pushes below
+    removed = js_arr_copy(el, start, dc)
+    tail = js_arr_copy(el, start + dc, el.size - start - dc)
     while el.size > start
       el.pop
     i = 0
@@ -729,8 +729,8 @@ JS_JOIN_GUARD = []
       i += 1
     return out
   mid = n / 2
-  l = js_merge_sort(a.slice(0, mid).dup, cmp)
-  rr = js_merge_sort(a.slice(mid, n - mid).dup, cmp)
+  l = js_merge_sort(js_arr_copy(a, 0, mid), cmp)
+  rr = js_merge_sort(js_arr_copy(a, mid, n - mid), cmp)
   out = Array.new(n, nil)
   i = 0
   j = 0

@@ -191,7 +191,7 @@ js_install(->(r) js_install_console(r))
 
 -> js_console_assert(args)
   return nil if js_truthy(js_arg(args, 0))
-  rest = args.size > 1 ? args.slice(1, args.size - 1).dup : []
+  rest = args.size > 1 ? js_arr_copy(args, 1, args.size - 1) : JS_NO_ARGS
   js_console_out("error", ["Assertion failed" + (rest.size > 0 ? ":" : "")] + rest)
 
 -> js_console_count(l)

@@ -378,7 +378,7 @@ JS_UNHANDLED = []
 -> js_promise_try(c, args)
   cap = js_new_capability_from(c)
   begin
-    v = js_call_arr(js_arg(args, 0), nil, args.size > 1 ? args.slice(1, args.size - 1).dup : [])
+    v = js_call_arr(js_arg(args, 0), nil, args.size > 1 ? js_arr_copy(args, 1, args.size - 1) : JS_NO_ARGS)
     js_call_arr(cap.resolve, nil, [v])
   rescue e
     js_call_arr(cap.reject, nil, [js_error_value(e)])

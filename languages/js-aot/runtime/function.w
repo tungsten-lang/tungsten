@@ -130,11 +130,11 @@ FNV_CTOR = 16          # (natives) callable with new
     materialize()
     super(key)
 
-  -> set(key, v, receiver)
+  -> set(key, v, receiver = nil)
     materialize() if key == "name" || key == "length" || key == "prototype"
     super(key, v, receiver)
 
-  -> define(key, v, attrs)
+  -> define(key, v, attrs = ATTR_DEFAULT)
     if key == "name" || key == "length"
       materialize()
     elsif key == "prototype" && !vflag?(FNV_PROTO)

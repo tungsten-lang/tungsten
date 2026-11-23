@@ -128,7 +128,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
         else
           @translated += 1
           u = JT_UNIT[0]
-          u.entries.push(f.index) if u != nil && !f.script && f.fclass == :escaping
+          u.entries.push(f.index) if u != nil && (f.script || f.fclass == :escaping)
       i += 1
     u = JT_UNIT[0]
     if u != nil
@@ -405,7 +405,8 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
   # The JS:Code of jf: a global of this program, or (for a function it does not compile)
   # the descriptor the host keeps.
   -> code_ref(jf)
-    return ta_call("js_code_at", [ta_int(jf.index)]) if @omit[jf.index] == true
+    # (a unit gets every descriptor from the host, compiled here or not)
+    return ta_call("js_code_at", [ta_int(jf.index)]) if @omit[jf.index] == true && JT_UNIT[0] == nil
     ta_var("JSC_" + jf.index.to_s)
 
   -> compiled?(jf)

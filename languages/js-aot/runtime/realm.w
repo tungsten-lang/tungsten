@@ -285,7 +285,8 @@ fn jsr_is_notplain(b) (i64) i64
     c = @cells[key]
     c != nil && c.value != JS_HOLE
 
-  -> get(key, receiver)
+  -> get(key, receiver = nil)
+    receiver = self if receiver == nil
     c = @cells[key]
     if c != nil && c.value != JS_HOLE
       return js_accessor_get(c.value, receiver) if (c.attrs & ATTR_ACCESSOR) != 0
@@ -293,7 +294,8 @@ fn jsr_is_notplain(b) (i64) i64
     p = @shape.proto
     p == nil ? nil : p.get(key, receiver)
 
-  -> set(key, v, receiver)
+  -> set(key, v, receiver = nil)
+    receiver = self if receiver == nil
     c = cell(key)
     if c.value != JS_HOLE
       return js_accessor_set(c.value, receiver, v) if (c.attrs & ATTR_ACCESSOR) != 0
@@ -310,7 +312,7 @@ fn jsr_is_notplain(b) (i64) i64
     c.value = v
     v
 
-  -> define(key, v, attrs)
+  -> define(key, v, attrs = ATTR_DEFAULT)
     c = cell(key)
     @order.push(key) if c.value == JS_HOLE
     c.put(v, attrs)

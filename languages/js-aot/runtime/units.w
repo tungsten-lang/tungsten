@@ -93,13 +93,6 @@ JSU_UNITS = []
   r = jsu_call_entry(code.entry, wvalue_bits(code.uctx) ## i64, wvalue_bits(f) ## i64, wvalue_bits(this) ## i64, wvalue_bits(argc) ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, wvalue_bits(more) ## i64)
   wvalue_from_bits(r)
 
-fn jsu_call_entry(fp, ctx, f, th, argc, a0, a1, a2, a3, more) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %fn = inttoptr i64 %fp to ptr
-    %r = call i64 %fn(i64 %ctx, i64 %f, i64 %th, i64 %argc, i64 %a0, i64 %a1, i64 %a2, i64 %a3, i64 %more)
-    ret i64 %r
-  IR
-
 fn jsu_call_init(fp, ctx, out) (i64 i64 i64) i64
   ll <<~IR
     %fn = inttoptr i64 %fp to ptr
@@ -157,7 +150,7 @@ fn jsu_cl_caps(cb) (i64) i64
 # Load the unit at obj_path for a script whose functions' JS:Code descriptors are codes
 # (indexed like the script's functions). Returns the JS:Unit, or a String saying why not.
 -> js_unit_load(obj_path, manifest_text, codes)
-  man = js_json_parse(manifest_text)
+  man = js_json_parse(manifest_text, nil)
   return "manifest is not an object" if !js_object?(man)
   return "unit ABI " + js_to_string(jget(man, "abi")) + ", host " + JSU_ABI.to_s if jget(man, "abi") != JSU_ABI.to_f
   rt = jget(man, "rt")

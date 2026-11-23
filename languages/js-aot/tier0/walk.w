@@ -93,6 +93,9 @@ WK_POOL = []
 
 # ---- running scripts ----
 
+# ->(analysis) called before a script (not eval code) runs, with its analysis.
+WK_PRE_RUN = [nil]
+
 # Run a script (mode nil), indirect eval code (:eval) or the source new Function builds.
 # Returns the completion value of the last expression statement.
 -> wk_run(src, url, mode = nil)
@@ -107,9 +110,15 @@ WK_POOL = []
   an.url = url
   an.eval_mode = mode != nil
   an.run
+  # (the host may load the script's compiled unit here: runtime/units.w)
+  WK_PRE_RUN[0].call(an) if WK_PRE_RUN[0] != nil && mode == nil
   f = an.funcs[0]
   # (a function tier 0 cannot run fails when it is called, not the whole script)
   js_throw(js_make_error("SyntaxError", "tier 0 cannot run this yet: " + f.unsupported0.to_s)) if f.unsupported0 != nil
+  c = f.code
+  if c != nil && c.entry != 0
+    # a loaded unit compiled the script itself
+    return wvalue_from_bits(jsu_call_entry(c.entry, wvalue_bits(c.uctx) ## i64, 0, wvalue_bits(js_realm().global) ## i64, wvalue_bits(0) ## i64, 0, 0, 0, 0, 0))
   act = wk_act(f, nil, nil, js_realm().global, f.nlocals)
   act.caller = JS_CUR_ACT[0]
   JS_CUR_ACT[0] = act

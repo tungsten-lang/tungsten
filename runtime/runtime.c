@@ -47501,6 +47501,10 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
 
     for (int i = 0; i < nsect && ok; i++) {
         struct section_64 *s = sects[i];
+        /* unwind and debug tables are never read in a loaded object (Tungsten raises
+         * through setjmp/longjmp, not unwinding), so their relocations are left alone */
+        if (strncmp(s->segname, "__LD", 16) == 0 || strncmp(s->segname, "__DWARF", 16) == 0 ||
+            strncmp(s->sectname, "__eh_frame", 16) == 0) continue;
         struct relocation_info *r = (struct relocation_info *)(fb + s->reloff);
         for (uint32_t k = 0; k < s->nreloc && ok; k++) {
             struct relocation_info ri = r[k];
@@ -47618,6 +47622,20 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
                         break;
                     }
                 }
+            }
+        }
+    }
+    if (result == W_NIL) {
+        /* no metadata row: the function's profiler alias `w:<name>` (a hidden external
+         * symbol in the object; a compiled JavaScript unit's jsu_init is found this way) */
+        size_t wl = strlen(want);
+        for (uint32_t k = 0; k < st->nsyms && result == W_NIL; k++) {
+            struct nlist_64 *ns = &syms[k];
+            if ((ns->n_type & N_TYPE) == N_UNDF || ns->n_sect < 1 || ns->n_sect > nsect) continue;
+            const char *nm = strs + ns->n_un.n_strx;
+            if (strncmp(nm, "_w:", 3) == 0 && strlen(nm + 3) == wl && memcmp(nm + 3, want, wl) == 0) {
+                uint64_t a = (uint64_t)(uintptr_t)(sect_base[ns->n_sect - 1] + (ns->n_value - sects[ns->n_sect - 1]->addr));
+                result = w_int((int64_t)(intptr_t)a);
             }
         }
     }

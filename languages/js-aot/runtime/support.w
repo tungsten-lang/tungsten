@@ -77,6 +77,15 @@ in JS
   jsr_set_aflags(ab, JS_AF_ARRAY | JS_AF_HOLES)
   a
 
+# A compiled unit's entry (runtime/units.w): fp(ctx, f, this, argc, a0..a3, more), all
+# raw WValue bits.
+fn jsu_call_entry(fp, ctx, f, th, argc, a0, a1, a2, a3, more) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
+  ll <<~IR
+    %fn = inttoptr i64 %fp to ptr
+    %r = call i64 %fn(i64 %ctx, i64 %f, i64 %th, i64 %argc, i64 %a0, i64 %a1, i64 %a2, i64 %a3, i64 %more)
+    ret i64 %r
+  IR
+
 # ---- the JS call stack (positions for Error.stack and host tools) ----
 
 # The innermost running activation of tier 0 (each links to its caller), nil outside JS.

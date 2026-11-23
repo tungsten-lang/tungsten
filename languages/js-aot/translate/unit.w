@@ -126,10 +126,12 @@ JSU_CONSTS = {"JSR" => true, "JS_HOLE" => true, "JS_NULL" => true, "JS_NO_ARGS" 
     i = 0
     while i < @entries.size
       n = @entries[i]
+      # (the script's entry is its jsd_0: it has no function object)
+      en = (n == 0 ? "jsd_" : "jsf_") + n.to_s
       ir = ir + "%p" + n.to_s + " = getelementptr i64, ptr %base, i64 " + n.to_s + "\n"
-      ir = ir + "%a" + n.to_s + " = ptrtoint ptr @\"w:jsf_" + n.to_s + "\" to i64\n"
+      ir = ir + "%a" + n.to_s + " = ptrtoint ptr @\"w:" + en + "\" to i64\n"
       ir = ir + "store i64 %a" + n.to_s + ", ptr %p" + n.to_s + "\n"
-      keep.push(Tungsten:AST:Call.new(nil, "jsf_" + n.to_s, [Tungsten:AST:Var.new("ctx"), v, v, v, v, v, v, v, v]))
+      keep.push(Tungsten:AST:Call.new(nil, en, [Tungsten:AST:Var.new("ctx"), v, v, v, v, v, v, v, v]))
       i += 1
     ir = "%base = inttoptr i64 %out to ptr\n" + ir + "ret i64 0"
     fill = Tungsten:AST:FnDef.new("jsu_fill", [Tungsten:AST:Param.new("out")], [Tungsten:AST:Call.new(nil, "ll", [Tungsten:AST:String.new(ir)])])

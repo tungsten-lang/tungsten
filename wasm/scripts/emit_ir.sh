@@ -9,7 +9,9 @@ mkdir -p wasm/build
 export TUNGSTEN_ROOT="$ROOT"
 export TUNGSTEN_CC="$CLANG"
 export TUNGSTEN_INCREMENTAL=0
-export TUNGSTEN_CACHE_DIR="$ROOT/wasm/build/cache/host"   # see build_host.sh
+. "$ROOT/bin/commands/store.sh"
+wasm_cache="$(tungsten_suite_dir "$ROOT" wasm)"
+export TUNGSTEN_CACHE_DIR="$wasm_cache/host"   # see build_host.sh
 mkdir -p "$TUNGSTEN_CACHE_DIR"
 # Feature flags shared with the runtime's C objects (wasm/scripts/config.sh).
 source "$ROOT/wasm/scripts/config.sh"

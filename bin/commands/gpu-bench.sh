@@ -2,10 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/bin/commands/store.sh"
 CALLER_PWD="$PWD"
 COMPILER="$ROOT/bin/tungsten-compiler"
 SOURCE="$ROOT/benchmarks/gpu/gpu_bench.w"
-CACHE_DIR="${TUNGSTEN_CACHE_DIR:-$ROOT/build/cache}/gpu-bench"
+CACHE_DIR="$(tungsten_cache_dir "$ROOT")/gpu-bench"
 BACKEND=auto
 ELEMENTS=1048576
 RUNS=50
@@ -19,7 +20,7 @@ usage() {
 Usage: tungsten gpu-bench [options]
 
 Emit, compile, dispatch, verify, and time Tungsten's baseline GPU kernel.
-Artifacts and a reproducibility record are stored under build/cache/gpu-bench.
+Artifacts and a reproducibility record are stored in the compiler cache’s gpu-bench directory.
 
 Options:
   --backend NAME    auto or metal (default: auto)
@@ -29,7 +30,7 @@ Options:
   --strict          disable Metal fast math
   --emit-only       compile and retain artifacts without dispatching
   --output PATH     JSON result path
-  --cache-dir PATH  artifact/result root (default: build/cache/gpu-bench)
+  --cache-dir PATH  artifact/result root (default: gpu-bench in the compiler cache)
   -h, --help        show this help
 
 The benchmark reports synchronous dispatch latency and batched throughput.

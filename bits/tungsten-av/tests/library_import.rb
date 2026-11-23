@@ -10,7 +10,7 @@ Dir.mktmpdir("av-native-library-") do |root|
     << project.name
     << project.profiles.keys.join(",")
   W
-  out, err, status = Open3.capture3({"BASH_ENV" => nil, "BIT_HOME" => File.join(root, "empty-registry"), "TUNGSTEN_CACHE_DIR" => File.join(ROOT, "build/cache")}, File.join(ROOT, "bin/tungsten"), File.join(root, "main.w"), chdir: root)
+  out, err, status = Open3.capture3({"BASH_ENV" => nil, "BIT_HOME" => File.join(root, "empty-registry")}, File.join(ROOT, "bin/tungsten"), File.join(root, "main.w"), chdir: root)
   raise "native library import: #{out}\n#{err}" unless status.success? && out == "library-import\nmaster\n"
   raise "import wrote project artifacts" if File.exist?(File.join(root, ".av"))
   puts "PASS native AV library import and declared C companion from a foreign project"

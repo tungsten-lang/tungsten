@@ -8,7 +8,9 @@ cd "$ROOT"
 HOSTC="${TUNGSTEN_HOST_COMPILER:-$ROOT/wasm/build/host/tungsten-compiler}"
 export TUNGSTEN_ROOT="$ROOT"
 export TUNGSTEN_INCREMENTAL=0
-export TUNGSTEN_CACHE_DIR="$ROOT/wasm/build/cache/host"   # see build_host.sh
+. "$ROOT/bin/commands/store.sh"
+wasm_cache="$(tungsten_suite_dir "$ROOT" wasm)"
+export TUNGSTEN_CACHE_DIR="$wasm_cache/host"   # see build_host.sh
 mkdir -p "$TUNGSTEN_CACHE_DIR"
 unset TUNGSTEN_TARGET TUNGSTEN_LL_PATH TUNGSTEN_TARGET_MARCH_ARGS
 "$HOSTC" compile wasm/repl_entry.w --out wasm/build/native_entry --release --no-debug --no-lto

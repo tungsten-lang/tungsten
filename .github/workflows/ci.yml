@@ -95,13 +95,18 @@ jobs:
       # Build artifacts are internally content-addressed. The outer key keeps
       # incompatible host ABIs apart; the rolling restore key lets unchanged
       # runtime/compiler objects survive an ordinary source commit. The
-      # toolchain's artifacts live in the build store (~/.tungsten/build);
-      # build/cache holds the suites' isolated caches and downloaded tools.
+      # toolchain's artifacts live in the build store (~/.tungsten/cache);
+      # build/cache holds downloaded CI tools and job-specific artifacts.
       - name: Restore Tungsten build cache
         uses: actions/cache@v5
         with:
           path: |
-            ~/.tungsten/build
+            ~/.tungsten/cache/compile
+            ~/.tungsten/cache/stages
+            ~/.tungsten/cache/compilers
+            ~/.tungsten/cache/bits
+            ~/.tungsten/cache/satori
+            ~/.tungsten/cache/suites
             build/cache
           key: tungsten-build-v4-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('VERSION', 'Bitfile', 'bin/commands/build.w', 'bin/commands/bootstrap*.sh', 'bin/commands/config.sh', 'compiler/**', 'core/**', 'data/**', 'scripts/gen_units.rb', 'scripts/lib/unit_registry.rb', 'implementations/c/Makefile', 'implementations/c/include/**', 'implementations/c/src/**', 'languages/tungsten/**', 'runtime/**') }}
           restore-keys: |

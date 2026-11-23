@@ -11,7 +11,9 @@ printf '%s\n' "${PROBE_SRC:-<< 2 ** 100}" > wasm/build/probe/p.w
 export TUNGSTEN_ROOT="$ROOT"
 export TUNGSTEN_CC="${WASM_CLANG:-/opt/homebrew/opt/llvm/bin/clang}"
 export TUNGSTEN_INCREMENTAL=0
-export TUNGSTEN_CACHE_DIR="$ROOT/wasm/build/cache/host"   # see build_host.sh
+. "$ROOT/bin/commands/store.sh"
+wasm_cache="$(tungsten_suite_dir "$ROOT" wasm)"
+export TUNGSTEN_CACHE_DIR="$wasm_cache/host"   # see build_host.sh
 mkdir -p "$TUNGSTEN_CACHE_DIR"
 export TUNGSTEN_LL_PATH="$ROOT/wasm/build/probe/p.ll"
 rm -f "$TUNGSTEN_LL_PATH"

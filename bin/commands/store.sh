@@ -8,8 +8,8 @@
 # a user, so identical work is done once:
 #
 #   TUNGSTEN_BUILD_STORE   the store root, when set
-#   TUNGSTEN_HOME/build    otherwise
-#   HOME/.tungsten/build   otherwise (the toolchain root stands in for a
+#   TUNGSTEN_HOME/cache    otherwise
+#   HOME/.tungsten/cache   otherwise (the toolchain root stands in for a
 #                          missing HOME, as bin/tungsten's TUNGSTEN_HOME does)
 #
 #   <store>/compile/       the compiler's incremental artifacts; exactly this
@@ -37,12 +37,16 @@ tungsten_store_dir() {
   if [ -n "${TUNGSTEN_BUILD_STORE:-}" ]; then
     printf '%s\n' "$TUNGSTEN_BUILD_STORE"
   elif [ -n "${TUNGSTEN_HOME:-}" ]; then
-    printf '%s/build\n' "$TUNGSTEN_HOME"
+    printf '%s/cache\n' "$TUNGSTEN_HOME"
   elif [ -n "${HOME:-}" ]; then
-    printf '%s/.tungsten/build\n' "$HOME"
+    printf '%s/.tungsten/cache\n' "$HOME"
   else
-    printf '%s/.tungsten/build\n' "${1:-.}"
+    printf '%s/.tungsten/cache\n' "${1:-.}"
   fi
+}
+
+tungsten_store_parts() {
+  printf '%s\n' compile stages compilers bits satori suites
 }
 
 tungsten_cache_dir() {
@@ -51,6 +55,14 @@ tungsten_cache_dir() {
   else
     printf '%s/compile\n' "$(tungsten_store_dir "${1:-.}")"
   fi
+}
+
+# Suite binaries have stable names within a checkout, so give each checkout
+# its own directory even when toolchains share a store.
+tungsten_suite_dir() {
+  local id
+  id="$(printf '%s' "$1" | tungsten_store_sha256)" || return 1
+  printf '%s/suites/%s/%s\n' "${TUNGSTEN_CACHE_DIR:-$(tungsten_store_dir "$1")}" "${id%% *}" "$2"
 }
 
 tungsten_store_sha256() {
@@ -271,19 +283,44 @@ tungsten_clear_cache() {
 # Everything in it is reproducible; a build running at the same time may fail
 # and has to be run again, so this is for a quiet machine.
 tungsten_wipe_store() {
-  local root="$1" store part
-  if [ -n "${TUNGSTEN_CACHE_DIR:-}" ]; then
-    case "$TUNGSTEN_CACHE_DIR" in ''|/) return 2 ;; esac
-    find "$TUNGSTEN_CACHE_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null
-    printf 'Emptied %s\n' "$TUNGSTEN_CACHE_DIR"
-    return 0
-  fi
+  local root="$1" store dir anchor protected part entry
   store="$(tungsten_store_dir "$root")"
-  case "$store" in ''|/) return 2 ;; esac
-  for part in compile stages compilers bits; do
-    rm -rf -- "$store/$part"
+  dir="${TUNGSTEN_CACHE_DIR:-$store}"
+  [ -e "$dir" ] || { printf 'Cache already empty (%s)\n' "$dir"; return 0; }
+  dir="$(cd -- "$dir" && pwd -P)" || return 2
+  # Overrides can point at an installation, including through a symlink.
+  # Refuse before unlinking anything there (bits/ holds installed packages).
+  for anchor in / /tmp "${TMPDIR:-}" "$root" "$PWD" "${HOME:-}" "${TUNGSTEN_HOME:-}" "${BIT_HOME:-}"; do
+    [ -d "$anchor" ] || continue
+    protected="$(cd -- "$anchor" && pwd -P)" || return 2
+    case "$protected/" in "$dir/"*)
+      printf 'Refusing to empty protected directory %s\n' "$dir" >&2; return 2 ;;
+    esac
   done
-  printf 'Emptied %s (compile, stages, compilers, bits)\n' "$store"
+  if [ -e "$dir/.git" ] || [ -e "$dir/bin/tungsten" ] || [ -e "$dir/Bitfile" ]; then
+    printf 'Refusing to empty project directory %s\n' "$dir" >&2
+    return 2
+  fi
+  if [ -n "$(git -C "$dir" ls-files -- . 2>/dev/null | head -c 1)" ]; then
+    printf 'Refusing to empty a directory with tracked files: %s\n' "$dir" >&2
+    return 2
+  fi
+  if [ -n "${TUNGSTEN_CACHE_DIR:-}" ]; then
+    # This override replaces compile/ outright. A typo must never turn an
+    # ordinary directory into the target of a recursive wipe.
+    while IFS= read -r -d '' entry; do
+      case "${entry##*/}" in
+        irbin-*|irshard-*|linkbin-*|companion-*.o|runtime-*|*.twc|*.memo|media-codecs-v1.cache|run|thinlto-cache|autotune|debug|gpu-bench|satori|parity|suites|bin|.gc-*) ;;
+        *) printf 'Refusing mixed-use cache directory: %s\n' "$dir" >&2; return 2 ;;
+      esac
+    done < <(find "$dir" -mindepth 1 -maxdepth 1 -print0)
+    find "$dir" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || return 1
+  else
+    for part in $(tungsten_store_parts); do
+      rm -rf -- "$dir/$part" || return 1
+    done
+  fi
+  printf 'Emptied build cache (%s)\n' "$dir"
 }
 
 # Run as a command (not sourced).

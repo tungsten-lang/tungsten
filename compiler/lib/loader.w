@@ -1455,13 +1455,13 @@ loader_toolchain_state = {split_checked: false}
       return store + "/compile"
     home = env("TUNGSTEN_HOME")
     if home != nil && home != ""
-      return home + "/build/compile"
+      return home + "/cache/compile"
     home = env("HOME")
     if home != nil && home != ""
-      return home + "/.tungsten/build/compile"
+      return home + "/.tungsten/cache/compile"
     root = env("TUNGSTEN_ROOT")
     if root != nil && root != ""
-      return root + "/.tungsten/build/compile"
+      return root + "/.tungsten/cache/compile"
     nil
 
   -> cache_key(resolved)

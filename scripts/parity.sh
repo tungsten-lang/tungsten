@@ -43,7 +43,7 @@ SPEC_DIR="$ROOT/spec/parity"
 DEFAULT_ENGINES="interp,compiled"
 ALL_ENGINES="interp compiled ruby nofree noinfer"
 
-# Isolated incremental cache so the suite never disturbs build/cache/specs
+# Isolated incremental cache so the suite never disturbs the spec suite
 # or a developer's default cache. An inherited TUNGSTEN_CACHE_DIR (the one
 # scripts/test-specs.sh exports for its own lanes) is honoured only as a
 # *parent*: parity gets its own subtree under it, never its slots.
@@ -55,7 +55,8 @@ if [[ -n "${TUNGSTEN_PARITY_CACHE_DIR:-}" ]]; then
 elif [[ -n "${TUNGSTEN_CACHE_DIR:-}" ]]; then
   PARITY_CACHE_ROOT="$TUNGSTEN_CACHE_DIR/parity"
 else
-  PARITY_CACHE_ROOT="$ROOT/build/cache/parity"
+  . "$ROOT/bin/commands/store.sh"
+  PARITY_CACHE_ROOT="$(tungsten_suite_dir "$ROOT" parity)"
 fi
 
 # The header comment block IS the help text: print it verbatim (minus the

@@ -74,6 +74,8 @@ tungsten_load_build_config
 # `bit install` use the stable per-user defaults unless the caller overrides
 # them.
 export TUNGSTEN_HOME="${TUNGSTEN_HOME:-${HOME:-$ROOT}/.tungsten}"
+# Older installed compilers also receive the current store location.
+export TUNGSTEN_BUILD_STORE="${TUNGSTEN_BUILD_STORE:-$TUNGSTEN_HOME/cache}"
 export BIT_HOME="${BIT_HOME:-$TUNGSTEN_HOME/bits}"
 
 # Single-source the version from the repo-root VERSION file, so children (the
@@ -151,6 +153,10 @@ case "$1" in
   # build/bootstrap and `run` kick daily). Removes entries unused for
   # TUNGSTEN_CACHE_MAX_AGE_DAYS (default 7) and, over TUNGSTEN_CACHE_MAX_SIZE_MB,
   # the least recently used ones. `cleanup --all` empties the store.
+  clean)
+    [ "$#" -eq 1 ] || { echo "usage: tungsten clean" >&2; exit 2; }
+    exec bash "$ROOT/bin/commands/store.sh" wipe "$ROOT"
+    ;;
   cleanup)
     shift
     if [ "${1:-}" = "--all" ]; then

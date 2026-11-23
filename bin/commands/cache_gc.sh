@@ -70,6 +70,22 @@ else
   mtime_of() { stat -c '%Y' "$1"; }
 fi
 
+# The default root also contains application data (for example, memoized
+# functions). Only the store's own directories participate in its sweep.
+roots=("$CACHE")
+if [[ "$CACHE" -ef "$(tungsten_store_dir "$ROOT")" ]]; then
+  roots=()
+  for part in $(tungsten_store_parts); do
+    if [[ -d "$CACHE/$part" && ! -L "$CACHE/$part" ]]; then
+      roots+=("$CACHE/$part")
+    fi
+  done
+  if [[ "${#roots[@]}" -eq 0 ]]; then
+    touch "$STAMP"
+    exit 0
+  fi
+fi
+
 # A directory holding a .ready marker is ONE entry (an LTO object bundle):
 # its reader trusts the marker for the whole set of objects, so the bundle is
 # removed whole, by the marker's age (a link renews every file in it), marker
@@ -80,7 +96,7 @@ remove_bundle() {
   rm -f -- "$1/.ready"
   rm -rf -- "$1"
 }
-find "$CACHE" -type f -name .ready -mtime "+$MAX_AGE_DAYS" -print0 > "$list"
+find "${roots[@]}" -type f -name .ready -mtime "+$MAX_AGE_DAYS" -print0 > "$list"
 while IFS= read -r -d '' marker; do
   remove_bundle "$(dirname "$marker")"
   removed=$((removed + 1))
@@ -89,14 +105,14 @@ done < "$list"
 # Then files outside bundles, then empty directories. We intentionally do not
 # remove a directory merely because its own mtime is old: it may contain a
 # fresh cache entry.
-find "$CACHE" -type d -exec test -e '{}/.ready' ';' -prune -o \
+find "${roots[@]}" -type d -exec test -e '{}/.ready' ';' -prune -o \
   -type f ! -name '.gc-last-run' -mtime "+$MAX_AGE_DAYS" -print0 > "$list"
 while IFS= read -r -d '' path; do
   rm -f -- "$path"
   removed=$((removed + 1))
 done < "$list"
 
-find "$CACHE" -type l -mtime "+$MAX_AGE_DAYS" -print0 > "$list"
+find "${roots[@]}" -type l -mtime "+$MAX_AGE_DAYS" -print0 > "$list"
 while IFS= read -r -d '' path; do
   rm -f -- "$path"
   removed=$((removed + 1))
@@ -105,15 +121,15 @@ done < "$list"
 # Size limit: least recently used first, among files idle for over a day.
 evicted=0
 if [ "$MAX_SIZE_MB" -gt 0 ]; then
-  total_kb="$(du -sk "$CACHE" 2>/dev/null | awk '{print $1}')"
+  total_kb="$(du -sk "${roots[@]}" 2>/dev/null | awk '{n += $1} END {print n}')"
   limit_kb=$((MAX_SIZE_MB * 1024))
   if [ -n "$total_kb" ] && [ "$total_kb" -gt "$limit_kb" ]; then
     # "mtime size kind path": kind f is a file, b a whole bundle (above).
     {
-      find "$CACHE" -type d -exec test -e '{}/.ready' ';' -prune -o \
+      find "${roots[@]}" -type d -exec test -e '{}/.ready' ';' -prune -o \
         -type f ! -name '.gc-last-run' -mtime +0 -exec "${STAT_ROW[@]}" {} + 2>/dev/null |
         sed 's/^\([0-9]*\) \([0-9]*\) /\1 \2 f /'
-      find "$CACHE" -type f -name .ready -mtime +0 -print 2>/dev/null |
+      find "${roots[@]}" -type f -name .ready -mtime +0 -print 2>/dev/null |
         while IFS= read -r marker; do
           bundle="$(dirname "$marker")"
           kb="$(du -sk "$bundle" 2>/dev/null | awk '{ s = $1 } END { print s + 0 }')"
@@ -149,7 +165,7 @@ fi
 # between. *.lock directories are live mkdir-mutexes (compiled `run`
 # serializes cache builds through them); a crashed holder's lock is stolen
 # by the next run, never swept here.
-find "$CACHE" -depth -type d ! -path "$CACHE" ! -path "$LOCK" ! -name '*.lock' -empty -mtime +0 -delete 2>/dev/null || true
+find "${roots[@]}" -depth -type d ! -path "$CACHE" ! -path "$LOCK" ! -name '*.lock' -empty -mtime +0 -delete 2>/dev/null || true
 rm -f "$list" "$list.sorted"
 touch "$STAMP"
 

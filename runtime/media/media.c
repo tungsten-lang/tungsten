@@ -2531,8 +2531,8 @@ static void m_codecs_cache_key(char *key, size_t key_cap, char *path, size_t pat
     const char *hm = getenv("HOME");
     if (cd && cd[0]) snprintf(path, path_cap, "%s/media-codecs-v1.cache", cd);
     else if (bs && bs[0]) snprintf(path, path_cap, "%s/compile/media-codecs-v1.cache", bs);
-    else if (th && th[0]) snprintf(path, path_cap, "%s/build/compile/media-codecs-v1.cache", th);
-    else if (hm && hm[0]) snprintf(path, path_cap, "%s/.tungsten/build/compile/media-codecs-v1.cache", hm);
+    else if (th && th[0]) snprintf(path, path_cap, "%s/cache/compile/media-codecs-v1.cache", th);
+    else if (hm && hm[0]) snprintf(path, path_cap, "%s/.tungsten/cache/compile/media-codecs-v1.cache", hm);
     else path[0] = 0;
 }
 

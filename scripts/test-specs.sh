@@ -34,7 +34,9 @@ fi
 # The cache lifecycle test still pins TUNGSTEN_INCREMENTAL per step against
 # its own TUNGSTEN_CACHE_DIR.
 if [[ -z "${TUNGSTEN_CACHE_DIR:-}" ]]; then
-  export TUNGSTEN_CACHE_DIR="$ROOT/build/cache/specs"
+  . "$ROOT/bin/commands/store.sh"
+  TUNGSTEN_CACHE_DIR="$(tungsten_suite_dir "$ROOT" specs)"
+  export TUNGSTEN_CACHE_DIR
 fi
 TUNGSTEN_SPECS_BIN_DIR="${TUNGSTEN_SPECS_BIN_DIR:-$TUNGSTEN_CACHE_DIR/bin}"
 mkdir -p "$TUNGSTEN_CACHE_DIR" "$TUNGSTEN_SPECS_BIN_DIR"

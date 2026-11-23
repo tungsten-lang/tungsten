@@ -19,7 +19,7 @@ Dir.mktmpdir("av-native-import-") do |root|
   engines = [[], ["run", "--interpret"]]
   engines << ["--ruby"] if ENV["RUN_RUBY_PARITY"] == "1"
   engines.each do |prefix|
-    out, err, status = Open3.capture3({"BASH_ENV" => nil, "BIT_HOME" => File.join(root, "empty-registry"), "TUNGSTEN_CACHE_DIR" => File.join(ROOT, "build/cache")}, driver, *prefix, source, chdir: root)
+    out, err, status = Open3.capture3({"BASH_ENV" => nil, "BIT_HOME" => File.join(root, "empty-registry")}, driver, *prefix, source, chdir: root)
     raise "bundled bit import #{prefix}: #{out}\n#{err}" unless status.success?
     transcripts << out
   end

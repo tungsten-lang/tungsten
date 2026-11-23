@@ -2,8 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/bin/commands/store.sh"
 CALLER_PWD="$PWD"
-CACHE_ROOT="${TUNGSTEN_CACHE_DIR:-$ROOT/build/cache}/debug"
+CACHE_ROOT="$(tungsten_cache_dir "$ROOT")/debug"
 DEBUGGER=auto
 BUILD_ONLY=0
 RUN_DIRECT=0
@@ -17,14 +18,14 @@ Usage: tungsten debug [options] FILE.w [-- PROGRAM_ARGS...]
 
 Build FILE with symbols, frame pointers, development checks, and a validated
 sidemap, then launch LLDB on macOS or GDB elsewhere. Artifacts default to
-build/cache/debug/runs/.
+the compiler cache under debug/runs/.
 
 Options:
   --debugger NAME  auto, lldb, or gdb (default: auto)
   --build-only     build and validate artifacts without launching a debugger
   --run            run the debug binary directly and preserve its exit status
   --output PATH    explicit debug binary path
-  --cache-dir PATH debug artifact root (default: build/cache/debug)
+  --cache-dir PATH debug artifact root (default: the compiler cache under debug)
   -h, --help       show this help
 EOF
 }

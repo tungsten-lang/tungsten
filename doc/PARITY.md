@@ -48,7 +48,8 @@ the "Ruby tree-walker as a third column" section of
 switch flipped; each gets its own cache so the incremental cache cannot
 serve a plain-compiled artifact under the variant's name.
 
-The suite compiles into its own incremental cache — `build/cache/parity`,
+The suite compiles into its own incremental cache under
+`suites/<checkout-hash>/parity` in the build store,
 or `$TUNGSTEN_CACHE_DIR/parity` when a cache root is already set (so the
 stage `test-specs.sh` runs never touches the spec suite's slots), or
 `$TUNGSTEN_PARITY_CACHE_DIR` when that is set explicitly.

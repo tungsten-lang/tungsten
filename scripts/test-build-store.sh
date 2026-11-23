@@ -27,11 +27,11 @@ clean_env() {
 }
 
 # ── 1. Location policy ──────────────────────────────────────────
-[ "$(clean_env HOME=/h bash "$STORE_SH" dir /root)" = "/h/.tungsten/build" ] || fail "default store"
-[ "$(clean_env HOME=/h TUNGSTEN_HOME=/th bash "$STORE_SH" dir /root)" = "/th/build" ] || fail "TUNGSTEN_HOME store"
+[ "$(clean_env HOME=/h bash "$STORE_SH" dir /root)" = "/h/.tungsten/cache" ] || fail "default store"
+[ "$(clean_env HOME=/h TUNGSTEN_HOME=/th bash "$STORE_SH" dir /root)" = "/th/cache" ] || fail "TUNGSTEN_HOME store"
 [ "$(clean_env HOME=/h TUNGSTEN_HOME=/th TUNGSTEN_BUILD_STORE=/s bash "$STORE_SH" dir /root)" = "/s" ] || fail "TUNGSTEN_BUILD_STORE"
-[ "$(clean_env bash "$STORE_SH" dir /root)" = "/root/.tungsten/build" ] || fail "store without a home"
-[ "$(clean_env HOME=/h bash "$STORE_SH" cache-dir /root)" = "/h/.tungsten/build/compile" ] || fail "default cache dir"
+[ "$(clean_env bash "$STORE_SH" dir /root)" = "/root/.tungsten/cache" ] || fail "store without a home"
+[ "$(clean_env HOME=/h bash "$STORE_SH" cache-dir /root)" = "/h/.tungsten/cache/compile" ] || fail "default cache dir"
 [ "$(clean_env HOME=/h TUNGSTEN_BUILD_STORE=/s TUNGSTEN_CACHE_DIR=/c bash "$STORE_SH" cache-dir /root)" = "/c" ] || fail "TUNGSTEN_CACHE_DIR"
 
 # ── 1b. The tuning environment that enters every shared key ─────
@@ -125,6 +125,28 @@ for part in compile stages compilers bits; do
   [ ! -e "$SHARED/$part" ] || fail "cleanup --all left $part"
 done
 [ -e "$SHARED/unrelated/keep" ] || fail "cleanup --all removed something that is not the store's"
+
+mkdir -p "$SHARED/bits" "$SHARED/satori" "$SHARED/suites"
+clean_env HOME="$TMP/nohome" TUNGSTEN_BUILD_STORE="$SHARED" "$ROOT/bin/tungsten" clean >/dev/null
+for part in bits satori suites; do
+  [ ! -e "$SHARED/$part" ] || fail "clean left $part"
+done
+[ -e "$SHARED/unrelated/keep" ] || fail "clean removed unrelated data"
+mkdir -p "$TMP/install/bits" "$TMP/install/compile"
+ln -s "$TMP/install" "$TMP/alias"
+if clean_env HOME="$TMP/nohome" TUNGSTEN_HOME="$TMP/install" TUNGSTEN_BUILD_STORE="$TMP/alias" "$ROOT/bin/tungsten" clean; then
+  fail "clean accepted the installation root"
+fi
+[ -d "$TMP/install/bits" ] && [ -d "$TMP/install/compile" ] || fail "clean modified the installation"
+mkdir -p "$SHARED/bits"
+clean_env HOME="$TMP/nohome" TUNGSTEN_BUILD_STORE="$SHARED" TUNGSTEN_CACHE_DIR="$ISOLATED" "$ROOT/bin/tungsten" clean >/dev/null
+[ -z "$(ls -A "$ISOLATED")" ] && [ -d "$SHARED/bits" ] || fail "isolated clean scope"
+
+touch "$ISOLATED/notes.txt" "$ISOLATED/runtime-native-x.a"
+if clean_env HOME="$TMP/nohome" TUNGSTEN_CACHE_DIR="$ISOLATED" "$ROOT/bin/tungsten" clean; then
+  fail "clean accepted a mixed-use isolated directory"
+fi
+[ -f "$ISOLATED/runtime-native-x.a" ] && [ -f "$ISOLATED/notes.txt" ] || fail "partial mixed-use wipe"
 
 if [ ! -x "$COMPILER" ]; then
   printf 'build store contracts: PASS (no compiler: compiler-side checks skipped)\n'

@@ -8,7 +8,8 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
   exit 0
 fi
 
-OUT_DIR="$ROOT/build/cache/native-arm-crypto-features"
+. "$ROOT/bin/commands/store.sh"
+OUT_DIR="$(tungsten_suite_dir "$ROOT" native-arm-crypto-features)"
 IR="$OUT_DIR/probe.ll"
 mkdir -p "$OUT_DIR"
 

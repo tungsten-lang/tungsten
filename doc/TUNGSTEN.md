@@ -60,9 +60,14 @@ COMMANDS
                          release matrix.
     gpu-bench            Emit, compile, dispatch, verify, and time the baseline
                          Metal kernel. Stores artifacts and JSON provenance in
-                         build/cache/gpu-bench.
+                         the compiler cache’s gpu-bench directory.
     debug FILE           Build with symbols/frame pointers and a validated
                          sidemap, then launch LLDB or GDB.
+    clean                Clear the shared compiler, stage, bit, Satori and suite caches.
+                         With TUNGSTEN_CACHE_DIR set, empty that isolated cache.
+                         A directory containing unrelated entries is refused.
+                         Run after builds and proof checks finish. SATORI_CACHE_DIR
+                         is independently managed when set outside the active cache.
     cleanup              Sweep the build store now (build, bootstrap, and run
                          kick the same sweep daily). Removes entries unused
                          for TUNGSTEN_CACHE_MAX_AGE_DAYS (default 7) and, over
@@ -90,7 +95,7 @@ COMMANDS
     ai / symbolicate / forge / flame / fire / profile
                          Additional tools
 
-    doctor, bootstrap, release, cleanup, gpu-bench, debug, and notes are bash
+    doctor, bootstrap, release, clean, cleanup, gpu-bench, debug, and notes are bash
     wrappers (bin/commands/*.sh). Doctor and bootstrap work on a fresh clone;
     bootstrap chains into the full `tungsten build` pipeline. compile,
     compile-batch, check, run, console, start, new, fmt, lint, sandbox,
@@ -298,7 +303,7 @@ ENVIRONMENT
     TUNGSTEN_BUILD_STORE
         The build store: one directory of reusable build artifacts shared by
         every checkout, worktree and installed toolchain, so identical work is
-        done once. Default: TUNGSTEN_HOME/build, i.e. ~/.tungsten/build. It
+        done once. Default: TUNGSTEN_HOME/cache, i.e. ~/.tungsten/cache. It
         holds compile/ (the compiler's runtime objects, incremental binaries
         and snapshots), stages/ (bootstrap and stage compilers), compilers/
         (finished compilers and their images) and bits/ (bit executables).

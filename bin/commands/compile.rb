@@ -11,15 +11,15 @@ RUNTIME_DIR = File.join(ROOT, "runtime")
 # inside it. The same policy as bin/commands/store.sh and the self-hosted
 # compiler (compiler_cache_dir in compiler/lib/driver/link.w):
 # TUNGSTEN_CACHE_DIR replaces the cache directory; the store root is
-# TUNGSTEN_BUILD_STORE, else TUNGSTEN_HOME/build, else ~/.tungsten/build.
+# TUNGSTEN_BUILD_STORE, else TUNGSTEN_HOME/cache, else ~/.tungsten/cache.
 def tungsten_build_store_dir
   explicit = ENV["TUNGSTEN_BUILD_STORE"]
   return explicit unless explicit.nil? || explicit.empty?
   home = ENV["TUNGSTEN_HOME"]
-  return File.join(home, "build") unless home.nil? || home.empty?
+  return File.join(home, "cache") unless home.nil? || home.empty?
   home = ENV["HOME"]
-  return File.join(home, ".tungsten", "build") unless home.nil? || home.empty?
-  File.join(ROOT, ".tungsten", "build")
+  return File.join(home, ".tungsten", "cache") unless home.nil? || home.empty?
+  File.join(ROOT, ".tungsten", "cache")
 end
 
 def tungsten_cache_dir
@@ -327,6 +327,7 @@ parser = OptionParser.new do |opts|
       start          First-run welcome: what Tungsten is + your next step
       new NAME       Scaffold a new project
       build          Bootstrap the self-hosted compiler
+      clean          Clear the active build cache (including bits in the shared store)
       cleanup        Force a build-cache sweep (GC also runs daily)
       doctor         Check your toolchain
       fmt FILE       Format .w source

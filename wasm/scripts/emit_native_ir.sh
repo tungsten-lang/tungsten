@@ -10,7 +10,9 @@ OUT="$1"
 HOSTC="${2:-$ROOT/wasm/build/host/tungsten-compiler}"
 export TUNGSTEN_ROOT="$ROOT"
 export TUNGSTEN_INCREMENTAL=0
-export TUNGSTEN_CACHE_DIR="$ROOT/wasm/build/cache/host"   # see build_host.sh
+. "$ROOT/bin/commands/store.sh"
+wasm_cache="$(tungsten_suite_dir "$ROOT" wasm)"
+export TUNGSTEN_CACHE_DIR="$wasm_cache/host"   # see build_host.sh
 mkdir -p "$TUNGSTEN_CACHE_DIR"
 export TUNGSTEN_LL_PATH="$OUT"
 unset TUNGSTEN_TARGET

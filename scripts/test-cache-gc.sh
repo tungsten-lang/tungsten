@@ -105,4 +105,13 @@ TUNGSTEN_CACHE_GC_FORCE=1 TUNGSTEN_CACHE_MAX_AGE_DAYS=7 TUNGSTEN_CACHE_MAX_SIZE_
 test ! -e "$BUNDLES/runtime-lto-old"
 test -f "$BUNDLES/runtime-lto-used/runtime.o"
 
+# A shared store root can also contain unrelated application files.
+STORE="$TMP/shared"
+mkdir -p "$STORE/compile" "$STORE/other"
+touch -t 202001010000 "$STORE/compile/cold" "$STORE/other/keep" "$STORE/keep.memo"
+TUNGSTEN_BUILD_STORE="$STORE" bash "$ROOT/bin/commands/cache_gc.sh"
+test ! -e "$STORE/compile/cold"
+test -f "$STORE/other/keep"
+test -f "$STORE/keep.memo"
+
 printf 'cache gc retention contract: ok\n'

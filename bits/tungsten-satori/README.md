@@ -458,7 +458,8 @@ and `calc` retain their existing proof blocks.
 * `sat` expands the hypotheses → goal implication to a propositional formula,
   Tseitin-encodes it in the kernel, runs the external solver
   (`bits/tungsten-wassat/bin/wassat`, or `$SATORI_SOLVER`), and re-checks the LRAT
-  refutation. Proofs are cached in `.satori-cache/` by CNF hash.
+  refutation. Proofs are cached by CNF hash in the build store’s `satori/` directory.
+  `SATORI_CACHE_DIR` overrides this location.
 * Arithmetic treats `succ n` and `n + 1` consistently, including inside function
   applications. Induction steps do not need a `show` line just to restate the
   generated successor goal. See [the compact induction example](examples/compact_induction.sat),

@@ -2,7 +2,7 @@
 # Where the compiler keeps its artifacts, and what their names cover.
 #
 # Every checkout, worktree and project shares one build store (default
-# ~/.tungsten/build; the compiler's own artifacts in its compile/ directory).
+# ~/.tungsten/cache; the compiler's own artifacts in its compile/ directory).
 # A project no longer owns a build/cache. TUNGSTEN_BUILD_STORE moves the store,
 # TUNGSTEN_CACHE_DIR replaces the compile directory outright. Because the
 # directory is shared, runtime objects are named by the CONTENT of the runtime
@@ -18,7 +18,7 @@ TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
 PROJECT="$TMP/project"
-STORE="$TMP/home/.tungsten/build"
+STORE="$TMP/home/.tungsten/cache"
 CACHE="$STORE/compile"
 mkdir -p "$PROJECT" "$TMP/home"
 printf 'name "cache-location"\n' >"$PROJECT/Bitfile"
@@ -62,8 +62,8 @@ grep -F "$ROOT/runtime/runtime.c" "$TMP/first.trace" | grep -q -- '-fno-omit-fra
 grep -F "$ROOT/runtime/runtime.c" "$TMP/first.trace" | grep -Fq -- "-ffile-prefix-map=$ROOT/runtime=runtime"
 # The project owns no cache, and nothing lands in the pre-store locations.
 [[ ! -e "$PROJECT/build" ]]
-[[ ! -e "$TMP/home/.tungsten/cache" ]]
-[[ ! -e "$TMP/home/.tungsten/build/cache" ]]
+[[ ! -e "$TMP/home/.tungsten/build" ]]
+[[ ! -e "$TMP/home/.tungsten/cache/cache" ]]
 
 # Disable the binary cache and compile to a fresh output. The frame-pointer
 # runtime archive itself must stay warm: clang links it into the new program

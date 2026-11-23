@@ -18,10 +18,12 @@ export TUNGSTEN_INCREMENTAL=0
 # written (wrong string ids -> a host whose `main` mis-parses argv). Each
 # compiler therefore gets its own cache dir, emptied whenever this script runs
 # (only the slow-to-build native runtime archive is kept).
-export TUNGSTEN_CACHE_DIR="$ROOT/wasm/build/cache/seed"
+. "$ROOT/bin/commands/store.sh"
+wasm_cache="$(tungsten_suite_dir "$ROOT" wasm)"
+export TUNGSTEN_CACHE_DIR="$wasm_cache/seed"
 mkdir -p "$TUNGSTEN_CACHE_DIR"
 find "$TUNGSTEN_CACHE_DIR" -mindepth 1 -maxdepth 1 ! -name 'runtime-native-*.a' -exec rm -rf {} +
-rm -rf "$ROOT/wasm/build/cache/host"
+rm -rf "$wasm_cache/host"
 unset TUNGSTEN_TARGET TUNGSTEN_LL_PATH
 "$SEED" compile compiler/tungsten.w --out "$OUT" --release --no-debug --no-lto
 ls -la "$OUT"

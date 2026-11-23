@@ -44,7 +44,7 @@ import json, sys
 line = sys.stdin.readline().strip()
 if not line: sys.exit(1)
 d = json.loads(line)
-print(f"{d[\"impl\"]},{d[\"N\"]},{d[\"K\"]},{d[\"median_ms\"]},{d[\"gflops\"]}")
+print(d["impl"], d["N"], d["K"], d["median_ms"], d["gflops"], sep=",")
 ' >> "$OUTPUT" 2>/dev/null; then
       echo "  [skip] $impl  N=$n  (toolchain unavailable or failed)" >&2
     else
@@ -73,9 +73,11 @@ fi
 
 # --- Rust ---
 if want "rust-ndarray" && command -v cargo >/dev/null; then
-  (cd rust && cargo build --release --quiet) || true
-  if [[ -x rust/target/release/matmul ]]; then
-    run_impl "rust-ndarray" 'rust/target/release/matmul $n $k'
+  root="$(cd ../.. && pwd)"
+  . "$root/bin/commands/store.sh"
+  target="${CARGO_TARGET_DIR:-$(tungsten_suite_dir "$root" linalg-rust)}"
+  if cargo build --manifest-path rust/Cargo.toml --target-dir "$target" --release --quiet; then
+    run_impl "rust-ndarray" '"$target/release/matmul" "$n" "$k"'
   fi
 fi
 

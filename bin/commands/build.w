@@ -13,7 +13,7 @@
 #
 # Everything this build can reuse lives in the build store, one directory
 # shared by every checkout, worktree and installed toolchain of a user
-# (default ~/.tungsten/build; see "Build store" in AGENTS.md):
+# (default ~/.tungsten/cache; see "Build store" in AGENTS.md):
 #   stages/     stage-0 VMs, stage-1/2 compilers with their .ll, build
 #               runtime archives, system-dependency probes
 #   compilers/  finished compilers by content, the compiler images built
@@ -41,8 +41,8 @@ C_INTERP_DIR = ROOT + "/implementations/c"
 SPINEL_BIN = ROOT + "/src/patched/spinel/spinel"
 SPINEL_RUNTIME = ROOT + "/src/patched/spinel/lib/libspinel_rt.a"
 
-# The build store root: TUNGSTEN_BUILD_STORE, else TUNGSTEN_HOME/build, else
-# HOME/.tungsten/build (the toolchain root stands in for a missing home, as in
+# The build store root: TUNGSTEN_BUILD_STORE, else TUNGSTEN_HOME/cache, else
+# HOME/.tungsten/cache (the toolchain root stands in for a missing home, as in
 # bin/tungsten). The same policy as compiler_cache_dir in
 # compiler/lib/driver/link.w and bin/commands/store.sh.
 -> build_store_root
@@ -51,11 +51,11 @@ SPINEL_RUNTIME = ROOT + "/src/patched/spinel/lib/libspinel_rt.a"
     return File.expand_path(override.strip)
   home = env("TUNGSTEN_HOME")
   if home != nil && home.strip != ""
-    return File.expand_path(home.strip + "/build")
+    return File.expand_path(home.strip + "/cache")
   home = env("HOME")
   if home != nil && home.strip != ""
-    return File.expand_path(home.strip + "/.tungsten/build")
-  ROOT + "/.tungsten/build"
+    return File.expand_path(home.strip + "/.tungsten/cache")
+  ROOT + "/.tungsten/cache"
 
 BUILD_STORE_DIR = build_store_root()
 STAGE_STORE_DIR = BUILD_STORE_DIR + "/stages"
@@ -1157,7 +1157,7 @@ BUILD_PROFILE_PATH = CHECKOUT_STATE_DIR + "/compiler-build.profile"
         if !sh_ok("rsync -a --delete --exclude '.DS_Store' --exclude '*.dSYM' " + shq(ROOT + "/" + d + "/") + " " + shq(tungsten_home + "/" + d + "/"))
           die("tungsten install: failed to sync " + d + " to " + tungsten_home)
     # The installed toolchain reads the same build store as this checkout
-    # (TUNGSTEN_HOME/build), so runtime objects are not copied; what it needs
+    # (TUNGSTEN_HOME/cache), so runtime objects are not copied; what it needs
     # of its own is the pair of compiler images that go with its compiler.
     if file_directory?(CHECKOUT_STATE_DIR + "/compiler-images")
       make_dirs(tungsten_home + "/build/compiler-images")

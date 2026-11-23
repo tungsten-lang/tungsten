@@ -419,8 +419,8 @@ if only_thresh
     << "  [GREY]" + lj("Algorithm Rung", 22) + lj("Tested Range", 16) + rj("Crossover Boundary", 22) + "[RESET]"
     << "  [GREY]" + "─" * 60 + "[RESET]"
 
-  autotune_cache = root + "/build/cache/autotune"
-  system("mkdir -p \"[autotune_cache]\"")
+  autotune_cache = capture("bash '" + root.gsub("'", "'\\''") + "/bin/commands/store.sh' cache-dir").strip + "/autotune"
+  File.mkdir_p(autotune_cache)
   sweep_log = autotune_cache + "/bigint-thresholds-[arch].txt"
   threshold_header = autotune_cache + "/bigint-thresholds-[arch].h"
 

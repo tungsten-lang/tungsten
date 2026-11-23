@@ -99,6 +99,7 @@ bin/tungsten --ll file.w                # print LLVM IR
 bin/tungsten -o out file.w              # compile a binary (-O3, no LTO)
 bin/tungsten -o out --release file.w    # full LTO, no dev checks (--no-lto opts out)
 bin/tungsten --clear-cache              # drop this checkout's incremental binaries and all snapshots
+bin/tungsten clean                      # clear shared build caches, including bits and Satori
 bin/tungsten cleanup                    # sweep the build store now (`--all` empties it)
 bin/wit                                 # REPL (same as bin/tungsten console)
 ```
@@ -138,7 +139,7 @@ In Ruby specs, `Tungsten.parse(code)` returns the AST, and
 ## Build store
 
 Reusable build artifacts live in one store shared by every checkout, worktree
-and installed toolchain: `~/.tungsten/build` (`TUNGSTEN_HOME/build`), or
+and installed toolchain: `~/.tungsten/cache` (`TUNGSTEN_HOME/cache`), or
 `TUNGSTEN_BUILD_STORE`. A checkout has no `build/cache` of its own.
 
 ```text
@@ -147,6 +148,8 @@ compile/     the compiler's artifacts: runtime archives and companion objects,
 stages/      stage-0 VMs, stage-1/2 compilers with their .ll, build runtime archives
 compilers/   finished compilers, their repl/metal images, by-source/ index
 bits/        bit executables
+satori/      Satori module and proof caches
+suites/      per-checkout spec, parity, and benchmark caches
 ```
 
 - Every entry's name is a fingerprint of what determines its bytes. What is

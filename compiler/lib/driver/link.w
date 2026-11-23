@@ -684,8 +684,8 @@
 # The build store: one directory shared by every checkout, worktree and
 # installed toolchain of one user, so identical work is done once.
 #   TUNGSTEN_BUILD_STORE   the store root, when set
-#   TUNGSTEN_HOME/build    otherwise (the launcher exports TUNGSTEN_HOME)
-#   HOME/.tungsten/build   otherwise
+#   TUNGSTEN_HOME/cache    otherwise (the launcher exports TUNGSTEN_HOME)
+#   HOME/.tungsten/cache   otherwise
 # Without a home directory the store sits under the toolchain root, as the
 # launcher's TUNGSTEN_HOME default does. The same policy is implemented by
 # bin/commands/store.sh (launcher, hook, GC), bin/commands/build.w, the
@@ -696,16 +696,16 @@
     return override
   home = env("TUNGSTEN_HOME")
   if home != nil && home != ""
-    return home + "/build"
+    return home + "/cache"
   home = env("HOME")
   if home != nil && home != ""
-    return home + "/.tungsten/build"
+    return home + "/.tungsten/cache"
   root = env("TUNGSTEN_ROOT")
   if root != nil && root != ""
-    return root + "/.tungsten/build"
+    return root + "/.tungsten/cache"
   parent = capture("cd " + dev_runtime_shell_quote(resolve_runtime_dir + "/..") + " && pwd -P 2>/dev/null").strip()
   if parent != ""
-    return parent + "/.tungsten/build"
+    return parent + "/.tungsten/cache"
   nil
 
 # The compiler's own artifacts (runtime archives and companion objects,

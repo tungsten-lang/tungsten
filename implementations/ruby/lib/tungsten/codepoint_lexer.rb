@@ -2338,14 +2338,18 @@ module Tungsten
         case byte(1)
         when 43 then emit_operator(:"++", 2, start_col)
         when 61 then emit_operator(:"+=", 2, start_col)
-        when 64 then emit_operator(:+@, 2, start_col)
+        when 64
+          b2 = byte(2)
+          emit_operator(:+@, 2, start_col) unless b2 && ((b2 >= 97 && b2 <= 122) || (b2 >= 65 && b2 <= 90) || (b2 >= 48 && b2 <= 57) || b2 == 95 || b2 == 64 || b2 >= 128)
         end
       when 45 # -
         case byte(1)
         when 45 then emit_operator(:"--", 2, start_col)
         when 61 then emit_operator(:"-=", 2, start_col)
         when 62 then emit_operator(:"->", 2, start_col)
-        when 64 then emit_operator(:-@, 2, start_col)
+        when 64
+          b2 = byte(2)
+          emit_operator(:-@, 2, start_col) unless b2 && ((b2 >= 97 && b2 <= 122) || (b2 >= 65 && b2 <= 90) || (b2 >= 48 && b2 <= 57) || b2 == 95 || b2 == 64 || b2 >= 128)
         end
       when 46 # .
         # Dot-prefix elementwise operators: .+ .- .* ./ — only

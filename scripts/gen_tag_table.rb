@@ -31,7 +31,7 @@ require "tmpdir"
 
 ROOT = File.expand_path("..", __dir__)
 TYPES_W = File.join(ROOT, "compiler", "lib", "lowering", "types.w")
-INTERP_W = File.join(ROOT, "compiler", "lib", "interpreter.w")
+INTERP_W = File.join(ROOT, "compiler", "lib", "interpreter", "dispatch.w")
 BEGIN_MARK = "# --- BEGIN GENERATED TAG TABLE (scripts/gen_tag_table.rb) ---"
 END_MARK = "# --- END GENERATED TAG TABLE ---"
 

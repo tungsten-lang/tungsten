@@ -376,10 +376,15 @@ static int intern_builtin_names(TcError *err) {
   for (int k = 1; k <= (int)W_AST_KIND_MAX; k++) {
     const char *kname = W_AST_KIND_NAME[k];
     if (kname) {
-      size_t klen = strlen(kname);
-      const char *ki = tc_intern(kname, klen);
+      /* KIND_RETURN_NIL (19) shares the public :return symbol with KIND_RETURN
+       * (ast.w ReturnNil / runtime.c w_ast_syms_init), while the reverse
+       * lookup table keeps "return_nil" -> 19 distinct from "return" -> 101. */
+      const char *pub_name = (k == 19) ? "return" : kname;
+      size_t pub_len = strlen(pub_name);
+      const char *ki = tc_intern(pub_name, pub_len);
       if (!ki) return 0;
-      g_ast_kind_sym[k] = tc_box_symbol_bytes(ki, klen, 0);
+      g_ast_kind_sym[k] = tc_box_symbol_bytes(ki, pub_len, 0);
+      size_t klen = strlen(kname);
       uint64_t kh = 14695981039346656037ULL;
       for (size_t bi = 0; bi < klen; bi++) {
         kh ^= (uint8_t)kname[bi];

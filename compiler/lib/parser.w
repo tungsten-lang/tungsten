@@ -18,5 +18,6 @@ use ../../core/token
   (bits >> 26) & 0xFFF
 
 use parser/core
+use parser/precedence
 use parser/expressions
 use parser/definitions

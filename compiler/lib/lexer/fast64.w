@@ -1088,8 +1088,18 @@
           match = 0
           case c
           when :--
-            if c2 == :-> || c2 == :-- || c2 == :-= || c2 == :-@
+            if c2 == :-> || c2 == :-- || c2 == :-=
               match = 1
+            elsif c2 == :-@
+              # Only lex `-@` (unary-minus method name) when `@` does not open
+              # an ivar (`@q`), cvar (`@@q`), or positional arg (`@1`).
+              at_starts_var = false
+              if pos + 1 < count
+                c3 = (lc[pos + 1] >> 18) & cp_mask
+                if (lc[pos + 1] & 0x40) != 0 || c3 == :-@ || (c3 >= :-0 && c3 <= :-9)
+                  at_starts_var = true
+              if !at_starts_var
+                match = 1
           when :-<
             # `<>` (swap) pairs here too; generics like `Complex<f64>`
             # always have content between the brackets, so a directly
@@ -1115,8 +1125,16 @@
             if c2 == :-=
               match = 1
           when :-+
-            if c2 == :-+ || c2 == :-= || c2 == :-@
+            if c2 == :-+ || c2 == :-=
               match = 1
+            elsif c2 == :-@
+              at_starts_var = false
+              if pos + 1 < count
+                c3 = (lc[pos + 1] >> 18) & cp_mask
+                if (lc[pos + 1] & 0x40) != 0 || c3 == :-@ || (c3 >= :-0 && c3 <= :-9)
+                  at_starts_var = true
+              if !at_starts_var
+                match = 1
           when :-*
             if c2 == :-= || c2 == :-*
               match = 1

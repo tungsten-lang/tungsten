@@ -1245,7 +1245,7 @@
     #     expressions with side effects like `make_arr().each(...)`)
     #   - block has exactly one explicit parameter (positional-ref
     #     blocks need different rewriting and aren't covered yet)
-    if ast_kind(recv_node) in (:var :self_ref) && is_array_type?(recv_type) && call_has_ast_block?(node)
+    if ast_kind(recv_node) in (:var :self_ref) && is_array_type?(recv_type) && call_has_ast_block?(node) && !block_spawns_escaping_closure?(node.block)
       block = node.block
       bparams = block.params
       # Implicit-free-var shape (`arr.each -> << v`) parses as block with
@@ -1279,11 +1279,34 @@
           while bi < n_blk_body
             new_body.push(blk_body[bi])
             bi += 1
+          # Save/restore the block parameter's static type so an inlined
+          # array.each never leaks its element type into a sibling loop or
+          # outer variable of the same name.
+          each_var_types = ctx[:var_types]
+          each_absent = :__each_absent_type
+          each_saved_type = each_absent
+          if each_var_types.has_key?(param_name)
+            each_saved_type = each_var_types[param_name]
+          each_outer_unboxed = ctx[:unboxed_vars]
+          if each_outer_unboxed != nil && each_outer_unboxed[param_name] != nil
+            filtered_unboxed = {}
+            ukeys = each_outer_unboxed.keys()
+            ui = 0
+            while ui < ukeys.size()
+              if ukeys[ui] != param_name
+                filtered_unboxed[ukeys[ui]] = each_outer_unboxed[ukeys[ui]]
+              ui += 1
+            ctx[:unboxed_vars] = filtered_unboxed
           # Use a bare string for the param (not a :param hash) — matches
           # the AST shape the parser produces for explicit block params,
           # which is what range.each / lower_with expect at params[0].
           # (0...recv.size).each -> (idx) ..., the subscript proven in range
           lower_typed_index_loop(ctx, recv_node, idx_name, new_body, [recv_node.name])
+          if each_saved_type == each_absent
+            each_var_types.delete(param_name)
+          else
+            each_var_types[param_name] = each_saved_type
+          ctx[:unboxed_vars] = each_outer_unboxed
           return typed_value(:i64, w_nil.to_s())
 
   if recv_node != nil && ast_kind(recv_node) == :var && method_name in ("each_with_index" "each_index" "map" "map!" "reduce") && call_has_ast_block?(node) && !block_spawns_escaping_closure?(node.block)
@@ -1823,11 +1846,28 @@
     block_params = block.params
     if block_params.size() == 0
       block_params = lower_block_free_vars(block, ctx)
+    range_param_name = nil
+    range_var_types = ctx[:var_types]
+    range_absent_type = :__range_each_absent_type
+    range_saved_param_type = range_absent_type
+    range_outer_unboxed = ctx[:unboxed_vars]
     if block_params.size() > 0
-      param_name = block_params[0]
-      ptr = ensure_var_slot(wfn, param_name)
+      range_param_name = block_params[0]
+      if range_var_types.has_key?(range_param_name)
+        range_saved_param_type = range_var_types[range_param_name]
+      if range_outer_unboxed != nil && range_outer_unboxed[range_param_name] != nil
+        range_unboxed = {}
+        rkeys = range_outer_unboxed.keys()
+        ri = 0
+        while ri < rkeys.size()
+          if rkeys[ri] != range_param_name
+            range_unboxed[rkeys[ri]] = range_outer_unboxed[rkeys[ri]]
+          ri += 1
+        ctx[:unboxed_vars] = range_unboxed
+      ptr = ensure_var_slot(wfn, range_param_name)
       emit_wire_store_i64(wfn, ptr, boxed_i)
-      ctx[:var_types][param_name] = :int
+      ctx[:bindings][range_param_name] = nil
+      ctx[:var_types][range_param_name] = :int
 
     # Lower block body inline
     blk_body = block.body
@@ -1880,6 +1920,12 @@
           pi += 1
 
     start_block(wfn, exit_label)
+    if range_param_name != nil
+      if range_saved_param_type == range_absent_type
+        range_var_types.delete(range_param_name)
+      else
+        range_var_types[range_param_name] = range_saved_param_type
+    ctx[:unboxed_vars] = range_outer_unboxed
     return typed_value(:i64, w_nil.to_s())
 
   # arr[from..to] or arr[from...to] → zero-copy view via
@@ -1980,6 +2026,73 @@
     receiver_reg = ensure_i64_value(wfn, receiver_val)
     temp = next_temp(wfn)
     emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_class_name", nil, nil, temp)
+    return typed_value(:i64, temp)
+
+  # Universal: .is_a?(Target) — bypasses IC dispatch when no user class
+  # overrides is_a?. Unsubclassed primitive ClassRef targets compile to
+  # 1-4 inline NaN-box tag instructions (zero calls, zero load_class, zero
+  # strcmp); all other targets lower directly to w_value_is_a.
+  if recv_node != nil && method_name == "is_a?" && node.block == nil && node.args != nil && node.args.size() == 1 && !module_has_custom_is_a?(ctx[:mod])
+    receiver_val = lower_expression(ctx, recv_node)
+    receiver_reg = ensure_i64_value(wfn, receiver_val)
+    arg0 = node.args[0]
+    if is_ast_node?(arg0) && ast_kind(arg0) == :class_ref && !(ctx[:locals] != nil && ctx[:locals][arg0.name] != nil)
+      tname = arg0.name
+      if tname in ("Nil" "Boolean" "BigInt" "Int" "Integer" "String" "Symbol" "Float" "Hash") && !primitive_is_a_subclassed?(ctx[:mod], tname)
+        if tname == "Nil"
+          cmp = next_temp(wfn)
+          emit_wire_icmp_i64(wfn, receiver_reg, "eq", "0", cmp)
+          return typed_value(:i1, cmp)
+        if tname == "Boolean"
+          diff = next_temp(wfn)
+          emit_wire_sub_i64(wfn, receiver_reg, "1", diff)
+          cmp = next_temp(wfn)
+          emit_wire_icmp_i64(wfn, diff, "ult", "2", cmp)
+          return typed_value(:i1, cmp)
+        if tname == "BigInt"
+          masked = next_temp(wfn)
+          emit_wire_and_i64(wfn, receiver_reg, "-281474976710656", masked)
+          cmp = next_temp(wfn)
+          emit_wire_icmp_i64(wfn, masked, "eq", "-1407374883553280", cmp)
+          return typed_value(:i1, cmp)
+        if tname == "Int" || tname == "Integer"
+          diff = next_temp(wfn)
+          emit_wire_sub_i64(wfn, receiver_reg, "-1688849860263936", diff)
+          cmp = next_temp(wfn)
+          emit_wire_icmp_i64(wfn, diff, "ult", "562949953421312", cmp)
+          return typed_value(:i1, cmp)
+        if tname == "String"
+          masked = next_temp(wfn)
+          emit_wire_and_i64(wfn, receiver_reg, "-281474976710655", masked)
+          cmp = next_temp(wfn)
+          emit_wire_icmp_i64(wfn, masked, "eq", "-1970324836974592", cmp)
+          return typed_value(:i1, cmp)
+        if tname == "Symbol"
+          masked = next_temp(wfn)
+          emit_wire_and_i64(wfn, receiver_reg, "-281474976710655", masked)
+          cmp = next_temp(wfn)
+          emit_wire_icmp_i64(wfn, masked, "eq", "-1970324836974591", cmp)
+          return typed_value(:i1, cmp)
+        if tname == "Float"
+          diff = next_temp(wfn)
+          emit_wire_sub_i64(wfn, receiver_reg, "281474976710656", diff)
+          cmp = next_temp(wfn)
+          emit_wire_icmp_i64(wfn, diff, "ule", "-4503599627370496", cmp)
+          return typed_value(:i1, cmp)
+        if tname == "Hash"
+          masked = next_temp(wfn)
+          emit_wire_and_i64(wfn, receiver_reg, "-281474976710641", masked)
+          c1 = next_temp(wfn)
+          emit_wire_icmp_i64(wfn, masked, "eq", "5", c1)
+          c2 = next_temp(wfn)
+          emit_wire_icmp_i64(wfn, receiver_reg, "ugt", "15", c2)
+          cmp = next_temp(wfn)
+          emit_wire_and_i1(wfn, c1, c2, cmp)
+          return typed_value(:i1, cmp)
+    target_val = lower_expression(ctx, arg0)
+    target_reg = ensure_i64_value(wfn, target_val)
+    temp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg, target_reg], nil, nil, "w_value_is_a", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Integer to_s: an integer-typed receiver dispatches straight to w_to_s,
@@ -3192,11 +3305,21 @@
 
   wire_record_dynamic_method_call(wfn, method_name, arg_regs.size())
   call_inst = wire_make_call_method_i64(arg_regs, construct_class, construct_fn, devirt_class, devirt_fn, ic_id, method_name_val, receiver_reg, scalar_source_argc1, scalar_source_argc2, node.col, node.line, temp, temp_args_val)
-  if closed_world_methods && node.block == nil && construct_fn == nil && devirt_fn == nil && !scalar_source_argc1 && !scalar_source_argc2 && node.args != nil && node.args.size() > 0 && is_ast_node?(node.args[0]) && ast_kind(node.args[0]) == :symbol
-    if method_name == "\[]" && arg_regs.size() == 1 && core_operator_untouched?(ctx[:mod], "Hash", method_name)
-      wire_set(call_inst, :sym_idx_get, true)
-    elsif method_name == "\[]=" && arg_regs.size() == 2 && core_operator_untouched?(ctx[:mod], "Hash", method_name)
-      wire_set(call_inst, :sym_idx_set, true)
+  if closed_world_methods && node.block == nil && construct_fn == nil && devirt_fn == nil && !scalar_source_argc1 && !scalar_source_argc2
+    if node.args != nil && node.args.size() > 0 && is_ast_node?(node.args[0]) && ast_kind(node.args[0]) == :symbol
+      if method_name == "\[]" && arg_regs.size() == 1 && core_operator_untouched?(ctx[:mod], "Hash", method_name)
+        wire_set(call_inst, :sym_idx_get, true)
+      elsif method_name == "\[]=" && arg_regs.size() == 2 && core_operator_untouched?(ctx[:mod], "Hash", method_name)
+        wire_set(call_inst, :sym_idx_set, true)
+    if wire_get(call_inst, :sym_idx_get) != true && wire_get(call_inst, :sym_idx_set) != true
+      if method_name == "\[]" && arg_regs.size() == 1 && core_operator_untouched?(ctx[:mod], "Array", method_name) && core_operator_untouched?(ctx[:mod], "Hash", method_name)
+        wire_set(call_inst, :fast_builtin, :idx_get)
+      elsif method_name == "\[]=" && arg_regs.size() == 2 && core_operator_untouched?(ctx[:mod], "Array", method_name) && core_operator_untouched?(ctx[:mod], "Hash", method_name)
+        wire_set(call_inst, :fast_builtin, :idx_set)
+      elsif method_name == "size" && arg_regs.size() == 0 && core_operator_untouched?(ctx[:mod], "Array", "size") && core_operator_untouched?(ctx[:mod], "Hash", "size") && core_operator_untouched?(ctx[:mod], "String", "size")
+        wire_set(call_inst, :fast_builtin, :size)
+      elsif method_name == "push" && arg_regs.size() == 1 && core_operator_untouched?(ctx[:mod], "Array", "push")
+        wire_set(call_inst, :fast_builtin, :push)
   current_block(wfn)[:instructions].push(call_inst)
   # A generated `- data` array accessor has a representation-preserving
   # contract. The send remains overridable, so verify the returned storage

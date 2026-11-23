@@ -567,9 +567,10 @@
         return parse_lambda()
       return parse_method_def()
 
-    # Typed array: i128[1000] / bare type name. A local or parameter
-    # spelled like the type (`u1 = [~0.0, ~1.0]`) is a variable instead:
-    # the Var below lets the postfix loop parse `u1[1]` as an index.
+    # Typed array: i128[1000] / bare type name or call (`string(key.to_s)`).
+    # A local or parameter spelled like the type (`u1 = [~0.0, ~1.0]`) is a
+    # variable instead: parse_var_or_call returns Var so the postfix loop
+    # parses `u1[1]` as an index, while `string(x)` parses as a Call.
     if t == TOK_TYPE
       if peek_type() == TOK_LBRACKET && !bound_type_name?(current_value())
         type_name = advance_value()
@@ -577,7 +578,7 @@
         size = parse_expression()
         expect_type(TOK_RBRACKET)
         return Tungsten:AST:TypedArray.new(type_name, size)
-      return Tungsten:AST:Var.new(advance_value())
+      return parse_var_or_call()
 
     # String interpolation
     if t == TOK_STRING_INTERP
@@ -1229,9 +1230,49 @@
       i += 1
     result
 
+  # True when `if`/`unless`/`while`/`rescue` right after bare `return` or
+  # `recase` is a postfix statement modifier (`return if cond`) rather than an
+  # `if cond then a else b` or indented `if`-expression return value.
+  -> return_modifier_ahead?
+    return false if @current_type != TOK_KEYWORD
+    kw = current_value()
+    if kw == "while" || kw == "rescue"
+      return true
+    if kw != "if" && kw != "unless"
+      return false
+    p = @pos + 1
+    n = @token_count
+    depth = 0
+    saw_arrow = false
+    while p < n
+      tt = parser_tok_type(@packed_tokens[p])
+      if tt == TOK_LPAREN || tt == TOK_LBRACKET || tt == TOK_LBRACE
+        depth += 1
+      elsif tt == TOK_RPAREN || tt == TOK_RBRACKET || tt == TOK_RBRACE
+        if depth > 0
+          depth -= 1
+      elsif depth == 0
+        if tt == TOK_ARROW
+          saw_arrow = true
+        elsif tt == TOK_KEYWORD && @values[p] == "then"
+          return false
+        elsif tt == TOK_NEWLINE
+          if saw_arrow
+            return true
+          q = p + 1
+          while q < n && (parser_tok_type(@packed_tokens[q]) == TOK_NEWLINE || parser_tok_type(@packed_tokens[q]) == TOK_SP)
+            q += 1
+          if q < n && parser_tok_type(@packed_tokens[q]) == TOK_INDENT
+            return false
+          return true
+        elsif tt in (TOK_EOF TOK_DEDENT TOK_SEMICOLON)
+          return true
+      p += 1
+    true
+
   -> parse_return
     advance()
-    if @current_type in (TOK_NEWLINE TOK_EOF TOK_DEDENT TOK_SEMICOLON)
+    if @current_type in (TOK_NEWLINE TOK_EOF TOK_DEDENT TOK_SEMICOLON) || return_modifier_ahead?()
       return Tungsten:AST:ReturnNil.new
     # `## type` annotates the returned VALUE, not the control-transfer node.
     # The general expression wrapper cannot repair this after parse_return:
@@ -1360,7 +1401,7 @@
   # optional-operand shape as `return`.
   -> parse_recase
     advance()
-    if @current_type in (TOK_NEWLINE TOK_EOF TOK_DEDENT TOK_SEMICOLON)
+    if @current_type in (TOK_NEWLINE TOK_EOF TOK_DEDENT TOK_SEMICOLON) || return_modifier_ahead?()
       return Tungsten:AST:Recase.new(nil)
     Tungsten:AST:Recase.new(parse_assignment())
 

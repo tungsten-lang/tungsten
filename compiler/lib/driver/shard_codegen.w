@@ -46,6 +46,45 @@
     i += 1
   out
 
+-> shard_codegen_canonical_shards
+  configured = env("TUNGSTEN_SHARD_COUNT")
+  if configured != nil && configured != "" && configured != "auto"
+    n = configured.to_i()
+    if n < 2
+      return 0
+    return n > 16 ? 16 : n
+  16
+
+-> shard_run_commands(work_dir, cmds, max_jobs)
+  ncmds = cmds.size()
+  if ncmds == 0
+    return true
+  if max_jobs >= ncmds
+    cmd = StringBuffer(ncmds * 256 + 64)
+    i = 0
+    while i < ncmds
+      cmd << "( "
+      cmd << cmds[i]
+      cmd << " ) & "
+      i += 1
+    cmd << "wait"
+    return system(cmd.to_s()) == true
+  # Bounded parallelism: write each shard command to its own script (ordered
+  # largest IR first) and let xargs -P schedule at most max_jobs clangs at once.
+  list_buf = StringBuffer(ncmds * 64 + 128)
+  list_buf << "printf '%s\\n'"
+  i = 0
+  while i < ncmds
+    script = work_dir + "/job_" + i.to_s() + ".sh"
+    write_file(script, cmds[i] + "\n")
+    list_buf << " "
+    list_buf << dev_runtime_shell_quote(script)
+    i += 1
+  list_buf << " | xargs -P "
+  list_buf << max_jobs.to_s()
+  list_buf << " -n 1 /bin/sh"
+  system(list_buf.to_s()) == true
+
 -> native_sharded_codegen_objects(ll_path, clang_opt, store_entries, verbose = false, lto_flag = "")
   rt_id = runtime_identity()
   if rt_id != "compiled-runtime" && rt_id != "tungsten-c"
@@ -61,10 +100,13 @@
   plan = emitter_last_artifact_state[:shard_plan]
   if plan == nil
     return nil
-  requested = shard_codegen_job_count()
-  if requested < 2
+  max_jobs = shard_codegen_job_count()
+  if max_jobs < 2
     return nil
-  shard_irs = emit_sharded_ir_modules(plan, requested)
+  canonical_shards = shard_codegen_canonical_shards()
+  if canonical_shards < 2
+    return nil
+  shard_irs = emit_sharded_ir_modules(plan, canonical_shards)
   if shard_irs == nil || shard_irs.size() < 2
     return nil
 
@@ -115,7 +157,7 @@
     if work_dir == ""
       return nil
     ordered_misses = shard_sort_indices_desc(miss_indices, shard_irs)
-    cmd = StringBuffer(ordered_misses.size() * 256 + 64)
+    cmds = []
     mi = 0
     while mi < ordered_misses.size()
       s = ordered_misses[mi]
@@ -123,25 +165,24 @@
       tmp_obj = work_dir + "/shard" + s.to_s() + ".o"
       ok_file = work_dir + "/shard" + s.to_s() + ".ok"
       write_file(ll_file, shard_irs[s])
-      cmd << "( "
-      cmd << cc_command
-      cmd << " "
-      cmd << compile_flags
-      cmd << path_map_flag
-      cmd << " -c -x ir "
-      cmd << dev_runtime_shell_quote(ll_file)
-      cmd << " -o "
-      cmd << dev_runtime_shell_quote(tmp_obj)
-      cmd << " && mv -f "
-      cmd << dev_runtime_shell_quote(tmp_obj)
-      cmd << " "
-      cmd << dev_runtime_shell_quote(obj_paths[s])
-      cmd << " && touch "
-      cmd << dev_runtime_shell_quote(ok_file)
-      cmd << " ) & "
+      c = StringBuffer(256)
+      c << cc_command
+      c << " "
+      c << compile_flags
+      c << path_map_flag
+      c << " -c -x ir "
+      c << dev_runtime_shell_quote(ll_file)
+      c << " -o "
+      c << dev_runtime_shell_quote(tmp_obj)
+      c << " && mv -f "
+      c << dev_runtime_shell_quote(tmp_obj)
+      c << " "
+      c << dev_runtime_shell_quote(obj_paths[s])
+      c << " && touch "
+      c << dev_runtime_shell_quote(ok_file)
+      cmds.push(c.to_s())
       mi += 1
-    cmd << "wait"
-    ok = system(cmd.to_s()) == true
+    ok = shard_run_commands(work_dir, cmds, max_jobs)
     if ok
       mi = 0
       while mi < miss_indices.size()
@@ -172,7 +213,7 @@
     all_indices.push(s)
     s += 1
   ordered_all = shard_sort_indices_desc(all_indices, shard_irs)
-  cmd = StringBuffer(nshards * 256 + 64)
+  cmds = []
   oi = 0
   while oi < ordered_all.size()
     s = ordered_all[oi]
@@ -180,21 +221,20 @@
     obj_file = obj_paths[s]
     ok_file = work_dir + "/shard" + s.to_s() + ".ok"
     write_file(ll_file, shard_irs[s])
-    cmd << "( "
-    cmd << cc_command
-    cmd << " "
-    cmd << compile_flags
-    cmd << path_map_flag
-    cmd << " -c -x ir "
-    cmd << dev_runtime_shell_quote(ll_file)
-    cmd << " -o "
-    cmd << dev_runtime_shell_quote(obj_file)
-    cmd << " && touch "
-    cmd << dev_runtime_shell_quote(ok_file)
-    cmd << " ) & "
+    c = StringBuffer(256)
+    c << cc_command
+    c << " "
+    c << compile_flags
+    c << path_map_flag
+    c << " -c -x ir "
+    c << dev_runtime_shell_quote(ll_file)
+    c << " -o "
+    c << dev_runtime_shell_quote(obj_file)
+    c << " && touch "
+    c << dev_runtime_shell_quote(ok_file)
+    cmds.push(c.to_s())
     oi += 1
-  cmd << "wait"
-  ok = system(cmd.to_s()) == true
+  ok = shard_run_commands(work_dir, cmds, max_jobs)
   if ok
     s = 0
     while s < nshards

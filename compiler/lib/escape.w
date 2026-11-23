@@ -58,7 +58,7 @@ escape_impure_calls_map = init_escape_impure_calls_map()
     "w_negate", "w_not", "w_to_s", "w_int_to_s", "w_to_i", "w_to_f",
     "w_string", "w_str_to_sym", "w_str_concat", "w_str_concat_free_rhs", "w_str_concat_free_lhs",
     "w_str_length", "w_string_byte_length", "__w_type", "w_hash_new", "w_array_new",
-    "w_box_int_checked", "w_wire_sequence_from_array"
+    "w_box_int_checked", "w_wire_sequence_from_array", "w_check_array_ebits"
   ]
   i = 0
   while i < names.size()
@@ -70,6 +70,29 @@ escape_pure_builtins_map = init_escape_pure_builtins_map()
 
 -> is_pure_builtin(name)
   escape_pure_builtins_map[name] == true
+
+-> init_escape_array_read_calls_map()
+  m = {}
+  names = [
+    "w_array_get", "w_array_get_i64", "w_array_idx_i64", "__w_array_get_i64_fast", "__w_array_idx_i64_fast",
+    "__w_ta_bounds_check", "__w_ta_bounds_check_boxed",
+    "w_array_size", "w_bool_array_size", "w_bool_array_get", "w_bytes_length", "w_bytes_get",
+    "w_array_min_signed", "w_array_min_unsigned", "w_array_min_float",
+    "w_array_max_signed", "w_array_max_unsigned", "w_array_max_float",
+    "w_array_sum_signed", "w_array_sum_unsigned", "w_array_sum_float",
+    "w_array_fastsum_float", "w_array_sumsq_float", "w_array_dot_i8", "w_array_dot_float",
+    "w_value_is_a"
+  ]
+  i = 0
+  while i < names.size()
+    m[names[i]] = true
+    i += 1
+  m
+
+escape_array_read_calls_map = init_escape_array_read_calls_map()
+
+-> is_escape_array_read_call(name)
+  escape_array_read_calls_map[name] == true
 
 # Param index for a WIRE value: a parameter register itself, or a temp the
 # forward derivation walk below traced back to one. nil when unrelated.
@@ -212,7 +235,7 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
         op = wire_kind(inst)
         if op == :call_direct_i64 || op == :call_direct_void
           call_name = wire_get(inst, :name)
-          if !(call_name in ("w_array_get" "w_array_get_i64" "w_array_idx_i64" "__w_array_get_i64_fast" "__w_array_idx_i64_fast")) && container_store_first_kept(call_name) == nil && !is_consuming_builtin(call_name) && !is_pure_builtin(call_name)
+          if !is_escape_array_read_call(call_name) && container_store_first_kept(call_name) == nil && !is_consuming_builtin(call_name) && !is_pure_builtin(call_name)
             if is_impure_call(call_name)
               has_side_effects = true
               break
@@ -253,8 +276,8 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
         call_name = wire_get(inst, :name)
         args = wire_get(inst, :args)
         kept = container_store_first_kept(call_name)
-        if call_name in ("w_array_get" "w_array_get_i64" "w_array_idx_i64" "__w_array_get_i64_fast" "__w_array_idx_i64_fast")
-          # an element read: the container is neither kept nor returned
+        if is_escape_array_read_call(call_name)
+          # an element read / reduction / bounds check: the container is neither kept nor returned
           ignored = nil
         elsif kept != nil
           # The container keeps the stored key/value, not itself; the result

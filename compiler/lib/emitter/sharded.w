@@ -313,6 +313,12 @@
     i += 1
   v
 
+-> shard_is_core_source?(f)
+  if f[:incremental_core_frozen] == true || f[:incremental_core_candidate] == true
+    return true
+  sp = f[:source_path]
+  sp != nil && (sp.starts_with?("core/") || sp.index("/core/") != nil)
+
 -> emit_sharded_ir_modules(shard_plan, requested_shards = 0)
   if shard_plan == nil || requested_shards < 2
     return nil
@@ -333,8 +339,8 @@
     return nil
 
   nshards = requested_shards
-  if total_fn_bytes < 1048576 && nshards > 4
-    nshards = 4
+  if total_fn_bytes < 524288 && nshards > 8
+    nshards = 8
   if nshards > 16
     nshards = 16
   if nshards < 2
@@ -345,6 +351,12 @@
   call_site_out = shard_plan[:call_site_out]
   llvm_used_out = shard_plan[:llvm_used_out]
   worker_shards = nshards - 1
+  # Separate Core files from non-Core (user/bit/library) files into disjoint
+  # worker shard ranges so editing user code never invalidates Core `.o`
+  # shard caches or forces ThinLTO to re-optimize unchanged Core shards.
+  split_core_user = worker_shards >= 3
+  core_worker_shards = split_core_user ? ((worker_shards + 1) / 2) : worker_shards
+  user_worker_shards = split_core_user ? (worker_shards - core_worker_shards) : worker_shards
 
   owner_shard = Array.new(nfns)
   fn_decl_lines = Array.new(nfns)
@@ -384,10 +396,15 @@
         prev_b = 0
       file_running_bytes[sp_key] = prev_b + txt.size()
       chunk_idx = prev_b / 196608
-      bkey = chunk_idx == 0 ? sp_key : (sp_key + "#" + chunk_idx.to_s())
+      is_core = split_core_user && shard_is_core_source?(f)
+      bkey = (is_core ? "C:" : "U:") + (chunk_idx == 0 ? sp_key : (sp_key + "#" + chunk_idx.to_s()))
       assigned = bucket_memo[bkey]
       if assigned == nil
-        assigned = 1 + (shard_hex4_value(wyhash64_hex_string(bkey)) % worker_shards)
+        hv = shard_hex4_value(wyhash64_hex_string(bkey))
+        if split_core_user
+          assigned = is_core ? (1 + (hv % core_worker_shards)) : (1 + core_worker_shards + (hv % user_worker_shards))
+        else
+          assigned = 1 + (hv % worker_shards)
         bucket_memo[bkey] = assigned
       owner_shard[i] = assigned
       shard_fn_bytes[assigned] = shard_fn_bytes[assigned] + txt.size()

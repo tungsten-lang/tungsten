@@ -695,5 +695,22 @@ builtin_names = [
   "flush"
 ]
 
+# Builtins valid only as bare/global calls, never as methods on arbitrary
+# receivers (prevents `Foo.file?("/etc")` from hijacking the global `file?`).
+global_only_builtin_names = [
+  "puts", "print", "read_file", "read_file_bytes", "file?", "file_exists?", "file_directory?", "read_dir",
+  "file_pwd", "file_chdir", "file_mkdir", "file_rmdir", "file_size", "file_mtime_ns", "file_expand_path",
+  "file_expand_path_base", "file_join", "file_basename", "file_dirname", "file_extname", "file_realpath",
+  "file_readlink", "file_symlink", "write_file", "write_file_bytes", "write_file_bytes_n", "file_stat_data",
+  "tempfile_create", "file_unlink", "file_unlink_strict", "file_link", "file_chmod", "file_touch",
+  "file_rename", "file_temp_for", "file_fsync", "file_fsync_parent", "file_rm",
+  "cache_read", "cache_write", "exit", "argv", "clock", "clock_ms", "runtime_identity", "digest_string64",
+  "capture", "system", "env", "gets", "freeze_slab", "cpu_count", "l1d_cache_bytes", "l2_cache_bytes",
+  "cpus_per_l2", "flush"
+]
+
 -> is_builtin?(name)
   builtin_names.include?(name)
+
+-> is_method_builtin?(name)
+  builtin_names.include?(name) && !global_only_builtin_names.include?(name)

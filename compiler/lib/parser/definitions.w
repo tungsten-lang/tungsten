@@ -1043,13 +1043,19 @@
     elsif @current_type == TOK_LBRACE
       advance()
       skip_block_whitespace()
+      prev_no_multi = @no_multi_assign
+      @no_multi_assign = false
       body = []
       while @current_type != TOK_RBRACE && @current_type != TOK_EOF
         body.push(parse_expression())
         skip_block_whitespace()
+      @no_multi_assign = prev_no_multi
       expect_type(TOK_RBRACE)
     else
+      prev_no_multi = @no_multi_assign
+      @no_multi_assign = false
       body = [parse_expression(false)]
+      @no_multi_assign = prev_no_multi
     block = Tungsten:AST:Block.new(params, body)
     if fold_hint != nil
       return Tungsten:AST:TypeAscription.new(block, fold_hint)
@@ -1099,6 +1105,8 @@
   -> parse_arg_list(terminator)
     args = []
     skip_newlines()
+    prev_no_multi = @no_multi_assign
+    @no_multi_assign = true
     # All call sites pass :RPAREN; we ignore the arg and check directly
     # against TOK_RPAREN. Keeps the param for now in case future callers
     # want a different terminator (e.g., TOK_RBRACKET).
@@ -1171,6 +1179,7 @@
         else
           skip_newlines()
           break
+    @no_multi_assign = prev_no_multi
     args
 
   -> bare_arg_start?
@@ -1187,6 +1196,8 @@
 
   -> parse_bare_args
     args = []
+    prev_no_multi = @no_multi_assign
+    @no_multi_assign = true
     if keyword_label_token?()
       entries = []
       while keyword_label_token?()
@@ -1202,6 +1213,7 @@
       kwh = Tungsten:AST:HashLiteral.new(entries)
       kwh.from_kwargs = true
       args.push(kwh)
+      @no_multi_assign = prev_no_multi
       return args
 
     arg = parse_assignment()
@@ -1228,6 +1240,7 @@
         kwh = Tungsten:AST:HashLiteral.new(entries)
         kwh.from_kwargs = true
         args.push(kwh)
+        @no_multi_assign = prev_no_multi
         return args
       arg = parse_assignment()
       if @current_type == T_FAT_ARROW
@@ -1235,6 +1248,7 @@
         val = parse_assignment()
         arg = Tungsten:AST:HashLiteral.new([[arg, val]])
       args.push(arg)
+    @no_multi_assign = prev_no_multi
     args
 
   -> parse_block
@@ -1253,10 +1267,13 @@
       expect_type(TOK_PIPE)
 
     skip_block_whitespace()
+    prev_no_multi = @no_multi_assign
+    @no_multi_assign = false
     body = []
     while @current_type != TOK_RBRACE && @current_type != TOK_EOF
       body.push(parse_expression())
       skip_block_whitespace()
+    @no_multi_assign = prev_no_multi
     expect_type(TOK_RBRACE)
 
     Tungsten:AST:Block.new(params, body)
@@ -1264,6 +1281,8 @@
   -> parse_array_literal
     expect_type(TOK_LBRACKET)
     skip_structure_whitespace()
+    prev_no_multi = @no_multi_assign
+    @no_multi_assign = true
     elements = []
 
     while @current_type != TOK_RBRACKET
@@ -1290,6 +1309,7 @@
         skip_structure_whitespace()
         break
 
+    @no_multi_assign = prev_no_multi
     expect_type(TOK_RBRACKET)
     Tungsten:AST:Array.new(elements)
 
@@ -1300,6 +1320,8 @@
   -> parse_hash_literal
     expect_type(TOK_LBRACE)
     skip_structure_whitespace()
+    prev_no_multi = @no_multi_assign
+    @no_multi_assign = true
     entries = []
 
     while @current_type != TOK_RBRACE
@@ -1332,6 +1354,7 @@
         skip_structure_whitespace()
         break
 
+    @no_multi_assign = prev_no_multi
     expect_type(TOK_RBRACE)
     Tungsten:AST:HashLiteral.new(entries)
 

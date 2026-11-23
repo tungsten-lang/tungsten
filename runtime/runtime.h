@@ -1229,6 +1229,8 @@ typedef struct WMethod {
     /* Zero for a fixed signature; otherwise source `*rest` index + 1.
      * The +1 encoding keeps calloc-zeroed method-table slots non-variadic. */
     int splat_index_plus_one;
+    uint8_t kw_count;
+    uint8_t has_block;
 } WMethod;
 
 typedef struct WClass {
@@ -1304,7 +1306,8 @@ typedef struct {
     void *fn_ptr;
     WValue *captures;
     int capture_count;
-    int arity;              /* declared block params; 0 = unknown (legacy) */
+    int arity;              /* declared block params; 0 = implicit or legacy */
+    int param_count;        /* physical LLVM params (excluding %__captures) */
 } WClosure;
 
 void *w_closure_cell_new(void);
@@ -1437,6 +1440,10 @@ WValue w_method_call_cached_1(WValue recv, WValue name, WValue arg, WInlineCache
 WValue w_method_call_cached_2(WValue recv, WValue name, WValue arg0, WValue arg1, WInlineCache *cache);
 WValue w_fast_sym_get(WValue recv, WValue sym, WInlineCache *cache);
 WValue w_fast_sym_set(WValue recv, WValue sym, WValue val, WInlineCache *cache);
+WValue w_fast_idx_get(WValue recv, WValue key, WInlineCache *cache);
+WValue w_fast_idx_set(WValue recv, WValue key, WValue val, WInlineCache *cache);
+WValue w_fast_size(WValue recv, WInlineCache *cache);
+WValue w_fast_push(WValue recv, WValue val, WInlineCache *cache);
 WValue w_string_chars(WValue r);
 WValue w_value_is_a(WValue recv, WValue target);
 

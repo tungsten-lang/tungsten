@@ -1264,9 +1264,18 @@
   -> respond_to_method?(recv, method_name)
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
       return lookup_method(recv[:w_class], method_name) != nil
-    is_builtin?(method_name)
+    if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :class
+      return lookup_class_method(recv, method_name) != nil
+    is_method_builtin?(method_name)
 
   -> is_a_class?(recv, klass)
+    # Range records are internal :rt => :range hashes; resolve Range identity
+    # before primitive_runtime_class (which returns nil for range records).
+    if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :range
+      target_name = klass
+      if type(klass) == "Hash" && klass.has_key?(:rt) && klass[:rt] == :class
+        target_name = klass[:name]
+      return target_name == "Range"
     # String/Symbol share compiled method dispatch but retain distinct public
     # primitive identities. Resolve their exact class/string targets without
     # autoloading the legacy Symbol scaffold.

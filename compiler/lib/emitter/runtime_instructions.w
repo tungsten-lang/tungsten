@@ -568,12 +568,20 @@
     call_keyword = "call"
     if wire_get(inst, :src_line) != nil
       call_keyword = "notail call"
-    if argc == 0
+    if fast_size_call?(inst)
+      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_size(i64 " + wire_get(inst, :receiver) + ic_arg + ")"
+    elsif argc == 0
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ic_arg + ")"
     elsif sym_idx_get_call?(inst)
       parts << dv_temp + " = " + call_keyword + " i64 @w_fast_sym_get(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
     elsif sym_idx_set_call?(inst)
       parts << dv_temp + " = " + call_keyword + " i64 @w_fast_sym_set(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ", i64 " + wire_sequence_get(args, 1) + ic_arg + ")"
+    elsif fast_idx_get_call?(inst)
+      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_idx_get(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
+    elsif fast_idx_set_call?(inst)
+      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_idx_set(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ", i64 " + wire_sequence_get(args, 1) + ic_arg + ")"
+    elsif fast_push_call?(inst)
+      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_push(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
     elsif scalar_source_one_call?(inst)
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
     elsif scalar_source_two_call?(inst)

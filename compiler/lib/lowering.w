@@ -343,6 +343,7 @@ use lowering/definitions
         mod[:known_fn_splat_info][call_key] = {
           splat_index: splat_index,
           param_count: n_expr_params,
+          kw_count: method_trailing_kw_count(expr),
           block_param_index: method_block_param_index(expr)
         }
       # `use math/globals`: an untyped top-level fn that exactly delegates
@@ -1095,7 +1096,7 @@ use lowering/definitions
 
   var_types = {}
   main_assign_counts = local_assignment_counts(ast.expressions)
-  main_raw_cands = raw_int_candidate_map(ast.expressions, var_types, mod)
+  main_raw_cands = raw_int_candidate_map(ast.expressions, var_types, mod, false, true)
   ctx = {
     mod: mod,
     func: main_fn,

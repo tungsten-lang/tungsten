@@ -4258,11 +4258,17 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # Scoped no-alias metadata only where the output is THIS SITE's fresh
   # malloc. A `## reuse` buffer persists across calls, and automatic reuse
   # may intentionally alias an RHS leaf (`y = y .* 2 .+ 1`), so skip it on
-  # both reuse paths.
+  # both reuse paths. Scope IDs are per-function (0, 1, 2, ...): scoped-noalias
+  # is intra-function and LLVM's inliner clones callee scopes, so the outlined
+  # worker always uses slot 0 and the caller numbers its own fresh sites from 0.
+  # Fixed IDs keep rendered LLVM independent of emit order (cache-safe).
   ewsid = nil
+  worker_ewsid = nil
   if ast_get(node, :reuse_safe) != true && !auto_reuse
-    ewsid = sid
-  worker_name = fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid, spec[:mode], ewsid)
+    ewsid = wfn[:ewscope_next] == nil ? 0 : wfn[:ewscope_next]
+    wfn[:ewscope_next] = ewsid + 1
+    worker_ewsid = 0
+  worker_name = fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid, spec[:mode], worker_ewsid)
 
   mt_label = next_label(wfn, "fuse.mt")
   st_label = next_label(wfn, "fuse.st")

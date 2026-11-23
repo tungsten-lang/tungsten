@@ -2678,7 +2678,7 @@ module Tungsten
         return intrinsic_result unless intrinsic_result.equal?(NO_DIRECT_CALL)
       end
 
-      if !@profile_enabled && (plan = cached_simple_method_plan(func))
+      if !@profile_enabled && func.param_types.nil? && (plan = cached_simple_method_plan(func))
         result = execute_simple_method_plan_from_nodes(plan, arg_nodes)
         return result unless result.equal?(SIMPLE_METHOD_UNSUPPORTED)
       end
@@ -2687,7 +2687,7 @@ module Tungsten
       params = func.args || EMPTY_ARGS
       method_env = new_param_env(closure_env, params, func, barrier: true)
 
-      if bind_exact_small_args_from_nodes(method_env, params, arg_nodes, func.splat_index, func.memo_cache)
+      if func.param_types.nil? && bind_exact_small_args_from_nodes(method_env, params, arg_nodes, func.splat_index, func.memo_cache)
         return execute_callable_body(func, method_env, block)
       end
 
@@ -2700,7 +2700,7 @@ module Tungsten
         return memo[args]
       end
 
-      bind_params(method_env, params, args, func.splat_index)
+      bind_params(method_env, params, args, func.splat_index, func.param_types)
 
       if func.splat_index.nil? && args.size > params.size
         raise Tungsten::Error, "too many arguments for '#{func.name}' (#{args.size} for #{params.size})"
@@ -3298,7 +3298,7 @@ module Tungsten
         block = args.pop
       end
 
-      bind_params(method_env, params, args, method.splat_index)
+      bind_params(method_env, params, args, method.splat_index, method.param_types)
       if method.block_param && method.block_param.name.to_s != "&"
         method_env.set(method.block_param.name.to_s, block)
       end
@@ -3331,7 +3331,7 @@ module Tungsten
         args = args.dup
         block = args.pop
       end
-      bind_params(method_env, params, args, method.splat_index)
+      bind_params(method_env, params, args, method.splat_index, method.param_types)
       if method.block_param && method.block_param.name.to_s != "&"
         method_env.set(method.block_param.name.to_s, block)
       end
@@ -6493,20 +6493,51 @@ module Tungsten
       end
     end
 
-    def bind_params(env, params, args, splat_index)
+    def coerce_machine_param_value(val, pt_name)
+      return val unless val.is_a?(Integer)
+
+      case pt_name
+      when "u8" then val & 0xFF
+      when "i8"
+        v = val & 0xFF
+        v >= 0x80 ? v - 0x100 : v
+      when "u16" then val & 0xFFFF
+      when "i16"
+        v = val & 0xFFFF
+        v >= 0x8000 ? v - 0x10000 : v
+      when "u32" then val & 0xFFFFFFFF
+      when "i32"
+        v = val & 0xFFFFFFFF
+        v >= 0x80000000 ? v - 0x100000000 : v
+      when "u64" then val & 0xFFFFFFFFFFFFFFFF
+      when "i64"
+        v = val & 0xFFFFFFFFFFFFFFFF
+        v >= 0x8000000000000000 ? v - 0x10000000000000000 : v
+      when "u128" then val & ((1 << 128) - 1)
+      when "i128"
+        v = val & ((1 << 128) - 1)
+        v >= (1 << 127) ? v - (1 << 128) : v
+      else
+        val
+      end
+    end
+
+    def bind_params(env, params, args, splat_index, param_types = nil)
       len = params.size
       if splat_index
         i = 0
         while i < len
           param = params[i]
           if i < splat_index
-            env.set_slot(i, args[i])
+            val = args[i]
           elsif i == splat_index
             splat_count = [args.size - len + 1, 0].max
-            env.set_slot(i, args[i, splat_count])
+            val = args[i, splat_count]
           else
-            env.set_slot(i, args[args.size - len + i])
+            val = args[args.size - len + i]
           end
+          val = coerce_machine_param_value(val, param_types[i].to_s) if param_types && i < param_types.size
+          env.set_slot(i, val)
           i += 1
         end
       else
@@ -6514,20 +6545,22 @@ module Tungsten
         while i < len
           param = params[i]
           if i < args.size
-            env.set_slot(i, args[i])
+            val = args[i]
           elsif param.default
             # Defaults see previously bound parameters in the callee, even
             # when a caller-local variable has the same name.
             old_env = @env
             begin
               @env = env
-              env.set_slot(i, param.default.eval_in(self))
+              val = param.default.eval_in(self)
             ensure
               @env = old_env
             end
           else
             raise Tungsten::Error, "missing argument: #{param.name}"
           end
+          val = coerce_machine_param_value(val, param_types[i].to_s) if param_types && i < param_types.size
+          env.set_slot(i, val)
           i += 1
         end
       end

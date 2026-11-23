@@ -15,11 +15,7 @@ passed = Atomic.new(0)
 
 d = 5m30s
 check("literal type", type(d) == "Duration")
-# BUG: `(5m30s).is_a?(Duration)` is true interpreted but false compiled — engine divergence.
-# Repro: printf 'use core/duration\n<< (5m30s).is_a?(Duration)\n' > /tmp/d.w &&
-#        bin/tungsten run --interpret /tmp/d.w   # true
-#        bin/tungsten -o /tmp/d /tmp/d.w && /tmp/d  # false
-# check("is_a? Duration", d.is_a?(Duration))
+check("is_a? Duration", d.is_a?(Duration))
 check("to_s two components", d.to_s == "5m30s")
 check("interpolates", "[d]" == "5m30s")
 # BUG: `Duration#inspect` (declared with the body `self.to_s`) raises "undefined method 'inspect'

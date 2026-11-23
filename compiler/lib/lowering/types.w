@@ -701,6 +701,20 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   # ast_children flattens only ONE Array layer, so it loses calls nested in
   # pair containers such as elsif clauses, hash entries, with bindings, and
   # interpolation parts. Descend the raw child values instead.
+  if ccall_nobox("w_is_node_extern", node) == 1
+    kid = ccall_nobox("w_node_kind_extern", node)
+    if kid == nil || kid < 1 || kid > KIND_MAX
+      return nil
+    offsets = slab_child_offsets_table[kid]
+    if offsets == nil
+      return nil
+    n_off = offsets.size()
+    i = 0
+    while i < n_off
+      memo_impurity_collect_reverse_edges(mod, record, ccall_nobox("w_node_field_load", node, offsets[i]), maps, reverse)
+      i += 1
+    return nil
+
   kid = kind_id_table[kind]
   if kid == nil
     if kind in (:fastmath_block :strictmath_block :overflow_block)
@@ -716,6 +730,11 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   nil
 
 -> propagate_memo_impurity(mod, expressions)
+  # Only memoized pure `fn` definitions consult `calls_impure_ccall` and
+  # `known_pure_calls`/`fn_memo_tables`; skip the whole-program AST scan when
+  # the module declares no memoized pure functions.
+  if mod[:known_pure_calls].size() == 0 && mod[:fn_memo_tables].size() == 0
+    return nil
   collected = memo_impurity_collect_records(expressions)
   records = collected[:records]
   order = collected[:order]
@@ -1312,6 +1331,55 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   if exact_tag_name_subclassed?(mod, name)
     return nil
   entry
+
+-> module_has_custom_is_a?(mod)
+  cached = mod[:has_custom_is_a]
+  if cached != nil
+    return cached
+  found = false
+  ks = mod[:known_classes].keys()
+  ki = 0
+  while ki < ks.size() && !found
+    cname = "" + ks[ki].to_s()
+    cls = mod[:known_classes][cname]
+    if cname != "Object" && is_ast_node?(cls) && cls.body != nil
+      bi = 0
+      while bi < cls.body.size()
+        stmt = cls.body[bi]
+        if is_ast_node?(stmt) && ast_kind(stmt) == :def && stmt.name == "is_a?" && stmt.body != nil && stmt.body.size() > 0
+          found = true
+          break
+        bi += 1
+    ki += 1
+  mod[:has_custom_is_a] = found
+  found
+
+-> primitive_is_a_subclassed?(mod, name)
+  cache = mod[:primitive_is_a_subclassed]
+  if cache == nil
+    cache = {}
+    mod[:primitive_is_a_subclassed] = cache
+  hit = cache[name]
+  if hit != nil
+    return hit
+  found = false
+  ks = mod[:known_classes].keys()
+  i = 0
+  while i < ks.size()
+    cn = "" + ks[i].to_s()
+    ignored_builtin = false
+    if name == "Boolean" && cn in ("True" "False")
+      ignored_builtin = true
+    elsif name in ("Int" "Integer") && cn in ("Int" "BigInt" "Signed" "Unsigned")
+      ignored_builtin = true
+    elsif name == "Float" && cn in ("Float16" "Float32" "Float64" "Float80" "Float128" "Float256" "BF16" "Normal4")
+      ignored_builtin = true
+    if !ignored_builtin && class_descends_from?(mod, cn, name)
+      found = true
+      break
+    i += 1
+  cache[name] = found
+  found
 
 # -- Tag facts --
 #

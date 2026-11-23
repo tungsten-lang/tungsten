@@ -5,18 +5,10 @@
   emitter_last_artifact_state[:shard_plan] = nil
   emit_blockaddress_sites = mod[:no_static_slab] == true || env("TUNGSTEN_BLOCKADDRESS_CALLSITES") == "1"
 
-  # Per-module metadata state MUST reset here: both containers are
-  # process-global (top-level rebinding from a function would shadow, so
-  # they are mutated in place) and survive across compiles in one
-  # process. Without the reset, compile-batch's program N re-emits every
-  # prior program's loop-metadata nodes (novec bloat) and — worse —
-  # ewscope's cache is keyed by mod[:next_fuse_site] ids that restart at
-  # 0 per module, so program N's fused loop 0 would REUSE program N-1's
-  # !alias.scope/!noalias list: unrelated loops sharing a no-alias scope
-  # is a miscompile, not bloat.
+  # Per-module novec loop-metadata state MUST reset here: the container is
+  # process-global and survives across compiles in compile-batch.
   novec_md_state[:kinds] = []
   novec_md_state[:refs] = {}
-  ewscope_md_state[:ids] = {}
   mod[:parallel_function_emit_jobs] = nil
 
   datalayout = mod[:llvm_datalayout]
@@ -56,6 +48,7 @@
   ccall_needed = {}
   used_runtime_fns = {}
   max_ascope_slots = 0
+  max_ewscope_sites = 0
   uses_g_ast_store = false
   # Verbatim `ll <<~IR` bodies, concatenated: their `@name(` call targets are
   # invisible to the instruction scan below (see embedded_ir_calls?).
@@ -141,6 +134,10 @@
           ascope = wire_get(inst, :ascope)
           if ascope != nil && ascope + 1 > max_ascope_slots
             max_ascope_slots = ascope + 1
+        elsif op in (:load_f64_at :store_f64_at :load_f32_at :store_f32_at :load_i64_at :load_int_at :store_int_at)
+          ewscope = wire_get(inst, :ewscope)
+          if ewscope != nil && ewscope + 1 > max_ewscope_sites
+            max_ewscope_sites = ewscope + 1
         elsif op == :call_num_to_f64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
           ccall_needed["__w_num_to_f64_fast"] = 1
         fns = runtime_fns_for_inst(inst, mod[:string_wvalues])
@@ -1044,7 +1041,7 @@
   attr_groups_out = emit_function_attr_groups(attr_groups)
   tbaa_out = tbaa_metadata_defs()
   novec_out = novec_loop_md_defs()
-  ewscope_out = ewscope_md_defs()
+  ewscope_out = ewscope_md_defs(max_ewscope_sites)
   ascope_out = alias_scope_md_defs(max_ascope_slots)
   globals_str = globals_out.to_s()
   fn_str = fn_out.to_s()
@@ -1413,7 +1410,7 @@
         args = wire_get(inst, :args)
         if args != nil
           argc = wire_sequence_size(args)
-          if argc > max_mcall_argc && !scalar_source_call?(inst) && !sym_idx_call?(inst)
+          if argc > max_mcall_argc && !scalar_source_call?(inst) && !sym_idx_call?(inst) && !fast_builtin_call?(inst)
             max_mcall_argc = argc
       hidden = hidden_exit_label_for_inst(inst, arm64_target, emit_blockaddress_sites)
       if hidden != nil

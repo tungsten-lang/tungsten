@@ -461,9 +461,13 @@
     when "have"
       tac_have(g, args, block, line)
     when "set"
-      tac_set(g, args)
+      tac_set(g, args, true)
+    when "let", "set!"
+      tac_set(g, args, false)
     when "show"
       tac_show(g, args)
+    when "change"
+      tac_change(g, args)
     when "obtain", "rcases"
       tac_obtain(g, args)
     when "cases"
@@ -910,8 +914,21 @@
     nil
 
   -> proof_name?(goal, e)
-    if e.kind == :proj || e.kind == :anon || e.kind == :by
+    while e.kind == :paren
+      e = e.kids[0]
+    if e.kind == :anon || e.kind == :by
       return true
+    if e.kind == :proj
+      if ["mp", "mpr", "symm"].include?(e.s)
+        return true
+      if ["1", "2", "left", "right"].include?(e.s)
+        return proof_name?(goal, e.kids[0])
+      begin
+        btm = elab_term_ast(goal, e.kids[0], nil)
+        bty = type_of(btm)
+        return bty.tag == :c && @session.elab.laws_of(bty.name).include?(e.s)
+      rescue _e
+        return false
     if e.kind == :id
       if e.s == "rfl" || e.s == "trivial"
         return true
@@ -920,7 +937,7 @@
       return !term_def?(goal, e.s) && lookup_proof(goal, e.s) != nil
     if e.kind == :app
       h = @session.elab.ast_spine(e)[0]
-      return h.kind == :id && goal.fixes.select(->(f) f[0] == h.s).size == 0 && !term_def?(goal, h.s) && lookup_proof(goal, h.s) != nil
+      return proof_name?(goal, h)
     false
 
   # a defined function or constant (not a theorem or hypothesis): an argument
@@ -2015,9 +2032,11 @@
         0
     fail("contradiction: none found")
 
-  # set x [: T] := value [with hx]. Fold exact occurrences in this branch;
-  # instantiating x in its finished proof restores the original context.
-  -> tac_set(g, args)
+  # set x [: T] := value [with hx]. With fold=true, fold exact occurrences in
+  # this branch; with fold=false (`let` / `set!`), introduce x and hx without
+  # rewriting existing hypotheses or conclusion. Instantiating x in its finished
+  # proof restores the original context.
+  -> tac_set(g, args, fold = true)
     goal = g.goal
     assign = find_top(args, ":=", 0)
     if assign < 1 || args[0].kind != :id || (assign != 1 && (assign < 3 || args[1].text != ":"))
@@ -2039,8 +2058,8 @@
     value = elab_term(goal, arr_sub(args, assign + 1, stop - assign - 1), expected)
     variable = mk_var(fresh_name(name, goal.all_terms + [value]), type_of(value))
     equation = @k.eq_tm(variable, value)
-    hyps = goal.hyps.map -> (h) [h[0], set_occurrences(h[1], value, variable)]
-    body = set_occurrences(goal.concl, value, variable)
+    hyps = fold ? (goal.hyps.map -> (h) [h[0], set_occurrences(h[1], value, variable)]) : goal.hyps
+    body = fold ? set_occurrences(goal.concl, value, variable) : goal.concl
     subgoal = Goal.new(goal.fixes + [[name, variable]], hyps + [[eqname, equation]], body)
     refine(g, [subgoal], ->(ts) @d.prove_hyp(@k.refl(value), @k.inst(ts[0], [[variable, value]])))
 
@@ -2154,6 +2173,48 @@
     p = elab_term(goal, args, ty_bool)
     c = goal.concl
     refine(g, [goal.with_concl(p)], ->(ts) fit_concl(ts[0], c))
+
+  # change <prop> [at h1 h2 ... [⊢]]. Immediately verifies definitional equality
+  # via the kernel before replacing the goal or hypothesis.
+  -> tac_change(g, args)
+    at = find_top(args, "at", 0)
+    expr_toks = at >= 0 ? arr_sub(args, 0, at) : args
+    if expr_toks.size == 0
+      fail("change: expected a proposition")
+    targets = [nil]
+    if at >= 0
+      if at + 1 >= args.size
+        fail("change: expected hypothesis name(s) after 'at'")
+      targets = []
+      k = at + 1
+      while k < args.size
+        if args[k].text == "⊢"
+          targets.push(nil)
+        else
+          targets.push(args[k].text)
+        k += 1
+    cur = g
+    targets.each -> (th_name)
+      goal = cur.goal
+      p = elab_term(goal, expr_toks, ty_bool)
+      if th_name == nil
+        old_c = goal.concl
+        bridge = nil
+        begin
+          bridge = fit_concl(@k.assume(p), old_c)
+        rescue _e
+          fail("change: " + tm_show(p) + " is not definitionally equal to " + tm_show(old_c))
+        cur = refine(cur, [goal.with_concl(p)], ->(ts) @d.prove_hyp(ts[0], bridge))[0]
+      else
+        old_h = hyp_or_fail(goal, th_name)
+        bridge = nil
+        begin
+          bridge = fit_concl(@k.assume(old_h), p)
+        rescue _e
+          fail("change: " + tm_show(p) + " is not definitionally equal to " + tm_show(old_h))
+        ng = goal.without_hyp(th_name).add_hyp(th_name, p)
+        cur = refine(cur, [ng], ->(ts) @d.prove_hyp(bridge, ts[0]))[0]
+    [cur]
 
   # obtain ⟨x, hx⟩ := proof   |  obtain h1 | h2 := proof
   -> tac_obtain(g, args)
@@ -5873,6 +5934,8 @@
       ts2 = ts
       if ty == TY_NAT_SINGLETON
         ts2 = ts + nat_nonneg(ts)
+      else
+        ts2 = ts + cast_nat_nonneg(ts, ty)
       if @nl_mode && ty != TY_NAT_SINGLETON
         ts2 = ts2 + nl_products(ts, ty)
       if @nl_mode && ty == TY_NAT_SINGLETON
@@ -6313,6 +6376,62 @@
     ts.each -> (t)
       collect_nat_atoms(t.concl, seen, out, l)
     out
+
+  -> cast_nat_nonneg(ts, ty)
+    l = @session.lemma_at("cast_nonneg", ty)
+    if l == nil || l.tags.size > 0
+      return []
+    seen = {}
+    out = []
+    ts.each -> (t)
+      if out.size < 24
+        collect_cast_nat_ring(t.concl, seen, out, l)
+    out
+
+  -> collect_cast_nat_ring(p, seen, out, l)
+    if out.size >= 24 || p.tag != :app
+      return 0
+    ta = p.a
+    if ta.tag == :app && ta.a.tag == :const
+      op = ta.a.op
+      if op == OP_LT || op == OP_LE || op == OP_EQ || op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_POW
+        collect_cast_nat_ring(ta.b, seen, out, l)
+        collect_cast_nat_ring(p.b, seen, out, l)
+    elsif ta.tag == :const
+      uop = ta.op
+      if uop == OP_NEG || uop == OP_REAL_OF_RAT || uop == OP_RAT_OF_INT
+        collect_cast_nat_ring(p.b, seen, out, l)
+      elsif uop == OP_INT_OF_NAT
+        collect_nat_atoms_under_cast(p.b, seen, out, l)
+    0
+
+  -> collect_nat_atoms_under_cast(u, seen, out, l)
+    if out.size >= 24 || u.tag == :lit || !ty_eq(type_of(u), ty_nat)
+      return 0
+    if u.tag == :app
+      ta = u.a
+      if ta.tag == :app && ta.a.tag == :const
+        op = ta.a.op
+        if op == OP_ADD
+          collect_nat_atoms_under_cast(ta.b, seen, out, l)
+          collect_nat_atoms_under_cast(u.b, seen, out, l)
+          return 0
+        if op == OP_MUL
+          collect_nat_atoms_under_cast(ta.b, seen, out, l)
+          collect_nat_atoms_under_cast(u.b, seen, out, l)
+          if out.size < 24 && ta.b.tag != :lit && u.b.tag != :lit
+            add_nat_atom(u, seen, out, l)
+          return 0
+        if op == OP_POW && u.b.tag == :lit
+          collect_nat_atoms_under_cast(ta.b, seen, out, l)
+          if out.size < 24 && u.b.val >= 2
+            add_nat_atom(u, seen, out, l)
+          return 0
+      elsif ta.tag == :const && ta.op == OP_SUCC
+        collect_nat_atoms_under_cast(u.b, seen, out, l)
+        return 0
+    add_nat_atom(u, seen, out, l)
+    0
 
   -> collect_nat_atoms(p, seen, out, l)
     case p.tag

@@ -355,7 +355,7 @@
     while !is?(stop)
       if accept("(")
         names = []
-        while peek != nil && peek.kind == :id
+        while peek != nil && (peek.kind == :id || peek.text == "_")
           names.push(next_tok.text)
         ty = nil
         if accept(":")
@@ -364,7 +364,14 @@
         names.each -> (nm)
           bs.push(Binder.new(nm, ty, nil, nil))
       elsif peek != nil && (peek.kind == :id || peek.text == "_")
-        bs.push(Binder.new(next_tok.text, nil, nil, nil))
+        names = []
+        while peek != nil && (peek.kind == :id || peek.text == "_")
+          names.push(next_tok.text)
+        ty = nil
+        if accept(":")
+          ty = parse_type
+        names.each -> (nm)
+          bs.push(Binder.new(nm, ty, nil, nil))
       else
         error("expected a binder")
     bs

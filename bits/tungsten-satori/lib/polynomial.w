@@ -27,8 +27,18 @@
           i += 1
       elsif op == OP_DIV && (kind == "rat" || kind == "real") && b.tag == :lit && b.val[0] != 0
         cost = recurrence_ring_cost(a, kind, nodes, max_power)
-    elsif t.a.tag == :const && t.a.op == OP_NEG && kind != "nat"
-      cost = recurrence_ring_cost(t.b, kind, nodes, max_power)
+    elsif t.a.tag == :const
+      uop = t.a.op
+      if uop == OP_NEG && kind != "nat"
+        cost = recurrence_ring_cost(t.b, kind, nodes, max_power)
+      elsif uop == OP_SUCC && kind == "nat"
+        cost = recurrence_ring_cost(t.b, kind, nodes, max_power) + 1
+      elsif uop == OP_REAL_OF_RAT && kind == "real"
+        cost = recurrence_ring_cost(t.b, "rat", nodes, max_power)
+      elsif uop == OP_RAT_OF_INT && kind == "rat"
+        cost = recurrence_ring_cost(t.b, "int", nodes, max_power)
+      elsif uop == OP_INT_OF_NAT && kind == "int"
+        cost = recurrence_ring_cost(t.b, "nat", nodes, max_power)
   if cost > 64
     raise "recurrence: expansion limit"
   cost

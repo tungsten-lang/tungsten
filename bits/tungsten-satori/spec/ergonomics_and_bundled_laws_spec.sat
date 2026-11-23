@@ -236,6 +236,32 @@ instance int_acg_test : AddCommGroupTest ℤ :=
     (1 / x) ^ 3 * x ^ 3 + (x / y) ^ k * (y ^ k / x ^ k) = 2
   field_simp
 
+-- 11. Homomorphic cast normalization in HOL kernel `ring_norm` + `linarith`, `change`, `let`, & projected `if_pos`
++ kernel_homomorphic_cast_ring (a b c : ℕ) (z w : ℤ) (q : ℚ) :
+    ((a * (b + c) + succ a : ℕ) : ℝ) = (a : ℝ) * (b : ℝ) + (a : ℝ) * (c : ℝ) + (a : ℝ) + 1 ∧
+    ((z - w : ℤ) ^ 2 : ℝ) = (z : ℝ) ^ 2 - 2 * (z : ℝ) * (w : ℝ) + (w : ℝ) ^ 2 ∧
+    ((q / 4 : ℚ) : ℝ) * 4 = (q : ℝ)
+  ring
+
++ linarith_cast_nat_nonneg_auto (k m : ℕ) :
+    (0 : ℝ) < ((k + 1 : ℕ) : ℝ) ∧ (k : ℝ) ≤ ((k + m : ℕ) : ℝ)
+  linarith
+
++ field_simp_nat_cast_auto_pos (n : ℕ) (x : ℝ) :
+    (x / ((n + 1 : ℕ) : ℝ)) * ((n : ℝ) + 1) = x
+  field_simp
+
++ change_and_let_no_eager_fold (x : ℝ) (hx : box_double_test x = 10) :
+    2 * x + 2 * x = 20
+  let s := 2 * x with hs
+  change 2 * x = 10 at hx
+  change (fun u : ℝ => u + u) (2 * x) = 20
+  linarith
+
++ rw_if_pos_projected_iff (P : ℕ → Prop) (b : ℕ) (hab : ∀ n : ℕ, P n ↔ b = n) (hb : b = 5) :
+    (if P 5 then (42 : ℕ) else 0) = 42
+  rw [if_pos ((hab 5).mpr hb)]
+
 #axioms have_semi_chain
 #axioms hole_application
 #axioms poly_ite_rewrite

@@ -35,4 +35,15 @@ s.run_source("+ bad_rw_if_by (n : ℕ) : (if n = 0 then (1 : ℕ) else 2) = 2 :=
 if s.failures != 5
   raise "rw if_neg (by omega) must fail when condition is unprovable"
 
+# Soundness gate 4: homomorphic cast ring_norm must reject truncated ℕ-sub and Euclidean ℤ-div casts.
+s.run_source("+ bad_nat_sub_cast (a b : ℕ) : ((a - b : ℕ) : ℝ) = (a : ℝ) - (b : ℝ) := by ring\n")
+if s.failures != 6
+  raise "ring must reject truncated natural subtraction cast"
+s.run_source("+ bad_int_div_cast (a : ℤ) : ((a / 2 : ℤ) : ℝ) = (a : ℝ) / 2 := by ring\n")
+if s.failures != 7
+  raise "ring must reject Euclidean integer division cast"
+s.run_source("+ bad_change (x : ℝ) : x = 0 := by change True; trivial\n")
+if s.failures != 8
+  raise "change must reject non-definitionally-equal propositions"
+
 << "Ergonomics and bundled law soundness spec passed"

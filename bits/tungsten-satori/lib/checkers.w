@@ -265,9 +265,28 @@
       return ring_ground_const_q(t.b)
   nil
 
+-> ring_wrap_casts(u, casts)
+  nc = casts.size
+  if nc == 0
+    return u
+  at = u
+  i = nc - 1
+  while i >= 0
+    at = mk_app_raw(casts[i], at)
+    i -= 1
+  at
+
 -> ring_norm(t, kind, ctx)
+  ring_norm_cast(t, kind, [], ctx)
+
+# Homomorphic polynomial normalizer across ℕ → ℤ → ℚ → ℝ widening casts.
+# Widening casts preserve literals, +, *, literal-exponent ^, and succ (on ℕ);
+# rat_of_int / real_of_rat additionally preserve - and neg (never on ℕ, where
+# subtraction is truncated); real_of_rat additionally preserves / by a nonzero
+# constant polynomial (never on ℕ or ℤ, where division is Euclidean).
+-> ring_norm_cast(t, cur_kind, casts, ctx)
   if t.tag == :lit
-    return poly_const(ring_lit_q(t, kind))
+    return poly_const(ring_lit_q(t, cur_kind))
   if t.tag == :app
     ta = t.a
     if ta.tag == :app && ta.a.tag == :const
@@ -275,16 +294,16 @@
       lhs = ta.b
       rhs = t.b
       if op == OP_ADD
-        return poly_add(ring_norm(lhs, kind, ctx), ring_norm(rhs, kind, ctx))
+        return poly_add(ring_norm_cast(lhs, cur_kind, casts, ctx), ring_norm_cast(rhs, cur_kind, casts, ctx))
       if op == OP_MUL
-        return poly_mul(ring_norm(lhs, kind, ctx), ring_norm(rhs, kind, ctx), ctx)
-      if op == OP_SUB && kind != "nat"
-        return poly_add(ring_norm(lhs, kind, ctx), poly_scale(ring_norm(rhs, kind, ctx), Q_NEG_ONE))
+        return poly_mul(ring_norm_cast(lhs, cur_kind, casts, ctx), ring_norm_cast(rhs, cur_kind, casts, ctx), ctx)
+      if op == OP_SUB && cur_kind != "nat"
+        return poly_add(ring_norm_cast(lhs, cur_kind, casts, ctx), poly_scale(ring_norm_cast(rhs, cur_kind, casts, ctx), Q_NEG_ONE))
       if op == OP_POW && rhs.tag == :lit
         exp = rhs.val
         if exp == 0
           return poly_const(Q_ONE)
-        base = ring_norm(lhs, kind, ctx)
+        base = ring_norm_cast(lhs, cur_kind, casts, ctx)
         if exp == 1
           return base
         if exp == 2
@@ -299,19 +318,24 @@
           if e > 0
             cur = poly_mul(cur, cur, ctx)
         return res
-      if op == OP_DIV && (kind == "rat" || kind == "real")
-        pr = ring_norm(rhs, kind, ctx)
+      if op == OP_DIV && (cur_kind == "rat" || cur_kind == "real")
+        pr = ring_norm_cast(rhs, cur_kind, casts, ctx)
         if pr.size == 1 && pr.has_key?(0) && pr[0][0] != 0
-          return poly_scale(ring_norm(lhs, kind, ctx), q_div(Q_ONE, pr[0]))
+          return poly_scale(ring_norm_cast(lhs, cur_kind, casts, ctx), q_div(Q_ONE, pr[0]))
     elsif ta.tag == :const
-      if ta.op == OP_NEG && kind != "nat"
-        return poly_scale(ring_norm(t.b, kind, ctx), Q_NEG_ONE)
-      if ta.op == OP_INT_OF_NAT || ta.op == OP_RAT_OF_INT || ta.op == OP_REAL_OF_RAT
-        cq = ring_ground_const_q(t.b)
-        if cq != nil
-          return poly_const(cq)
+      uop = ta.op
+      if uop == OP_NEG && cur_kind != "nat"
+        return poly_scale(ring_norm_cast(t.b, cur_kind, casts, ctx), Q_NEG_ONE)
+      if uop == OP_SUCC && cur_kind == "nat"
+        return poly_add(ring_norm_cast(t.b, cur_kind, casts, ctx), poly_const(Q_ONE))
+      if uop == OP_REAL_OF_RAT && cur_kind == "real"
+        return ring_norm_cast(t.b, "rat", casts + [ta], ctx)
+      if uop == OP_RAT_OF_INT && cur_kind == "rat"
+        return ring_norm_cast(t.b, "int", casts + [ta], ctx)
+      if uop == OP_INT_OF_NAT && cur_kind == "int"
+        return ring_norm_cast(t.b, "nat", casts + [ta], ctx)
   p = {}
-  p[ctx.atom_mono(t)] = Q_ONE
+  p[ctx.atom_mono(ring_wrap_casts(t, casts))] = Q_ONE
   p
 
 # ---------------------------------------------------------------------------

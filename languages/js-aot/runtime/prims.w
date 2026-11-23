@@ -113,7 +113,9 @@ fn jsr_fneg(a) (i64) i64
     %dx = bitcast i64 %x to double
     %s = fneg double %dx
     %si = bitcast double %s to i64
-    %r = add i64 %si, 281474976710656
+    %nan = fcmp uno double %s, %s
+    %sc = select i1 %nan, i64 9221120237041090560, i64 %si
+    %r = add i64 %sc, 281474976710656
     ret i64 %r
   IR
 

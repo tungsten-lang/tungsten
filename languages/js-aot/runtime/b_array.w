@@ -17,8 +17,41 @@ in JS
   f = jsr_aflags(wvalue_bits(o) ## i64)
   (f & JS_AF_ARRAY) != 0 && (f & JS_AF_EXT) == 0
 
+# Do Array.prototype and Object.prototype hold no index-like keys? Then a write past a
+# plain array's end cannot meet a setter or a read-only property on its chain. Cached per
+# prototype epoch (both are marked as prototypes, so any change to their keys bumps it).
+JS_PROTO_CLEAN = [-1, false, nil]
+
+-> js_array_protos_clean?
+  e = JS_EPOCH[0]
+  c = JS_PROTO_CLEAN
+  r = js_realm()
+  return c[1] if c[0] == e && c[2] == r
+  ok = !js_has_index_key?(r.array_proto) && !js_has_index_key?(r.object_proto)
+  c[0] = e
+  c[1] = ok
+  c[2] = r
+  ok
+
+-> js_has_index_key?(o)
+  ks = o.own_keys
+  i = 0
+  while i < ks.size
+    return true if js_string?(ks[i]) && js_array_index?(ks[i])
+    i += 1
+  false
+
+# A plain array that can grow without the generic algorithm.
+-> js_growable_array?(o)
+  js_plain_array?(o) && js_array_protos_clean?
+
 -> js_len_of(o)
   return o.size if js_array?(o)
+  # typed arrays answer from [[ArrayLength]] (their methods borrowed from Array.prototype
+  # must not observe an overridden length)
+  if o.is_a?(JS:TypedArray)
+    n = js_ta_length(o)
+    return n < 0 ? 0 : n
   js_to_length(jget(o, "length"))
 
 # Element i of an array-like (holes read through the prototype chain, as [[Get]] does).
@@ -52,7 +85,7 @@ in JS
 
 -> js_fn_arg(args, i, what)
   f = js_arg(args, i)
-  js_throw_type(js_to_display(f) + " is not a function") if !js_callable?(f)
+  js_throw_type(js_err_display(f) + " is not a function") if !js_callable?(f)
   f
 
 -> js_rel_index(v, len, dflt)
@@ -81,7 +114,9 @@ in JS
       js_throw_type("object.constructor\[Symbol.species] is not a constructor") if !js_is_constructor?(c)
       return js_construct(c, [n + ~0.0], nil)
   js_throw_range("Invalid array length") if n > 4294967295
-  js_mark_array([])
+  a = js_mark_array([])
+  js_array_set_length(a, n + ~0.0) if n > 0 && n <= ARRAY_GAP
+  a
 
 -> js_array_ctor(args, nt)
   r = js_realm()
@@ -100,7 +135,7 @@ in JS
 
 -> js_array_from(this, items, mapfn, this_arg)
   r = js_realm()
-  js_throw_type(js_to_display(mapfn) + " is not a function") if mapfn != nil && !js_callable?(mapfn)
+  js_throw_type(js_err_display(mapfn) + " is not a function") if mapfn != nil && !js_callable?(mapfn)
   ctor = this != r.intrinsic("Array") && js_is_constructor?(this)
   usable = js_nullish?(items) ? nil : js_get_method(items, SYM_ITERATOR)
   if usable != nil
@@ -154,7 +189,9 @@ in JS
   return true if js_array?(v)
   return false if !v.is_a?(JS:Base)
   return true if js_special?(v, "Array")
-  return js_is_array(js_proxy_target(v)) if js_proxy?(v)
+  if js_proxy?(v)
+    js_throw_type("Cannot perform 'IsArray' on a proxy that has been revoked") if v.handler == nil
+    return js_is_array(js_proxy_target(v))
   false
 
 # ---- iteration-style methods: f.call(thisArg, value, index, obj) ----
@@ -170,6 +207,7 @@ in JS
   elsif mode == :filter
     out = js_species_create(o, 0)
   to = 0
+  filled = 0
   i = 0
   while i < n
     if js_has_el?(o, i)
@@ -177,6 +215,7 @@ in JS
       res = js_call(f, t, 3, v, i + ~0.0, o, nil, nil)
       if mode == :map
         js_create_data(out, i.to_s, res)
+        filled += 1
       elsif mode == :filter
         if js_truthy(res)
           js_create_data(out, to.to_s, v)
@@ -186,6 +225,10 @@ in JS
       elsif mode == :every
         return false if !js_truthy(res)
     i += 1
+  if mode == :map && filled == n && js_plain_array?(out) && out.size == n
+    # every slot was written: reads need no hole check
+    ob = wvalue_bits(out) ## i64
+    jsr_set_aflags(ob, JS_AF_ARRAY)
   return out if mode == :map || mode == :filter
   return false if mode == :some
   return true if mode == :every
@@ -313,7 +356,7 @@ JS_JOIN_GUARD = []
   parts.join(",")
 
 -> js_arr_push(this, args)
-  if js_plain_array?(this)
+  if js_growable_array?(this)
     i = 0
     while i < args.size
       this.push(args[i])
@@ -370,7 +413,7 @@ JS_JOIN_GUARD = []
   first
 
 -> js_arr_unshift(this, args)
-  if js_plain_array?(this)
+  if js_growable_array?(this)
     i = args.size - 1
     while i >= 0
       this.unshift(args[i])
@@ -434,7 +477,7 @@ JS_JOIN_GUARD = []
     dc = d > (n - start) + ~0.0 ? n - start : d.to_i
   items = args.size > 2 ? args.slice(2, args.size - 2).dup : []
   js_throw_type("Splice result length exceeds 2^53-1") if n + items.size - dc > 9007199254740991
-  if js_default_species?(o) && (js_array_flags(o) & JS_AF_HOLES) == 0
+  if js_default_species?(o) && (js_array_flags(o) & JS_AF_HOLES) == 0 && js_array_protos_clean?
     el = o
     # copies: slices may share el's storage, which the pushes below overwrite
     removed = el.slice(start, dc).dup
@@ -732,26 +775,33 @@ JS_JOIN_GUARD = []
     k += 1
   o
 
--> js_arr_flat_into(out, o, depth)
-  n = js_len_of(o)
+# FlattenIntoArray (§23.1.3.13.1): appends o's elements (flattened depth levels) to out
+# from index start; returns the next index.
+-> js_arr_flat_into(out, o, depth, n, start)
+  n = js_len_of(o) if n < 0
+  t = start
   k = 0
   while k < n
     if js_has_el?(o, k)
       v = js_el(o, k)
       if depth > 0 && js_is_array(v)
-        js_arr_flat_into(out, v, depth - 1)
+        t = js_arr_flat_into(out, v, depth - 1, -1, t)
       else
-        js_create_data(out, js_len_of(out).to_s, v)
+        js_throw_type("Flattened array exceeds 2^53-1 elements") if t >= 9007199254740991
+        js_create_data(out, t.to_s, v)
+        t += 1
     k += 1
-  out
+  t
 
 -> js_arr_flat(this, d)
   o = js_to_obj(this)
-  js_len_of(o)
+  n = js_len_of(o)
   depth = d == nil ? ~1.0 : js_to_integer(d)
   depth = ~0.0 if depth < ~0.0
   dd = depth > ~1000000.0 ? 1000000 : depth.to_i
-  js_arr_flat_into(js_species_create(o, 0), o, dd)
+  out = js_species_create(o, 0)
+  js_arr_flat_into(out, o, dd, n, 0)
+  out
 
 -> js_arr_flat_map(this, args)
   o = js_to_obj(this)
@@ -759,14 +809,16 @@ JS_JOIN_GUARD = []
   f = js_fn_arg(args, 0, "flatMap")
   t = js_arg(args, 1)
   out = js_species_create(o, 0)
+  ti = 0
   k = 0
   while k < n
     if js_has_el?(o, k)
       v = js_call(f, t, 3, js_el(o, k), k + ~0.0, o, nil, nil)
       if js_is_array(v)
-        js_arr_flat_into(out, v, 0)
+        ti = js_arr_flat_into(out, v, 0, -1, ti)
       else
-        js_create_data(out, js_len_of(out).to_s, v)
+        js_create_data(out, ti.to_s, v)
+        ti += 1
     k += 1
   out
 
@@ -857,6 +909,8 @@ js_install(->(r) js_install_array(r))
   op = r.object_proto
   ap = js_new_special(op, "Array")
   r.array_proto = ap
+  js_mark_proto(ap)
+  js_mark_proto(op)
   ap.define("length", ~0.0, ATTR_W)
   ac = r.constructor("Array", 1, ->(this, args, nt) js_array_ctor(args, nt), ap)
   r.method(ac, "isArray", 1, ->(this, args, nt) js_is_array(js_arg(args, 0)))
@@ -904,6 +958,7 @@ js_install(->(r) js_install_array(r))
   vals = r.method(ap, "values", 0, ->(this, args, nt) js_array_iter(js_to_obj(this), :values))
   ap.define(SYM_ITERATOR, vals, BUILTIN_ATTRS)
   r.set_intrinsic("%ArrayProto_values%", vals)
+  r.set_intrinsic("%Array.prototype.values%", vals)
   un = js_new_object(nil)
   ks = ["at", "copyWithin", "entries", "fill", "find", "findIndex", "findLast", "findLastIndex", "flat", "flatMap", "includes", "keys", "toReversed", "toSorted", "toSpliced", "values"]
   i = 0

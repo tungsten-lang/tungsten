@@ -75,7 +75,7 @@ in JS
   if js_array?(o)
     return true if js_array_has_own?(o, k)
     p = js_array_proto(o)
-    return p != nil && p.has_property?(k)
+    return p != nil && jhas_property?(p, k)
   o.has_property?(k)
 
 -> jenumerable?(o, k)

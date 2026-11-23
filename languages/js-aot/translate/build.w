@@ -64,11 +64,19 @@
 -> ta_not(a)
   Tungsten:AST:Not.new(a)
 
+# Comparison operators are the parser's symbols (compiler/lib/parser/core.w): a string
+# op is not one of them and does not lower as a comparison.
 -> ta_eq(a, b)
-  Tungsten:AST:BinaryOp.new(a, "==", b)
+  Tungsten:AST:BinaryOp.new(a, :EQ, b)
 
 -> ta_ne(a, b)
-  Tungsten:AST:BinaryOp.new(a, "!=", b)
+  Tungsten:AST:BinaryOp.new(a, :NEQ, b)
+
+-> ta_lt(a, b)
+  Tungsten:AST:BinaryOp.new(a, :LT, b)
+
+-> ta_le(a, b)
+  Tungsten:AST:BinaryOp.new(a, :LTE, b)
 
 -> ta_array(elems)
   Tungsten:AST:Array.new(elems)
@@ -98,3 +106,9 @@
     out.push(Tungsten:AST:CaseArm.new(arms[i][0], nil, arms[i][1]))
     i += 1
   Tungsten:AST:CaseValue.new(subject, out, else_body)
+
+-> ta_gt(a, b)
+  Tungsten:AST:BinaryOp.new(a, :GT, b)
+
+-> ta_add(a, b)
+  Tungsten:AST:BinaryOp.new(a, :PLUS, b)

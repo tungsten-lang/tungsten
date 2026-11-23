@@ -106,7 +106,7 @@ WK_POOL = []
   an.funcs.each ->(f) bad.push(f.unsupported0) if f.unsupported0 != nil
   js_throw(js_make_error("SyntaxError", "tier 0 cannot run this yet: " + bad[0].to_s)) if bad.size > 0
   f = an.funcs[0]
-  act = wk_act(f, nil, nil, nil, f.nlocals)
+  act = wk_act(f, nil, nil, js_realm().global, f.nlocals)
   wk_hoist_script(f, act)
   wk_hoist_functions(prog.list, act)
   wk_stmts(prog.list, act)
@@ -404,7 +404,15 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
 -> wk_cell(b)
   c = b.cell
   if c == nil
-    c = b.kind == :lexical ? js_lcell(b.name) : js_gcell(b.name)
+    if b.kind == :lexical
+      c = js_lcell(b.name)
+    else
+      # a name an earlier script declared with let, const or class
+      c = JS_LEXICAL[b.name]
+      if c == nil
+        c = js_gcell(b.name)
+      else
+        b.kind = :lexical
     b.cell = c
   c
 
@@ -420,9 +428,11 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
 
 -> wk_write_ref(ref, v, act, init = false)
   b = ref.binding
-  if b.kind == :lexical
-    return init ? js_linit(wk_cell(b), v, wk_const?(b)) : js_lset(wk_cell(b), v)
-  return js_gset(wk_cell(b), v, act.f.strict) if b.global?
+  if b.global?
+    c = wk_cell(b)
+    if b.kind == :lexical
+      return init ? js_linit(c, v, wk_const?(b)) : js_lset(c, v)
+    return js_gset(c, v, act.f.strict)
   if b.slot >= 0
     js_env_set(wk_env_at(act, wk_hops(ref)), b.slot, v)
     return v
@@ -995,7 +1005,7 @@ WK_SHORT = WkShort.new
   g = f
   while g.arrow
     g = g.parent
-  return act.this if g.script
+  return js_realm().global if g.script
   wk_read_binding_from(g.this_binding, e.x.scope, act)
 
 WK_OPS = {"+" => 1, "-" => 2, "*" => 3, "/" => 4, "%" => 5, "<" => 6, ">" => 7, "<=" => 8, ">=" => 9, "===" => 10, "!==" => 11, "==" => 12, "!=" => 13, "|" => 14, "&" => 15, "^" => 16, "<<" => 17, ">>" => 18, ">>>" => 19, "**" => 20, "instanceof" => 21, "in" => 22}
@@ -1062,13 +1072,13 @@ WK_OPS = {"+" => 1, "-" => 2, "*" => 3, "/" => 4, "%" => 5, "<" => 6, ">" => 7, 
   inc = e.str == "++"
   if t.kind == :ident
     old = js_tonumeric(wk_read_ref(t.x, act))
-    nv = inc ? js_add(old, ~1.0) : js_sub(old, ~1.0)
+    nv = js_inc(old, inc)
     wk_write_ref(t.x, nv, act)
     return e.has?(F_PREFIX) ? nv : old
   o = wk_ev(t.a, act)
   key = t.has?(F_COMPUTED) ? js_to_property_key(wk_ev(t.b, act)) : t.b.str
   old = js_tonumeric(js_getv(o, key))
-  nv = inc ? js_add(old, ~1.0) : js_sub(old, ~1.0)
+  nv = js_inc(old, inc)
   js_setv(o, key, nv, act.f.strict)
   e.has?(F_PREFIX) ? nv : old
 

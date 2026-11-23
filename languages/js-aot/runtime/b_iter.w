@@ -20,15 +20,11 @@ in JS
 # ToLength(o.length).
 -> js_iter_len_of(o)
   return o.size if js_array?(o)
-  return js_typed_iter_length(o) if js_special?(o, "TypedArray")
-  js_to_length(jget(o, "length"))
-
-# TODO(js-aot): moves to b_typed.w with the typed arrays.
--> js_typed_iter_length(o)
+  return js_typed_iter_length(o) if o.is_a?(JS:TypedArray)
   js_to_length(jget(o, "length"))
 
 -> js_array_iter_next(this)
-  js_throw_type("next method called on incompatible receiver " + js_to_display(this)) if !(js_special?(this, "Array Iterator") && this.internal.is_a?(JS:ArrayIterState))
+  js_throw_type("next method called on incompatible receiver " + js_err_display(this)) if !(js_special?(this, "Array Iterator") && this.internal.is_a?(JS:ArrayIterState))
   st = this.internal
   o = st.target
   return js_iter_result(nil, true) if o == nil
@@ -55,7 +51,7 @@ in JS
   it
 
 -> js_string_iter_next(this)
-  js_throw_type("next method called on incompatible receiver " + js_to_display(this)) if !(js_special?(this, "String Iterator") && this.internal.is_a?(JS:StringIterState))
+  js_throw_type("next method called on incompatible receiver " + js_err_display(this)) if !(js_special?(this, "String Iterator") && this.internal.is_a?(JS:StringIterState))
   st = this.internal
   s = st.s
   return js_iter_result(nil, true) if s == nil
@@ -80,16 +76,16 @@ in JS
     @running = false
 
 -> js_get_iter_direct(o)
-  js_throw_type(js_to_display(o) + " is not an object") if !js_object?(o)
+  js_throw_type(js_err_display(o) + " is not an object") if !js_object?(o)
   JS:IterRecord.new(o, jget(o, "next"))
 
 -> js_iter_helper(this, mode, f, limit_v)
-  js_throw_type(js_to_display(this) + " is not an object") if !js_object?(this)
+  js_throw_type(js_err_display(this) + " is not an object") if !js_object?(this)
   limit = 0
   if mode == :map || mode == :filter || mode == :flat_map
     if !js_callable?(f)
       js_iter_close_quiet(JS:IterRecord.new(this, nil))
-      js_throw_type(js_to_display(f) + " is not a function")
+      js_throw_type(js_err_display(f) + " is not a function")
   else
     limit = js_iter_limit_or_close(this, limit_v)
   rec = js_get_iter_direct(this)
@@ -98,7 +94,7 @@ in JS
   h
 
 -> js_this_helper(v)
-  js_throw_type("Iterator Helper method called on incompatible receiver " + js_to_display(v)) if !(js_special?(v, "Iterator Helper") && v.internal.is_a?(JS:IterHelper))
+  js_throw_type("Iterator Helper method called on incompatible receiver " + js_err_display(v)) if !(js_special?(v, "Iterator Helper") && v.internal.is_a?(JS:IterHelper))
   v.internal
 
 -> js_iter_helper_next(this)
@@ -128,7 +124,7 @@ in JS
         return js_iter_result(nil, true) if x == JS_ITER_DONE
         h.count += 1
     if m == :flat_map && h.inner != nil
-      y = js_iter_step_done(h, h.inner)
+      y = js_flat_inner_step(h)
       return js_iter_result(y, false) if y != JS_ITER_DONE
       h.done = false
       h.inner = nil
@@ -158,10 +154,22 @@ in JS
   h.done = true if x == JS_ITER_DONE
   x
 
+# flatMap's inner step: when it throws, the underlying iterator is closed too.
+-> js_flat_inner_step(h)
+  y = nil
+  begin
+    y = js_iter_step(h.inner)
+  rescue e
+    h.done = true
+    h.inner = nil
+    js_iter_close_quiet(h.src)
+    raise e
+  y
+
 # GetIteratorFlattenable (reject-strings): flatMap's mapper result.
 -> js_get_iterator_flattenable(h, v)
   begin
-    js_throw_type(js_to_display(v) + " is not an object") if !js_object?(v)
+    js_throw_type(js_err_display(v) + " is not an object") if !js_object?(v)
     m = js_get_method(v, SYM_ITERATOR)
     it = m == nil ? v : js_call_arr(m, v, JS_NO_ARGS)
     js_throw_type("not an iterator") if !js_object?(it)
@@ -173,10 +181,10 @@ in JS
   nil
 
 -> js_iter_reduce_like(this, mode, f, init, has_init)
-  js_throw_type(js_to_display(this) + " is not an object") if !js_object?(this)
+  js_throw_type(js_err_display(this) + " is not an object") if !js_object?(this)
   if mode != :to_array && !js_callable?(f)
     js_iter_close_quiet(JS:IterRecord.new(this, nil))
-    js_throw_type(js_to_display(f) + " is not a function")
+    js_throw_type(js_err_display(f) + " is not a function")
   rec = js_get_iter_direct(this)
   acc = init
   started = has_init
@@ -219,7 +227,7 @@ in JS
   if js_string?(v)
     return js_string_iter(v) if js_string_iter_pristine?()
   else
-    js_throw_type(js_to_display(v) + " is not an object") if !js_object?(v)
+    js_throw_type(js_err_display(v) + " is not an object") if !js_object?(v)
   m = js_get_method(v, SYM_ITERATOR)
   it = m == nil ? v : js_call_arr(m, v, JS_NO_ARGS)
   js_throw_type("not an iterator") if !js_object?(it)
@@ -231,7 +239,7 @@ in JS
   w
 
 -> js_this_wrap(v)
-  js_throw_type("incompatible receiver " + js_to_display(v)) if !(js_special?(v, "WrapForValidIterator") && v.internal.is_a?(JS:IterHelper))
+  js_throw_type("incompatible receiver " + js_err_display(v)) if !(js_special?(v, "WrapForValidIterator") && v.internal.is_a?(JS:IterHelper))
   v.internal
 
 -> js_wrap_return(this)
@@ -356,9 +364,9 @@ js_install(->(r) js_install_iter(r))
 
 -> js_iter_limit(v)
   n = js_to_number(v)
-  js_throw_range(js_to_display(v) + " must be positive") if n != n
+  js_throw_range(js_err_display(v) + " must be positive") if n != n
   t = js_to_integer(n)
-  js_throw_range(js_to_display(v) + " must be positive") if t < ~0.0
+  js_throw_range(js_err_display(v) + " must be positive") if t < ~0.0
   return 9007199254740991 if t == INF
   t.to_i
 

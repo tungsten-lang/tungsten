@@ -190,11 +190,22 @@ JS_NAN = [nil]
   return js_strict_eq(js_to_number(a), b) if js_string?(a) && js_number?(b)
   return js_loose_eq(js_to_number(a), b) if a == true || a == false
   return js_loose_eq(a, js_to_number(b)) if b == true || b == false
-  if (js_number?(a) || js_string?(a) || a.is_a?(JS:Symbol)) && js_object?(b)
+  if (js_number?(a) || js_string?(a) || a.is_a?(JS:Symbol) || a.is_a?(JS:BigIntValue)) && js_object?(b)
     return js_loose_eq(a, js_to_primitive(b))
-  if js_object?(a) && (js_number?(b) || js_string?(b) || b.is_a?(JS:Symbol))
+  if js_object?(a) && (js_number?(b) || js_string?(b) || b.is_a?(JS:Symbol) || b.is_a?(JS:BigIntValue))
     return js_loose_eq(js_to_primitive(a), b)
+  return js_big_num_eq(a, b) if a.is_a?(JS:BigIntValue)
+  return js_big_num_eq(b, a) if b.is_a?(JS:BigIntValue)
   false
+
+# A BigInt loosely equal to a Number or a String.
+-> js_big_num_eq(x, v)
+  if js_string?(v)
+    n = js_string_to_bigint(v)
+    return n != nil && n == x.v
+  return false if !js_number?(v) || v != v || v == INF || v == ~0.0 - INF
+  return false if Math.floor(v) != v
+  v.to_i == x.v
 
 -> js_same_value(a, b)
   if js_number?(a) && js_number?(b)
@@ -250,8 +261,11 @@ JS_NAN = [nil]
   de = js_digits_exp(a)
   ds = de[0]
   e = de[1]
-  if ds.size > 15
-    k = 15
+  # subnormals print with 15 digits but may round-trip with fewer; others need search
+  # only past 15
+  k0 = a < ~2.2250738585072014e-308 ? 1 : 15
+  if ds.size > k0
+    k = k0
     found = false
     while k < ds.size && !found
       r = js_round_digits(ds, e, k)

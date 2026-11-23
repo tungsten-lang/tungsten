@@ -7,6 +7,8 @@
 # the translated script appended as Tungsten AST (compiler program_ast_hook). No
 # Tungsten source text is generated. JSC_DUMP=1 prints the analysis summary, JSC_DUMP=2 the generated Tungsten AST,
 # JSC_STATS=1 (with JSC_PARTIAL=1) stops after translating: the scale check without a compile.
+# JSC_LIMIT=n / JSC_SKIP=k (with JSC_PARTIAL=1) compile only the window of n functions after
+# the first k supported ones; JSC_MAXSIZE=b leaves out functions of more than b source bytes.
 
 use ../../../compiler/lib/driver_modules
 use ../frontend/parser
@@ -29,9 +31,13 @@ use ../translate/translate
     exit(1)
   an = JaAnalysis.new(prog, false).run
   t = JsTranslator.new(an)
+  # the script's text goes into the program for Function.prototype.toString (JSC_NOSRC=1: not)
+  t.source = src if env("JSC_NOSRC") != "1"
   partial = env("JSC_PARTIAL") == "1"
   lim = env("JSC_LIMIT")
-  nodes = t.program(partial, lim == nil || lim == "" ? -1 : lim.to_i)
+  skip = env("JSC_SKIP")
+  maxs = env("JSC_MAXSIZE")
+  nodes = t.program(partial, lim == nil || lim == "" ? -1 : lim.to_i, skip == nil || skip == "" ? 0 : skip.to_i, maxs == nil || maxs == "" ? -1 : maxs.to_i)
   if env("JSC_DUMP") == "1" || partial
     ccall("w_eputs", "jsc: " + an.stats.to_s + " translated=" + t.translated.to_s + " ic_words=" + t.ic_words.to_s)
   if partial

@@ -388,7 +388,6 @@ use frontend/parser
       while i < s.list.size
         d = s.list[i]
         if d.a.kind != :ident
-          f.fail("destructuring")
           walk_expr(d.b, sc) if d.b != nil
           walk_pattern(d.a, sc, true)
         else
@@ -411,7 +410,6 @@ use frontend/parser
           note_write(av, sc, s.pos)
           b.value_uses += 1
     elsif k == :class_decl
-      f.fail("class")
       cb = resolve(s.str, sc)
       s.c = JaRef.new(cb, sc)
       walk_class(s, sc, cb)
@@ -465,12 +463,10 @@ use frontend/parser
           if s.b.kind == :ident
             ref(s.b, cs)
           else
-            f.fail("destructuring")
             walk_pattern(s.b, cs, true)
         bs = block_scope(cs, s.c, s.c.list)
         walk_stmts(s.c.list, bs)
       if s.d != nil
-        f.fail("finally")
         bd = block_scope(sc, s.d, s.d.list)
         walk_stmts(s.d.list, bd)
     elsif k == :switch
@@ -495,7 +491,6 @@ use frontend/parser
       walk_expr(s.a, sc)
       walk_stmt(s.b, sc)
     elsif k == :for_in || k == :for_of
-      f.fail(k.to_s)
       f.fail("for await") if s.has?(F_AWAIT)
       fs = sc
       a = s.a
@@ -569,7 +564,7 @@ use frontend/parser
     k = e.kind
     if k == :ident
       note_read(ref(e, sc), sc, e.pos, false)
-    elsif k == :num || k == :string || k == :null || k == :true || k == :false
+    elsif k == :num || k == :string || k == :null || k == :true || k == :false || k == :bigint
       nil
     elsif k == :this
       e.x = JaRef.new(nil, sc)
@@ -578,12 +573,13 @@ use frontend/parser
       walk_function(e, sc, nil)
     elsif k == :call
       c = e.a
-      f.fail("optional chain") if e.has?(F_OPTIONAL)
+      # super(...) passes new.target on (an arrow reads it from the constructor)
+      note_special(sc, :nt) if c.kind == :super
       if c.kind == :ident
         if c.str == "eval"
           f.dynamic = true
           f.fail0("eval")
-        note_read(ref(c, sc), sc, c.pos, true)
+        note_read(ref(c, sc), sc, c.pos, !e.has?(F_OPTIONAL))
       elsif (c.kind == :function || c.kind == :arrow) && !c.has?(F_ASYNC) && !c.has?(F_GENERATOR)
         walk_function(c, sc, nil)
         jf = fn_of(c)
@@ -595,15 +591,12 @@ use frontend/parser
       walk_expr(e.a, sc)
       walk_args(e.list, sc)
     elsif k == :member
-      f.fail("optional chain") if e.has?(F_OPTIONAL)
       walk_expr(e.a, sc)
       if e.has?(F_COMPUTED)
         walk_expr(e.b, sc)
       elsif e.b.kind == :private_name
-        f.fail("private name")
         priv_ref(e.b, sc)
     elsif k == :chain
-      f.fail("optional chain")
       walk_expr(e.a, sc)
     elsif k == :unary
       if e.str == "typeof" && e.a.kind == :ident
@@ -616,7 +609,6 @@ use frontend/parser
       walk_target(e.a, sc)
     elsif k == :binary || k == :logical
       if e.a.kind == :private_name
-        f.fail("private name")
         priv_ref(e.a, sc)
       else
         walk_expr(e.a, sc)
@@ -633,7 +625,6 @@ use frontend/parser
         walk_expr(e.a, sc)
         walk_expr(e.b, sc)
       else
-        f.fail("destructuring assignment")
         walk_expr(e.b, sc)
         walk_pattern(e.a, sc, false)
     elsif k == :cond
@@ -648,7 +639,6 @@ use frontend/parser
         x = e.list[i]
         if x != nil
           if x.kind == :spread
-            f.fail("spread")
             walk_expr(x.a, sc)
           else
             walk_expr(x, sc)
@@ -658,18 +648,18 @@ use frontend/parser
       while i < e.list.size
         p = e.list[i]
         if p.kind != :prop || p.str != "init" || p.has?(F_COMPUTED) || p.has?(F_METHOD)
-          f.fail("object literal " + (p.kind == :prop ? p.str : p.kind.to_s))
           walk_expr(p.a, sc) if p.kind == :prop && p.has?(F_COMPUTED)
         walk_expr(p.kind == :prop ? p.b : p.a, sc)
+        # methods and accessors of a literal are not constructors
+        if p.kind == :prop && (p.has?(F_METHOD) || p.str == "get" || p.str == "set") && p.b.x.is_a?(JaFunc)
+          p.b.x.method_kind = p.has?(F_METHOD) ? "method" : p.str
         if p.kind == :prop && !p.has?(F_COMPUTED) && p.str == "init"
           kn = p.a.kind == :num ? nil : p.a.str
           name_fn(p.b, kn) if kn != nil && kn != "__proto__"
         i += 1
     elsif k == :template
-      f.fail("template")
       walk_exprs(e.a, sc)
     elsif k == :class
-      f.fail("class")
       walk_class(e, sc, nil)
     elsif k == :super
       # super.x / super.m() / super(...): the home object and this of the enclosing method
@@ -677,18 +667,15 @@ use frontend/parser
       note_special(sc, :fo)
       note_this(sc)
     elsif k == :tagged_template
-      f.fail("tagged template")
       walk_expr(e.a, sc)
       walk_exprs(e.b.a, sc)
     elsif k == :spread
-      f.fail("spread")
       walk_expr(e.a, sc)
     elsif k == :yield || k == :await
       walk_expr(e.a, sc) if e.a != nil
     elsif k == :regex
-      f.fail("regex")
+      nil
     elsif k == :meta_property
-      f.fail(e.str)
       if e.str == "new.target"
         e.x = JaRef.new(nil, sc)
         note_special(sc, :nt)
@@ -705,7 +692,6 @@ use frontend/parser
     while i < list.size
       a = list[i]
       if a.kind == :spread
-        sc.func.fail("spread")
         walk_expr(a.a, sc)
       else
         walk_expr(a, sc)
@@ -775,7 +761,6 @@ use frontend/parser
         while q < names.size
           fs.declare(self, names[q], :param)
           q += 1
-        jf.fail("parameter " + p.kind.to_s)
       i += 1
     jf.nparams = nlen < 0 ? n.list.size : nlen
     if !jf.arrow && (n.has?(F_USES_ARGS) || n.has?(F_HAS_EVAL))
@@ -784,7 +769,7 @@ use frontend/parser
         jf.args_binding = fs.declare(self, "arguments", :arguments)
         jf.args_binding.writes = 1
         jf.mapped_args = !jf.strict && jf.simple
-      jf.fail(jf.mapped_args ? "mapped arguments" : "arguments")
+      jf.fail("mapped arguments") if jf.mapped_args
     if n.has?(F_HAS_EVAL)
       jf.dynamic = true
     # defaults and patterns are evaluated in the parameter scope
@@ -883,8 +868,6 @@ use frontend/parser
     b
 
   -> note_read(b, sc, pos, callee)
-    if b.kind == :self && (!callee || sc.func != b.scope.func)
-      sc.func.fail("named function expression used as a value")
     b.reads += 1
     if callee
       b.callee_uses += 1
@@ -1047,8 +1030,11 @@ use frontend/parser
           f.fclass = :call_only
         else
           f.fclass = :escaping
-      if f.self_binding != nil && f.self_binding.value_uses > 0
-        f.fclass = :escaping if f.fclass == :call_only
+      # a named function expression that reads its own name as a value (or from a nested
+      # function) needs its object, even as an IIFE
+      sb = f.self_binding
+      if sb != nil && (sb.value_uses > 0 || sb.captured)
+        f.fclass = :escaping if f.fclass == :call_only || f.fclass == :iife
       # one captured binding that never changes after its initializer: stored by value
       if f.free.size == 1 && !inner_captures?(f)
         fb = f.free.values[0]
@@ -1125,7 +1111,8 @@ use frontend/parser
   -> single_ok?(b)
     return false if b.kind == :param && b.scope.func.mapped_args
     return true if b.kind == :param && b.writes == 0
-    return true if b.kind == :this
+    # a derived constructor's this changes when super() returns
+    return !b.scope.func.derived if b.kind == :this
     if b.kind == :const || b.kind == :let || b.kind == :var
       return b.writes == 1 && !b.early_read && b.kind != :var
     false

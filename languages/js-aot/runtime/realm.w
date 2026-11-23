@@ -8,9 +8,10 @@
 in JS
 
 + Realm
-  rw :global, :intrinsics, :jobs, :host, :symbol_registry, :template_cache, :modules, :object_proto, :function_proto, :array_proto, :string_proto, :number_proto, :boolean_proto, :error_proto, :symbol_proto, :fn_shape, :native_shape, :errors
+  rw :global, :intrinsics, :jobs, :host, :symbol_registry, :template_cache, :modules, :object_proto, :function_proto, :array_proto, :string_proto, :number_proto, :boolean_proto, :error_proto, :symbol_proto, :fn_shape, :native_shape, :errors, :kind_shapes
 
   -> new
+    @kind_shapes = {}
     @global = nil
     @intrinsics = {}
     @jobs = []
@@ -284,6 +285,35 @@ fn jsr_is_notplain(b) (i64) i64
   -> enumerable?(key)
     c = @cells[key]
     c != nil && (c.attrs & ATTR_E) != 0
+
+  -> attr(key)
+    c = @cells[key]
+    c == nil ? ATTR_DEFAULT : c.attrs
+
+  -> get_own_property(key)
+    c = @cells[key]
+    return nil if c == nil || c.value == JS_HOLE
+    a = c.attrs
+    v = c.value
+    d = JS:PropDesc.new
+    if (a & ATTR_ACCESSOR) != 0
+      d.getter = v.getter
+      d.setter = v.setter
+      d.has_get = true
+      d.has_set = true
+    else
+      d.value = v
+      d.has_value = true
+      d.writable = (a & ATTR_W) != 0
+    d.enumerable = (a & ATTR_E) != 0
+    d.configurable = (a & ATTR_C) != 0
+    d
+
+  -> define_accessor(key, g, st, flags = ATTR_E + ATTR_C)
+    c = cell(key)
+    @order.push(key) if c.value == JS_HOLE
+    c.put(JS:Accessor.new(g, st), (flags & (ATTR_E + ATTR_C)) | ATTR_ACCESSOR)
+    nil
 
 # The cell of a global name (created absent).
 -> js_gcell(name)

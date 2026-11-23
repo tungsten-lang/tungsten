@@ -33,10 +33,12 @@ JS_NAN_KEY = JS:NanKey.new
 # always Floats, so no number collides with it).
 -> js_map_key(k)
   if js_number?(k)
-    return JS_NAN_KEY if k != k
-    return ~0.0 if k == ~0.0
-    return k
-  return (wvalue_bits(k) ## i64) & 140737488355312 if js_array?(k)
+    if k != k
+      k = JS_NAN_KEY
+    elsif k == ~0.0
+      k = ~0.0
+  elsif js_array?(k)
+    k = (wvalue_bits(k) ## i64) & 140737488355312
   k
 
 -> js_map_find(d, k)
@@ -110,7 +112,7 @@ JS_NAN_KEY = JS:NanKey.new
   m
 
 -> js_this_map(v, cls)
-  js_throw_type("Method " + cls + ".prototype method called on incompatible receiver " + js_to_display(v)) if !(js_special?(v, cls) && v.internal.is_a?(JS:MapData))
+  js_throw_type("Method " + cls + ".prototype method called on incompatible receiver " + js_err_display(v)) if !(js_special?(v, cls) && v.internal.is_a?(JS:MapData))
   v.internal
 
 -> js_coll_ctor(cls, args, nt, adder_name, pairs)
@@ -120,7 +122,7 @@ JS_NAN_KEY = JS:NanKey.new
   it = js_arg(args, 0)
   return m if js_nullish?(it)
   adder = m.get(adder_name, m)
-  js_throw_type("'" + js_to_display(adder) + "' returned for property '" + adder_name + "' of object '#<" + cls + ">' is not callable") if !js_callable?(adder)
+  js_throw_type("'" + js_err_display(adder) + "' returned for property '" + adder_name + "' of object '#<" + cls + ">' is not callable") if !js_callable?(adder)
   native_add = adder == r.intrinsic("%" + cls + "_" + adder_name + "%")
   if js_array?(it) && js_array_iter_pristine?(it)
     i = 0
@@ -141,7 +143,7 @@ JS_NAN_KEY = JS:NanKey.new
 
 -> js_coll_add_item(m, adder, native_add, e, pairs, cls)
   if pairs
-    js_throw_type("Iterator value " + js_to_display(e) + " is not an entry object") if !js_object?(e)
+    js_throw_type("Iterator value " + js_err_display(e) + " is not an entry object") if !js_object?(e)
     k = jget(e, "0")
     v = jget(e, "1")
     if native_add
@@ -183,7 +185,7 @@ JS_NAN_KEY = JS:NanKey.new
   it
 
 -> js_map_iter_next(this, cls)
-  js_throw_type("next method called on incompatible receiver " + js_to_display(this)) if !(js_special?(this, cls) && this.internal.is_a?(JS:MapIterState))
+  js_throw_type("next method called on incompatible receiver " + js_err_display(this)) if !(js_special?(this, cls) && this.internal.is_a?(JS:MapIterState))
   it = this.internal
   return js_iter_result(nil, true) if it.done
   d = it.map.internal
@@ -207,7 +209,7 @@ JS_NAN_KEY = JS:NanKey.new
 
 -> js_coll_for_each(m, cls, f, t)
   d = js_this_map(m, cls)
-  js_throw_type(js_to_display(f) + " is not a function") if !js_callable?(f)
+  js_throw_type(js_err_display(f) + " is not a function") if !js_callable?(f)
   e = d.head
   while e != nil
     if !e.dead
@@ -219,7 +221,7 @@ JS_NAN_KEY = JS:NanKey.new
     e = nx
   nil
 
-# GetSetRecord (§24.2.1.2)
+# GetSetRecord (§24.2.1.2): [size, has, keys].
 -> js_set_record(other)
   js_throw_type("other is not an object") if !js_object?(other)
   rs = jget(other, "size")
@@ -233,76 +235,134 @@ JS_NAN_KEY = JS:NanKey.new
   js_throw_type("other.keys is not a function") if !js_callable?(keys)
   [sz, has, keys]
 
+# GetIteratorFromMethod on the record's keys.
+-> js_set_keys_iter(other, keys)
+  it = js_call_arr(keys, other, JS_NO_ARGS)
+  js_throw_type("keys() result is not an object") if !js_object?(it)
+  nx = jget(it, "next")
+  js_throw_type("keys() iterator's next is not a function") if !js_callable?(nx)
+  JS:IterRecord.new(it, nx)
+
+# The next live entry of a set's list after e (nil: start), skipping deleted ones.
+-> js_set_next_live(d, e)
+  x = e == nil ? d.head : e.next
+  while x != nil && x.dead
+    x = x.next
+  x
+
+-> js_set_copy_data(d)
+  out = JS:MapData.new
+  e = d.head
+  while e != nil
+    js_map_put(out, e.key, e.key) if !e.dead
+    e = e.next
+  out
+
+# (-0 becomes +0. No early `return ~0.0`: a Float literal on an early return types the
+# whole function as Float in compiled code.)
+-> js_set_canon(k)
+  k = ~0.0 if js_number?(k) && k == ~0.0
+  k
+
+# The Set methods of ES2025 (§24.2.4): union, intersection, difference,
+# symmetricDifference, isSubsetOf, isSupersetOf, isDisjointFrom.
 -> js_set_op(this, other, op)
   d = js_this_map(this, "Set")
   rec = js_set_record(other)
+  osize = rec[0]
   has = rec[1]
   keys = rec[2]
-  mine = []
-  e = d.head
-  while e != nil
-    mine.push(e.key) if !e.dead
-    e = e.next
-  out = js_set_new_empty()
-  od = out.internal
-  i = 0
+  this_size = d.size + ~0.0
   if op == :union
-    theirs = js_to_list_iter(js_call_arr(keys, other, JS_NO_ARGS))
-    while i < mine.size
-      js_map_put(od, mine[i], mine[i])
-      i += 1
-    i = 0
-    while i < theirs.size
-      js_map_put(od, theirs[i], theirs[i])
-      i += 1
-  elsif op == :intersection
-    while i < mine.size
-      js_map_put(od, mine[i], mine[i]) if js_truthy(js_call_arr(has, other, [mine[i]]))
-      i += 1
-  elsif op == :difference
-    while i < mine.size
-      js_map_put(od, mine[i], mine[i]) if !js_truthy(js_call_arr(has, other, [mine[i]]))
-      i += 1
-  elsif op == :symmetric
-    theirs = js_to_list_iter(js_call_arr(keys, other, JS_NO_ARGS))
-    while i < mine.size
-      js_map_put(od, mine[i], mine[i])
-      i += 1
-    i = 0
-    while i < theirs.size
-      k = theirs[i]
+    out = js_set_copy_data(d)
+    it = js_set_keys_iter(other, keys)
+    while true
+      k = js_iter_step(it)
+      break if k == JS_ITER_DONE
+      k = js_set_canon(k)
+      js_map_put(out, k, k)
+    return js_set_from_data(out)
+  if op == :intersection
+    out = JS:MapData.new
+    if this_size <= osize
+      e = js_set_next_live(d, nil)
+      while e != nil
+        k = e.key
+        if js_truthy(js_call_arr(has, other, [k]))
+          js_map_put(out, k, k) if js_map_find(out, k) == nil
+        e = js_set_next_live(d, e)
+    else
+      it = js_set_keys_iter(other, keys)
+      while true
+        k = js_iter_step(it)
+        break if k == JS_ITER_DONE
+        k = js_set_canon(k)
+        js_map_put(out, k, k) if js_map_find(d, k) != nil && js_map_find(out, k) == nil
+    return js_set_from_data(out)
+  if op == :difference
+    out = js_set_copy_data(d)
+    if this_size <= osize
+      e = js_set_next_live(d, nil)
+      while e != nil
+        k = e.key
+        js_map_remove(out, k) if js_truthy(js_call_arr(has, other, [k]))
+        e = js_set_next_live(d, e)
+    else
+      it = js_set_keys_iter(other, keys)
+      while true
+        k = js_iter_step(it)
+        break if k == JS_ITER_DONE
+        js_map_remove(out, js_set_canon(k))
+    return js_set_from_data(out)
+  if op == :symmetric
+    it = js_set_keys_iter(other, keys)
+    out = js_set_copy_data(d)
+    while true
+      k = js_iter_step(it)
+      break if k == JS_ITER_DONE
+      k = js_set_canon(k)
       if js_map_find(d, k) != nil
-        js_map_remove(od, k)
-      else
-        js_map_put(od, k, k)
-      i += 1
-  elsif op == :subset
-    while i < mine.size
-      return false if !js_truthy(js_call_arr(has, other, [mine[i]]))
-      i += 1
+        js_map_remove(out, k)
+      elsif js_map_find(out, k) == nil
+        js_map_put(out, k, k)
+    return js_set_from_data(out)
+  if op == :subset
+    return false if this_size > osize
+    e = js_set_next_live(d, nil)
+    while e != nil
+      return false if !js_truthy(js_call_arr(has, other, [e.key]))
+      e = js_set_next_live(d, e)
     return true
-  elsif op == :superset
-    theirs = js_to_list_iter(js_call_arr(keys, other, JS_NO_ARGS))
-    while i < theirs.size
-      return false if js_map_find(d, theirs[i]) == nil
-      i += 1
+  if op == :superset
+    return false if this_size < osize
+    it = js_set_keys_iter(other, keys)
+    while true
+      k = js_iter_step(it)
+      break if k == JS_ITER_DONE
+      if js_map_find(d, k) == nil
+        js_iter_close(it)
+        return false
     return true
-  elsif op == :disjoint
-    while i < mine.size
-      return false if js_truthy(js_call_arr(has, other, [mine[i]]))
-      i += 1
-    return true
-  out
+  # :disjoint
+  if this_size <= osize
+    e = js_set_next_live(d, nil)
+    while e != nil
+      return false if js_truthy(js_call_arr(has, other, [e.key]))
+      e = js_set_next_live(d, e)
+  else
+    it = js_set_keys_iter(other, keys)
+    while true
+      k = js_iter_step(it)
+      break if k == JS_ITER_DONE
+      if js_map_find(d, k) != nil
+        js_iter_close(it)
+        return false
+  true
 
--> js_to_list_iter(it)
-  js_throw_type("keys() result is not an object") if !js_object?(it)
-  out = []
-  rec = JS:IterRecord.new(it, jget(it, "next"))
-  while true
-    x = js_iter_step(rec)
-    break if x == JS_ITER_DONE
-    out.push(x)
-  out
+-> js_set_from_data(data)
+  s = js_set_new_empty()
+  s.internal = data
+  s
 
 -> js_set_new_empty
   js_coll_new(js_realm().intrinsic("Set.prototype"), "Set")
@@ -440,5 +500,5 @@ js_install(->(r) js_install_collections(r))
 
 -> js_fin_reg_unregister(this, token)
   js_fin_reg_this(this)
-  js_throw_type("Invalid unregisterToken ('" + js_to_display(token) + "')") if !js_can_be_held_weakly?(token)
+  js_throw_type("Invalid unregisterToken ('" + js_err_display(token) + "')") if !js_can_be_held_weakly?(token)
   false

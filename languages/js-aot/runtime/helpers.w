@@ -54,13 +54,17 @@ TWO32 = ~4294967296.0
     nil
 JS_ITER_DONE = JS:IterDone.new
 
+# IteratorStepValue: an abrupt completion anywhere in the step leaves the record done (so
+# callers do not close an iterator that just threw), which holding done = true until the
+# value is in hand gives without a rescue.
 -> js_iter_step(rec)
+  rec.done = true
   r = js_call_arr(rec.next_fn, rec.iterator, JS_NO_ARGS)
   js_throw_type("Iterator result is not an object") if !js_object?(r)
-  if js_truthy(jget(r, "done"))
-    rec.done = true
-    return JS_ITER_DONE
-  jget(r, "value")
+  return JS_ITER_DONE if js_truthy(jget(r, "done"))
+  v = jget(r, "value")
+  rec.done = false
+  v
 
 -> js_iter_close(rec)
   return nil if rec.done
@@ -242,6 +246,14 @@ BF_INLINE = 3
 
 # ---- conversions ----
 
+# A value for an error message, without running script or reading properties (an
+# object's keys and getters are observable through proxies).
+-> js_err_display(v)
+  return js_to_display(v) if !js_object?(v)
+  return "\[object Array]" if js_array?(v)
+  return "function" if js_callable?(v)
+  "#<Object>"
+
 -> js_to_boolean(v)
   js_truthy(v)
 
@@ -274,7 +286,7 @@ BF_INLINE = 3
 # ToIntegerOrInfinity
 -> js_to_integer(v)
   n = js_to_number(v)
-  return ~0.0 if n != n
+  return ~0.0 if n != n || n == ~0.0
   return n if n == INF || n == NEG_INF
   n < ~0.0 ? ~0.0 - Math.floor(~0.0 - n) : Math.floor(n)
 
@@ -398,11 +410,13 @@ JS_UNITS_CACHE = [nil, nil, nil, nil]
 # surrogate at the start of b join into one code point (4-byte UTF-8), so the result is
 # the same string as the one literals and fromCharCode produce.
 -> js_str_cat(a, b)
+  # b is tested first: it is usually the short side, and a may be a rope
+  return a + b if b.size < 3 || b.byte_at(0) != 237 || b.byte_at(1) < 176 || b.byte_at(1) > 191
   na = a.size
-  if na >= 3 && b.size >= 3 && a.byte_at(na - 3) == 237 && b.byte_at(0) == 237
+  if na >= 3 && a.byte_at(na - 3) == 237
     h2 = a.byte_at(na - 2)
     l2 = b.byte_at(1)
-    if h2 >= 160 && h2 <= 175 && l2 >= 176 && l2 <= 191
+    if h2 >= 160 && h2 <= 175
       hi = 55296 + ((h2 & 15) << 6) + (a.byte_at(na - 1) & 63)
       lo = 56320 + ((l2 & 15) << 6) + (b.byte_at(2) & 63)
       cp = 65536 + ((hi - 55296) << 10) + (lo - 56320)
@@ -444,6 +458,21 @@ JS_UNITS_CACHE = [nil, nil, nil, nil]
 
 # ---- objects ----
 
+# [[Set]] continuing at a JS array on an object's prototype chain (OrdinarySet from the
+# array, with the original receiver r).
+-> js_array_proto_set(a, key, v, r)
+  d = js_array_get_own_property(a, key)
+  if d == nil
+    p = js_array_proto(a)
+    return js_set_on_receiver(r, key, v) if p == nil
+    return p.set(key, v, r)
+  if d.accessor?
+    return false if d.setter == nil
+    js_call_arr(d.setter, r, [v])
+    return true
+  return false if d.writable == false
+  js_set_on_receiver(r, key, v)
+
 # Identity (for JS arrays too, which core == compares by contents).
 -> js_ident?(a, b)
   (wvalue_bits(a) ## i64) == (wvalue_bits(b) ## i64)
@@ -470,7 +499,3 @@ JS_UNITS_CACHE = [nil, nil, nil, nil]
   m = jget(v, SYM_MATCH)
   return js_truthy(m) if m != nil
   js_special?(v, "RegExp")
-
-# A regex literal /pattern/flags (stand-in until runtime/regexp.w lands).
--> js_regexp_create(pattern, flags)
-  js_throw_syntax("RegExp is not available yet: /" + pattern + "/" + flags)

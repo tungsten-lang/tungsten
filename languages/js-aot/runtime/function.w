@@ -23,6 +23,7 @@ CODE_CLASS = 16        # class constructor (throws when called without new)
 CODE_DERIVED = 32      # derived class constructor (`this` comes from super())
 CODE_GEN = 64          # generator function
 CODE_ASYNC = 128       # async function
+CODE_NONT = 256        # compiled code that never reads new.target (js_new leaves it unset)
 
 + Code
   rw :name, :nparams, :index, :flags, :url, :start, :fin, :node
@@ -154,7 +155,8 @@ FNV_CTOR = 16          # (natives) callable with new
     jsr_set_kind(wvalue_bits(self) ## i64, KIND_FUNCTION)
 
 -> js_method_closure(code, env, home)
-  m = JS:Method.new(js_realm().fn_shape, code, env)
+  fl = code.flags
+  m = JS:Method.new((fl & 192) == 0 ? js_realm().fn_shape : js_fn_kind_shape(fl), code, env)
   m.home = home
   m
 
@@ -237,7 +239,23 @@ NF_INLINE = 2
 
 # A new closure over env for code.
 -> js_closure(code, env)
-  JS:Function.new(js_realm().fn_shape, code, env)
+  fl = code.flags
+  return JS:Function.new(js_realm().fn_shape, code, env) if (fl & 192) == 0
+  JS:Function.new(js_fn_kind_shape(fl), code, env)
+
+# The root shape of generator, async and async generator functions: their [[Prototype]]
+# is %GeneratorFunction.prototype% and so on.
+-> js_fn_kind_shape(fl)
+  r = js_realm()
+  k = fl & 192
+  sh = r.kind_shapes[k]
+  if sh == nil
+    nm = (fl & CODE_GEN) != 0 ? ((fl & CODE_ASYNC) != 0 ? "%AsyncGeneratorFunction.prototype%" : "%GeneratorFunction.prototype%") : "%AsyncFunction.prototype%"
+    p = r.intrinsics[nm]
+    return r.fn_shape if p == nil
+    sh = js_root_shape(p, FN_INLINE, FN_IBASE)
+    r.kind_shapes[k] = sh
+  sh
 
 -> js_native(name, len, fn)
   JS:NativeFunction.new(js_realm().native_shape, fn, name, len)
@@ -270,6 +288,8 @@ JS_NO_ARGS = []
     return f.fn.call(this, js_args_array(argc, a0, a1, a2, a3, more), nil)
   if k == KIND_BOUND
     return js_call_arr(f.target, f.bthis, f.args + js_args_array(argc, a0, a1, a2, a3, more))
+  if k == KIND_EXOTIC && f.callable?
+    return f.call_obj(this, js_args_array(argc, a0, a1, a2, a3, more).dup)
   js_throw_type(js_to_display_short(f) + " is not a function")
 
 -> js_to_display_short(v)
@@ -322,6 +342,9 @@ JS_NEW_TARGET = [nil]
         JS_IC[k + 4] = pb
         JS_IC[k + 5] = wvalue_bits(sh) ## i64
     obj = (f.code.flags & CODE_DERIVED) != 0 ? nil : JS:Object.new(sh)
+    if (f.code.flags & CODE_NONT) != 0
+      r = js_dispatch(f.code.index, f, obj, argc, a0, a1, a2, a3, more)
+      return js_object?(r) ? r : obj
     saved = JS_NEW_TARGET[0]
     JS_NEW_TARGET[0] = f
     r = js_dispatch(f.code.index, f, obj, argc, a0, a1, a2, a3, more)
@@ -329,7 +352,7 @@ JS_NEW_TARGET = [nil]
     return js_object?(r) ? r : obj
   if kind == KIND_NATIVE && f.ctor?
     return f.fn.call(nil, js_args_array(argc, a0, a1, a2, a3, more), f)
-  if kind == KIND_BOUND
+  if kind == KIND_BOUND || (kind == KIND_EXOTIC && f.constructor?)
     return js_construct(f, js_args_array(argc, a0, a1, a2, a3, more).dup, f)
   js_throw_type(js_to_display_short(f) + " is not a constructor")
 
@@ -372,6 +395,9 @@ fn jsr_code_is(fb, cb) (i64 i64) i64
     if (f.code.flags & CODE_DERIVED) == 0
       proto = jget(nt, "prototype")
       obj = js_new_object(js_object?(proto) ? proto : js_realm().object_proto)
+    if (f.code.flags & CODE_NONT) != 0
+      r = js_dispatch(f.code.index, f, obj, n, a0, a1, a2, a3, more)
+      return js_object?(r) ? r : obj
     saved = JS_NEW_TARGET[0]
     JS_NEW_TARGET[0] = nt
     r = js_dispatch(f.code.index, f, obj, n, a0, a1, a2, a3, more)

@@ -107,23 +107,29 @@ JS_DIGITS36 = "0123456789abcdefghijklmnopqrstuvwxyz"
     m = m * ~2.0
     e += 1
   mi = js_float_to_bigint(m) ## int
-  # value = mi / 2^e ; want round(value * 10^f)
-  num = mi * ((10 ## int) ** f)
-  den = 2 ** e
+  # value = mi / 2^e ; want round(value * 10^f) (f may be negative)
+  num = mi
+  den = (2 ## int) ** e
+  if f >= 0
+    num = mi * ((10 ## int) ** f)
+  else
+    den = den * ((10 ## int) ** (0 - f))
   q = num / den
   rem = num - q * den
   q += 1 if rem * 2 >= den
   q
 
 -> js_float_to_bigint(x)
-  return x.to_i if x < ~9.0e15
-  # x is an integer-valued double; peel off 2^k factors exactly
+  # x is a non-negative integer-valued double; above 2^53 halving is exact
   k = 0
   t = x
-  while t >= ~9.0e15
+  while t >= ~9007199254740992.0
     t = t / ~2.0
     k += 1
-  (Math.floor(t).to_i ## int) * (2 ** k)
+  # below 2^53 the two 32-bit halves convert exactly
+  hi = Math.floor(t / ~4294967296.0)
+  lo = t - hi * ~4294967296.0
+  ((hi.to_i ## int) * (4294967296 ## int) + (lo.to_i ## int)) * ((2 ## int) ** k)
 
 -> js_num_to_fixed(this, fd)
   x = js_this_num(this, "toFixed")
@@ -173,17 +179,17 @@ JS_DIGITS36 = "0123456789abcdefghijklmnopqrstuvwxyz"
 # p significant digits of a (> 0) whose decimal exponent is about e: [digit string, exponent].
 -> js_round_sig(a, p, e)
   fdig = p - 1 - e
-  n = fdig >= 0 ? js_decimal_digits_of(a, fdig) : js_decimal_digits_of(a / (~10.0 ** (0 - fdig)), 0)
+  n = js_decimal_digits_of(a, fdig)
   s = n.to_s
   if s.size > p
     e += 1
     fdig = p - 1 - e
-    n = fdig >= 0 ? js_decimal_digits_of(a, fdig) : js_decimal_digits_of(a / (~10.0 ** (0 - fdig)), 0)
+    n = js_decimal_digits_of(a, fdig)
     s = n.to_s
   if s.size < p
     e -= 1
     fdig = p - 1 - e
-    n = fdig >= 0 ? js_decimal_digits_of(a, fdig) : js_decimal_digits_of(a / (~10.0 ** (0 - fdig)), 0)
+    n = js_decimal_digits_of(a, fdig)
     s = n.to_s
   [s, e]
 
@@ -195,6 +201,7 @@ JS_DIGITS36 = "0123456789abcdefghijklmnopqrstuvwxyz"
   neg = x < ~0.0
   a = neg ? ~0.0 - x : x
   if fv == nil
+    return (neg ? "-" : "") + "0e+0" if a == ~0.0
     s = js_number_to_s(a)
     # shortest digits, exponent form
     e = a == ~0.0 ? 0 : Math.floor(Math.log10(a)).to_i
@@ -293,13 +300,15 @@ JS_RNG = [0, 0]
 -> js_math_round(x)
   return x if x != x || x == INF || x == NEG_INF
   return x if x == Math.floor(x)
-  f = Math.floor(x + ~0.5)
+  f = Math.floor(x)
+  # (x + 0.5 would round up for the largest double below 0.5)
+  f = f + ~1.0 if x - f >= ~0.5
   return ~-0.0 if f == ~0.0 && x < ~0.0
   f
 
 -> js_math_trunc(x)
   return x if x != x || x == INF || x == NEG_INF
-  x < ~0.0 ? (~0.0 - Math.floor(~0.0 - x)) : Math.floor(x)
+  x < ~0.0 ? Math.ceil(x) : Math.floor(x)
 
 -> js_math_sign(x)
   return x if x != x || x == ~0.0
@@ -396,7 +405,7 @@ JS_RNG = [0, 0]
   when "log1p"
     x < ~-1.0 ? js_nan() : (x == ~0.0 ? x : Math.log1p(x))
   when "log10"
-    x < ~0.0 ? js_nan() : Math.log10(x)
+    x < ~0.0 ? js_nan() : js_log10(x)
   when "log2"
     x < ~0.0 ? js_nan() : Math.log2(x)
   when "round"
@@ -417,6 +426,14 @@ JS_RNG = [0, 0]
     js_math_trunc(x)
   else
     js_nan()
+
+# log10, exact at powers of ten.
+-> js_log10(x)
+  r = Math.log10(x)
+  return r if r != r || r == INF || r == NEG_INF
+  k = Math.round(r)
+  return k if (k - r).abs < ~1.0e-9 && (~10.0 ** k) == x
+  r
 
 -> js_ceil(x)
   c = Math.ceil(x)
@@ -441,7 +458,7 @@ JS_RNG = [0, 0]
     v2 = js_string_to_bigint(p)
     js_throw_syntax("Cannot convert " + p + " to a BigInt") if v2 == nil
     return JS:BigIntValue.new(v2)
-  js_throw_type("Cannot convert " + js_to_display(p) + " to a BigInt")
+  js_throw_type("Cannot convert " + js_err_display(p) + " to a BigInt")
 
 -> js_this_bigint(v)
   return v if v.is_a?(JS:BigIntValue)

@@ -209,11 +209,25 @@ JS_NULL_ROOTS = {}
 
 JS_ROOT_KEEP = []
 
+# Some prototype has (or may have) an index-keyed property: array writes to holes and
+# past the end then look up the prototype chain for setters and read-only elements
+# (V8 calls the fast case's guard the no-elements protector).
+JS_PROTO_INDEX = [false]
+
 -> js_mark_proto(o)
   ob = wvalue_bits(o) ## i64
   k = jsr_kind(ob)
   if k != 0 && (k & KIND_PROTO) == 0
     jsr_set_kind(ob, k | KIND_PROTO)
+    if !JS_PROTO_INDEX[0]
+      if (k & 15) == KIND_EXOTIC
+        JS_PROTO_INDEX[0] = true
+      else
+        ks = o.own_keys
+        i = 0
+        while i < ks.size
+          JS_PROTO_INDEX[0] = true if ks[i].is_a?(String) && js_array_index?(ks[i])
+          i += 1
   nil
 
 -> js_is_proto?(o)
@@ -272,6 +286,10 @@ JS_ROOT_KEEP = []
   -> proxy?
     false
 
+  # [[Construct]] exists (exotic objects that are constructors override this).
+  -> constructor?
+    false
+
   # Properties some classes compute until written (a function's name, length, prototype).
   -> get_virtual(key)
     JS_HOLE
@@ -315,7 +333,9 @@ JS_ROOT_KEEP = []
     r = receiver == nil ? self : receiver
     o = self
     while o != nil
-      return o.get(key, r) if o != self && js_exotic_bits?(wvalue_bits(o) ## i64)
+      if o != self
+        return o.get(key, r) if js_exotic_bits?(wvalue_bits(o) ## i64)
+        return js_array_get(o, key) if js_array?(o)
       s = o.shape
       i = s.slot_of(key)
       if i >= 0
@@ -335,7 +355,9 @@ JS_ROOT_KEEP = []
     r = receiver == nil ? self : receiver
     o = self
     while o != nil
-      return o.set(key, v, r) if o != self && js_exotic_bits?(wvalue_bits(o) ## i64)
+      if o != self
+        return o.set(key, v, r) if js_exotic_bits?(wvalue_bits(o) ## i64)
+        return js_array_proto_set(o, key, v, r) if js_array?(o)
       s = o.shape
       i = s.slot_of(key)
       if i >= 0
@@ -396,7 +418,9 @@ JS_ROOT_KEEP = []
 
   -> add_property(key, v, attrs)
     s = @shape
-    js_bump_epoch() if js_is_proto?(self)
+    if js_is_proto?(self)
+      js_bump_epoch()
+      JS_PROTO_INDEX[0] = true if key.is_a?(String) && js_array_index?(key)
     if s.dict
       i = s.count
       s.index[key] = i
@@ -476,7 +500,9 @@ JS_ROOT_KEEP = []
     if i < 0
       v = get_virtual(key)
       return nil if v == JS_HOLE
-      return JS:PropDesc.data(v, ATTR_C)
+      # get_virtual may have made it a real property (a function's prototype)
+      i = @shape.slot_of(key)
+      return JS:PropDesc.data(v, ATTR_C) if i < 0
     a = @shape.attrs_of(key)
     d = JS:PropDesc.new
     if (a & ATTR_ACCESSOR) != 0
@@ -532,7 +558,9 @@ JS_ROOT_KEEP = []
   -> has_property?(key)
     o = self
     while o != nil
-      return o.has_property?(key) if o != self && js_exotic_bits?(wvalue_bits(o) ## i64)
+      if o != self
+        return o.has_property?(key) if js_exotic_bits?(wvalue_bits(o) ## i64)
+        return jhas_property?(o, key) if js_array?(o)
       return true if o.has_own?(key)
       o = o.proto
     false
@@ -554,7 +582,7 @@ JS_ROOT_KEEP = []
     q = p
     while q != nil
       return false if q == self
-      break if js_exotic_bits?(wvalue_bits(q) ## i64)
+      break if js_exotic_bits?(wvalue_bits(q) ## i64) || js_array?(q)
       q = q.proto
     js_bump_epoch() if js_is_proto?(self)
     @shape = @shape.with_proto(p)

@@ -200,8 +200,8 @@ JS_UNHANDLED = []
 # NewPromiseCapability(C)
 -> js_new_capability_from(c)
   r = js_realm()
-  return js_new_capability() if c == r.intrinsic("Promise") || c == nil
-  js_throw_type("Promise resolve or reject function is not callable") if !js_is_constructor?(c)
+  return js_new_capability() if c == r.intrinsic("Promise")
+  js_throw_type(js_to_display_short(c) + " is not a constructor") if !js_is_constructor?(c)
   slots = [nil, nil]
   ex = r.native("", 2, ->(this, args, nt) js_capability_executor(slots, args))
   p = js_construct(c, [ex], nil)
@@ -217,7 +217,7 @@ JS_UNHANDLED = []
 -> js_promise_ctor(args, nt)
   js_throw_type("Promise constructor cannot be invoked without 'new'") if nt == nil
   ex = js_arg(args, 0)
-  js_throw_type("Promise resolver " + js_to_display(ex) + " is not a function") if !js_callable?(ex)
+  js_throw_type("Promise resolver " + js_err_display(ex) + " is not a function") if !js_callable?(ex)
   p = js_promise_alloc(js_realm().proto_from(nt, "Promise"))
   fns = js_resolving_functions(p)
   begin
@@ -227,7 +227,7 @@ JS_UNHANDLED = []
   p
 
 -> js_promise_then(p, on_f, on_r)
-  js_throw_type("Method Promise.prototype.then called on incompatible receiver " + js_to_display(p)) if !js_promise?(p)
+  js_throw_type("Method Promise.prototype.then called on incompatible receiver " + js_err_display(p)) if !js_promise?(p)
   c = js_species_ctor(p, js_realm().intrinsic("Promise"))
   cap = js_new_capability_from(c)
   f = js_callable?(on_f) ? on_f : nil
@@ -303,7 +303,6 @@ JS_UNHANDLED = []
 -> js_promise_combinator(c, iterable, mode)
   cap = js_new_capability_from(c)
   rec = nil
-  stepping = false
   begin
     resolve_fn = js_get_value(c, "resolve")
     js_throw_type("Promise resolve is not a function") if !js_callable?(resolve_fn)
@@ -313,9 +312,7 @@ JS_UNHANDLED = []
     remaining = [1]
     i = 0
     while true
-      stepping = true
       x = js_iter_step(rec)
-      stepping = false
       break if x == JS_ITER_DONE
       values.push(nil)
       remaining[0] += 1
@@ -330,7 +327,7 @@ JS_UNHANDLED = []
         js_call_arr(cap.resolve, nil, [r.adopt_array(values)])
   rescue e
     # an error from the iterator itself leaves it alone; any other error closes it
-    js_iter_close_quiet(rec) if rec != nil && !stepping && !rec.done
+    js_iter_close_quiet(rec) if rec != nil && !rec.done
     js_call_arr(cap.reject, nil, [js_error_value(e)])
   cap.promise
 

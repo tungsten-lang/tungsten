@@ -13,7 +13,7 @@ in JS
 
 # ToPropertyDescriptor
 -> js_to_desc(v)
-  js_throw_type("Property description must be an object: " + js_to_display(v)) if !js_object?(v)
+  js_throw_type("Property description must be an object: " + js_err_display(v)) if !js_object?(v)
   d = JS:PropDesc.new
   if jhas_property?(v, "enumerable")
     d.enumerable = js_to_boolean(jget(v, "enumerable"))
@@ -26,12 +26,12 @@ in JS
     d.writable = js_to_boolean(jget(v, "writable"))
   if jhas_property?(v, "get")
     g = jget(v, "get")
-    js_throw_type("Getter must be a function: " + js_to_display(g)) if g != nil && !js_callable?(g)
+    js_throw_type("Getter must be a function: " + js_err_display(g)) if g != nil && !js_callable?(g)
     d.getter = g
     d.has_get = true
   if jhas_property?(v, "set")
     st = jget(v, "set")
-    js_throw_type("Setter must be a function: " + js_to_display(st)) if st != nil && !js_callable?(st)
+    js_throw_type("Setter must be a function: " + js_err_display(st)) if st != nil && !js_callable?(st)
     d.setter = st
     d.has_set = true
   js_throw_type("Invalid property descriptor. Cannot both specify accessors and a value or writable attribute") if (d.has_get || d.has_set) && (d.has_value || d.writable != nil)
@@ -192,14 +192,14 @@ in JS
   js_to_obj(v)
 
 -> js_object_create(p, props)
-  js_throw_type("Object prototype may only be an Object or null: " + js_to_display(p)) if !(js_object?(p) || p == JS_NULL)
+  js_throw_type("Object prototype may only be an Object or null: " + js_err_display(p)) if !(js_object?(p) || p == JS_NULL)
   o = js_new_object(p == JS_NULL ? nil : p)
   js_object_define_properties(o, props) if props != nil
   o
 
 -> js_object_set_proto(o, p)
   js_throw_type("Object.setPrototypeOf called on null or undefined") if js_nullish?(o)
-  js_throw_type("Object prototype may only be an Object or null: " + js_to_display(p)) if !(js_object?(p) || p == JS_NULL)
+  js_throw_type("Object prototype may only be an Object or null: " + js_err_display(p)) if !(js_object?(p) || p == JS_NULL)
   return o if !js_object?(o)
   js_throw_type("Cyclic __proto__ value") if !jset_prototype_of(o, p)
   o
@@ -212,7 +212,7 @@ in JS
     while true
       e = js_iter_step(rec)
       break if e == JS_ITER_DONE
-      js_throw_type("Iterator value " + js_to_display(e) + " is not an entry object") if !js_object?(e)
+      js_throw_type("Iterator value " + js_err_display(e) + " is not an entry object") if !js_object?(e)
       k = jget(e, "0")
       v = jget(e, "1")
       js_create_data(o, js_to_property_key(k), v)
@@ -224,7 +224,7 @@ in JS
 -> js_object_group_by(items, cb, as_map)
   r = js_realm()
   js_throw_type("groupBy called on null or undefined") if js_nullish?(items)
-  js_throw_type(js_to_display(cb) + " is not a function") if !js_callable?(cb)
+  js_throw_type(js_err_display(cb) + " is not a function") if !js_callable?(cb)
   groups = []
   index = {}
   list = js_to_list(items)
@@ -389,6 +389,9 @@ js_install(->(r) js_install_object(r))
   tte.define("name", "", 0)
   tte.prevent_extensions
   r.set_intrinsic("%ThrowTypeError%", tte)
+  # AddRestrictedFunctionProperties (§10.2.4)
+  fp.define_accessor("caller", tte, tte, ATTR_C)
+  fp.define_accessor("arguments", tte, tte, ATTR_C)
   # Boolean
   bp = js_new_special(op, "Boolean")
   bp.internal = false
@@ -418,6 +421,7 @@ js_install(->(r) js_install_object(r))
   ep.define("message", "", BUILTIN_ATTRS)
   r.method(ep, "toString", 0, ->(this, args, nt) js_error_to_string(this))
   r.method(ec, "captureStackTrace", 1, ->(this, args, nt) js_capture_stack(js_arg(args, 0)))
+  r.method(ec, "isError", 1, ->(this, args, nt) js_special?(js_arg(args, 0), "Error"))
   ec.define("stackTraceLimit", ~100.0, ATTR_ALL)
   kinds = ["TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError"]
   i = 0
@@ -496,7 +500,7 @@ js_install(->(r) js_install_object(r))
   JS:Symbol.new(d == nil ? nil : js_to_string(d))
 
 -> js_symbol_key_for(r, s)
-  js_throw_type(js_to_display(s) + " is not a symbol") if !s.is_a?(JS:Symbol)
+  js_throw_type(js_err_display(s) + " is not a symbol") if !s.is_a?(JS:Symbol)
   ks = r.symbol_registry.keys
   i = 0
   while i < ks.size
@@ -511,7 +515,7 @@ js_install(->(r) js_install_object(r))
     return js_instance_of(v, c.target)
   return false if !js_object?(v)
   p = jget(c, "prototype")
-  js_throw_type("Function has non-object prototype '" + js_to_display(p) + "' in instanceof check") if !js_object?(p)
+  js_throw_type("Function has non-object prototype '" + js_err_display(p) + "' in instanceof check") if !js_object?(p)
   o = jget_prototype_of(v)
   while o != JS_NULL && o != nil
     return true if o == p

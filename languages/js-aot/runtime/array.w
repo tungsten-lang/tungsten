@@ -92,6 +92,7 @@ JS_AEXT_KEEP = {}
 
 -> js_proto_get(p, key, receiver)
   return nil if p == nil
+  return js_array_get(p, key) if js_array?(p)
   p.get(key, receiver)
 
 # a[key] = v. Returns true when the write took effect.
@@ -103,16 +104,21 @@ JS_AEXT_KEEP = {}
     key = js_to_property_key(key)
   if key.is_a?(String)
     if key == "length"
+      # [[Set]] on a non-writable length fails even for the same value (OrdinarySet)
+      return false if (js_array_flags(a) & JS_AF_EXT) != 0 && !js_array_length_writable?(a)
       return js_array_set_length(a, v)
     if js_array_index?(key)
       return js_array_set_index(a, key.to_i, v)
   x = js_array_ext(a, true)
   x.set(key, v, x)
 
-ARRAY_GAP = 65536
+ARRAY_GAP = 16777216
 
 -> js_array_set_index(a, i, v)
   n = a.size
+  if JS_PROTO_INDEX[0] && (i >= n || a[i] == JS_HOLE)
+    r = js_array_hole_set(a, i, v)
+    return r if r != nil
   if (js_array_flags(a) & JS_AF_EXT) != 0
     # frozen: no element is writable; not extensible (sealed too): no element is added
     return false if js_array_frozen?(a)
@@ -134,6 +140,26 @@ ARRAY_GAP = 65536
   ab = wvalue_bits(a) ## i64
   jsr_set_aflags(ab, jsr_aflags(ab) | JS_AF_HOLES)
   true
+
+# OrdinarySet's walk for an element the array lacks: an inherited setter runs, an
+# inherited read-only element refuses (false); nil when neither is found.
+-> js_array_hole_set(a, i, v)
+  k = i.to_s
+  if (js_array_flags(a) & JS_AF_EXT) != 0 && js_array_ext(a, false).has_own?(k)
+    return nil
+  p = js_array_proto(a)
+  while p != nil
+    d = jget_own_property(p, k)
+    if d != nil
+      if d.accessor?
+        return false if d.setter == nil
+        js_call_arr(d.setter, a, [v])
+        return true
+      return false if d.writable != true
+      return nil
+    return nil if !js_array?(p) && p.proxy?
+    p = jproto(p)
+  nil
 
 -> js_array_set_length(a, v)
   n = js_to_number(v)
@@ -269,13 +295,19 @@ ARRAY_GAP = 65536
 -> js_array_define_own_property(a, key, d)
   if key.is_a?(String)
     if key == "length"
-      return false if d.accessor?
+      # ArraySetLength (§10.4.2.4): the value is converted (ToUint32, then ToNumber) and
+      # checked before the attributes
+      len = -1
       if d.has_value
+        len = js_to_uint32(d.value)
         n = js_to_number(d.value)
-        len = js_to_uint32(n)
         js_throw_range("Invalid array length") if len.to_f != n
+      # length is a non-configurable, non-enumerable data property
+      return false if d.accessor? || d.configurable == true || d.enumerable == true
+      return false if d.writable == true && !js_array_length_writable?(a)
+      if len >= 0
         return false if len != a.size && !js_array_length_writable?(a)
-        js_array_set_length(a, d.value)
+        js_array_set_length(a, len.to_f)
       if d.writable == false
         js_array_ext(a, true).define(JS_AK_LENRO, true, 0)
       return true
@@ -292,5 +324,6 @@ ARRAY_GAP = 65536
 -> js_array_set_proto(a, p)
   p = nil if p == JS_NULL
   return true if p == js_array_proto(a)
+  return false if !jextensible?(a)
   js_array_ext(a, true).put_own(JS_AK_PROTO, p == nil ? JS_NULL : p)
   true

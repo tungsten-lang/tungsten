@@ -84,6 +84,7 @@ HARNESS = {}
   d.define("global", g, BUILTIN_ATTRS)
   r.method(d, "evalScript", 1, ->(this, args, nt) wk_run(js_to_string(js_arg(args, 0)), "evalScript"))
   r.method(d, "gc", 0, ->(this, args, nt) nil)
+  r.method(d, "detachArrayBuffer", 1, ->(this, args, nt) js_detach_buffer(js_arg(args, 0)))
   r.method(d, "createRealm", 0, ->(this, args, nt) js_throw_type("createRealm unsupported"))
   ag = r.new_object
   d.define("agent", ag, BUILTIN_ATTRS)
@@ -95,8 +96,10 @@ HARNESS = {}
   fm = t262_frontmatter(src)
   flags = t262_list(fm, "flags")
   feats = t262_list(fm, "features")
-  feats.each ->(f)
-    return "SKIP " + rel + " feature " + f if SKIP_FEATURES.include?(f)
+  fi = 0
+  while fi < feats.size
+    return "SKIP " + rel + " feature " + feats[fi] if SKIP_FEATURES.include?(feats[fi])
+    fi += 1
   return "SKIP " + rel + " module" if flags.include?("module")
   return "SKIP " + rel + " CanBlockIsTrue" if flags.include?("CanBlockIsTrue")
   neg = t262_negative(fm)

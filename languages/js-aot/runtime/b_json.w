@@ -72,7 +72,7 @@ in JS
         @i += 1
       fail("Exponent part is missing a number") if @i == d
     t = @s.slice(st, @i - st)
-    t.to_f + ~0.0
+    t.to_f
 
   -> j_string
     @i += 1

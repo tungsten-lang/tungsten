@@ -166,7 +166,7 @@ in JS
 -> js_str_split(this, sep, limit)
   js_throw_type("String.prototype.split called on null or undefined") if js_nullish?(this)
   r = js_realm()
-  if !js_nullish?(sep) && !js_string?(sep)
+  if js_object?(sep)
     sp = js_get_method(sep, SYM_SPLIT)
     return js_call_arr(sp, sep, [this, limit]) if sp != nil
   s = js_this_str(this, "split")
@@ -250,6 +250,10 @@ in JS
       else
         sb.append("$")
         i += 1
+    elsif c == 36
+      # a lone "$" at the end
+      sb.append("$")
+      i += 1
     else
       j = repl.index("$", i)
       j = n if j == nil
@@ -259,7 +263,7 @@ in JS
 
 -> js_str_replace(this, pat, repl, all)
   js_throw_type("String.prototype.replace called on null or undefined") if js_nullish?(this)
-  if !js_nullish?(pat)
+  if js_object?(pat)
     if all && js_is_regexp?(pat)
       fv = jget(pat, "flags")
       js_throw_type("String.prototype.replaceAll called on null or undefined flags") if js_nullish?(fv)
@@ -383,6 +387,11 @@ in JS
 
 -> js_locale_compare(a, b)
   return ~0.0 if a == b
+  # canonically equivalent strings compare equal
+  if !a.ascii? || !b.ascii?
+    a = a.nfc
+    b = b.nfc
+    return ~0.0 if a == b
   la = js_str_case(a, false)
   lb = js_str_case(b, false)
   if la != lb
@@ -544,7 +553,7 @@ in JS
 -> js_str_match(this, rx, all)
   js_throw_type("String.prototype.match called on null or undefined") if js_nullish?(this)
   sym = all ? SYM_MATCH_ALL : SYM_MATCH
-  if !js_nullish?(rx)
+  if js_object?(rx)
     if all && js_is_regexp?(rx)
       fv = jget(rx, "flags")
       js_throw_type("String.prototype.matchAll called on null or undefined flags") if js_nullish?(fv)
@@ -557,7 +566,7 @@ in JS
 
 -> js_str_search(this, rx)
   js_throw_type("String.prototype.search called on null or undefined") if js_nullish?(this)
-  if !js_nullish?(rx)
+  if js_object?(rx)
     m = js_get_method(rx, SYM_SEARCH)
     return js_call_arr(m, rx, [this]) if m != nil
   s = js_this_str(this, "search")

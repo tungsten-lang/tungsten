@@ -1,5 +1,4 @@
-// expect: a5bsc 5  plain 5s|n: 3 null undefined true 1,2 [object Object]|3:a|b|c:1,2:a|b|c|2:||:0:
-||true true|7|multi|line|nested inner 5
+// expect: a5bsc 5  plain 5s|n: 3 null undefined true 1,2 [object Object]|3:a|b|c:1,2:a|b|c|2:||:0:\n||true true|7|multi|line|nested inner 5
 var x = 5, y = "s";
 console.log(`a${x}b${y}c`, `${x}`, ``, `plain`, `${x}${y}`);
 console.log(`n: ${1 + 2} ${null} ${undefined} ${true} ${[1, 2]} ${{}}`);

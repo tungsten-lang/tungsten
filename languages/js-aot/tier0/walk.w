@@ -235,6 +235,8 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
     wk_write(jf.this_binding, act.this, act)
   wk_write(jf.nt_binding, act.nt, act) if jf.nt_binding != nil
   wk_write(jf.fo_binding, act.fobj, act) if jf.fo_binding != nil
+  # a named function expression sees itself under its name
+  wk_write(jf.self_binding, act.fobj, act) if jf.self_binding != nil
   if jf.args_binding != nil
     args = js_args_array(argc, a0, a1, a2, a3, more)
     slots = []
@@ -399,7 +401,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
   h
 
 -> wk_const?(b)
-  b.writes <= 1 && b.decl_const == true
+  b.decl_const == true
 
 -> wk_cell(b)
   c = b.cell
@@ -1076,6 +1078,12 @@ WK_OPS = {"+" => 1, "-" => 2, "*" => 3, "/" => 4, "%" => 5, "<" => 6, ">" => 7, 
     wk_write_ref(t.x, nv, act)
     return e.has?(F_PREFIX) ? nv : old
   o = wk_ev(t.a, act)
+  if t.b.kind == :private_name
+    pn = wk_read_ref(t.b.x, act)
+    old = js_tonumeric(js_priv_get(o, pn))
+    nv = js_inc(old, inc)
+    js_priv_set(o, pn, nv)
+    return e.has?(F_PREFIX) ? nv : old
   key = t.has?(F_COMPUTED) ? js_to_property_key(wk_ev(t.b, act)) : t.b.str
   old = js_tonumeric(js_getv(o, key))
   nv = js_inc(old, inc)

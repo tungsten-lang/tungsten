@@ -222,7 +222,7 @@ JS_NAN = [nil]
   return v.to_s if v.is_a?(JS:Symbol)
   js_inspect(v, 2)
 
--> js_inspect(v, depth)
+-> js_inspect(v, depth, seen = nil)
   return "'" + v + "'" if js_string?(v)
   return js_to_display(v) if !js_object?(v)
   if js_array?(v)

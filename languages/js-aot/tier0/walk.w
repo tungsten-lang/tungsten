@@ -118,7 +118,7 @@ WK_PRE_RUN = [nil]
   c = f.code
   if c != nil && c.entry != 0
     # a loaded unit compiled the script itself
-    return wvalue_from_bits(jsu_call_entry(c.entry, wvalue_bits(c.uctx) ## i64, 0, wvalue_bits(js_realm().global) ## i64, wvalue_bits(0) ## i64, 0, 0, 0, 0, 0))
+    return wvalue_from_bits(jsu_call_entry(c.entry, c.uctx, 0, wvalue_bits(js_realm().global) ## i64, wvalue_bits(0) ## i64, 0, 0, 0, 0, 0))
   act = wk_act(f, nil, nil, js_realm().global, f.nlocals)
   act.caller = JS_CUR_ACT[0]
   JS_CUR_ACT[0] = act
@@ -470,8 +470,10 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
 -> wk_env_at(act, hops)
   e = act.env
   while hops > 0
+    js_throw_type("tier 0: no environment " + hops.to_s + " above, in " + act.f.name.to_s + " (" + (act.f.analysis.url == nil ? "" : act.f.analysis.url) + ":" + act.f.node.pos.to_s + ")") if e == nil
     e = js_env_up(e)
     hops -= 1
+  js_throw_type("tier 0: missing environment in " + act.f.name.to_s + " (" + (act.f.analysis.url == nil ? "" : act.f.analysis.url) + ":" + act.f.node.pos.to_s + ")") if e == nil
   e
 
 -> wk_hops(ref)
@@ -748,6 +750,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
   if s.a.kind == :var_decl && s.a.list[0].b != nil
     # for (var x = init in o): the initializer runs first (Annex B.3.5)
     wk_bind(s.a.list[0].a, wk_ev(s.a.list[0].b, act), act, true)
+  wk_scope_enter(fs, act) if per
   obj = wk_ev(s.b, act)
   ks = js_for_in_keys(obj)
   i = 0
@@ -776,6 +779,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
   fs = s.x
   saved = act.env
   per = fs.is_a?(JaScope) && fs.has_env?
+  wk_scope_enter(fs, act) if per
   o = wk_ev(s.b, act)
   c = act.coro
   sync = js_get_method(o, SYM_ASYNC_ITERATOR) == nil
@@ -821,6 +825,9 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
   fs = s.x
   saved = act.env
   per = fs.is_a?(JaScope) && fs.has_env?
+  # the right side is evaluated in the head's scope (its let bindings' dead zone), as the
+  # analysis resolved it
+  wk_scope_enter(fs, act) if per
   rec = js_get_iterator(wk_ev(s.b, act))
   begin
     while true

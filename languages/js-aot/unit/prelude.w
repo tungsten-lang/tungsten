@@ -321,5 +321,5 @@ fn jsu_enter(fp, ctx, f, th, argc, a0, a1, a2, a3, more) (i64 i64 i64 i64 i64 i6
     cb = jsr_ivar(fb, 2)
     e = wvalue_from_bits(jsr_ivar(cb, 8))
     if e != 0
-      return wvalue_from_bits(jsu_enter(e ## i64, jsr_ivar(cb, 9), fb, wvalue_bits(this) ## i64, wvalue_bits(argc) ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, wvalue_bits(more) ## i64))
+      return wvalue_from_bits(jsu_enter(e ## i64, wvalue_from_bits(jsr_ivar(cb, 9)) ## i64, fb, wvalue_bits(this) ## i64, wvalue_bits(argc) ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, wvalue_bits(more) ## i64))
   wvalue_from_bits(jsu_c8(ctx, 11, fb, wvalue_bits(this) ## i64, wvalue_bits(argc) ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, wvalue_bits(more) ## i64))

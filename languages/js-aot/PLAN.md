@@ -10,8 +10,10 @@ Audience: the agent that implements it. Every stage has an exit criterion with a
 |---|---|
 | M0 | done: `frontend/`, `tier0/` (Blade 99b7307 + the aot body-scope fix), `tools/jsrun.w`, `tools/memstat.sh`, `bench/`, `BASELINE.md` |
 | M1 | exit met: see Appendix B.1 (speed, blocks, spike, scale). Tests: T1 on tier 1 6 pass / 17 fail (missing builtins: M2) / 24 unsupported constructs (M3); the test262 sample needs M2's builtins (its harness uses Object, Array, String, Error) and moves there |
-| M2 | in progress. Tier 0 is a new tree walker (`tier0/walk.w`, deviation 7) running the whole language but eval/with; generators/async on goroutines (`runtime/coro.w`, waits for the Promise port). Builtins being ported from `tier0/b_*.w` into `runtime/b_*.w` (helper agent). T1 on tier 0: 18/47 (the rest wait on builtins and eval/with). |
-| M3 | translator coverage in progress (helper agent: `translate/`), following the walker's semantics |
+| M2 | tier 0 = new tree walker (`tier0/walk.w`, deviation 7): the whole language but `with`, direct eval included (deviation 9); generators/async on goroutines (`runtime/coro.w`); all builtins ported (`runtime/b_*.w`, `regexp.w`). T1 on tier 0: 44/47 (2 `with`, 1 a sloppy eval declaring a function in its caller, deviation 9). test262 built-ins 15,664/18,062 before the fixes the port's report listed (now made); language directories not re-run yet. T3 tier 0: arith 995 ms, closure 885, property 1,170 (M0: 1,621 / 992 / 1,452) |
+| M3 | translator: everything but mapped `arguments`, generators, async, eval and `with` (those functions stay in tier 0). T1 on tier 1: 37 pass / 0 fail / 10 tier-0-only; youtube-main 47,143 of 47,143 functions translate. Bench (tier 1 static): arith 46 ms, closure 29, property 63 |
+| M5 | units load into a running host (deviation 8): `translate/unit.w`, `unit/prelude.w`, `runtime/units.w`, `runtime/unit_rt.w`, `tools/jsu.sh`, `tools/jsrun3.w`. Bench with units (script body and functions compiled, loaded at run time): arith 105 ms, closure 75, property 108. Blade side: `blade/jsn/unitcache.w` (background builds per 2,000-function window, cache by script SHA-256 and engine id, load at task boundaries) |
+| M6 | Blade runs on the new engine (private copy wired to `jsn/engine`): bindings use an engine-neutral API (`blade/js/neutral.w` ↔ `blade/jsn/compat.w`), YouTube's watch page plays in tier 0 |
 
 Next, in order: finish M2 (builtins, eval/with in tier 0, T1 47/47, test262 parity), then M6's
 Blade switch on tier 0 of the new runtime (compat layer: `JsObject < JS:Special` with the old
@@ -55,6 +57,24 @@ Deviations from the plan as written, each with its reason:
    allocates nothing per node (activations are pooled), and was already faster than the closure
    interpreter on the T3 core before any tuning. Per-node inline caches live in the JsNode's
    annotation slot.
+8. **Units are runtime-bound through host closures** (refines section 1.4 after the M1 spike):
+   a unit calls the host's runtime only through a table of host closures (one per
+   "name/arity", `runtime/unit_rt.w`, generated): the context holds each closure's code pointer
+   and captures, and the unit calls the code directly (a closure's code takes its captures and
+   raw WValues, so no boxing and no four-argument limit). This needs no symbol exports and no
+   compiler unit mode: a unit is an ordinary Tungsten compile of `unit/prelude.w` plus the
+   translated functions (unsharded, so `jsu_init` reaches each entry through its `w:` profiler
+   alias), loaded with the runtime's in-memory Mach-O loader (`w_jit_load_object`, which now finds
+   functions by alias and skips unwind sections). Host values (strings longer than five bytes,
+   cells, codes, literal shapes, template objects, the cache table, the prototype epoch) are
+   context slots. The prelude keeps fast lanes inline (numbers, booleans, inline caches, plain
+   globals, and calls of compiled functions, which jump to the callee's entry without the host).
+   The old engine's AOT tier (`blade/js/aot.w`) used closures for its upcalls too.
+9. **Direct eval in tier 0** is analysed below the call site as an arrow-like function (its
+   this, arguments and new.target are the caller's), with every binding of the calling functions
+   kept in environments. A sloppy eval's `var` or function declaration assigns the caller's
+   existing binding or a global; one that would add a new variable to a function stays the eval
+   code's own (no dynamic variable objects). `with` is not implemented (no YouTube script uses it).
 6. **Raw-value discipline.** Fast paths are `fn … (i64 …) i64` functions with `ll` bodies on raw
    WValue bits (`runtime/prims.w`). Measured traps, now rules: a heap value passed to an `ll` fn
    as bits is invisible to escape analysis and gets freed, so pointers are only *stored* through

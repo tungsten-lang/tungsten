@@ -23,11 +23,10 @@ use unit_id
 JSU_UNITS = []
 
 + Unit
-  rw :path, :ctx, :keep, :out, :nentries
+  rw :path, :ctx, :keep, :nentries
   -> new(@path)
     @ctx = nil
     @keep = []
-    @out = nil
     @nentries = 0
 
 # ---- what units call that compiled programs do not ----
@@ -92,13 +91,13 @@ JSU_UNITS = []
 
 # Call the entry of a function a unit compiled (code.entry, code.uctx set at load).
 -> js_unit_enter(code, f, this, argc, a0, a1, a2, a3, more)
-  r = jsu_call_entry(code.entry, wvalue_bits(code.uctx) ## i64, wvalue_bits(f) ## i64, wvalue_bits(this) ## i64, wvalue_bits(argc) ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, wvalue_bits(more) ## i64)
+  r = jsu_call_entry(code.entry, code.uctx, wvalue_bits(f) ## i64, wvalue_bits(this) ## i64, wvalue_bits(argc) ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, wvalue_bits(more) ## i64)
   wvalue_from_bits(r)
 
-fn jsu_call_init(fp, ctx, out) (i64 i64 i64) i64
+fn jsu_call_init(fp, ctx) (i64 i64) i64
   ll <<~IR
     %fn = inttoptr i64 %fp to ptr
-    %r = call i64 %fn(i64 %ctx, i64 %out)
+    %r = call i64 %fn(i64 %ctx)
     ret i64 %r
   IR
 
@@ -185,20 +184,21 @@ fn jsu_cl_caps(cb) (i64) i64
     j += 1
   fp = ccall("w_jit_load_object", obj_path, "jsu_init")
   return "cannot load " + obj_path if fp == nil
-  out = i64[nfuncs]
-  u.out = out
   ctxi = jsu_raw(ctx)
-  outi = jsu_raw(out)
-  abi = jsu_call_init(fp ## i64, wvalue_bits(ctxi) ## i64, wvalue_bits(outi) ## i64)
-  return "jsu_init answered " + abi.to_s if abi != wvalue_bits(JSU_ABI) ## i64
+  # jsu_init(ctx) answers [index, closure, …]: each entry is its closure's code, called
+  # with the closure's captures (which hold ctx)
+  pairs = wvalue_from_bits(jsu_call_init(fp ## i64, wvalue_bits(ctxi) ## i64))
+  return "jsu_init answered no entries" if !pairs.is_a?(Array)
+  u.keep.push(pairs)
   i = 0
-  while i < entries.size
-    n = entries[i].to_i
+  while i + 1 < pairs.size
+    n = pairs[i]
     c = codes[n]
-    if c != nil && out[n] != 0
-      c.entry = out[n]
-      c.uctx = ctxi
+    cb = wvalue_bits(pairs[i + 1]) ## i64
+    if c != nil
+      c.entry = jsu_cl_fn(cb)
+      c.uctx = jsu_cl_caps(cb)
       u.nentries += 1
-    i += 1
+    i += 2
   JSU_UNITS.push(u)
   u

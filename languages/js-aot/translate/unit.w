@@ -15,9 +15,7 @@
 #
 # Inline caches: the four runtime entries that take a site's word index into the
 # program's JS_IC (js_getp, js_setp, js_call_method, js_new) are called as their _t
-# forms with the unit's own table. jsu_init(ctx, out) stores the address of each jsf_N
-# entry at out[N] (through the profiler aliases `w:jsf_N`, so the unit is compiled
-# unsharded) and keeps every entry alive and generic.
+# forms with the unit's own table. jsu_init(ctx) answers a closure over ctx per entry.
 
 JSU_ABI = 1
 
@@ -136,31 +134,22 @@ JSU_CONSTS = {"JSR" => true, "JS_HOLE" => true, "JS_NULL" => true, "JS_NO_ARGS" 
     return rt_call("js_object_proto", []) if name == "object_proto" && rn == "JSR"
     nil
 
-  # The unit's jsu_init: entry addresses into out, every entry kept (and generic).
+  # The unit's jsu_init(ctx): an Array of [index, closure, …], one closure per entry,
+  # over ctx. The host calls a closure's code directly with its captures (runtime/units.w):
+  # entry(captures, f, this, argc, a0, a1, a2, a3, more), so no symbol of the unit is ever
+  # looked up but jsu_init (identical functions may share one body: content-hash dedup).
   -> init_defs
-    ir = ""
-    keep = []
-    v = Tungsten:AST:Var.new("v")
+    ps = ["f", "this", "argc", "a0", "a1", "a2", "a3", "more"]
+    els = []
     i = 0
     while i < @entries.size
       n = @entries[i]
       # (the script's entry is its jsd_0: it has no function object)
       en = (n == 0 ? "jsd_" : "jsf_") + n.to_s
-      ir = ir + "%p" + n.to_s + " = getelementptr i64, ptr %base, i64 " + n.to_s + "\n"
-      ir = ir + "%a" + n.to_s + " = ptrtoint ptr @\"w:" + en + "\" to i64\n"
-      ir = ir + "store i64 %a" + n.to_s + ", ptr %p" + n.to_s + "\n"
-      keep.push(Tungsten:AST:Call.new(nil, en, [Tungsten:AST:Var.new("ctx"), v, v, v, v, v, v, v, v]))
+      els.push(ta_int(n))
+      els.push(Tungsten:AST:Block.new(ps, [Tungsten:AST:Call.new(nil, en, [Tungsten:AST:Var.new("ctx")] + ps.map(->(p) Tungsten:AST:Var.new(p)))]))
       i += 1
-    ir = "%base = inttoptr i64 %out to ptr\n" + ir + "ret i64 0"
-    fill = Tungsten:AST:FnDef.new("jsu_fill", [Tungsten:AST:Param.new("out")], [Tungsten:AST:Call.new(nil, "ll", [Tungsten:AST:String.new(ir)])])
-    fill.param_types = [:i64]
-    fill.return_type = :i64
-    # (the keep-alive calls never run: ctx is a real address; v is opaque to inference)
-    body = [Tungsten:AST:Call.new(nil, "jsu_fill", [Tungsten:AST:Var.new("out")])]
-    body.push(Tungsten:AST:Assign.new(v, slot_value(@ic_slot)))
-    body.push(ta_if(ta_eq(Tungsten:AST:Var.new("ctx"), ta_int(1)), keep, nil))
-    body.push(ta_int(JSU_ABI))
-    [fill, Tungsten:AST:MethodDef.new("jsu_init", [Tungsten:AST:Param.new("ctx"), Tungsten:AST:Param.new("out")], body)]
+    [Tungsten:AST:MethodDef.new("jsu_init", [Tungsten:AST:Param.new("ctx")], [Tungsten:AST:Array.new(els)])]
 
   # The manifest (JSON) runtime/units.w reads to fill the context.
   -> manifest(ic_words, nfuncs)

@@ -27,6 +27,7 @@
 # iterators it leaves itself.
 
 use build
+use unit
 use ../analyze
 
 JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%" => "js_mod", "**" => "js_pow", "<" => "js_lt", ">" => "js_gt", "<=" => "js_le", ">=" => "js_ge", "==" => "js_eq", "===" => "js_seq", "|" => "js_bitor", "&" => "js_bitand", "^" => "js_bitxor", "<<" => "js_shl", ">>" => "js_sar", ">>>" => "js_shr", "instanceof" => "js_instanceof", "in" => "js_in"}
@@ -49,7 +50,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
     @close = nil
 
 + JsTranslator
-  rw :an, :ic_words, :errors, :globals, :lexicals, :codes, :lit_shapes, :fn_count, :source
+  rw :an, :ic_words, :errors, :globals, :lexicals, :codes, :lit_shapes, :fn_count, :source, :glist, :llist, :templates, :omit
 
   -> new(@an)
     @ic_words = 8
@@ -126,7 +127,16 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
           @defs.push(stub(f))
         else
           @translated += 1
+          u = JT_UNIT[0]
+          u.entries.push(f.index) if u != nil && !f.script && f.fclass == :escaping
       i += 1
+    u = JT_UNIT[0]
+    if u != nil
+      # a unit: the functions and jsu_init (the host makes the realm, cells and codes)
+      out = []
+      @defs.each ->(d) out.push(d)
+      u.init_defs.each ->(d) out.push(d)
+      return out
     out = []
     out.push(ta_set("JSR", ta_call("js_new_realm", [])))
     i = 0

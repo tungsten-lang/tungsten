@@ -3,16 +3,29 @@
 # The translator builds Tungsten:AST nodes directly; no Tungsten source text is
 # generated (tools/dump_w prints one for people). Bodies are Arrays of nodes.
 
+# Unit mode (translate/unit.w): a JtUnit, while translating a unit.
+JT_UNIT = [nil]
+
 -> ta_var(name)
+  u = JT_UNIT[0]
+  if u != nil
+    x = u.var(name)
+    return x if x != nil
   Tungsten:AST:Var.new(name)
 
 -> ta_set(name, value)
   Tungsten:AST:Assign.new(Tungsten:AST:Var.new(name), value)
 
 -> ta_call(name, args)
+  u = JT_UNIT[0]
+  return u.call(name, args) if u != nil
   Tungsten:AST:Call.new(nil, name, args)
 
 -> ta_send(recv, name, args)
+  u = JT_UNIT[0]
+  if u != nil
+    x = u.send(recv, name, args)
+    return x if x != nil
   Tungsten:AST:Call.new(recv, name, args)
 
 -> ta_nil
@@ -25,6 +38,8 @@
   Tungsten:AST:Int.new(i, nil, i.to_s)
 
 -> ta_str(s)
+  u = JT_UNIT[0]
+  return u.str(s) if u != nil && !jsu_inline_str?(s)
   Tungsten:AST:String.new(s)
 
 # A number literal: Float text that round-trips; NaN and the infinities are computed.
@@ -86,6 +101,8 @@
 
 -> ta_def(name, params, body)
   ps = []
+  if JT_UNIT[0] != nil && (name.starts_with?("jsd_") || name.starts_with?("jsf_"))
+    ps.push(Tungsten:AST:Param.new("ctx"))
   i = 0
   while i < params.size
     ps.push(Tungsten:AST:Param.new(params[i]))

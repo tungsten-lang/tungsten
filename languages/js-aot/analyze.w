@@ -148,6 +148,48 @@ use frontend/parser
     @fnmap = {}
     @scopemap = {}
 
+  # Direct eval code (tier 0): the program as an arrow-like function defined at the
+  # caller's scope outer (another analysis, already finished), so the code reads and
+  # writes the caller's bindings and its this. Its own var and function declarations stay
+  # its own (a sloppy direct eval would add them to the caller's variables).
+  -> run_direct(outer)
+    f = JaFunc.new(@program, outer.func, 0)
+    f.analysis = self
+    f.arrow = true
+    f.strict = @strict || @program.has?(F_STRICT)
+    f.def_scope = outer
+    @funcs.push(f)
+    sc = new_scope(:function, outer, f, @program)
+    f.scope = sc
+    f.body_scope = sc
+    list = @program.list
+    if f.strict
+      hoist_body(f, sc, list, true)
+    else
+      # sloppy: a var or function the caller's variable scope already has is that binding;
+      # one the global scope gets is a global; a lexical one in between is an error
+      vs = outer
+      while vs.parent != nil && vs.kind != :function && vs.kind != :body && vs.kind != :script
+        vs = vs.parent
+      names = var_names(list, [], false, true)
+      list.each ->(s) names.push(s.str) if s.kind == :function_decl && s.str != nil && !names.include?(s.str)
+      names.each ->(nm)
+        s = outer
+        found = nil
+        while s != nil && found == nil
+          found = s.names[nm]
+          if found == nil
+            break if s == vs
+            s = s.parent
+        if found != nil && (found.kind == :let || found.kind == :const || found.kind == :class)
+          f.fail0("SyntaxError: Identifier '" + nm + "' has already been declared")
+        elsif found == nil
+          sc.declare(self, nm, vs.kind == :script ? :global : :var)
+      hoist_block(sc, list.select(->(s) s.kind != :function_decl), true)
+    walk_stmts(list, sc)
+    finish()
+    f
+
   -> new_scope(kind, parent, func, node)
     s = JaScope.new(kind, parent, func, node)
     @scope_count += 1
@@ -577,10 +619,24 @@ use frontend/parser
       # super(...) passes new.target on (an arrow reads it from the constructor)
       note_special(sc, :nt) if c.kind == :super
       if c.kind == :ident
-        if c.str == "eval"
-          f.dynamic = true
-          f.fail0("eval")
-        note_read(ref(c, sc), sc, c.pos, !e.has?(F_OPTIONAL))
+        cb = ref(c, sc)
+        if c.str == "eval" && cb.global?
+          # a direct eval (when eval is still %eval% at run time): its code sees every
+          # binding in scope, so this function and those around it keep all of theirs in
+          # environments (finish), and tier 0 analyses the code below sc (run_direct)
+          f.fail("eval")
+          e.d = sc
+          g = f
+          while g != nil
+            g.dynamic = true
+            g = g.parent
+          g = f
+          while g.arrow
+            g = g.parent
+          if !g.script && g.this_binding == nil
+            g.this_binding = g.scope.declare(self, "this", :this)
+            g.this_binding.writes = 1
+        note_read(cb, sc, c.pos, !e.has?(F_OPTIONAL))
       elsif (c.kind == :function || c.kind == :arrow) && !c.has?(F_ASYNC) && !c.has?(F_GENERATOR)
         walk_function(c, sc, nil)
         jf = fn_of(c)
@@ -1037,7 +1093,7 @@ use frontend/parser
       if sb != nil && (sb.value_uses > 0 || sb.captured)
         f.fclass = :escaping if f.fclass == :call_only || f.fclass == :iife
       # one captured binding that never changes after its initializer: stored by value
-      if f.free.size == 1 && !inner_captures?(f)
+      if f.free.size == 1 && !inner_captures?(f) && !f.dynamic
         fb = f.free.values[0]
         if single_ok?(fb)
           f.single = fb
@@ -1051,6 +1107,18 @@ use frontend/parser
           if b.slot < 0
             b.slot = b.scope.env_count
             b.scope.env_count = b.scope.env_count + 1
+      i += 1
+    # a function containing a direct eval (or one around it): every binding in an
+    # environment, where the eval'd code can reach it
+    i = 0
+    while i < @funcs.size
+      f = @funcs[i]
+      if f.dynamic && !f.script
+        f.scopes.each ->(s)
+          s.order.each ->(b)
+            if !b.global? && b.slot < 0
+              b.slot = s.env_count
+              s.env_count = s.env_count + 1
       i += 1
     # a sloppy function with a mapped arguments object aliases its parameters through it:
     # they live in the environment so the object stays valid after the call returns

@@ -9,6 +9,10 @@
 # JSC_STATS=1 (with JSC_PARTIAL=1) stops after translating: the scale check without a compile.
 # JSC_LIMIT=n / JSC_SKIP=k (with JSC_PARTIAL=1) compile only the window of n functions after
 # the first k supported ones; JSC_MAXSIZE=b leaves out functions of more than b source bytes.
+#
+# JSC_UNIT=path: a unit (translate/unit.w) instead of a program. The program compiled is
+# unit/prelude.w plus the translated functions (run with --ll, unsharded), and the
+# manifest is written to path. Implies JSC_PARTIAL=1.
 
 use ../../../compiler/lib/driver_modules
 use ../frontend/parser
@@ -31,9 +35,12 @@ use ../translate/translate
     exit(1)
   an = JaAnalysis.new(prog, false).run
   t = JsTranslator.new(an)
+  unit = env("JSC_UNIT")
+  unit = nil if unit == ""
+  JT_UNIT[0] = JtUnit.new(t) if unit != nil
   # the script's text goes into the program for Function.prototype.toString (JSC_NOSRC=1: not)
-  t.source = src if env("JSC_NOSRC") != "1"
-  partial = env("JSC_PARTIAL") == "1"
+  t.source = src if env("JSC_NOSRC") != "1" && unit == nil
+  partial = env("JSC_PARTIAL") == "1" || unit != nil
   lim = env("JSC_LIMIT")
   skip = env("JSC_SKIP")
   maxs = env("JSC_MAXSIZE")
@@ -53,6 +60,13 @@ use ../translate/translate
     t.errors.each ->(er)
       ccall("w_eputs", "jsc: " + js + ": function " + er[0].to_s + ": unsupported: " + er[1].to_s)
     exit(1)
+  if unit != nil
+    write_file(unit, JT_UNIT[0].manifest(t.ic_words, an.funcs.size))
+    JT_UNIT[0] = nil
+    exprs = []
+    ast.expressions.each ->(x) exprs.push(x)
+    nodes.each ->(x) exprs.push(x)
+    return Tungsten:AST:Program.new(exprs)
   exprs = [ta_set("JS_IC", ta_typed_array("i64", t.ic_words))]
   ast.expressions.each ->(x) exprs.push(x)
   nodes.each ->(x) exprs.push(x)

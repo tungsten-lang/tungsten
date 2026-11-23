@@ -101,7 +101,7 @@ WK_POOL = []
   begin
     prog = p.parse_program()
   rescue e
-    js_throw(js_make_error("SyntaxError", p.error == nil ? e.to_s : p.error.to_s))
+    js_throw(js_make_error("SyntaxError", p.error == nil ? e.to_s : p.error.msg + " (line " + p.error.line.to_s + ", column " + p.error.col.to_s + ")"))
   an = JaAnalysis.new(prog, false)
   an.src = src
   an.url = url
@@ -554,7 +554,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
 -> wk_env_for(jf, act)
   if jf.single != nil
     return wk_read_single(jf, act)
-  return nil if jf.free.size == 0
+  return nil if jf.free.size == 0 && !jf.dynamic
   t = jf.def_scope
   while t != nil && !t.has_env?
     t = t.parent
@@ -601,6 +601,9 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
         wk_write_ref(d.a.x, nil, act, true)
       i += 1
   elsif k == :if
+    # if, loops, try and switch complete with undefined when nothing inside produced a
+    # value (UpdateEmpty: the completion value eval and scripts report)
+    act.rv = nil
     if js_truthy(wk_ev(s.a, act))
       wk_ex(s.b, act)
     elsif s.c != nil
@@ -611,10 +614,13 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
     act.rv = s.a == nil ? nil : wk_ev(s.a, act)
     act.sig = WK_RETURN
   elsif k == :for
+    act.rv = nil
     wk_for(s, act, nil)
   elsif k == :while
+    act.rv = nil
     wk_while(s, act, nil)
   elsif k == :do_while
+    act.rv = nil
     wk_do_while(s, act, nil)
   elsif k == :break
     act.sig = WK_BREAK
@@ -627,6 +633,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
     act.pos = s.pos
     js_throw(v)
   elsif k == :try
+    act.rv = nil
     wk_try(s, act)
   elsif k == :function_decl
     jf = s.x
@@ -637,12 +644,15 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
       v = wk_read_binding_from(jf.binding, jf.def_scope, act)
       wk_write_ref(JaRef.new(jf.annexb, jf.def_scope), v, act)
   elsif k == :switch
+    act.rv = nil
     wk_switch(s, act, nil)
   elsif k == :class_decl
     wk_write_ref(s.c, wk_class(s, act), act, true)
   elsif k == :for_in
+    act.rv = nil
     wk_for_in(s, act, nil)
   elsif k == :for_of
+    act.rv = nil
     wk_for_of(s, act, nil)
   elsif k == :labeled
     wk_labeled(s, act, [s.str])
@@ -874,6 +884,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
   rescue ex
     JS_CUR_ACT[0] = act
     act.env = saved
+    act.rv = nil
     cs = s.x
     cs = nil if !cs.is_a?(JaScope)
     wk_scope_enter(cs, act) if cs != nil
@@ -1270,7 +1281,48 @@ WK_OPS = {"+" => 1, "-" => 2, "*" => 3, "/" => 4, "%" => 5, "<" => 6, ">" => 7, 
       f = c.has?(F_COMPUTED) ? js_getv(o, wk_ev(c.b, act)) : js_getp_ic(o, c.b.str, wk_ic(c))
     return wk_call_args(f, o, e.list, act)
   f = wk_ev(c, act)
+  if e.d.is_a?(JaScope) && f == js_realm().intrinsics["eval"]
+    # a direct eval (§19.2.1.1 PerformEval with direct = true)
+    args = wk_args(e.list, act)
+    return args.size == 0 ? nil : wk_direct_eval(args[0], act, e.d)
   wk_call_args(f, nil, e.list, act)
+
+# Direct eval: the code is analysed below the call's scope and runs as an arrow there,
+# on the caller's environment and this; its completion value is the result.
+-> wk_direct_eval(src, act, sc)
+  return src if !js_string?(src)
+  p = JsParser.new(src, false)
+  prog = nil
+  begin
+    prog = p.parse_program()
+  rescue e
+    js_throw(js_make_error("SyntaxError", p.error == nil ? e.to_s : p.error.msg + " (line " + p.error.line.to_s + ", column " + p.error.col.to_s + ")"))
+  an = JaAnalysis.new(prog, act.f.strict)
+  an.src = src
+  an.url = act.f.analysis.url
+  an.eval_mode = true
+  f = an.run_direct(sc)
+  bad = nil
+  an.funcs.each ->(g) bad = g.unsupported0 if bad == nil && g.unsupported0 != nil
+  if bad != nil
+    js_throw(js_make_error("SyntaxError", bad.slice(13, bad.size - 13))) if bad.starts_with?("SyntaxError: ")
+    js_throw(js_make_error("SyntaxError", "tier 0 cannot run this yet: " + bad.to_s))
+  # (a script's vars a sloppy eval declares become global properties)
+  if f.strict == false
+    vn = JaAnalysis.new(nil, false).var_names(prog.list, [], false, true)
+    f.scope.order.each ->(b) js_gdeclare(js_gcell(b.name), nil, false, ATTR_W + ATTR_E + ATTR_C) if b.kind == :global && vn.include?(b.name)
+  ea = WkAct.new(f, nil, act.env, act.this, f.nlocals)
+  ea.caller = JS_CUR_ACT[0]
+  JS_CUR_ACT[0] = ea
+  begin
+    wk_prologue(f, ea, 0, nil, nil, nil, nil, nil)
+    wk_hoist_functions(prog.list, ea)
+    wk_stmts(prog.list, ea)
+  rescue ex
+    JS_CUR_ACT[0] = ea.caller
+    raise ex
+  JS_CUR_ACT[0] = ea.caller
+  ea.rv
 
 -> wk_call_args(f, this, list, act)
   n = list.size
@@ -1353,7 +1405,7 @@ WK_OPS = {"+" => 1, "-" => 2, "*" => 3, "/" => 4, "%" => 5, "<" => 6, ">" => 7, 
   begin
     prog = p.parse_program()
   rescue e
-    js_throw(js_make_error("SyntaxError", p.error == nil ? e.to_s : p.error.to_s))
+    js_throw(js_make_error("SyntaxError", p.error == nil ? e.to_s : p.error.msg + " (line " + p.error.line.to_s + ", column " + p.error.col.to_s + ")"))
   JaAnalysis.new(prog, false).run
   nil
 

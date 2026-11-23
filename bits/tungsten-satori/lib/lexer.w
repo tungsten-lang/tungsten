@@ -170,7 +170,8 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
         else
           break
       kind = :num
-      if j + 1 < limit && bytes[j] == 46 && digit_byte?(bytes[j + 1])
+      after_dot = toks.size > 0 && toks[toks.size - 1].kind == :sym && toks[toks.size - 1].text == "."
+      if !after_dot && j + 1 < limit && bytes[j] == 46 && digit_byte?(bytes[j + 1])
         j += 2
         while j < limit && digit_byte?(bytes[j])
           j += 1

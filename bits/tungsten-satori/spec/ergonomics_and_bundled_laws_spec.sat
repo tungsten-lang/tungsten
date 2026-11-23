@@ -186,6 +186,22 @@ instance int_acg_test : AddCommGroupTest ℤ :=
   intro P Q h1 _
   exact h1
 
+-> spec_cpow_box (x : ℝ) (w : ℂ) : ℂ := complex.exp (complex.smul (x * x) w)
+
++ continuity_inner_complex_def (w : ℂ) (t : ℝ) :
+    continuous_at (fun x => complex.re (spec_cpow_box x w)) t ∧
+    continuous_at (fun x => complex.im (spec_cpow_box x w)) t
+  continuity
+
++ push_cast_nat_int_real (a b c : ℕ) :
+    ((a * (b + c) + 1 : ℕ) : ℝ) = (a : ℝ) * (b : ℝ) + (a : ℝ) * (c : ℝ) + 1
+  push_cast
+  ring
+
++ chained_paren_proj (P Q R S : ℕ → Prop) (h : ∀ n : ℕ, P n ∧ Q n ∧ R n ∧ S n) :
+    R 5 ∧ (((1 : ℕ), ((2 : ℕ), (3 : ℕ))).2.1 = 2)
+  exact ⟨(h 5).2.2.1, rfl⟩
+
 #axioms have_semi_chain
 #axioms hole_application
 #axioms poly_ite_rewrite
@@ -206,3 +222,6 @@ instance int_acg_test : AddCommGroupTest ℤ :=
 #axioms continuity_complex_re_im
 #axioms continuity_shift_comp
 #axioms intro_underscore_no_shadow
+#axioms continuity_inner_complex_def
+#axioms push_cast_nat_int_real
+#axioms chained_paren_proj

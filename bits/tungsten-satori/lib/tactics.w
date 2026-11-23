@@ -504,6 +504,10 @@
       tac_positivity(g, args)
     when "continuity"
       tac_continuity(g, args)
+    when "canalytic", "analytic"
+      tac_canalytic(g, args)
+    when "push_cast"
+      tac_push_cast(g, args)
     when "nlinarith"
       @nl_mode = true
       begin
@@ -3817,9 +3821,14 @@
         p_s2 = cont_prove_norm(goal, hints, extra_rules, v, s2_rhs, x, depth + 1)
         if p_s2 != nil
           return cont_congr(mk_lam(v, s2_rhs), mk_lam(v, body), x, p_s2, v, @k.trans(s2_eq, ba2))
-    # Fallback 3: unfold head non-primitive definition once (e.g. rpow)
-    if sp[0].tag == :const && @session.k.defs.has_key?(sp[0].name)
-      hd_nm = sp[0].name
+    # Fallback 3: unfold head non-primitive definition once (e.g. rpow, or inner complex def under complex.re/im)
+    cand_hd = sp[0]
+    if sp[0].tag == :const && (sp[0].name == "complex.re" || sp[0].name == "complex.im") && sp[1].size == 1
+      isp = strip_app(sp[1][0])
+      if isp[0].tag == :const && @session.k.defs.has_key?(isp[0].name)
+        cand_hd = isp[0]
+    if cand_hd.tag == :const && @session.k.defs.has_key?(cand_hd.name)
+      hd_nm = cand_hd.name
       def_rules = [make_rule(@d, @session.k.defs[hd_nm], hd_nm, false)] + extra_rules
       @session.eqns_of(hd_nm).each -> (eqth)
         def_rules.push(named_equation(eqth, hd_nm))
@@ -3891,7 +3900,7 @@
         split_top(inner, ",").each -> (item)
           if item.size == 1 && @session.k.defs.has_key?(item[0].text)
             nm = item[0].text
-            extra_rules.push(make_rule(@d, @session.k.defs[nm], nm, false))
+            extra_rules.push(make_rule(@d, @session.k.defs[nm], nm))
             @session.eqns_of(nm).each -> (eqth)
               extra_rules.push(named_equation(eqth, nm))
             if @session.theorem(nm) != nil
@@ -3904,6 +3913,605 @@
     prf = cont_solve_goal(g.goal, hints, extra_rules, 0)
     if prf == nil
       fail("continuity failed")
+    close(g, fit_concl(prf, g.goal.concl))
+
+  # ---- push_cast tactic -----------------------------------------------------
+
+  -> push_cast_rules
+    names = [
+      "cast_zero.int", "cast_one.int", "cast_add.int", "cast_mul.int", "cast_succ.int", "cast_pow.int", "cast_sum.int", "cast_mod.int", "cast_div.int",
+      "cast_zero.rat", "cast_one.rat", "cast_add.rat", "cast_mul.rat", "cast_succ.rat", "cast_pow.rat", "cast_sum.rat",
+      "cast_zero.real", "cast_one.real", "cast_add.real", "cast_mul.real", "cast_succ.real", "cast_pow.real", "cast_sum.real",
+      "int_of_nat_add", "int_of_nat_mul", "rat_of_int_add", "rat_of_int_mul", "real_of_rat_add", "real_of_rat_mul"
+    ]
+    rules = []
+    names.each -> (nm)
+      th = @session.theorem(nm)
+      if th != nil
+        rules.push(make_rule(@d, th, nm))
+    rules
+
+  -> tac_push_cast(g, args)
+    at = find_top(args, "at", 0)
+    if at >= 0 && args.size - at - 1 == 1 && args[at + 1].text == "⊢"
+      return tac_push_cast(g, arr_sub(args, 0, at))
+    target_h = nil
+    pre_args = args
+    if at >= 0
+      if args.size - at - 1 > 1
+        cur = g
+        k = at + 1
+        while k < args.size
+          if args[k].text == "⊢"
+            cur = tac_push_cast(cur, arr_sub(args, 0, at))[0]
+          else
+            cur = tac_push_cast(cur, arr_sub(args, 0, at + 1) + [args[k]])[0]
+          k += 1
+        return [cur]
+      target_h = args[at + 1].text
+      pre_args = arr_sub(args, 0, at)
+    rules = push_cast_rules
+    if pre_args.size > 0
+      if pre_args.size < 2 || pre_args[0].text != "\[" || pre_args[pre_args.size - 1].text != "]"
+        fail("push_cast: expected optional [r1, ...] rules")
+      inner = arr_sub(pre_args, 1, pre_args.size - 2)
+      if inner.size > 0
+        split_top(inner, ",").each -> (item)
+          th = proof_expr(g.goal, item)
+          rules.push(make_rule(@d, th, "hint"))
+    s = Simp.new(@d, rules, {}, [])
+    prover = self
+    goal = g.goal
+    s.discharger = ->(c) prover.try_arith_discharge(goal, c)
+    if target_h != nil
+      old = hyp_or_fail(goal, target_h)
+      eqth = s.simp_conv(old, 0)
+      newp = dest_binop(eqth.concl, "=")[1]
+      ng = goal.without_hyp(target_h).add_hyp(target_h, newp)
+      return refine(g, [ng], ->(ts) @d.prove_hyp(@k.eq_mp(eqth, @k.assume(old)), ts[0]))
+    eqth = s.simp_conv(goal.concl, 0)
+    rhs = dest_binop(eqth.concl, "=")[1]
+    if is_const?(rhs, "⊤")
+      return close(g, @d.eqt_elim(eqth))
+    refine(g, [goal.with_concl(rhs)], ->(ts) @k.eq_mp(@k.sym(eqth), ts[0]))
+
+  # ---- canalytic tactic -----------------------------------------------------
+
+  -> cana_ring_eq(goal, lhs, rhs)
+    if tm_eq(lhs, rhs)
+      return @k.refl(lhs)
+    ty = type_of(lhs)
+    if !ty_eq(ty, type_of(rhs))
+      return nil
+    eq_tm = mk_apps(@k.mk_const("=", ty_funs([ty, ty], TY_BOOL_SINGLETON)), [lhs, rhs])
+    begin
+      sub = Prover.new(@session, application_conversions)
+      root = GoalRef.new(goal.with_concl(eq_tm), nil, 0)
+      sub.goals = [root]
+      sub.tac_ring(root)
+      return root.thm
+    rescue err_cr
+      return nil
+
+  -> cana_congr(f_tm, g_tm, z0, hf, v, eq_body_to_alt)
+    # hf : is_canalytic_at f_tm z0, eq_body_to_alt : g_body = f_body (where g_tm = fun v => g_body, f_tm = fun v => f_body)
+    congr_th = @session.theorem("is_canalytic_at.congr")
+    if congr_th == nil
+      return nil
+    ty_c = ty_con("complex", [])
+    one_r = mk_lit(Q_ONE, ty_real)
+    zero_r = mk_lit(Q_ZERO, ty_real)
+    lt_r = @k.mk_const("<", ty_funs([ty_real, ty_real], TY_BOOL_SINGLETON))
+    hr = @d.eqt_elim(@k.compute(mk_apps(lt_r, [zero_r, one_r])))
+    bf = @d.beta_norm_conv(mk_app(f_tm, v))
+    bg = @d.beta_norm_conv(mk_app(g_tm, v))
+    eq_fg = @k.trans(bf, @k.trans(@k.sym(eq_body_to_alt), @k.sym(bg)))
+    cabs_c = @k.mk_const("complex.abs", ty_fun(ty_c, ty_real))
+    csub_c = @k.mk_const("complex.sub", ty_funs([ty_c, ty_c], ty_c))
+    cond_lt = mk_apps(lt_r, [mk_app(cabs_c, mk_apps(csub_c, [v, z0])), one_r])
+    heq = @k.gen(v, @k.disch(cond_lt, eq_fg))
+    inst = @k.spec(one_r, @k.spec(z0, @k.spec(g_tm, @k.spec(f_tm, congr_th))))
+    @k.mp(@k.mp(@k.mp(inst, hr), hf), heq)
+
+  -> cana_simp_real_cond(goal, tm)
+    rules = []
+    if @session.k.defs.has_key?("complex.of_real")
+      rules.push(make_rule(@d, @session.k.defs["complex.of_real"], "complex.of_real"))
+    prover = self
+    s = Simp.new(@d, rules, @session.simp_by_head, @session.simp_general)
+    s.hyp_rules = hyp_thms(goal)
+    s.discharger = ->(c) prover.try_arith_discharge(goal, c)
+    s.simp_conv(tm, 0)
+
+  -> cana_prove_ne_zero(goal, hints, extra_rules, z, depth)
+    if depth > 32
+      return nil
+    ty_c = ty_con("complex", [])
+    not_c = @k.mk_const("¬", ty_fun(TY_BOOL_SINGLETON, TY_BOOL_SINGLETON))
+    czero = @k.mk_const("complex.zero", ty_c)
+    eq_c = @k.mk_const("=", ty_funs([ty_c, ty_c], TY_BOOL_SINGLETON))
+    z_eq_0 = mk_apps(eq_c, [z, czero])
+    ne_tm = mk_app(not_c, z_eq_0)
+    goal.hyps.each -> (h)
+      if tm_eq(h[1], ne_tm)
+        return @k.assume(h[1])
+    hints.each -> (th)
+      if tm_eq(th.concl, ne_tm)
+        return th
+    zsp = strip_app(z)
+    if zsp[0].tag == :const && zsp[0].name == "complex.sub" && zsp[1].size == 2
+      u = zsp[1][0]
+      w = zsp[1][1]
+      ne_uw = mk_app(not_c, mk_apps(eq_c, [u, w]))
+      ne_wu = mk_app(not_c, mk_apps(eq_c, [w, u]))
+      huw = nil
+      goal.hyps.each -> (h)
+        if tm_eq(h[1], ne_uw)
+          huw = [@k.assume(h[1]), false]
+        elsif tm_eq(h[1], ne_wu)
+          huw = [@k.assume(h[1]), true]
+      if huw != nil
+        cadd_c = @k.mk_const("complex.add", ty_funs([ty_c, ty_c], ty_c))
+        r1 = cana_ring_eq(goal, u, mk_apps(cadd_c, [z, w]))
+        r2 = cana_ring_eq(goal, mk_apps(cadd_c, [czero, w]), w)
+        if r1 != nil && r2 != nil
+          ass = @k.assume(z_eq_0)
+          step_mid = @d.ap_thm(@d.ap_term(cadd_c, ass), w)
+          u_eq_w = @k.trans(r1, @k.trans(step_mid, r2))
+          eq_oriented = huw[1] ? @k.sym(u_eq_w) : u_eq_w
+          return @k.not_intro(z_eq_0, @k.not_elim(huw[0], eq_oriented))
+    if zsp[0].tag == :const && zsp[0].name == "complex.mul" && zsp[1].size == 2
+      mul_nz = @session.theorem("complex.mul_ne_zero")
+      if mul_nz != nil
+        p1 = cana_prove_ne_zero(goal, hints, extra_rules, zsp[1][0], depth + 1)
+        if p1 != nil
+          p2 = cana_prove_ne_zero(goal, hints, extra_rules, zsp[1][1], depth + 1)
+          if p2 != nil
+            return @k.mp(@k.mp(@k.spec(zsp[1][1], @k.spec(zsp[1][0], mul_nz)), p1), p2)
+    if zsp[0].tag == :const && zsp[0].name == "classical_gamma" && zsp[1].size == 2
+      cg_nz = @session.theorem("classical_gamma.ne_zero_re_pos")
+      if cg_nz != nil
+        re_c = @k.mk_const("complex.re", ty_fun(ty_c, ty_real))
+        lt_r = @k.mk_const("<", ty_funs([ty_real, ty_real], ty_bool))
+        zero_r = mk_lit(Q_ZERO, ty_real)
+        pre = cana_discharge_cond(goal, hints, extra_rules, mk_apps(lt_r, [zero_r, mk_app(re_c, zsp[1][1])]), depth + 1)
+        if pre != nil
+          return @k.mp(@k.spec(zsp[1][1], @k.spec(zsp[1][0], cg_nz)), pre)
+    if zsp[0].tag == :const && zsp[0].name == "gamma" && zsp[1].size == 1
+      g_nz = @session.theorem("gamma.ne_zero_of_re_pos")
+      if g_nz != nil
+        re_c = @k.mk_const("complex.re", ty_fun(ty_c, ty_real))
+        lt_r = @k.mk_const("<", ty_funs([ty_real, ty_real], ty_bool))
+        zero_r = mk_lit(Q_ZERO, ty_real)
+        pre = cana_discharge_cond(goal, hints, extra_rules, mk_apps(lt_r, [zero_r, mk_app(re_c, zsp[1][0])]), depth + 1)
+        if pre != nil
+          return @k.mp(@k.spec(zsp[1][0], g_nz), pre)
+    # Try projecting complex.re z = complex.re complex.zero and complex.im z = complex.im complex.zero -> contradiction by linarith
+    re_c = @k.mk_const("complex.re", ty_fun(ty_c, ty_real))
+    im_c = @k.mk_const("complex.im", ty_fun(ty_c, ty_real))
+    ass0 = @k.assume(z_eq_0)
+    re_raw = @d.ap_term(re_c, ass0)
+    im_raw = @d.ap_term(im_c, ass0)
+    re_s = cana_simp_real_cond(goal, re_raw.concl)
+    im_s = cana_simp_real_cond(goal, im_raw.concl)
+    re_th = @k.eq_mp(re_s, re_raw)
+    im_th = @k.eq_mp(im_s, im_raw)
+    extra = [re_th, im_th] + hints
+    goal.hyps.each -> (h)
+      hs_eq = cana_simp_real_cond(goal, h[1])
+      if !tm_eq(h[1], dest_binop(hs_eq.concl, "=")[1])
+        extra.push(@k.eq_mp(hs_eq, @k.assume(h[1])))
+    saved_nl = @nl_mode
+    @nl_mode = true
+    bot_prf = nil
+    begin
+      bot_prf = arith_prove(goal.with_concl(@k.false_tm), extra)
+    rescue err_nz
+      bot_prf = nil
+    @nl_mode = saved_nl
+    bot_prf == nil ? nil : @k.not_intro(z_eq_0, bot_prf)
+
+  -> cana_discharge_cond(goal, hints, extra_rules, cond, depth)
+    if depth > 32
+      return nil
+    goal.hyps.each -> (h)
+      if tm_eq(h[1], cond)
+        return @k.assume(h[1])
+    hints.each -> (th)
+      if tm_eq(th.concl, cond)
+        return th
+    sp = strip_app(cond)
+    if sp[0].tag == :const && sp[0].name == "is_canalytic_at" && sp[1].size == 2
+      return cana_solve_goal(goal.with_concl(cond), hints, extra_rules, depth + 1)
+    if sp[0].tag == :const && sp[0].name == "dchar.valid" && sp[1].size == 1
+      arg = sp[1][0]
+      if arg.tag == :const && arg.name == "dchar.trivial_one"
+        t1 = @session.theorem("dchar.trivial_one_valid")
+        if t1 != nil
+          return t1
+      asp = strip_app(arg)
+      if asp[0].tag == :const && asp[0].name == "dchar.inv" && asp[1].size == 1
+        iv_th = @session.theorem("dchar.inv_valid")
+        if iv_th != nil
+          sub_v = cana_discharge_cond(goal, hints, extra_rules, mk_app(sp[0], asp[1][0]), depth + 1)
+          if sub_v != nil
+            return @k.mp(@k.spec(asp[1][0], iv_th), sub_v)
+      if asp[0].tag == :const && asp[0].name == "dchar.prim" && asp[1].size == 1
+        ps_th = @session.theorem("dchar.prim_spec")
+        if ps_th != nil && @session.k.defs.has_key?("dchar.is_primitive")
+          sub_v = cana_discharge_cond(goal, hints, extra_rules, mk_app(sp[0], asp[1][0]), depth + 1)
+          if sub_v != nil
+            prim_th = @k.conj1(@k.mp(@k.spec(asp[1][0], ps_th), sub_v))
+            u_eq = Simp.new(@d, [make_rule(@d, @session.k.defs["dchar.is_primitive"], "dchar.is_primitive")]).simp_conv(prim_th.concl, 0)
+            u_rhs = dest_binop(u_eq.concl, "=")[1]
+            if dest_binop(u_rhs, "∧") != nil
+              return @k.conj1(@k.eq_mp(u_eq, prim_th))
+    neg_inner = dest_unop(cond, "¬")
+    if neg_inner != nil
+      eqp = dest_binop(neg_inner, "=")
+      if eqp != nil && ty_eq(type_of(eqp[0]), ty_con("complex", [])) && is_const?(eqp[1], "complex.zero")
+        nz = cana_prove_ne_zero(goal, hints, extra_rules, eqp[0], depth + 1)
+        if nz != nil
+          return nz
+    cond_s = cana_simp_real_cond(goal, cond)
+    cond_rhs = dest_binop(cond_s.concl, "=")[1]
+    extra = [] + hints
+    pos_facts(cond_rhs, extra, {})
+    goal.hyps.each -> (h)
+      hs_eq = cana_simp_real_cond(goal, h[1])
+      if !tm_eq(h[1], dest_binop(hs_eq.concl, "=")[1])
+        extra.push(@k.eq_mp(hs_eq, @k.assume(h[1])))
+    saved_nl = @nl_mode
+    @nl_mode = true
+    res = nil
+    begin
+      res = arith_prove(goal.with_concl(cond_rhs), extra)
+    rescue err_ca
+      res = nil
+    @nl_mode = saved_nl
+    res == nil ? nil : @k.eq_mp(@k.sym(cond_s), res)
+
+  -> cana_try_thm(goal, hints, extra_rules, th, v, body, z0, depth)
+    if th == nil || th.concl.tv
+      return nil
+    ty_c = ty_con("complex", [])
+    avoid = goal.all_terms + [v, body, z0, th.concl]
+    steps = []
+    qvars = []
+    pvars = {}
+    cur = th.concl
+    while true
+      q = dest_unop(cur, "∀")
+      if q != nil && q.tag == :lam
+        vp = dest_lam_fresh(q, avoid)
+        avoid.push(vp[0])
+        qvars.push(vp[0])
+        pvars[vp[0].vkey] = true
+        steps.push([:all, vp[0]])
+        cur = vp[1]
+      else
+        imp = dest_binop(cur, "⇒")
+        if imp != nil
+          steps.push([:imp])
+          cur = imp[1]
+        else
+          break
+    leaves = []
+    stk = [[[], cur]]
+    while stk.size > 0
+      it = stk.pop
+      cj = dest_binop(it[1], "∧")
+      if cj != nil
+        stk.push([it[0] + [false], cj[1]])
+        stk.push([it[0] + [true], cj[0]])
+      else
+        leaves.push(it)
+    li = 0
+    while li < leaves.size
+      path = leaves[li][0]
+      ltm = leaves[li][1]
+      lsp = strip_app(ltm)
+      if lsp[0].tag == :const && lsp[0].name == "is_canalytic_at" && lsp[1].size == 2 && ty_eq(type_of(lsp[1][1]), ty_c)
+        g_pat = lsp[1][0]
+        pt_pat = lsp[1][1]
+        app_pat = @d.beta_norm_term(mk_app(g_pat, v))
+        mat = Matcher.new(pvars, {})
+        if mat.m(pt_pat, z0, 0, true) && mat.m(app_pat, body, 0, true)
+          ok = true
+          qi = 0
+          while qi < qvars.size
+            bval = mat.tm[qvars[qi].vkey]
+            if bval == nil || tm_free_in?(v, bval)
+              ok = false
+              break
+            qi += 1
+          if ok
+            inst_th = th
+            si = 0
+            while si < steps.size
+              st = steps[si]
+              if st[0] == :all
+                inst_th = @k.spec(mat.tm[st[1].vkey], inst_th)
+              else
+                imp_now = dest_binop(@d.beta_norm_term(inst_th.concl), "⇒")
+                if imp_now == nil
+                  ok = false
+                  break
+                inst_th = @d.beta_norm_thm(inst_th)
+                cprf = cana_discharge_cond(goal, hints, extra_rules, imp_now[0], depth + 1)
+                if cprf == nil
+                  ok = false
+                  break
+                inst_th = @k.mp(inst_th, cprf)
+              si += 1
+            if ok
+              inst_th = @d.beta_norm_thm(inst_th)
+              pi = 0
+              while pi < path.size
+                inst_th = path[pi] ? @k.conj1(inst_th) : @k.conj2(inst_th)
+                pi += 1
+              f_lam = mk_lam(v, body)
+              g_inst = strip_app(inst_th.concl)[1][0]
+              if tm_eq(g_inst, f_lam)
+                return inst_th
+              return cana_congr(g_inst, f_lam, z0, inst_th, v, @k.refl(body))
+      li += 1
+    nil
+
+  -> cana_from_hyps_and_lib(goal, hints, extra_rules, v, body, z0, depth)
+    hi = 0
+    while hi < hints.size
+      r = cana_try_thm(goal, hints, extra_rules, hints[hi], v, body, z0, depth)
+      if r != nil
+        return r
+      hi += 1
+    gi = goal.hyps.size - 1
+    while gi >= 0
+      hth = @k.assume(goal.hyps[gi][1])
+      r = cana_try_thm(goal, hints, extra_rules, hth, v, body, z0, depth)
+      if r != nil
+        return r
+      gi -= 1
+    lib_names = [
+      "Z_reg.is_canalytic_at_re_pos",
+      "classical_L_reg.is_canalytic_at_re_pos",
+      "classical_gamma.is_canalytic_at_re_pos",
+      "gamma.is_canalytic_at_re_pos",
+      "riemann_theta_tail_int.is_canalytic_at",
+      "classical_Lambda_triv_reg.is_canalytic_at_re_pos",
+      "nt_mellin_int.is_canalytic_at",
+      "classical_Lambda_nt.is_canalytic_at",
+      "induced_euler_ratio.is_canalytic_at",
+      "D_chi.is_canalytic_at_re_pos",
+      "N_base.is_canalytic_at_re_pos",
+      "finite_G_mellin.is_canalytic_at",
+      "cpow_real.is_canalytic_at_linear"
+    ]
+    li = 0
+    while li < lib_names.size
+      lth = @session.theorem(lib_names[li])
+      if lth != nil
+        r = cana_try_thm(goal, hints, extra_rules, lth, v, body, z0, depth)
+        if r != nil
+          return r
+      li += 1
+    nil
+
+  -> cana_prove_fn(goal, hints, extra_rules, f_tm, z0, depth)
+    ty_c = ty_con("complex", [])
+    if f_tm.tag == :lam
+      vp = dest_lam_fresh(f_tm, goal.all_terms + [f_tm, z0])
+      return cana_prove(goal, hints, extra_rules, vp[0], vp[1], z0, depth)
+    v = mk_var(fresh_name("s", goal.all_terms + [f_tm, z0]), ty_c)
+    body = mk_app(f_tm, v)
+    pf = cana_prove(goal, hints, extra_rules, v, body, z0, depth)
+    if pf == nil
+      return nil
+    cana_congr(mk_lam(v, body), f_tm, z0, pf, v, @k.refl(body))
+
+  -> cana_prove(goal, hints, extra_rules, v, body, z0, depth)
+    if depth > 24
+      return nil
+    bc = @d.beta_norm_conv(body)
+    rhs = dest_binop(bc.concl, "=")[1]
+    pf = cana_prove_norm(goal, hints, extra_rules, v, rhs, z0, depth)
+    if pf == nil
+      return nil
+    if tm_eq(body, rhs)
+      return pf
+    cana_congr(mk_lam(v, rhs), mk_lam(v, body), z0, pf, v, bc)
+
+  -> cana_prove_norm(goal, hints, extra_rules, v, body, z0, depth)
+    if depth > 24
+      return nil
+    ty_c = ty_con("complex", [])
+    if !tm_free_in?(v, body)
+      cth = @session.theorem("is_canalytic_at.const")
+      return cth == nil ? nil : @k.spec(z0, @k.spec(body, cth))
+    if tm_eq(body, v)
+      ith = @session.theorem("is_canalytic_at.id")
+      return ith == nil ? nil : @k.spec(z0, ith)
+    from_h = cana_from_hyps_and_lib(goal, hints, extra_rules, v, body, z0, depth)
+    if from_h != nil
+      return from_h
+    sp = strip_app(body)
+    if sp[0].tag == :const
+      nm = sp[0].name
+      if nm == "complex.neg" && sp[1].size == 1
+        nth = @session.theorem("is_canalytic_at.neg")
+        if nth != nil
+          pa = cana_prove(goal, hints, extra_rules, v, sp[1][0], z0, depth + 1)
+          if pa != nil
+            return @d.beta_norm_thm(@k.mp(@k.spec(z0, @k.spec(mk_lam(v, sp[1][0]), nth)), pa))
+      elsif (nm == "complex.add" || nm == "complex.sub" || nm == "complex.mul") && sp[1].size == 2
+        a = sp[1][0]
+        b = sp[1][1]
+        if nm == "complex.mul" && !tm_free_in?(v, a) && @session.theorem("is_canalytic_at.const_mul") != nil
+          cmth = @session.theorem("is_canalytic_at.const_mul")
+          pb = cana_prove(goal, hints, extra_rules, v, b, z0, depth + 1)
+          if pb != nil
+            return @d.beta_norm_thm(@k.mp(@k.spec(z0, @k.spec(mk_lam(v, b), @k.spec(a, cmth))), pb))
+        lem_nm = nm == "complex.add" ? "is_canalytic_at.add" : (nm == "complex.sub" ? "is_canalytic_at.sub" : "is_canalytic_at.mul")
+        lem = @session.theorem(lem_nm)
+        if lem != nil
+          pa = cana_prove(goal, hints, extra_rules, v, a, z0, depth + 1)
+          if pa != nil
+            pb = cana_prove(goal, hints, extra_rules, v, b, z0, depth + 1)
+            if pb != nil
+              return @d.beta_norm_thm(@k.mp(@k.mp(@k.spec(z0, @k.spec(mk_lam(v, b), @k.spec(mk_lam(v, a), lem))), pa), pb))
+      elsif nm == "complex.smul" && sp[1].size == 2 && !tm_free_in?(v, sp[1][0])
+        of_r = @k.mk_const("complex.of_real", ty_fun(ty_real, ty_c))
+        cmul_c = @k.mk_const("complex.mul", ty_funs([ty_c, ty_c], ty_c))
+        alt = mk_apps(cmul_c, [mk_app(of_r, sp[1][0]), sp[1][1]])
+        req = cana_ring_eq(goal, body, alt)
+        if req != nil
+          p_alt = cana_prove_norm(goal, hints, extra_rules, v, alt, z0, depth + 1)
+          if p_alt != nil
+            return cana_congr(mk_lam(v, alt), mk_lam(v, body), z0, p_alt, v, req)
+      elsif nm == "complex.inv" && sp[1].size == 1
+        inv_th = @session.theorem("is_canalytic_at.inv")
+        if inv_th != nil
+          a = sp[1][0]
+          az0 = @d.beta_norm_term(tm_subst(a, {v.vkey => z0}))
+          hne = cana_prove_ne_zero(goal, hints, extra_rules, az0, 0)
+          if hne != nil
+            pa = cana_prove(goal, hints, extra_rules, v, a, z0, depth + 1)
+            if pa != nil
+              inst_inv = @d.beta_norm_thm(@k.spec(z0, @k.spec(mk_lam(v, a), inv_th)))
+              return @k.mp(@k.mp(inst_inv, pa), hne)
+      elsif nm == "cderiv_at" && sp[1].size == 2 && tm_eq(sp[1][1], v) && !tm_free_in?(v, sp[1][0])
+        cd_th = @session.theorem("is_canalytic_at.cderiv_at")
+        if cd_th != nil
+          pf_inner = cana_prove_fn(goal, hints, extra_rules, sp[1][0], z0, depth + 1)
+          if pf_inner != nil
+            cd_res = @k.conj2(@k.mp(@k.spec(z0, @k.spec(sp[1][0], cd_th)), pf_inner))
+            return cana_congr(mk_app(@k.mk_const("cderiv_at", ty_funs([ty_fun(ty_c, ty_c), ty_c], ty_c)), sp[1][0]), mk_lam(v, body), z0, cd_res, v, @k.refl(body))
+      elsif nm == "cpow_real" && sp[1].size == 2 && !tm_free_in?(v, sp[1][0])
+        cp_th = @session.theorem("cpow_real.is_canalytic_at_linear")
+        if cp_th != nil
+          c_base = sp[1][0]
+          w_exp = sp[1][1]
+          csmul_c = @k.mk_const("complex.smul", ty_funs([ty_real, ty_c], ty_c))
+          cadd_c = @k.mk_const("complex.add", ty_funs([ty_c, ty_c], ty_c))
+          czero = @k.mk_const("complex.zero", ty_c)
+          a_sc = nil
+          b_off = nil
+          wsp = strip_app(w_exp)
+          if tm_eq(w_exp, v)
+            a_sc = mk_lit(Q_ONE, ty_real)
+            b_off = czero
+          elsif wsp[0].tag == :const && wsp[0].name == "complex.neg" && wsp[1].size == 1 && tm_eq(wsp[1][0], v)
+            a_sc = mk_app(@k.mk_const("neg", ty_fun(ty_real, ty_real)), mk_lit(Q_ONE, ty_real))
+            b_off = czero
+          elsif wsp[0].tag == :const && wsp[0].name == "complex.sub" && wsp[1].size == 2 && !tm_free_in?(v, wsp[1][0]) && tm_eq(wsp[1][1], v)
+            a_sc = mk_app(@k.mk_const("neg", ty_fun(ty_real, ty_real)), mk_lit(Q_ONE, ty_real))
+            b_off = wsp[1][0]
+          elsif wsp[0].tag == :const && wsp[0].name == "complex.smul" && wsp[1].size == 2 && !tm_free_in?(v, wsp[1][0]) && tm_eq(wsp[1][1], v)
+            a_sc = wsp[1][0]
+            b_off = czero
+          if a_sc != nil
+            aff = mk_apps(cadd_c, [mk_apps(csmul_c, [a_sc, v]), b_off])
+            weq = cana_ring_eq(goal, w_exp, aff)
+            if weq != nil
+              alt = mk_apps(sp[0], [c_base, aff])
+              beq = @d.ap_term(mk_app(sp[0], c_base), weq)
+              p_alt = cana_from_hyps_and_lib(goal, hints, extra_rules, v, alt, z0, depth + 1)
+              if p_alt != nil
+                return cana_congr(mk_lam(v, alt), mk_lam(v, body), z0, p_alt, v, beq)
+    # Positive affine pullback: f(a_sc • v + b_off)
+    if body.tag == :app && !tm_free_in?(v, body.a) && tm_free_in?(v, body.b)
+      asp = strip_app(body.b)
+      if asp[0].tag == :const && asp[0].name == "complex.add" && asp[1].size == 2 && !tm_free_in?(v, asp[1][1])
+        smsp = strip_app(asp[1][0])
+        if smsp[0].tag == :const && smsp[0].name == "complex.smul" && smsp[1].size == 2 && !tm_free_in?(v, smsp[1][0]) && tm_eq(smsp[1][1], v)
+          aff_th = @session.theorem("is_canalytic_at.comp_pos_affine")
+          if aff_th != nil
+            a_sc = smsp[1][0]
+            b_off = asp[1][1]
+            lt_r = @k.mk_const("<", ty_funs([ty_real, ty_real], ty_bool))
+            pa_pos = cana_discharge_cond(goal, hints, extra_rules, mk_apps(lt_r, [mk_lit(Q_ZERO, ty_real), a_sc]), depth + 1)
+            if pa_pos != nil
+              pt_img = @d.beta_norm_term(tm_subst(body.b, {v.vkey => z0}))
+              pf_out = cana_prove_fn(goal, hints, extra_rules, body.a, pt_img, depth + 1)
+              if pf_out != nil
+                inst_aff = @d.beta_norm_thm(@k.spec(z0, @k.spec(b_off, @k.spec(a_sc, @k.spec(body.a, aff_th)))))
+                return @k.mp(@k.mp(inst_aff, pa_pos), pf_out)
+    # Fallback: simplify via extra_rules + local set equations + if_pos/if_neg
+    set_rules = [] + extra_rules
+    if @session.theorem("if_pos") != nil
+      set_rules.push(make_rule(@d, @session.theorem("if_pos"), "if_pos"))
+    if @session.theorem("if_neg") != nil
+      set_rules.push(make_rule(@d, @session.theorem("if_neg"), "if_neg"))
+    goal.hyps.each -> (h)
+      eq = dest_binop(h[1], "=")
+      if eq != nil && (eq[0].tag == :var || (eq[0].tag == :const && @session.k.defs.has_key?(eq[0].name))) && !tm_free_in?(v, eq[0])
+        set_rules.push(make_rule(@d, @k.assume(h[1]), "local_eq", false))
+    prover = self
+    s_fb = Simp.new(@d, set_rules, @session.simp_by_head, @session.simp_general)
+    s_fb.hyp_rules = hyp_thms(goal)
+    s_fb.discharger = ->(c) prover.try_arith_discharge(goal, c)
+    fb_eq = s_fb.simp_conv(body, 0)
+    fb_rhs = @d.beta_norm_term(dest_binop(fb_eq.concl, "=")[1])
+    if !tm_eq(body, fb_rhs)
+      ba_fb = @d.beta_norm_conv(dest_binop(fb_eq.concl, "=")[1])
+      p_fb = cana_prove_norm(goal, hints, extra_rules, v, fb_rhs, z0, depth + 1)
+      if p_fb != nil
+        return cana_congr(mk_lam(v, fb_rhs), mk_lam(v, body), z0, p_fb, v, @k.trans(fb_eq, ba_fb))
+    nil
+
+  -> cana_solve_goal(goal, hints, extra_rules, depth)
+    if depth > 16
+      return nil
+    bc = @d.beta_norm_conv(goal.concl)
+    ct = dest_binop(bc.concl, "=")[1]
+    q = dest_unop(ct, "∀")
+    if q != nil && q.tag == :lam
+      vp = dest_lam_fresh(q, goal.all_terms + [ct])
+      sub = cana_solve_goal(goal.add_fix(vp[0].name, vp[0]).with_concl(vp[1]), hints, extra_rules, depth + 1)
+      return sub == nil ? nil : @k.eq_mp(@k.sym(bc), @k.gen(vp[0], sub))
+    imp = dest_binop(ct, "⇒")
+    if imp != nil
+      sub = cana_solve_goal(goal.add_hyp(fresh_hyp_name(goal), imp[0]).with_concl(imp[1]), hints, extra_rules, depth + 1)
+      return sub == nil ? nil : @k.eq_mp(@k.sym(bc), @k.disch(imp[0], sub))
+    cj = dest_binop(ct, "∧")
+    if cj != nil
+      p1 = cana_solve_goal(goal.with_concl(cj[0]), hints, extra_rules, depth + 1)
+      if p1 == nil
+        return nil
+      p2 = cana_solve_goal(goal.with_concl(cj[1]), hints, extra_rules, depth + 1)
+      if p2 == nil
+        return nil
+      return @k.eq_mp(@k.sym(bc), @k.conj(p1, p2))
+    sp = strip_app(ct)
+    if sp[0].tag == :const && sp[0].name == "is_canalytic_at" && sp[1].size == 2 && ty_eq(type_of(sp[1][1]), ty_con("complex", []))
+      res = cana_prove_fn(goal, hints, extra_rules, sp[1][0], sp[1][1], 0)
+      return res == nil ? nil : @k.eq_mp(@k.sym(bc), res)
+    nil
+
+  -> tac_canalytic(g, args)
+    hints = []
+    extra_rules = []
+    if args.size > 0
+      if args.size < 2 || args[0].text != "\[" || args[args.size - 1].text != "]"
+        fail("canalytic: expected optional [h1, h2, ...] hints")
+      inner = arr_sub(args, 1, args.size - 2)
+      if inner.size > 0
+        split_top(inner, ",").each -> (item)
+          if item.size == 1 && @session.k.defs.has_key?(item[0].text)
+            nm = item[0].text
+            extra_rules.push(make_rule(@d, @session.k.defs[nm], nm))
+            @session.eqns_of(nm).each -> (eqth)
+              extra_rules.push(named_equation(eqth, nm))
+            if @session.theorem(nm) != nil
+              hints.push(@session.theorem(nm))
+          else
+            th = proof_expr(g.goal, item)
+            hints.push(th)
+            if dest_binop(th.concl, "=") != nil
+              extra_rules.push(make_rule(@d, th, "hint"))
+    prf = cana_solve_goal(g.goal, hints, extra_rules, 0)
+    if prf == nil
+      fail("canalytic failed")
     close(g, fit_concl(prf, g.goal.concl))
 
   # Lift a polynomial identity through matching applications and binders.

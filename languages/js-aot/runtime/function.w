@@ -1,0 +1,275 @@
+# runtime/function — function objects, code descriptors, environments, and calls.
+#
+#   JS:Code            one per function per loaded script: name, parameter count, flags, and
+#                      the index of its native entry in the program's js_dispatch.
+#   JS:Function        @shape @ext @code @env + 4 inline slots: 72 bytes, one block. name,
+#                      length and prototype are virtual until a script writes, deletes or
+#                      (for prototype) first reads them.
+#   JS:NativeFunction  a static Tungsten function ->(this, args, new_target) and a data
+#                      slot, so a builtin needs no capturing lambda.
+#   JS:Env             a captured scope: @up and seven variables (JS:EnvN beyond).
+#
+# Entry convention of every compiled function (generic form):
+#   jsf_N(f, this, argc, a0, a1, a2, a3, more)
+# all WValues; argc an Int; more an Array of the arguments when argc > 4.
+
+in JS
+
+CODE_STRICT = 1
+CODE_ARROW = 2
+CODE_METHOD = 4
+CODE_CTOR = 8          # constructible (ordinary functions and classes)
+CODE_CLASS = 16        # class constructor (throws when called without new)
+
++ Code
+  rw :name, :nparams, :index, :flags, :url, :start, :fin
+
+  -> new(@name, @nparams, @index, @flags)
+    @url = nil
+    @start = 0
+    @fin = 0
+
+FN_IBASE = 4
+FN_INLINE = 4
+# Function kind byte bits above the kind (KIND_PROTO is 128).
+FNV_DONE = 64          # name/length were made real properties
+FNV_PROTO = 32         # prototype was created (or a script defined it)
+
++ Function < JS:Base
+  rw :code, :env, :s0, :s1, :s2, :s3
+
+  -> new(@shape, @code, @env)
+    @ext = nil
+    @s0 = nil
+    @s1 = nil
+    @s2 = nil
+    @s3 = nil
+    jsr_set_kind(wvalue_bits(self) ## i64, KIND_FUNCTION)
+
+  -> callable?
+    true
+
+  -> vflag?(b)
+    (jsr_kind(wvalue_bits(self) ## i64) & b) != 0
+
+  -> set_vflag(b)
+    ob = wvalue_bits(self) ## i64
+    jsr_set_kind(ob, jsr_kind(ob) | b)
+    nil
+
+  -> get_virtual(key)
+    if key == "prototype"
+      return JS_HOLE if vflag?(FNV_PROTO) || (@code.flags & CODE_CTOR) == 0
+      set_vflag(FNV_PROTO)
+      p = js_new_object(js_realm().object_proto)
+      p.define("constructor", self, ATTR_W + ATTR_C)
+      define("prototype", p, ATTR_W)
+      return p
+    return JS_HOLE if vflag?(FNV_DONE)
+    return @code.name if key == "name"
+    return @code.nparams.to_f if key == "length"
+    JS_HOLE
+
+  # name and length become real (non-enumerable, configurable) properties before any
+  # change to the object's own keys.
+  -> materialize
+    return nil if vflag?(FNV_DONE)
+    set_vflag(FNV_DONE)
+    super_define("length", @code.nparams.to_f, ATTR_C) if !has_own_slot?("length")
+    super_define("name", @code.name, ATTR_C) if !has_own_slot?("name")
+    get_virtual("prototype")
+    nil
+
+  -> has_own_slot?(key)
+    @shape.slot_of(key) >= 0
+
+  -> super_define(key, v, attrs)
+    i = @shape.slot_of(key)
+    if i >= 0
+      slot_set(i, v)
+    else
+      add_property(key, v, attrs)
+    nil
+
+  -> has_own?(key)
+    materialize()
+    @shape.slot_of(key) >= 0
+
+  -> get_own(key)
+    materialize()
+    i = @shape.slot_of(key)
+    return JS_HOLE if i < 0
+    slot_get(i)
+
+  -> own_keys
+    materialize()
+    super()
+
+  -> delete_own(key)
+    materialize()
+    super(key)
+
+  -> set(key, v, receiver)
+    materialize() if key == "name" || key == "length" || key == "prototype"
+    super(key, v, receiver)
+
+  -> define(key, v, attrs)
+    if key == "name" || key == "length"
+      materialize()
+    elsif key == "prototype" && !vflag?(FNV_PROTO)
+      set_vflag(FNV_PROTO)
+    super(key, v, attrs)
+
++ NativeFunction < JS:Base
+  rw :fn, :name, :len, :data, :s0, :s1
+
+  -> new(@shape, @fn, @name, @len)
+    @ext = nil
+    @data = nil
+    @s0 = nil
+    @s1 = nil
+    jsr_set_kind(wvalue_bits(self) ## i64, KIND_NATIVE)
+
+  -> callable?
+    true
+
+  -> get_virtual(key)
+    return JS_HOLE if (jsr_kind(wvalue_bits(self) ## i64) & FNV_DONE) != 0
+    return @name if key == "name"
+    return @len.to_f if key == "length"
+    JS_HOLE
+
+NF_IBASE = 6
+NF_INLINE = 2
+
++ Env
+  rw :up, :v0, :v1, :v2, :v3, :v4, :v5, :v6
+  -> new(@up)
+    @v0 = nil
+    @v1 = nil
+    @v2 = nil
+    @v3 = nil
+    @v4 = nil
+    @v5 = nil
+    @v6 = nil
+
++ EnvN
+  rw :up, :vars
+  -> new(@up, n)
+    @vars = Array.new(n, nil)
+
+# A new closure over env for code.
+-> js_closure(code, env)
+  JS:Function.new(js_realm().fn_shape, code, env)
+
+-> js_native(name, len, fn)
+  JS:NativeFunction.new(js_realm().native_shape, fn, name, len)
+
+# ---- calls ----
+
+# The arguments of a generic entry as an Array (for natives and rest parameters).
+-> js_args_array(argc, a0, a1, a2, a3, more)
+  return more if argc > 4
+  return JS_NO_ARGS if argc == 0
+  return [a0] if argc == 1
+  return [a0, a1] if argc == 2
+  return [a0, a1, a2] if argc == 3
+  [a0, a1, a2, a3]
+
+JS_NO_ARGS = []
+
+# Calls f with this and the arguments in generic-entry form.
+-> js_call(f, this, argc, a0, a1, a2, a3, more)
+  fb = wvalue_bits(f) ## i64
+  k = jsr_kind(fb) & 15
+  if k == KIND_FUNCTION
+    code = wvalue_from_bits(jsr_ivar(fb, 2))
+    return js_dispatch(wvalue_from_bits(jsr_ivar(wvalue_bits(code) ## i64, 2)), f, this, argc, a0, a1, a2, a3, more)
+  js_call_slow(f, this, argc, a0, a1, a2, a3, more)
+
+-> js_call_slow(f, this, argc, a0, a1, a2, a3, more)
+  k = jsr_kind(wvalue_bits(f) ## i64) & 15
+  if k == KIND_NATIVE
+    return f.fn.call(this, js_args_array(argc, a0, a1, a2, a3, more), nil)
+  js_throw_type(js_to_display_short(f) + " is not a function")
+
+-> js_to_display_short(v)
+  return "undefined" if v == nil
+  return "null" if v == JS_NULL
+  return js_inspect(v, 0) if js_object?(v)
+  js_to_display(v)
+
+# f(...args) with an Array of arguments (runtime and builtin callers).
+-> js_call_arr(f, this, args)
+  n = args.size
+  if n > 4
+    return js_call(f, this, n, args[0], args[1], args[2], args[3], args)
+  a0 = n > 0 ? args[0] : nil
+  a1 = n > 1 ? args[1] : nil
+  a2 = n > 2 ? args[2] : nil
+  a3 = n > 3 ? args[3] : nil
+  js_call(f, this, n, a0, a1, a2, a3, nil)
+
+# The method call o.m(args) for a property site k.
+-> js_call_method(o, key, k, argc, a0, a1, a2, a3, more)
+  f = js_getp(o, key, k)
+  js_call(f, o, argc, a0, a1, a2, a3, more)
+
+# ic[j] when ic[i] == key (and key is not 0), else 0.
+fn jsr_ic_word_if(ic, i, key, j) (i64[] i64 i64 i64) i64
+  if key != 0 && ic[i] == key
+    return ic[j]
+  0
+
+# new.target of the running constructor (one register per thread).
+JS_NEW_TARGET = [nil]
+
+# new F(args) at a site with cache k: words k..k+3 cache F.prototype's slot, k+4 and
+# k+5 the prototype and the root shape for its instances.
+-> js_new(f, k, argc, a0, a1, a2, a3, more)
+  fb = wvalue_bits(f) ## i64
+  kind = jsr_kind(fb) & 15
+  if kind == KIND_FUNCTION && (f.code.flags & CODE_CTOR) != 0
+    proto = js_getp(f, "prototype", k)
+    pb = wvalue_bits(proto) ## i64
+    sh = nil
+    sb = jsr_ic_word_if(JS_IC, k + 4, pb, k + 5)
+    if sb != 0
+      sh = wvalue_from_bits(sb)
+    else
+      p = js_object?(proto) ? proto : js_realm().object_proto
+      sh = js_root_shape(p, OBJ_INLINE, OBJ_IBASE)
+      if js_object?(proto)
+        JS_IC[k + 4] = pb
+        JS_IC[k + 5] = wvalue_bits(sh) ## i64
+    obj = JS:Object.new(sh)
+    saved = JS_NEW_TARGET[0]
+    JS_NEW_TARGET[0] = f
+    r = js_dispatch(f.code.index, f, obj, argc, a0, a1, a2, a3, more)
+    JS_NEW_TARGET[0] = saved
+    return js_object?(r) ? r : obj
+  if kind == KIND_NATIVE
+    return f.fn.call(nil, js_args_array(argc, a0, a1, a2, a3, more), f)
+  js_throw_type(js_to_display_short(f) + " is not a constructor")
+
+-> js_new_arr(f, args)
+  n = args.size
+  js_new(f, JS_IC_SCRATCH, n, n > 0 ? args[0] : nil, n > 1 ? args[1] : nil, n > 2 ? args[2] : nil, n > 3 ? args[3] : nil, n > 4 ? args : nil)
+
+# The environment of a function object (its @env, ivar 3).
+-> js_fenv(f)
+  fb = wvalue_bits(f) ## i64
+  wvalue_from_bits(jsr_ivar(fb, 3))
+
+# 1 when f is a JS:Function whose code is c (a call site's guess at its callee).
+fn jsr_code_is(fb, cb) (i64 i64) i64
+  if (jsr_kind(fb) & 15) != 2
+    return 0
+  if jsr_ivar(fb, 2) == cb
+    return 1
+  0
+
+-> js_code_is?(f, c)
+  fb = wvalue_bits(f) ## i64
+  cb = wvalue_bits(c) ## i64
+  jsr_code_is(fb, cb) != 0

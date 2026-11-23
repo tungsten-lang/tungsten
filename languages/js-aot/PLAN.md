@@ -1,7 +1,50 @@
 # JS-AOT: JavaScript compiled through the Tungsten compiler
 
-Status: plan only (branch `js-aot`, from Tungsten main fd1eaa9b). Nothing here is built yet.
+Status: M0 and M1 implemented (branch `js-aot`); see "Implementation status" just below and
+Appendix B for what was built, the numbers, and where the implementation departs from this plan.
 Audience: the agent that implements it. Every stage has an exit criterion with a command and a number.
+
+### Implementation status (kept current)
+
+| Milestone | State |
+|---|---|
+| M0 | done: `frontend/`, `tier0/` (Blade 99b7307 + the aot body-scope fix), `tools/jsrun.w`, `tools/memstat.sh`, `bench/`, `BASELINE.md` |
+| M1 | exit met: see Appendix B.1 (speed, blocks, spike, scale) |
+
+Deviations from the plan as written, each with its reason:
+
+1. **Value layout (user directive, 2026-11-22).** No new WValue tags. `JS:Object` is a plain
+   instance; the inline-cache test is `subtag == 4 && ivars[0] == cached_shape` (the shape load is
+   needed anyway, so a dedicated subtag would save nothing). A JS kind byte lives in the spare
+   32-bit word of the instance header (`WObject._reserved`, zeroed on every allocation and
+   recycle path): 1 ordinary, 2 function, 3 native, 4 bound, 5 exotic, +128 "is a prototype",
+   +64/+32 function virtual-property flags. typeof/IsCallable are one header load.
+2. **JS arrays are WArrays (user directive).** See 2.3 as amended: the marker is the spare header
+   byte `WArray._pad[0]`, not a new ebits code (ebits stays 65 so every core fast path applies).
+3. **The prototype lives in the shape** (as V8 maps, JSC structures and SpiderMonkey shapes do),
+   so `JS:Object` has six inline slots instead of five, and a cached shape check also fixes the
+   prototype chain's first link. Prototype hits are guarded by one global epoch (V8 uses
+   per-prototype validity cells; the epoch is the simple form, bumped when any object that is a
+   prototype changes layout).
+4. **Function entry convention.** Every compiled function is `jsd_N(fe, this, argc, a0..a3, more)`
+   where `fe` is its environment (a `JS:Env`, the single captured value, or nil). Functions that
+   have an object also get `jsf_N(f, …)` = `jsd_N(f.@env, …)`, reached through the generated
+   `js_dispatch(index, …)` switch. Call-only functions and IIFEs are called through `jsd_N`
+   directly. (The plan's separate "direct form with exact parameters" is folded into this: the
+   generic form already passes four arguments in registers.)
+5. **How jsc reaches the compiler.** A driver hook (`program_ast_hook`, compiler/lib/driver/ir.w)
+   lets a front end transform the loaded program AST before compilation; `tools/jsc.w` is the
+   compiler binary plus the JS front end and sets the hook. The JS runtime is ordinary Tungsten
+   source (`runtime/main.w`) loaded as the program; the translated script is appended as
+   `Tungsten:AST` nodes. Stage identity verified after the change.
+6. **Raw-value discipline.** Fast paths are `fn … (i64 …) i64` functions with `ll` bodies on raw
+   WValue bits (`runtime/prims.w`). Measured traps, now rules: a heap value passed to an `ll` fn
+   as bits is invisible to escape analysis and gets freed, so pointers are only *stored* through
+   `ccall("w_ivar_set_idx", …)` or Tungsten assignment; typed fns must not reference untyped module
+   constants (they get boxed wrappers); raw bits beyond 48 bits must not reach untyped code (they
+   box as BigInt); typed arrays read on fast paths (`JS_IC`) are declared before the functions that
+   read them, so the program declares `JS_IC` ahead of `use runtime/main`.
+
 
 Words used below:
 
@@ -191,6 +234,16 @@ Shared key layouts, which are where the per-object Hash goes:
 
 ### 2.3 `JS:Array`
 
+**As built (user directive):** a JS array *is* a core `Array` (polymorphic, ebits 65), marked in its
+spare header byte `WArray._pad[0]` (`runtime/array.w`): `JS_AF_ARRAY`, `JS_AF_HOLES` (may hold
+`JS_HOLE`; when clear an in-bounds read needs no check), `JS_AF_EXT` (named properties, a non-default
+prototype, sparse elements or a non-writable length, kept in a side `JS:Object` keyed by the
+array's pointer). One allocation for the header, one for the slots, and core speed for indexing,
+`push`, `pop`; a core `copy`/`dup` is an unflagged engine array. (V8 tracks the same facts as
+elements kinds plus a properties store; JSC as indexing types plus the butterfly.) If the side
+table shows up in profiles, an 8-byte `ext` word at WArray offset 24 costs no memory (macOS malloc
+already rounds the 24-byte header to 32). The original design below is kept for reference.
+
 `JS:Array < JS:Object` adds `@elems` (core `Array`) and `@len`.
 
 - Dense storage is the core array. A hole is the `JS:HOLE` sentinel. A write far past the end (more than 65,536, the current `ARRAY_GAP`) moves the array to sparse mode, where indices live in a `Hash`.
@@ -218,6 +271,11 @@ Static methods only, plus the `new Number(x)` wrapper.
 - JS-specific: number → string (core prints `9.9999999999999995e-08` where JS prints `1e-7`, and `1.2345678901234568e+20` where JS prints `123456789012345680000`), string → number, `**` (JS differs from C `pow` for `1 ** Infinity` and `NaN ** 0`), `ToInt32` / `ToUint32` (modular, where core `to_i` saturates), `toFixed` and friends. These port from `value.w` and `b_number.w`.
 
 ### 2.6 `JS:Function`
+
+As built: `JS:Function < JS:Base` is `@shape @ext @code @env` plus four inline slots, eight ivars
+(72 bytes, an 80-byte malloc block, recycle-pool size). The object layout is `JS:Base` (`@shape
+@ext`) with subclasses adding their fields before their inline slots; the shape records where
+inline slots start (`ibase`) and how many there are (`inline`).
 
 ```text
 JS:Function < JS:Object     … @code  @env                    88 bytes, one block

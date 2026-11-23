@@ -107,10 +107,9 @@ WK_POOL = []
   an.url = url
   an.eval_mode = mode != nil
   an.run
-  bad = []
-  an.funcs.each ->(f) bad.push(f.unsupported0) if f.unsupported0 != nil
-  js_throw(js_make_error("SyntaxError", "tier 0 cannot run this yet: " + bad[0].to_s)) if bad.size > 0
   f = an.funcs[0]
+  # (a function tier 0 cannot run fails when it is called, not the whole script)
+  js_throw(js_make_error("SyntaxError", "tier 0 cannot run this yet: " + f.unsupported0.to_s)) if f.unsupported0 != nil
   act = wk_act(f, nil, nil, js_realm().global, f.nlocals)
   act.caller = JS_CUR_ACT[0]
   JS_CUR_ACT[0] = act
@@ -179,6 +178,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
 # The entry js_dispatch uses for a function with no native code.
 -> wk_call(f, this, argc, a0, a1, a2, a3, more)
   jf = f.code.node
+  js_throw(js_make_error("SyntaxError", "tier 0 cannot run this yet: " + jf.unsupported0.to_s)) if jf.unsupported0 != nil
   nt = JS_NEW_TARGET[0]
   JS_NEW_TARGET[0] = nil
   js_throw_type("Class constructor " + jf.name + " cannot be invoked without 'new'") if jf.class_ctor && nt == nil

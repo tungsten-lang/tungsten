@@ -5,8 +5,8 @@
 # in unit mode a JtUnit is installed as JT_UNIT[0] (translate/build.w), and everything the
 # translated code takes from the host goes through the unit's context (unit/prelude.w):
 #
-#   - runtime calls become jsu_cN(ctx, k, …): an indirect call of the host's closure for
-#     entry k, named "js_add/2" and so on in the manifest;
+#   - runtime calls become jsu_cN(ctx, k, …): a call of the host's closure for entry k,
+#     named "js_add/2" and so on in the manifest;
 #   - host values are slots: global and lexical cells, JS:Code descriptors, literal
 #     shapes, template objects, JS_HOLE and the other constants, the inline-cache table;
 #   - strings longer than five bytes are slots too (a string literal is an index into
@@ -74,12 +74,7 @@ JSU_CONSTS = {"JSR" => true, "JS_HOLE" => true, "JS_NULL" => true, "JS_NO_ARGS" 
   # A runtime call through the context.
   -> rt_call(name, args)
     n = args.size
-    xs = [Tungsten:AST:Var.new("ctx"), ta_int(rt_index(name, n))]
-    i = 0
-    while i < n
-      xs.push(Tungsten:AST:TypeAscription.new(Tungsten:AST:Call.new(nil, "wvalue_bits", [args[i]]), "i64"))
-      i += 1
-    Tungsten:AST:Call.new(nil, "wvalue_from_bits", [Tungsten:AST:Call.new(nil, "jsu_c" + n.to_s, xs)])
+    Tungsten:AST:Call.new(nil, "jsu_c" + n.to_s, [Tungsten:AST:Var.new("ctx"), ta_int(rt_index(name, n))] + args)
 
   -> call(name, args)
     if name.starts_with?("jsd_") || name.starts_with?("jsf_")
@@ -123,15 +118,16 @@ JSU_CONSTS = {"JSR" => true, "JS_HOLE" => true, "JS_NULL" => true, "JS_NO_ARGS" 
   -> str(s)
     slot_value(slot("str", s, s))
 
-  # Sends to host classes become runtime calls (a unit knows no host class).
+  # A runtime class's new (a unit knows no host class).
+  -> new_obj(cls, args)
+    return rt_call("js_env_new", args) if cls == "JS:Env"
+    return rt_call("js_envn_new", args) if cls == "JS:EnvN"
+    return rt_call("js_private_name_new", args) if cls == "JS:PrivateName"
+    ccall("w_eputs", "jsc: unit: no runtime constructor for " + cls)
+    rt_call("js_tier0_only", [ta_int(-1)])
+
+  # Other sends are core methods on unit values (Arrays) and compile to code in the unit.
   -> send(recv, name, args)
-    return nil if !recv.is_a?(Tungsten:AST:Var)
-    rn = recv.name
-    if name == "new"
-      return rt_call("js_env_new", args) if rn == "JS:Env"
-      return rt_call("js_envn_new", args) if rn == "JS:EnvN"
-      return rt_call("js_private_name_new", args) if rn == "JS:PrivateName"
-    return rt_call("js_object_proto", []) if name == "object_proto" && rn == "JSR"
     nil
 
   # The unit's jsu_init(ctx): an Array of [index, closure, …], one closure per entry,

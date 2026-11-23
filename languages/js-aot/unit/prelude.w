@@ -5,171 +5,61 @@
 # runtime only through its context, ctx (a Tungsten Int holding the address of a
 # host-made i64 table):
 #
-#   ctx[2k], ctx[2k+1]   (k < JSU_RT_MAX) the code pointer and captures of the host
-#                        closure for runtime entry k (the unit's manifest names them)
+#   ctx[2k]              (k < 512) the host closure for runtime entry k (the unit's
+#                        manifest names them)
 #   ctx[JSU_SLOTS + j]   slot j: the raw bits of a host value (strings, global cells,
 #                        codes, literal shapes, template objects, inline-cache tables)
 #
-# A host closure's code takes (captures, args...) with every argument a raw WValue
-# (runtime/units.w makes one per entry), so a call through jsu_cN is an indirect call
-# with no boxing. Strings longer than five bytes come from slots: a unit's own string
-# slab means nothing in the host. The unit defines no classes and runs no main.
+# A call through jsu_cN is w_closure_call_N on the host's closure for the entry
+# (runtime/units.w makes one per entry). Strings longer than five bytes come from slots:
+# a unit's own string slab means nothing in the host. The unit defines no classes and
+# runs no main.
 
-fn jsu_c0(ctx, k) (i64 i64) i64
+# The host closure for runtime entry k (ctx[2k] holds its bits).
+fn jsu_rt(ctx, k) (i64 i64) i64
   ll <<~IR
     %base = inttoptr i64 %ctx to ptr
     %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps)
-    ret i64 %r
+    %p = getelementptr i64, ptr %base, i64 %k2
+    %v = load i64, ptr %p
+    ret i64 %v
   IR
 
-fn jsu_c1(ctx, k, a0) (i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0)
-    ret i64 %r
-  IR
+# Runtime entry k with n arguments. A C call, so the compiler sees every argument escape:
+# a value passed only as raw bits would look unused, and what the unit allocated (an
+# Array literal) would be freed when the function returned.
+-> jsu_c0(ctx, k)
+  ccall("w_closure_call_0", wvalue_from_bits(jsu_rt(ctx, k)))
 
-fn jsu_c2(ctx, k, a0, a1) (i64 i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0, i64 %a1)
-    ret i64 %r
-  IR
+-> jsu_c1(ctx, k, a0)
+  ccall("w_closure_call_1", wvalue_from_bits(jsu_rt(ctx, k)), a0)
 
-fn jsu_c3(ctx, k, a0, a1, a2) (i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0, i64 %a1, i64 %a2)
-    ret i64 %r
-  IR
+-> jsu_c2(ctx, k, a0, a1)
+  ccall("w_closure_call_2", wvalue_from_bits(jsu_rt(ctx, k)), a0, a1)
 
-fn jsu_c4(ctx, k, a0, a1, a2, a3) (i64 i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0, i64 %a1, i64 %a2, i64 %a3)
-    ret i64 %r
-  IR
+-> jsu_c3(ctx, k, a0, a1, a2)
+  ccall("w_closure_call_3", wvalue_from_bits(jsu_rt(ctx, k)), a0, a1, a2)
 
-fn jsu_c5(ctx, k, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0, i64 %a1, i64 %a2, i64 %a3, i64 %a4)
-    ret i64 %r
-  IR
+-> jsu_c4(ctx, k, a0, a1, a2, a3)
+  ccall("w_closure_call_4", wvalue_from_bits(jsu_rt(ctx, k)), a0, a1, a2, a3)
 
-fn jsu_c6(ctx, k, a0, a1, a2, a3, a4, a5) (i64 i64 i64 i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5)
-    ret i64 %r
-  IR
+-> jsu_c5(ctx, k, a0, a1, a2, a3, a4)
+  ccall("w_closure_call_5", wvalue_from_bits(jsu_rt(ctx, k)), a0, a1, a2, a3, a4)
 
-fn jsu_c7(ctx, k, a0, a1, a2, a3, a4, a5, a6) (i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6)
-    ret i64 %r
-  IR
+-> jsu_c6(ctx, k, a0, a1, a2, a3, a4, a5)
+  ccall("w_closure_call_6", wvalue_from_bits(jsu_rt(ctx, k)), a0, a1, a2, a3, a4, a5)
 
-fn jsu_c8(ctx, k, a0, a1, a2, a3, a4, a5, a6, a7) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6, i64 %a7)
-    ret i64 %r
-  IR
+-> jsu_c7(ctx, k, a0, a1, a2, a3, a4, a5, a6)
+  ccall("w_closure_call_7", wvalue_from_bits(jsu_rt(ctx, k)), a0, a1, a2, a3, a4, a5, a6)
 
-fn jsu_c9(ctx, k, a0, a1, a2, a3, a4, a5, a6, a7, a8) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6, i64 %a7, i64 %a8)
-    ret i64 %r
-  IR
+-> jsu_c8(ctx, k, a0, a1, a2, a3, a4, a5, a6, a7)
+  ccall("w_closure_call_8", wvalue_from_bits(jsu_rt(ctx, k)), a0, a1, a2, a3, a4, a5, a6, a7)
 
-fn jsu_c10(ctx, k, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6, i64 %a7, i64 %a8, i64 %a9)
-    ret i64 %r
-  IR
+-> jsu_c9(ctx, k, a0, a1, a2, a3, a4, a5, a6, a7, a8)
+  ccall("w_closure_call_9", wvalue_from_bits(jsu_rt(ctx, k)), a0, a1, a2, a3, a4, a5, a6, a7, a8)
 
-fn jsu_c11(ctx, k, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %base = inttoptr i64 %ctx to ptr
-    %k2 = shl i64 %k, 1
-    %pf = getelementptr i64, ptr %base, i64 %k2
-    %fn = load i64, ptr %pf
-    %pc = getelementptr i64, ptr %pf, i64 1
-    %caps = load i64, ptr %pc
-    %fp = inttoptr i64 %fn to ptr
-    %r = call i64 %fp(i64 %caps, i64 %a0, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6, i64 %a7, i64 %a8, i64 %a9, i64 %a10)
-    ret i64 %r
-  IR
+-> jsu_c10(ctx, k, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9)
+  ccall("w_closure_call_10", wvalue_from_bits(jsu_rt(ctx, k)), a0, a1, a2, a3, a4, a5, a6, a7, a8, a9)
 
 # Slot j of the context (raw bits of a host value).
 fn jsu_k(ctx, j) (i64 i64) i64
@@ -190,57 +80,57 @@ use ../runtime/prims
   ab = wvalue_bits(a) ## i64
   bb = wvalue_bits(b) ## i64
   return wvalue_from_bits(jsr_fadd(ab, bb)) if jsr_nn(ab, bb) != 0
-  wvalue_from_bits(jsu_c2(ctx, 0, ab, bb))
+  jsu_c2(ctx, 0, a, b)
 
 -> jsu_sub(ctx, a, b)
   ab = wvalue_bits(a) ## i64
   bb = wvalue_bits(b) ## i64
   return wvalue_from_bits(jsr_fsub(ab, bb)) if jsr_nn(ab, bb) != 0
-  wvalue_from_bits(jsu_c2(ctx, 1, ab, bb))
+  jsu_c2(ctx, 1, a, b)
 
 -> jsu_mul(ctx, a, b)
   ab = wvalue_bits(a) ## i64
   bb = wvalue_bits(b) ## i64
   return wvalue_from_bits(jsr_fmul(ab, bb)) if jsr_nn(ab, bb) != 0
-  wvalue_from_bits(jsu_c2(ctx, 2, ab, bb))
+  jsu_c2(ctx, 2, a, b)
 
 -> jsu_lt(ctx, a, b)
   ab = wvalue_bits(a) ## i64
   bb = wvalue_bits(b) ## i64
   return wvalue_from_bits(jsr_flt(ab, bb)) if jsr_nn(ab, bb) != 0
-  wvalue_from_bits(jsu_c2(ctx, 3, ab, bb))
+  jsu_c2(ctx, 3, a, b)
 
 -> jsu_gt(ctx, a, b)
   ab = wvalue_bits(a) ## i64
   bb = wvalue_bits(b) ## i64
   return wvalue_from_bits(jsr_flt(bb, ab)) if jsr_nn(ab, bb) != 0
-  wvalue_from_bits(jsu_c2(ctx, 4, ab, bb))
+  jsu_c2(ctx, 4, a, b)
 
 -> jsu_le(ctx, a, b)
   ab = wvalue_bits(a) ## i64
   bb = wvalue_bits(b) ## i64
   return wvalue_from_bits(jsr_fle(ab, bb)) if jsr_nn(ab, bb) != 0
-  wvalue_from_bits(jsu_c2(ctx, 5, ab, bb))
+  jsu_c2(ctx, 5, a, b)
 
 -> jsu_ge(ctx, a, b)
   ab = wvalue_bits(a) ## i64
   bb = wvalue_bits(b) ## i64
   return wvalue_from_bits(jsr_fle(bb, ab)) if jsr_nn(ab, bb) != 0
-  wvalue_from_bits(jsu_c2(ctx, 6, ab, bb))
+  jsu_c2(ctx, 6, a, b)
 
 -> jsu_seq(ctx, a, b)
   ab = wvalue_bits(a) ## i64
   bb = wvalue_bits(b) ## i64
   return wvalue_from_bits(jsr_feq(ab, bb)) if jsr_nn(ab, bb) != 0
   return true if ab == bb && jsr_num(ab) == 0
-  wvalue_from_bits(jsu_c2(ctx, 7, ab, bb))
+  jsu_c2(ctx, 7, a, b)
 
 -> jsu_truthy(ctx, v)
   return v if v == true || v == false
   return false if v == nil
   vb = wvalue_bits(v) ## i64
   return v != ~0.0 && v == v if jsr_num(vb) != 0
-  wvalue_from_bits(jsu_c1(ctx, 8, vb)) == true
+  jsu_c1(ctx, 8, v) == true
 
 # Inline-cache reads and writes (runtime/object.w jsr_ic_get / jsr_ic_set), against the
 # host's prototype epoch (slot 1 holds its address).
@@ -283,7 +173,7 @@ fn jsu_epoch(ctx) (i64) i64
   ob = wvalue_bits(o) ## i64
   r = jsu_ic_get(ic, k, ob, jsu_epoch(ctx))
   return wvalue_from_bits(r) if r != 6
-  wvalue_from_bits(jsu_c4(ctx, 9, ob, wvalue_bits(key) ## i64, wvalue_bits(ic) ## i64, wvalue_bits(k) ## i64))
+  jsu_c4(ctx, 9, o, key, ic, k)
 
 -> jsu_setp(ctx, o, key, v, ic, k)
   ob = wvalue_bits(o) ## i64
@@ -291,7 +181,7 @@ fn jsu_epoch(ctx) (i64) i64
   if i > 0
     ccall("w_ivar_set_idx", o, i, v)
     return v
-  wvalue_from_bits(jsu_c5(ctx, 10, ob, wvalue_bits(key) ## i64, wvalue_bits(v) ## i64, wvalue_bits(ic) ## i64, wvalue_bits(k) ## i64))
+  jsu_c5(ctx, 10, o, key, v, ic, k)
 
 # A global read: the cell's value while it is plain (runtime/realm.w js_gget).
 fn jsu_gcell_fast(cb) (i64) i64
@@ -304,22 +194,13 @@ fn jsu_gcell_fast(cb) (i64) i64
   cb = wvalue_bits(c) ## i64
   v = jsu_gcell_fast(cb)
   return wvalue_from_bits(v) if v != 6
-  wvalue_from_bits(jsu_c1(ctx, 12, cb))
+  jsu_c1(ctx, 12, c)
 
-fn jsu_enter(fp, ctx, f, th, argc, a0, a1, a2, a3, more) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
-  ll <<~IR
-    %fn = inttoptr i64 %fp to ptr
-    %r = call i64 %fn(i64 %ctx, i64 %f, i64 %th, i64 %argc, i64 %a0, i64 %a1, i64 %a2, i64 %a3, i64 %more)
-    ret i64 %r
-  IR
-
-# A call: a compiled function (any unit's) is entered directly (its JS:Code's entry and
-# context: ivars 8 and 9, runtime/function.w); anything else through the host's js_call.
+# A call: a compiled function (any unit's) is entered directly through its JS:Code's entry
+# closure (ivar 8, runtime/function.w); anything else through the host's js_call.
 -> jsu_call(ctx, f, this, argc, a0, a1, a2, a3, more)
   fb = wvalue_bits(f) ## i64
   if (jsr_kind(fb) & 15) == 2
-    cb = jsr_ivar(fb, 2)
-    e = wvalue_from_bits(jsr_ivar(cb, 8))
-    if e != 0
-      return wvalue_from_bits(jsu_enter(e ## i64, wvalue_from_bits(jsr_ivar(cb, 9)) ## i64, fb, wvalue_bits(this) ## i64, wvalue_bits(argc) ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, wvalue_bits(more) ## i64))
-  wvalue_from_bits(jsu_c8(ctx, 11, fb, wvalue_bits(this) ## i64, wvalue_bits(argc) ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, wvalue_bits(more) ## i64))
+    e = wvalue_from_bits(jsr_ivar(jsr_ivar(fb, 2), 8))
+    return ccall("w_closure_call_8", e, f, this, argc, a0, a1, a2, a3, more) if e != 0
+  jsu_c8(ctx, 11, f, this, argc, a0, a1, a2, a3, more)

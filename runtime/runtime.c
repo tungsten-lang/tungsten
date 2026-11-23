@@ -51766,6 +51766,39 @@ WValue w_closure_call_4(WValue closure_val, WValue arg1, WValue arg2, WValue arg
     return ((fn_t)cl->fn_ptr)(cl->captures, arg1, arg2, arg3, arg4);
 }
 
+/* Wider closure calls (no Ruby-style destructuring): a compiled JavaScript unit calls its
+ * host's runtime entries and compiled entries through these (languages/js-aot). */
+WValue w_closure_call_5(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5);
+}
+WValue w_closure_call_6(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5, a6);
+}
+WValue w_closure_call_7(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5, a6, a7);
+}
+WValue w_closure_call_8(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7, WValue a8) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5, a6, a7, a8);
+}
+WValue w_closure_call_9(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7, WValue a8, WValue a9) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5, a6, a7, a8, a9);
+}
+WValue w_closure_call_10(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7, WValue a8, WValue a9, WValue a10) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10);
+}
+
 /* ---- Command-line arguments ---- */
 
 static int g_argc = 0;

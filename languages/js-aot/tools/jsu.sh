@@ -17,4 +17,7 @@ case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
 # unsharded: jsu_init reaches each entry through its `w:` alias in the same module
 TUNGSTEN_ROOT="$ROOT" TUNGSTEN_INCREMENTAL=0 TUNGSTEN_SHARD_CODEGEN=0 TUNGSTEN_LL_PATH="$out.ll" \
   JSC_JS="$js" JSC_UNIT="$out.json" "$JSC" compile --emit-ll "$D/unit/prelude.w" -o "$out.bin"
+# the method-call inline caches become plain globals (a unit runs on its host's JS thread;
+# the in-memory loader takes no thread-local relocations)
+sed -i '' 's/ = internal thread_local global / = internal global /' "$out.ll"
 "${CLANG:-/opt/homebrew/opt/llvm/bin/clang}" -O2 -fno-asynchronous-unwind-tables -c "$out.ll" -o "$out.o"

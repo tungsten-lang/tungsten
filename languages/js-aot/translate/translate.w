@@ -366,7 +366,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
     return [] if !sc.has_env?
     up = current_env(sc.parent, sc.func)
     up = ta_var("fe") if sc.kind == :function && @f.single == nil
-    ctor = sc.env_count > 7 ? ta_send(ta_var("JS:EnvN"), "new", [up, ta_int(sc.env_count)]) : ta_send(ta_var("JS:Env"), "new", [up])
+    ctor = sc.env_count > 7 ? ta_new("JS:EnvN", [up, ta_int(sc.env_count)]) : ta_new("JS:Env", [up])
     [ta_set(env_name(sc), ctor)]
 
   # Hoisted var bindings of a function start undefined.
@@ -1676,7 +1676,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
   # tier 0's wk_object: spread, accessors, computed keys, __proto__.
   -> tr_object_general(e, sc)
     o = tmp()
-    out = [ta_set(o, ta_call("js_new_object", [ta_send(ta_var("JSR"), "object_proto", [])]))]
+    out = [ta_set(o, ta_call("js_new_object", [ta_object_proto()]))]
     i = 0
     while i < e.list.size
       p = e.list[i]
@@ -1829,7 +1829,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
     while i < cs.order.size
       b = cs.order[i]
       if b.kind == :private
-        out.push(write_binding(b, ta_send(ta_var("JS:PrivateName"), "new", [ta_str(b.name.slice(1, b.name.size - 1))]), cs))
+        out.push(write_binding(b, ta_new("JS:PrivateName", [ta_str(b.name.slice(1, b.name.size - 1))]), cs))
       i += 1
     sup = nil
     if n.a != nil

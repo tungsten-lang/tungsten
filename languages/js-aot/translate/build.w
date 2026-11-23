@@ -28,6 +28,18 @@ JT_UNIT = [nil]
     return x if x != nil
   Tungsten:AST:Call.new(recv, name, args)
 
+# cls.new(args) for a runtime class (a unit, knowing no host class, calls the runtime).
+-> ta_new(cls, args)
+  u = JT_UNIT[0]
+  return u.new_obj(cls, args) if u != nil
+  Tungsten:AST:Call.new(Tungsten:AST:Var.new(cls), "new", args)
+
+# The realm's Object.prototype.
+-> ta_object_proto
+  u = JT_UNIT[0]
+  return u.rt_call("js_object_proto", []) if u != nil
+  Tungsten:AST:Call.new(Tungsten:AST:Var.new("JSR"), "object_proto", [])
+
 -> ta_nil
   Tungsten:AST:Nil.new
 

@@ -10,7 +10,7 @@
 # value it uses — loads the object in memory (w_jit_load_object), and calls its
 # jsu_init, which reports the address of each function's entry. Each JS:Code in codes
 # (the host's descriptors, by function index: tier 0's, so closures tier 0 already made
-# go native too) then gets entry and uctx, and js_dispatch calls the entry instead of
+# go native too) then gets entry (a closure), and js_dispatch calls it instead of
 # tier 0 (js_unit_enter).
 
 in JS
@@ -89,10 +89,10 @@ JSU_UNITS = []
 
 # ---- calling into a unit ----
 
-# Call the entry of a function a unit compiled (code.entry, code.uctx set at load).
+# Call the entry of a function a unit compiled (code.entry, its closure, set at load).
+# (C calls throughout: an argument passed as raw bits would not count as escaping.)
 -> js_unit_enter(code, f, this, argc, a0, a1, a2, a3, more)
-  r = jsu_call_entry(code.entry, code.uctx, wvalue_bits(f) ## i64, wvalue_bits(this) ## i64, wvalue_bits(argc) ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, wvalue_bits(more) ## i64)
-  wvalue_from_bits(r)
+  ccall("w_closure_call_8", code.entry, f, this, argc, a0, a1, a2, a3, more)
 
 fn jsu_call_init(fp, ctx) (i64 i64) i64
   ll <<~IR
@@ -105,24 +105,6 @@ fn jsu_call_init(fp, ctx) (i64 i64) i64
 fn jsu_raw(t) (i64[]) i64
   ll <<~IR
     ret i64 %t
-  IR
-
-# A closure's code pointer and captures (runtime.h WClosure: fn_ptr, captures).
-fn jsu_cl_fn(cb) (i64) i64
-  ll <<~IR
-    %p = and i64 %cb, -16
-    %pp = inttoptr i64 %p to ptr
-    %f = load i64, ptr %pp
-    ret i64 %f
-  IR
-
-fn jsu_cl_caps(cb) (i64) i64
-  ll <<~IR
-    %p = and i64 %cb, -16
-    %pp = inttoptr i64 %p to ptr
-    %q = getelementptr i8, ptr %pp, i64 8
-    %c = load i64, ptr %q
-    ret i64 %c
   IR
 
 # ---- loading ----
@@ -168,9 +150,7 @@ fn jsu_cl_caps(cb) (i64) i64
     cl = JSU_RT[rt[k]]
     return "the host has no runtime entry " + rt[k] if cl == nil
     u.keep.push(cl)
-    cb = wvalue_bits(cl) ## i64
-    ctx[2 * k] = jsu_cl_fn(cb)
-    ctx[2 * k + 1] = jsu_cl_caps(cb)
+    ctx[2 * k] = wvalue_bits(cl) ## i64
     k += 1
   j = 0
   while j < slots.size
@@ -185,8 +165,7 @@ fn jsu_cl_caps(cb) (i64) i64
   fp = ccall("w_jit_load_object", obj_path, "jsu_init")
   return "cannot load " + obj_path if fp == nil
   ctxi = jsu_raw(ctx)
-  # jsu_init(ctx) answers [index, closure, …]: each entry is its closure's code, called
-  # with the closure's captures (which hold ctx)
+  # jsu_init(ctx) answers [index, closure, …]: a function's entry is its closure (over ctx)
   pairs = wvalue_from_bits(jsu_call_init(fp ## i64, wvalue_bits(ctxi) ## i64))
   return "jsu_init answered no entries" if !pairs.is_a?(Array)
   u.keep.push(pairs)
@@ -194,10 +173,8 @@ fn jsu_cl_caps(cb) (i64) i64
   while i + 1 < pairs.size
     n = pairs[i]
     c = codes[n]
-    cb = wvalue_bits(pairs[i + 1]) ## i64
     if c != nil
-      c.entry = jsu_cl_fn(cb)
-      c.uctx = jsu_cl_caps(cb)
+      c.entry = pairs[i + 1]
       u.nentries += 1
     i += 2
   JSU_UNITS.push(u)

@@ -118,7 +118,7 @@ WK_PRE_RUN = [nil]
   c = f.code
   if c != nil && c.entry != 0
     # a loaded unit compiled the script itself
-    return wvalue_from_bits(jsu_call_entry(c.entry, c.uctx, 0, wvalue_bits(js_realm().global) ## i64, wvalue_bits(0) ## i64, 0, 0, 0, 0, 0))
+    return ccall("w_closure_call_8", c.entry, nil, js_realm().global, 0, nil, nil, nil, nil, nil)
   act = wk_act(f, nil, nil, js_realm().global, f.nlocals)
   act.caller = JS_CUR_ACT[0]
   JS_CUR_ACT[0] = act

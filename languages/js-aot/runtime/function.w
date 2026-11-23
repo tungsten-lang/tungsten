@@ -26,18 +26,17 @@ CODE_ASYNC = 128       # async function
 CODE_NONT = 256        # compiled code that never reads new.target (js_new leaves it unset)
 
 + Code
-  rw :name, :nparams, :index, :flags, :url, :start, :fin, :node, :entry, :uctx
+  rw :name, :nparams, :index, :flags, :url, :start, :fin, :node, :entry
 
   # node: tier 0's form of the function (its analysed JaFunc), when it has one.
-  # entry, uctx: the address of its compiled entry in a loaded unit and that unit's
-  # context (runtime/units.w); entry 0 when it has none.
+  # entry: its compiled entry in a loaded unit, a closure (runtime/units.w; unit code
+  # reads it as ivar 8); 0 when it has none.
   -> new(@name, @nparams, @index, @flags)
     @url = nil
     @start = 0
     @fin = 0
     @node = nil
     @entry = 0
-    @uctx = 0
 
 FN_IBASE = 4
 FN_INLINE = 4

@@ -1318,6 +1318,12 @@ WValue w_closure_call_1(WValue closure_val, WValue arg);
 WValue w_closure_call_2(WValue closure_val, WValue arg1, WValue arg2);
 WValue w_closure_call_3(WValue closure_val, WValue arg1, WValue arg2, WValue arg3);
 WValue w_closure_call_4(WValue closure_val, WValue arg1, WValue arg2, WValue arg3, WValue arg4);
+WValue w_closure_call_5(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5);
+WValue w_closure_call_6(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6);
+WValue w_closure_call_7(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7);
+WValue w_closure_call_8(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7, WValue a8);
+WValue w_closure_call_9(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7, WValue a8, WValue a9);
+WValue w_closure_call_10(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7, WValue a8, WValue a9, WValue a10);
 
 /* ---- Exceptions ---- */
 #include <setjmp.h>

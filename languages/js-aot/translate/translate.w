@@ -368,7 +368,11 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
         i += 1
       return out
     if k == :function_decl
-      return [] if @hoisted[@an.node_key(s)] == true
+      if @hoisted[@an.node_key(s)] == true
+        jf = @an.fn_of(s)
+        # Annex B: evaluating the declaration copies the block's binding into the var
+        return [write_binding(jf.annexb, read_binding(jf.binding, sc), sc)] if jf.annexb != nil
+        return []
       # a declaration as the body of an if (sloppy mode): assigned when reached
       jf = @an.fn_of(s)
       return [write_binding(jf.binding, closure(jf, sc), sc)]

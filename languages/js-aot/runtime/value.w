@@ -59,7 +59,7 @@ JS_NAN = [nil]
   v.is_a?(JS:Base) || js_array?(v)
 
 -> js_callable?(v)
-  k = jsr_kind(wvalue_bits(v) ## i64) & 127
+  k = jsr_kind(wvalue_bits(v) ## i64) & 15
   k == KIND_FUNCTION || k == KIND_NATIVE || k == KIND_BOUND || (k == KIND_EXOTIC && v.callable?)
 
 -> js_typeof(v)
@@ -390,11 +390,43 @@ JS_NAN = [nil]
 
 JS_WS = [9, 10, 11, 12, 13, 32]
 
+# WhiteSpace and LineTerminator (§12.2, §12.3) at both ends: the ASCII ones and U+00A0,
+# U+1680, U+2000-200A, U+2028, U+2029, U+202F, U+205F, U+3000, U+FEFF.
 -> js_trim(s)
   a = 0
   b = s.size
-  while a < b && JS_WS.include?(s.byte_at(a))
-    a += 1
-  while b > a && JS_WS.include?(s.byte_at(b - 1))
-    b -= 1
+  while a < b
+    n = js_ws_len_at(s, a)
+    break if n == 0
+    a += n
+  while b > a
+    n = js_ws_len_before(s, b)
+    break if n == 0
+    b -= n
   s.slice(a, b - a)
+
+# Bytes of the whitespace character starting at byte i, or 0.
+-> js_ws_len_at(s, i)
+  c = s.byte_at(i)
+  return 1 if c == 32 || (c >= 9 && c <= 13)
+  return 0 if c < 192
+  return (i + 1 < s.size && s.byte_at(i + 1) == 160) ? 2 : 0 if c == 194
+  return 0 if i + 2 >= s.size || (c != 225 && c != 226 && c != 227 && c != 239)
+  js_ws3?(c, s.byte_at(i + 1), s.byte_at(i + 2)) ? 3 : 0
+
+# Bytes of the whitespace character ending just before byte e, or 0.
+-> js_ws_len_before(s, e)
+  c = s.byte_at(e - 1)
+  return 1 if c == 32 || (c >= 9 && c <= 13)
+  return 0 if c < 128
+  return 2 if e >= 2 && c == 160 && s.byte_at(e - 2) == 194
+  return 3 if e >= 3 && js_ws3?(s.byte_at(e - 3), s.byte_at(e - 2), c)
+  0
+
+-> js_ws3?(a, b, c)
+  return b == 154 && c == 128 if a == 225
+  return b == 128 && c == 128 if a == 227
+  return b == 187 && c == 191 if a == 239
+  return false if a != 226
+  return (c >= 128 && c <= 138) || c == 168 || c == 169 || c == 175 if b == 128
+  b == 129 && c == 159

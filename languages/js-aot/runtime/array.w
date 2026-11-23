@@ -17,6 +17,12 @@ JS_AF_ARRAY = 1
 JS_AF_HOLES = 2
 JS_AF_EXT = 4
 
+# Engine-only keys in an array's side object (private names never show as properties).
+JS_AK_PROTO = JS:PrivateName.new("proto")
+JS_AK_LENRO = JS:PrivateName.new("length-read-only")
+JS_AK_SEALED = JS:PrivateName.new("sealed")
+JS_AK_FROZEN = JS:PrivateName.new("frozen")
+
 # Side tables keyed by the array's bits; entries are created only for arrays that need one.
 JS_AEXT = {}
 JS_AEXT_KEEP = {}
@@ -47,7 +53,7 @@ JS_AEXT_KEEP = {}
 -> js_array_proto(a)
   if (js_array_flags(a) & JS_AF_EXT) != 0
     x = js_array_ext(a, false)
-    p = x.get_own("__proto__")
+    p = x.get_own(JS_AK_PROTO)
     return (p == JS_NULL ? nil : p) if p != JS_HOLE
   js_realm().array_proto
 
@@ -137,5 +143,77 @@ ARRAY_GAP = 65536
     i += 1
   out.push("length")
   if (js_array_flags(a) & JS_AF_EXT) != 0
-    js_array_ext(a, false).own_keys.each ->(k) out.push(k) if k != "__proto__"
+    js_array_ext(a, false).own_keys.each ->(k) out.push(k)
   out
+
+# ---- the array exotic object's internal methods (§10.4.2) ----
+
+-> js_array_get_own(a, key)
+  if key.is_a?(String)
+    return a.size.to_f if key == "length"
+    if js_array_index?(key)
+      i = key.to_i
+      return i < a.size && a[i] != JS_HOLE ? a[i] : JS_HOLE
+  return JS_HOLE if (js_array_flags(a) & JS_AF_EXT) == 0
+  js_array_ext(a, false).get_own(key)
+
+-> js_array_has_own?(a, key)
+  js_array_get_own(a, key) != JS_HOLE
+
+-> js_array_get_own_property(a, key)
+  if key.is_a?(String)
+    if key == "length"
+      return JS:PropDesc.data(a.size.to_f, js_array_length_writable?(a) ? ATTR_W : 0)
+    if js_array_index?(key)
+      i = key.to_i
+      return nil if i >= a.size || a[i] == JS_HOLE
+      return JS:PropDesc.data(a[i], js_array_frozen?(a) ? ATTR_E : (js_array_sealed?(a) ? ATTR_E + ATTR_W : ATTR_DEFAULT))
+  return nil if (js_array_flags(a) & JS_AF_EXT) == 0
+  js_array_ext(a, false).get_own_property(key)
+
+-> js_array_length_writable?(a)
+  return true if (js_array_flags(a) & JS_AF_EXT) == 0
+  x = js_array_ext(a, false)
+  x.get_own(JS_AK_LENRO) == JS_HOLE
+
+-> js_array_sealed?(a)
+  return false if (js_array_flags(a) & JS_AF_EXT) == 0
+  js_array_ext(a, false).get_own(JS_AK_SEALED) != JS_HOLE
+
+-> js_array_frozen?(a)
+  return false if (js_array_flags(a) & JS_AF_EXT) == 0
+  js_array_ext(a, false).get_own(JS_AK_FROZEN) != JS_HOLE
+
+-> js_array_define(a, key, v, flags = ATTR_DEFAULT)
+  d = JS:PropDesc.data(v, flags)
+  js_array_define_own_property(a, key, d)
+  v
+
+-> js_array_define_own_property(a, key, d)
+  if key.is_a?(String)
+    if key == "length"
+      return false if d.accessor?
+      if d.has_value
+        n = js_to_number(d.value)
+        len = js_to_uint32(n)
+        js_throw_range("Invalid array length") if len.to_f != n
+        return false if len != a.size && !js_array_length_writable?(a)
+        js_array_set_length(a, d.value)
+      if d.writable == false
+        js_array_ext(a, true).define(JS_AK_LENRO, true, 0)
+      return true
+    if js_array_index?(key)
+      i = key.to_i
+      if d.accessor? || (d.writable == false) || (d.enumerable == false) || (d.configurable == false)
+        # non-default attributes on an element: elements no longer fit the dense store
+        js_throw_type("Array element with non-default attributes is not supported yet")
+      return false if i >= a.size && !js_array_length_writable?(a)
+      js_array_set_index(a, i, d.has_value ? d.value : (i < a.size && a[i] != JS_HOLE ? a[i] : nil))
+      return true
+  js_array_ext(a, true).define_own_property(key, d)
+
+-> js_array_set_proto(a, p)
+  p = nil if p == JS_NULL
+  return true if p == js_array_proto(a)
+  js_array_ext(a, true).put_own(JS_AK_PROTO, p == nil ? JS_NULL : p)
+  true

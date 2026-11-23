@@ -219,6 +219,9 @@ JS_ROOT_KEEP = []
 -> js_is_proto?(o)
   (jsr_kind(wvalue_bits(o) ## i64) & KIND_PROTO) != 0
 
+-> js_exotic_bits?(ob)
+  (jsr_kind(ob) & 127) == KIND_EXOTIC
+
 -> js_bump_epoch
   JS_EPOCH[0] = JS_EPOCH[0] + 1
   nil
@@ -312,7 +315,7 @@ JS_ROOT_KEEP = []
     r = receiver == nil ? self : receiver
     o = self
     while o != nil
-      return o.get(key, r) if o != self && o.exotic?
+      return o.get(key, r) if o != self && js_exotic_bits?(wvalue_bits(o) ## i64)
       s = o.shape
       i = s.slot_of(key)
       if i >= 0
@@ -325,14 +328,14 @@ JS_ROOT_KEEP = []
     nil
 
   -> exotic?
-    (jsr_kind(wvalue_bits(self) ## i64) & 127) == KIND_EXOTIC
+    js_exotic_bits?(wvalue_bits(self) ## i64)
 
   # [[Set]]: own writable data property, an inherited setter, or a new own property.
   -> set(key, v, receiver = nil)
     r = receiver == nil ? self : receiver
     o = self
     while o != nil
-      return o.set(key, v, r) if o != self && o.exotic?
+      return o.set(key, v, r) if o != self && js_exotic_bits?(wvalue_bits(o) ## i64)
       s = o.shape
       i = s.slot_of(key)
       if i >= 0
@@ -529,7 +532,7 @@ JS_ROOT_KEEP = []
   -> has_property?(key)
     o = self
     while o != nil
-      return o.has_property?(key) if o != self && o.exotic?
+      return o.has_property?(key) if o != self && js_exotic_bits?(wvalue_bits(o) ## i64)
       return true if o.has_own?(key)
       o = o.proto
     false
@@ -551,7 +554,7 @@ JS_ROOT_KEEP = []
     q = p
     while q != nil
       return false if q == self
-      break if q.exotic?
+      break if js_exotic_bits?(wvalue_bits(q) ## i64)
       q = q.proto
     js_bump_epoch() if js_is_proto?(self)
     @shape = @shape.with_proto(p)
@@ -584,6 +587,24 @@ JS_ROOT_KEEP = []
     js_throw_type("Cannot initialize " + pn.to_s + " twice on the same object") if @shape.slot_of(pn) >= 0
     add_property(pn, v, ATTR_W)
     v
+
+  # A private method (not writable) or accessor pair; a getter and setter of one name
+  # share the entry.
+  -> priv_add_method(pn, f)
+    js_throw_type("Cannot initialize " + pn.to_s + " twice on the same object") if @shape.slot_of(pn) >= 0
+    add_property(pn, f, 0)
+    f
+
+  -> priv_add_accessor(pn, g, st)
+    i = @shape.slot_of(pn)
+    if i >= 0
+      a = slot_get(i)
+      js_throw_type("Cannot initialize " + pn.to_s + " twice on the same object") if !a.is_a?(JS:Accessor)
+      a.getter = g if g != nil
+      a.setter = st if st != nil
+      return nil
+    add_property(pn, JS:Accessor.new(g, st), ATTR_ACCESSOR)
+    nil
 
 + Object < JS:Base
   rw :s0, :s1, :s2, :s3, :s4, :s5
@@ -722,34 +743,40 @@ fn jsr_ic_set(ic, k, ob, epoch) (i64[] i64 i64 i64) i64
     jsr_set_shape(ob, ns)
   ic[k + 1]
 
--> js_ic_fill_get(k, s, ivar, holder, epoch)
-  JS_IC[k] = s
-  JS_IC[k + 1] = ivar
-  JS_IC[k + 2] = holder
-  JS_IC[k + 3] = epoch
+-> js_ic_fill_get(ic, k, s, ivar, holder, epoch)
+  ic[k] = s
+  ic[k + 1] = ivar
+  ic[k + 2] = holder
+  ic[k + 3] = epoch
   nil
 
-# o[key] for a site with cache k (k = 4 × site number).
+# o[key] for a site with cache k (k = 4 × site number) in the program's table.
 -> js_getp(o, key, k)
   r = jsr_ic_get(JS_IC, k, wvalue_bits(o) ## i64, JS_EPOCH[0])
   return wvalue_from_bits(r) if r != JSR_SLOW
-  js_get_miss(o, key, k)
+  js_get_miss(o, key, JS_IC, k)
 
--> js_get_miss(o, key, k)
+# The same with a cache of the caller's own (tier 0 keeps one per property node).
+-> js_getp_ic(o, key, ic)
+  r = jsr_ic_get(ic, 0, wvalue_bits(o) ## i64, JS_EPOCH[0])
+  return wvalue_from_bits(r) if r != JSR_SLOW
+  js_get_miss(o, key, ic, 0)
+
+-> js_get_miss(o, key, ic, k)
   return js_get_prim(o, key) if !o.is_a?(JS:Base)
   s = o.shape
   if !s.dict && js_ivar_cacheable?(o)
     i = s.slot_of(key)
     if i >= 0
       if s.attrs_of(key) & ATTR_ACCESSOR == 0 && i < s.inline
-        js_ic_fill_get(k, wvalue_bits(s) ## i64, (s.ibase + i) ## i64, 0 ## i64, 0 ## i64)
+        js_ic_fill_get(ic, k, wvalue_bits(s) ## i64, (s.ibase + i) ## i64, 0 ## i64, 0 ## i64)
     else
       p = s.proto
       if p != nil && p.is_a?(JS:Base) && js_ivar_cacheable?(p) && p.get_virtual(key) == JS_HOLE && o.get_virtual(key) == JS_HOLE
         ps = p.shape
         j = ps.slot_of(key)
         if j >= 0 && !ps.dict && ps.attrs_of(key) & ATTR_ACCESSOR == 0 && j < ps.inline
-          js_ic_fill_get(k, wvalue_bits(s) ## i64, (ps.ibase + j) ## i64, wvalue_bits(p) ## i64, JS_EPOCH[0])
+          js_ic_fill_get(ic, k, wvalue_bits(s) ## i64, (ps.ibase + j) ## i64, wvalue_bits(p) ## i64, JS_EPOCH[0])
   o.get(key, o)
 
 # Objects whose properties all live in plain slots (exotic classes override get).
@@ -763,30 +790,42 @@ fn jsr_ic_set(ic, k, ob, epoch) (i64[] i64 i64 i64) i64
   if i > 0
     ccall("w_ivar_set_idx", o, i, v)
     return v
-  js_set_miss(o, key, v, k)
+  js_set_miss(o, key, v, JS_IC, k, false)
 
--> js_set_miss(o, key, v, k)
+-> js_setp_ic(o, key, v, ic, strict)
+  i = jsr_ic_set(ic, 0, wvalue_bits(o) ## i64, JS_EPOCH[0])
+  if i > 0
+    ccall("w_ivar_set_idx", o, i, v)
+    return v
+  js_set_miss(o, key, v, ic, 0, strict)
+
+-> js_set_miss(o, key, v, ic, k, strict)
   if !o.is_a?(JS:Base)
-    js_set_prim(o, key, v)
+    js_setv(o, key, v, strict)
     return v
   s = o.shape
   cache = !s.dict && js_ivar_cacheable?(o) && !js_is_proto?(o)
   i = s.slot_of(key)
   if i >= 0
     if cache && s.attrs_of(key) == ATTR_DEFAULT && i < s.inline
-      JS_IC[k] = wvalue_bits(s) ## i64
-      JS_IC[k + 1] = (s.ibase + i) ## i64
-      JS_IC[k + 2] = 0 ## i64
-    o.set(key, v, o)
+      ic[k] = wvalue_bits(s) ## i64
+      ic[k + 1] = (s.ibase + i) ## i64
+      ic[k + 2] = 0 ## i64
+    js_set_checked(o, key, v, strict)
     return v
-  o.set(key, v, o)
+  js_set_checked(o, key, v, strict)
   ns = o.shape
   if cache && ns != s && !ns.dict && ns.parent == s && ns.key == key && ns.count - 1 < ns.inline && js_proto_chain_plain?(s.proto, key)
-    JS_IC[k] = wvalue_bits(s) ## i64
-    JS_IC[k + 1] = (ns.ibase + ns.count - 1) ## i64
-    JS_IC[k + 2] = wvalue_bits(ns) ## i64
-    JS_IC[k + 3] = JS_EPOCH[0]
+    ic[k] = wvalue_bits(s) ## i64
+    ic[k + 1] = (ns.ibase + ns.count - 1) ## i64
+    ic[k + 2] = wvalue_bits(ns) ## i64
+    ic[k + 3] = JS_EPOCH[0]
   v
+
+-> js_set_checked(o, key, v, strict)
+  ok = o.set(key, v, o)
+  js_throw_type("Cannot assign to read only property '" + js_to_display(js_key_display(key)) + "' of object") if !ok && strict
+  ok
 
 # No setter or read-only property for key anywhere on the chain (so adding it to the
 # receiver is always right while the prototypes keep their layout).

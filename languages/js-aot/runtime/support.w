@@ -21,7 +21,7 @@ in JS
 -> js_env_copy(e)
   if e.is_a?(JS:EnvN)
     n = JS:EnvN.new(e.up, 0)
-    n.vars = e.vars.copy
+    n.vars = e.vars.dup
     return n
   n = JS:Env.new(e.up)
   n.v0 = e.v0
@@ -83,6 +83,18 @@ JS_LEXICAL = {}
     c.put(JS_HOLE, ATTR_W + ATTR_E)
     JS_LEXICAL[name] = c
   c
+
+# Initializing a script-level let/const/class (its declaration runs).
+-> js_linit(c, v, is_const)
+  c.put(v, is_const ? ATTR_E : ATTR_W + ATTR_E)
+  v
+
+# Assigning one: TDZ before its declaration, TypeError for a const.
+-> js_lset(c, v)
+  js_throw_reference("Cannot access '" + c.name + "' before initialization") if c.value == JS_HOLE
+  js_throw_type("Assignment to constant variable.") if (c.attrs & ATTR_W) == 0
+  c.value = v
+  v
 
 # ---- this, calls, operators on objects ----
 
@@ -185,3 +197,43 @@ JS_CODE_AT = {}
     c = JS:Code.new("", 0, -1, 8)
     JS_CODE_AT[i] = c
   c
+
+# ---- for-in (§14.7.5.9 EnumerateObjectProperties) ----
+
+# The string keys a for-in over v visits: own enumerable keys first, then each
+# prototype's, without duplicates (a non-enumerable own key still shadows). The loop
+# checks each key is still present before visiting it.
+-> js_for_in_keys(v)
+  return [] if js_nullish?(v)
+  o = js_object?(v) ? v : js_realm().wrap_primitive(v)
+  seen = {}
+  out = []
+  while o != nil
+    ks = jown_keys(o)
+    i = 0
+    while i < ks.size
+      k = ks[i]
+      if js_string?(k) && !seen.has_key?(k)
+        seen[k] = true
+        out.push(k) if jenumerable?(o, k)
+      i += 1
+    o = jproto(o)
+  out
+
+# ---- template literals ----
+
+# The template object of a tagged template site (§13.2.8.4): a frozen array of the cooked
+# strings with a frozen raw array, made once per site.
+-> js_template_object(cooked, raw)
+  c = js_mark_array(cooked)
+  rw = js_mark_array(raw)
+  js_array_ext(c, true).define("raw", rw, 0)
+  js_array_freeze(rw)
+  js_array_freeze(c)
+  c
+
+-> js_array_freeze(a)
+  js_array_ext(a, true).define(JS_AK_FROZEN, true, 0)
+  js_array_ext(a, true).define(JS_AK_LENRO, true, 0)
+  js_array_ext(a, true).prevent_extensions
+  nil

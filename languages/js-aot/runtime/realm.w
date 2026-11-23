@@ -8,10 +8,158 @@
 in JS
 
 + Realm
-  rw :global, :object_proto, :function_proto, :array_proto, :string_proto, :number_proto, :boolean_proto, :error_proto, :symbol_proto, :fn_shape, :native_shape, :errors
+  rw :global, :intrinsics, :jobs, :host, :symbol_registry, :template_cache, :modules, :object_proto, :function_proto, :array_proto, :string_proto, :number_proto, :boolean_proto, :error_proto, :symbol_proto, :fn_shape, :native_shape, :errors
+
   -> new
     @global = nil
+    @intrinsics = {}
+    @jobs = []
+    @host = nil
+    @symbol_registry = {}
+    @template_cache = {}
+    @modules = {}
     @errors = {}
+
+  -> intrinsic(name)
+    v = @intrinsics[name]
+    raise "js: missing intrinsic " + name if v == nil
+    v
+
+  -> intrinsic?(name)
+    @intrinsics.has_key?(name)
+
+  -> set_intrinsic(name, v)
+    @intrinsics[name] = v
+
+  # The prototype an error of this kind gets (TypeError, RangeError, ...).
+  -> proto_of(kind)
+    p = @intrinsics[kind + ".prototype"]
+    p == nil ? @error_proto : p
+
+  -> new_object
+    js_new_object(@object_proto)
+
+  # A JS array taking ownership of a fresh Tungsten list (no copy).
+  -> adopt_array(elems)
+    js_mark_array(elems)
+
+  -> new_array(elems = nil)
+    js_mark_array(elems == nil ? [] : elems.dup)
+
+  # ToObject for primitives: the Number/String/Boolean/Symbol/BigInt wrappers.
+  -> wrap_primitive(v)
+    kind = js_number?(v) ? "Number" : (js_string?(v) ? "String" : ((v == true || v == false) ? "Boolean" : (v.is_a?(JS:Symbol) ? "Symbol" : "BigInt")))
+    return js_string_object(intrinsic("String.prototype"), v) if js_string?(v)
+    o = js_new_special(intrinsic(kind + ".prototype"), kind)
+    o.internal = v
+    o
+
+  # ---- defining builtins (writable + configurable, not enumerable) ----
+
+  -> native(name, arity, fun, ctor = false)
+    f = js_native(name, arity, fun)
+    f.set_ctor if ctor
+    f
+
+  -> method(obj, name, arity, fun)
+    f = native(name.is_a?(JS:Symbol) ? "\[" + name.description + "]" : name, arity, fun)
+    jdefine(obj, name, f, BUILTIN_ATTRS)
+    f
+
+  -> getter(obj, name, fun, setter = nil)
+    g = native("get " + (name.is_a?(JS:Symbol) ? "\[" + name.description + "]" : name), 0, fun)
+    st = setter == nil ? nil : native("set " + js_key_display(name).to_s, 1, setter)
+    obj.define_accessor(name, g, st, ATTR_C)
+    g
+
+  -> constant(obj, name, v)
+    jdefine(obj, name, v, 0)
+
+  # A constructor with its prototype object linked both ways; installed on the global.
+  -> constructor(name, arity, fun, proto = nil, parent_proto = nil)
+    proto = js_new_special(parent_proto == nil ? @object_proto : parent_proto, name) if proto == nil
+    c = native(name, arity, fun, true)
+    c.define("prototype", proto, 0)
+    proto.define("constructor", c, BUILTIN_ATTRS)
+    @intrinsics[name] = c
+    @intrinsics[name + ".prototype"] = proto
+    @global.define(name, c, BUILTIN_ATTRS)
+    c
+
+  # OrdinaryCreateFromConstructor: the prototype a constructor call should use.
+  -> proto_from(new_target, fallback_name)
+    if new_target != nil
+      p = jget(new_target, "prototype")
+      return p if js_object?(p)
+    intrinsic(fallback_name + ".prototype")
+
+  # ---- jobs (microtasks) ----
+
+  -> enqueue_job(job, keep = nil)
+    @jobs.push(job)
+    nil
+
+  # Run queued jobs until none remain (HTML's "perform a microtask checkpoint").
+  -> run_jobs
+    while @jobs.size > 0
+      j = @jobs.shift
+      j.call()
+    nil
+
+  # ---- symbols ----
+
+  -> symbol_for(key)
+    sy = @symbol_registry[key]
+    if sy == nil
+      sy = JS:Symbol.new(key)
+      @symbol_registry[key] = sy
+    sy
+
+BUILTIN_ATTRS = ATTR_W + ATTR_C
+
+# Builtin installers: each builtins file appends ->(realm) at load time; js_new_realm runs
+# them in registration order.
+JS_INSTALLERS = []
+
+-> js_install(f)
+  JS_INSTALLERS.push(f)
+  nil
+
+# An object with an internal slot and a class tag (Date, RegExp, Map, the primitive
+# wrappers, and the embedder's host objects): JS:Base plus @cls and @internal.
++ Special < JS:Base
+  rw :cls, :internal, :s0, :s1, :s2, :s3
+
+  -> new(@shape, @cls)
+    @ext = nil
+    @internal = nil
+    @s0 = nil
+    @s1 = nil
+    @s2 = nil
+    @s3 = nil
+    jsr_set_kind(wvalue_bits(self) ## i64, KIND_OBJECT)
+
+SP_IBASE = 4
+SP_INLINE = 4
+
+-> js_new_special(proto, cls)
+  JS:Special.new(js_root_shape(proto, SP_INLINE, SP_IBASE), cls)
+
+# What the embedder provides: the console, timers, the clock. Blade subclasses it.
++ Host
+  -> new
+    nil
+  -> console(level, text)
+    << text
+    nil
+  -> set_timer(f, ms, repeat)
+    0
+  -> clear_timer(id)
+    nil
+  -> now_ms
+    Instant.now.unix_ms + ~0.0
+  -> perf_now
+    clock_ms() + ~0.0
 
 JS_REALM = [nil]
 
@@ -261,9 +409,8 @@ fn jsr_gcell_fast(cb) (i64) i64
 
 -> js_make_error(kind, msg)
   r = js_realm()
-  p = r.errors[kind]
-  p = r.error_proto if p == nil
-  e = js_new_object(p)
+  p = r.proto_of(kind)
+  e = js_new_special(p, "Error")
   e.define("message", msg, ATTR_W + ATTR_C)
   e.define("stack", kind + ": " + msg, ATTR_W + ATTR_C)
   e
@@ -289,126 +436,34 @@ SYM_ITERATOR = JS:Symbol.new("Symbol.iterator")
 -> js_arg(args, i)
   i < args.size ? args[i] : nil
 
--> js_new_realm
+-> js_new_realm(host = nil)
   r = JS:Realm.new
+  r.host = host == nil ? JS:Host.new : host
   JS_REALM[0] = r
-  op = js_new_object(nil)
+  op = js_new_special(nil, "Object")
   r.object_proto = op
-  # functions need Function.prototype for their root shape: build it as a native
+  r.set_intrinsic("Object.prototype", op)
+  # Function.prototype is itself callable: a native that returns undefined
   fp = JS:NativeFunction.new(js_root_shape(op, NF_INLINE, NF_IBASE), ->(this, args, nt) nil, "", 0)
   r.function_proto = fp
+  r.set_intrinsic("Function.prototype", fp)
   r.fn_shape = js_root_shape(fp, FN_INLINE, FN_IBASE)
   r.native_shape = js_root_shape(fp, NF_INLINE, NF_IBASE)
-  r.array_proto = js_new_object(op)
-  r.string_proto = js_new_object(op)
-  r.number_proto = js_new_object(op)
-  r.boolean_proto = js_new_object(op)
-  r.symbol_proto = js_new_object(op)
-  ep = js_new_object(op)
-  r.error_proto = ep
-  ep.define("name", "Error", ATTR_W + ATTR_C)
-  ep.define("message", "", ATTR_W + ATTR_C)
-  js_method(ep, "toString", 0, ->(this, args, nt) js_error_to_string(this))
-  ["TypeError", "RangeError", "ReferenceError", "SyntaxError", "EvalError", "URIError"].each ->(k)
-    p = js_new_object(ep)
-    p.define("name", k, ATTR_W + ATTR_C)
-    r.errors[k] = p
   g = JS:GlobalObject.new(js_root_shape(op, 0, 2))
   r.global = g
-  g.define("globalThis", g, ATTR_W + ATTR_C)
+  i = 0
+  while i < JS_INSTALLERS.size
+    JS_INSTALLERS[i].call(r)
+    i += 1
+  r.array_proto = r.intrinsic?("Array.prototype") ? r.intrinsic("Array.prototype") : js_new_special(op, "Array")
+  r.string_proto = r.intrinsic?("String.prototype") ? r.intrinsic("String.prototype") : js_new_special(op, "String")
+  r.number_proto = r.intrinsic?("Number.prototype") ? r.intrinsic("Number.prototype") : js_new_special(op, "Number")
+  r.boolean_proto = r.intrinsic?("Boolean.prototype") ? r.intrinsic("Boolean.prototype") : js_new_special(op, "Boolean")
+  r.symbol_proto = r.intrinsic?("Symbol.prototype") ? r.intrinsic("Symbol.prototype") : js_new_special(op, "Symbol")
+  r.error_proto = r.intrinsic?("Error.prototype") ? r.intrinsic("Error.prototype") : js_new_special(op, "Error")
+  g.define("globalThis", g, BUILTIN_ATTRS)
   g.define("undefined", nil, 0)
   g.define("NaN", js_nan(), 0)
   g.define("Infinity", ~1.0 / ~0.0, 0)
-  js_install_console(r, g)
-  js_install_basics(r, g)
   r
 
--> js_error_to_string(this)
-  n = js_get_value(this, "name")
-  m = js_get_value(this, "message")
-  ns = n == nil ? "Error" : js_to_string(n)
-  ms = m == nil ? "" : js_to_string(m)
-  return ms if ns == ""
-  return ns if ms == ""
-  ns + ": " + ms
-
-JS_OUT = []
-
--> js_console_line(args)
-  parts = []
-  i = 0
-  while i < args.size
-    parts.push(js_to_display(args[i]))
-    i += 1
-  parts.join(" ")
-
--> js_install_console(r, g)
-  c = js_new_object(r.object_proto)
-  js_method(c, "log", 0, ->(this, args, nt) js_print(js_console_line(args)))
-  js_method(c, "info", 0, ->(this, args, nt) js_print(js_console_line(args)))
-  js_method(c, "warn", 0, ->(this, args, nt) js_print(js_console_line(args)))
-  js_method(c, "error", 0, ->(this, args, nt) js_print(js_console_line(args)))
-  g.define("console", c, ATTR_W + ATTR_C)
-  nil
-
--> js_print(s)
-  << s
-  nil
-
--> js_install_basics(r, g)
-  ap = r.array_proto
-  js_method(ap, "push", 1, ->(this, args, nt) js_array_push(this, args))
-  js_method(ap, "pop", 0, ->(this, args, nt) js_array_pop(this))
-  js_method(ap, "join", 1, ->(this, args, nt) js_array_join(this, js_arg(args, 0)))
-  op = r.object_proto
-  js_method(op, "hasOwnProperty", 1, ->(this, args, nt) js_has_own_property(this, js_arg(args, 0)))
-  js_method(op, "toString", 0, ->(this, args, nt) js_object_to_string(this))
-  js_method(op, "valueOf", 0, ->(this, args, nt) this)
-  js_method(r.number_proto, "toString", 1, ->(this, args, nt) js_to_string(this))
-  js_method(r.string_proto, "toString", 0, ->(this, args, nt) this)
-  js_method(r.string_proto, "charCodeAt", 1, ->(this, args, nt) js_char_code_at(this, js_arg(args, 0)))
-  js_method(r.function_proto, "call", 1, ->(this, args, nt) js_call_arr(this, js_arg(args, 0), args.size > 1 ? args.slice(1, args.size - 1).copy : []))
-  nil
-
--> js_array_push(this, args)
-  js_throw_type("Array.prototype.push called on a non-array") if !js_array?(this)
-  i = 0
-  while i < args.size
-    this.push(args[i])
-    i += 1
-  this.size.to_f
-
--> js_array_pop(this)
-  return nil if this.size == 0
-  v = this.pop
-  v == JS_HOLE ? nil : v
-
--> js_array_join(this, sep)
-  s = sep == nil ? "," : js_to_string(sep)
-  parts = []
-  i = 0
-  while i < this.size
-    e = this[i]
-    parts.push(js_nullish?(e) || e == JS_HOLE ? "" : js_to_string(e))
-    i += 1
-  parts.join(s)
-
--> js_has_own_property(this, key)
-  k = js_to_property_key(key)
-  return js_array_get(this, k) != nil if js_array?(this)
-  return this.has_own?(k) if this.is_a?(JS:Base)
-  false
-
--> js_object_to_string(this)
-  return "\[object Undefined]" if this == nil
-  return "\[object Null]" if this == JS_NULL
-  return "\[object Array]" if js_array?(this)
-  return "\[object Function]" if js_callable?(this)
-  "\[object Object]"
-
--> js_char_code_at(s, i)
-  str = js_to_string(s)
-  n = i == nil ? 0 : js_to_number(i).to_i
-  u = js_str_units(str)
-  return js_nan() if n < 0 || n >= u.size
-  u[n].to_f

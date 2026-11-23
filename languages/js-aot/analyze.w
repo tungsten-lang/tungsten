@@ -21,11 +21,13 @@
 use frontend/parser
 
 + JaBinding
-  rw :name, :kind, :scope, :slot, :local, :captured, :writes, :reads, :value_uses, :callee_uses, :fnode, :tdz, :decl_pos, :early_read, :init_before_fns, :id, :lidx
+  rw :name, :kind, :scope, :slot, :local, :captured, :writes, :reads, :value_uses, :callee_uses, :fnode, :tdz, :decl_pos, :early_read, :init_before_fns, :id, :lidx, :cell, :decl_const
 
   -> new(@name, @kind, @scope)
     @slot = -1
     @lidx = -1
+    @cell = nil
+    @decl_const = false
     @local = nil
     @captured = false
     @writes = 0
@@ -47,9 +49,9 @@ use frontend/parser
 
 # A resolved identifier occurrence: the binding and the scope it is written in.
 + JaRef
-  rw :binding, :scope
+  rw :binding, :scope, :hops
   -> new(@binding, @scope)
-    nil
+    @hops = nil
 
 + JaScope
   rw :kind, :parent, :func, :names, :env_count, :id, :node, :per_iter, :order
@@ -75,7 +77,7 @@ use frontend/parser
     @env_count > 0
 
 + JaFunc
-  rw :node, :parent, :index, :scope, :strict, :arrow, :uses_this, :uses_args, :dynamic, :free, :fclass, :single, :inner, :binding, :self_binding, :unsupported, :name, :def_scope, :nparams, :params, :this_binding, :body_scope, :script, :nlocals, :code, :scopes
+  rw :node, :parent, :index, :scope, :strict, :arrow, :uses_this, :uses_args, :dynamic, :free, :fclass, :single, :inner, :binding, :self_binding, :unsupported, :name, :def_scope, :nparams, :params, :this_binding, :body_scope, :script, :nlocals, :code, :scopes, :analysis, :in_if, :single_ref, :annexb, :unsupported0, :simple, :args_binding, :mapped_args, :param_nodes, :param_copies, :method_kind, :is_static, :home, :class_ctor, :derived, :default_ctor, :field_init, :class_node, :nt_binding, :fo_binding
 
   -> new(@node, @parent, @index)
     @scope = nil
@@ -101,10 +103,36 @@ use frontend/parser
     @nlocals = 0
     @code = nil
     @scopes = []
+    @analysis = nil
+    @in_if = false
+    @single_ref = nil
+    @annexb = nil
+    @unsupported0 = nil
+    @simple = true
+    @args_binding = nil
+    @mapped_args = false
+    @param_nodes = []
+    @param_copies = []
+    @method_kind = nil
+    @is_static = false
+    @home = false
+    @class_ctor = false
+    @derived = false
+    @default_ctor = false
+    @field_init = false
+    @class_node = nil
+    @nt_binding = nil
+    @fo_binding = nil
 
+  # What tier 1 cannot compile yet (the function stays in tier 0).
   -> fail(why)
     @unsupported = why if @unsupported == nil
     nil
+
+  # What neither tier can run yet.
+  -> fail0(why)
+    @unsupported0 = why if @unsupported0 == nil
+    fail(why)
 
 + JaAnalysis
   rw :program, :funcs, :strict, :bind_count, :scope_count, :unsupported_counts
@@ -126,6 +154,7 @@ use frontend/parser
 
   -> run
     f = JaFunc.new(@program, nil, 0)
+    f.analysis = self
     f.script = true
     f.strict = @strict || @program.has?(F_STRICT)
     @funcs.push(f)
@@ -159,8 +188,8 @@ use frontend/parser
       bound_names(p.a, out)
     out
 
-  # var-declared names of a statement list, not entering functions; sloppy-mode
-  # function declarations in nested blocks are var-scoped too (Annex B).
+  # var-declared names of a statement list, not entering functions. (Sloppy-mode
+  # function declarations in nested blocks are added by annexb_names.)
   -> var_names(stmts, out, strict, top)
     i = 0
     while i < stmts.size
@@ -177,8 +206,6 @@ use frontend/parser
         while i < s.list.size
           bound_names(s.list[i].a, out)
           i += 1
-    elsif k == :function_decl
-      out.push(s.str) if !top && !strict && s.str != nil
     elsif k == :block
       var_names(s.list, out, strict, false)
     elsif k == :if
@@ -213,13 +240,87 @@ use frontend/parser
   # top-level let, const or class of the body already declares are not vars.)
   -> hoist_body(f, sc, stmts, top)
     vn = var_names(stmts, [], f.strict, true)
-    lex = lexical_names(stmts)
     i = 0
     while i < vn.size
       kind = sc.kind == :script ? :global : :var
-      b = sc.declare(self, vn[i], kind) if !lex.include?(vn[i])
+      sc.declare(self, vn[i], kind)
       i += 1
+    if !f.strict
+      pnames = []
+      f.scope.order.each ->(b) pnames.push(b.name) if b.kind == :param
+      an = annexb_names(stmts, lexical_names(stmts) + pnames, [], true)
+      i = 0
+      while i < an.size
+        b = sc.names[an[i]]
+        sc.declare(self, an[i], sc.kind == :script ? :global : :var) if b == nil
+        i += 1
     hoist_block(sc, stmts, top)
+
+  # Annex B.3.3: a sloppy-mode function declaration in a nested block also gets a var
+  # binding in the function, unless a var there would clash with a lexical declaration
+  # of an enclosing block (or the function body) or name a parameter. lex holds those
+  # names on the way down.
+  -> annexb_names(stmts, lex, out, top)
+    i = 0
+    inner = lex + lexical_names(stmts)
+    if !top
+      j = 0
+      while j < stmts.size
+        s = stmts[j]
+        if s.kind == :function_decl && s.str != nil && !lex.include?(s.str)
+          out.push(s.str) if !out.include?(s.str)
+        j += 1
+      # this block's own functions are lexical in it: they shadow for nested blocks
+      j = 0
+      while j < stmts.size
+        inner.push(stmts[j].str) if stmts[j].kind == :function_decl && stmts[j].str != nil
+        j += 1
+    while i < stmts.size
+      annexb_stmt(stmts[i], inner, out)
+      i += 1
+    out
+
+  -> annexb_stmt(s, lex, out)
+    return nil if s == nil
+    k = s.kind
+    if k == :block
+      annexb_names(s.list, lex, out, false)
+    elsif k == :if
+      annexb_body(s.b, lex, out)
+      annexb_body(s.c, lex, out)
+    elsif k == :for || k == :for_in || k == :for_of
+      l2 = lex
+      if s.a != nil && s.a.kind == :var_decl && s.a.str != "var"
+        l2 = lex + lexical_names([s.a])
+      annexb_body(s.d, l2, out)
+    elsif k == :while
+      annexb_body(s.b, lex, out)
+    elsif k == :do_while
+      annexb_body(s.a, lex, out)
+    elsif k == :try
+      annexb_stmt(s.a, lex, out)
+      if s.c != nil
+        l2 = lex
+        l2 = lex + bound_names(s.b, []) if s.b != nil && s.b.kind != :ident
+        annexb_stmt(s.c, l2, out)
+      annexb_stmt(s.d, lex, out)
+    elsif k == :switch
+      all = []
+      s.list.each ->(c) all = all + c.list
+      annexb_names(all, lex, out, false)
+    elsif k == :labeled
+      annexb_body(s.a, lex, out)
+    nil
+
+  # A statement in a body position (if branch, loop body): a function declaration there
+  # behaves as if wrapped in a block.
+  -> annexb_body(s, lex, out)
+    return nil if s == nil
+    if s.kind == :function_decl
+      annexb_names([s], lex, out, false)
+    else
+      annexb_stmt(s, lex, out)
+    nil
 
   -> lexical_names(stmts)
     out = []
@@ -250,6 +351,7 @@ use frontend/parser
           while q < names.size
             b = sc.declare(self, names[q], script ? :lexical : (s.str == "const" ? :const : :let))
             b.decl_pos = s.fin
+            b.decl_const = s.str == "const"
             q += 1
           j += 1
       elsif s.kind == :class_decl && s.str != nil
@@ -282,19 +384,32 @@ use frontend/parser
         d = s.list[i]
         if d.a.kind != :ident
           f.fail("destructuring")
+          walk_expr(d.b, sc) if d.b != nil
+          walk_pattern(d.a, sc, true)
         else
           b = ref(d.a, sc)
           if d.b != nil
             note_fn_value(d.b, b)
             walk_expr(d.b, sc)
+            name_fn(d.b, d.a.str)
             note_write(b, sc, d.a.pos)
           elsif s.str != "var"
             note_write(b, sc, d.a.pos)
         i += 1
     elsif k == :function_decl
-      walk_function(s, sc, resolve(s.str, sc))
+      b = resolve(s.str, sc)
+      walk_function(s, sc, b)
+      if b.kind == :function && b.scope != sc.func.scope
+        av = annexb_var(s.str, b.scope)
+        if av != nil
+          s.x.annexb = av
+          note_write(av, sc, s.pos)
+          b.value_uses += 1
     elsif k == :class_decl
       f.fail("class")
+      cb = resolve(s.str, sc)
+      s.c = JaRef.new(cb, sc)
+      walk_class(s, sc, cb)
     elsif k == :block
       bs = block_scope(sc, s, s.list)
       walk_stmts(s.list, bs)
@@ -304,6 +419,8 @@ use frontend/parser
       walk_expr(s.a, sc)
       walk_stmt(s.b, sc)
       walk_stmt(s.c, sc)
+      s.b.x.in_if = true if s.b.kind == :function_decl && s.b.x.is_a?(JaFunc)
+      s.c.x.in_if = true if s.c != nil && s.c.kind == :function_decl && s.c.x.is_a?(JaFunc)
     elsif k == :for
       fs = sc
       if s.a != nil && s.a.kind == :var_decl && s.a.str != "var"
@@ -335,13 +452,22 @@ use frontend/parser
       if s.c != nil
         cs = map_scope(s, new_scope(:catch, sc, f, s))
         if s.b != nil
-          if s.b.kind != :ident
-            f.fail("destructuring")
+          names = bound_names(s.b, [])
+          q = 0
+          while q < names.size
+            cs.declare(self, names[q], :catch)
+            q += 1
+          if s.b.kind == :ident
+            ref(s.b, cs)
           else
-            cs.declare(self, s.b.str, :catch)
+            f.fail("destructuring")
+            walk_pattern(s.b, cs, true)
         bs = block_scope(cs, s.c, s.c.list)
         walk_stmts(s.c.list, bs)
-      f.fail("finally") if s.d != nil
+      if s.d != nil
+        f.fail("finally")
+        bd = block_scope(sc, s.d, s.d.list)
+        walk_stmts(s.d.list, bd)
     elsif k == :switch
       walk_expr(s.a, sc)
       all = []
@@ -360,11 +486,26 @@ use frontend/parser
       walk_stmt(s.a, sc)
     elsif k == :with
       f.dynamic = true
-      f.fail("with")
+      f.fail0("with")
       walk_expr(s.a, sc)
       walk_stmt(s.b, sc)
     elsif k == :for_in || k == :for_of
       f.fail(k.to_s)
+      f.fail0("for await") if s.has?(F_AWAIT)
+      fs = sc
+      a = s.a
+      if a.kind == :var_decl && a.str != "var"
+        fs = map_scope(s, new_scope(:for, sc, f, s))
+        hoist_block(fs, [a], false)
+        fs.per_iter = true
+      # the right side sees the head's let bindings in their dead zone (spec: TDZ scope)
+      walk_expr(s.b, fs)
+      if a.kind == :var_decl
+        walk_pattern(a.list[0].a, fs, true)
+        walk_expr(a.list[0].b, fs) if a.list[0].b != nil
+      else
+        walk_pattern(a, fs, false)
+      walk_stmt(s.d, fs)
     else
       f.fail(k.to_s)
     nil
@@ -391,11 +532,24 @@ use frontend/parser
       i += 1
     bs
 
+  # The var binding an Annex B function declaration in block scope bs copies into.
+  -> annexb_var(name, bs)
+    return nil if bs.func.strict
+    fs = bs.func.scope
+    v = fs.names[name]
+    return nil if v == nil || (v.kind != :var && v.kind != :global)
+    # a lexical declaration between the block and the function shadows: no copy
+    s = bs.parent
+    while s != nil && s != fs
+      b = s.names[name]
+      return nil if b != nil
+      s = s.parent
+    v
+
+  # Function declarations in blocks are block-scoped (strict and sloppy alike); a sloppy
+  # one whose name Annex B also made a var gets copied into it when evaluated.
   -> block_function?(s, sc)
-    return false if s.str == nil
-    return true if sc.func.strict
-    b = sc.func.scope.names[s.str]
-    b == nil || (b.kind != :var && b.kind != :global)
+    s.str != nil
 
   -> walk_exprs(list, sc)
     i = 0
@@ -413,16 +567,17 @@ use frontend/parser
     elsif k == :num || k == :string || k == :null || k == :true || k == :false
       nil
     elsif k == :this
+      e.x = JaRef.new(nil, sc)
       note_this(sc)
     elsif k == :function || k == :arrow
       walk_function(e, sc, nil)
     elsif k == :call
       c = e.a
-      f.fail("optional call") if e.has?(F_OPTIONAL)
+      f.fail("optional chain") if e.has?(F_OPTIONAL)
       if c.kind == :ident
         if c.str == "eval"
           f.dynamic = true
-          f.fail("eval")
+          f.fail0("eval")
         note_read(ref(c, sc), sc, c.pos, true)
       elsif (c.kind == :function || c.kind == :arrow) && !c.has?(F_ASYNC) && !c.has?(F_GENERATOR)
         walk_function(c, sc, nil)
@@ -441,6 +596,7 @@ use frontend/parser
         walk_expr(e.b, sc)
       elsif e.b.kind == :private_name
         f.fail("private name")
+        priv_ref(e.b, sc)
     elsif k == :chain
       f.fail("optional chain")
       walk_expr(e.a, sc)
@@ -454,7 +610,11 @@ use frontend/parser
     elsif k == :update
       walk_target(e.a, sc)
     elsif k == :binary || k == :logical
-      walk_expr(e.a, sc)
+      if e.a.kind == :private_name
+        f.fail("private name")
+        priv_ref(e.a, sc)
+      else
+        walk_expr(e.a, sc)
       walk_expr(e.b, sc)
     elsif k == :assign
       if e.a.kind == :ident
@@ -462,12 +622,15 @@ use frontend/parser
         note_read(b, sc, e.a.pos, false) if e.str != "="
         note_fn_value(e.b, nil)
         walk_expr(e.b, sc)
+        name_fn(e.b, e.a.str) if e.str == "=" || e.str == "&&=" || e.str == "||=" || e.str == "??="
         note_write(b, sc, e.a.pos)
       elsif e.a.kind == :member
         walk_expr(e.a, sc)
         walk_expr(e.b, sc)
       else
         f.fail("destructuring assignment")
+        walk_expr(e.b, sc)
+        walk_pattern(e.a, sc, false)
     elsif k == :cond
       walk_expr(e.a, sc)
       walk_expr(e.b, sc)
@@ -479,8 +642,11 @@ use frontend/parser
       while i < e.list.size
         x = e.list[i]
         if x != nil
-          f.fail("spread") if x.kind == :spread
-          walk_expr(x, sc)
+          if x.kind == :spread
+            f.fail("spread")
+            walk_expr(x.a, sc)
+          else
+            walk_expr(x, sc)
         i += 1
     elsif k == :object
       i = 0
@@ -490,10 +656,37 @@ use frontend/parser
           f.fail("object literal " + (p.kind == :prop ? p.str : p.kind.to_s))
           walk_expr(p.a, sc) if p.kind == :prop && p.has?(F_COMPUTED)
         walk_expr(p.kind == :prop ? p.b : p.a, sc)
+        if p.kind == :prop && !p.has?(F_COMPUTED) && p.str == "init"
+          kn = p.a.kind == :num ? nil : p.a.str
+          name_fn(p.b, kn) if kn != nil && kn != "__proto__"
         i += 1
     elsif k == :template
       f.fail("template")
       walk_exprs(e.a, sc)
+    elsif k == :class
+      f.fail("class")
+      walk_class(e, sc, nil)
+    elsif k == :super
+      # super.x / super.m() / super(...): the home object and this of the enclosing method
+      e.x = JaRef.new(nil, sc)
+      note_special(sc, :fo)
+      note_this(sc)
+    elsif k == :tagged_template
+      f.fail("tagged template")
+      walk_expr(e.a, sc)
+      walk_exprs(e.b.a, sc)
+    elsif k == :spread
+      f.fail("spread")
+      walk_expr(e.a, sc)
+    elsif k == :regex
+      f.fail("regex")
+    elsif k == :meta_property
+      f.fail(e.str)
+      if e.str == "new.target"
+        e.x = JaRef.new(nil, sc)
+        note_special(sc, :nt)
+      else
+        f.fail0(e.str)
     else
       f.fail(k.to_s)
       walk_expr(e.a, sc) if e.a.is_a?(JsNode)
@@ -504,8 +697,11 @@ use frontend/parser
     i = 0
     while i < list.size
       a = list[i]
-      sc.func.fail("spread") if a.kind == :spread
-      walk_expr(a, sc)
+      if a.kind == :spread
+        sc.func.fail("spread")
+        walk_expr(a.a, sc)
+      else
+        walk_expr(a, sc)
       i += 1
     nil
 
@@ -538,6 +734,7 @@ use frontend/parser
   -> walk_function(n, sc, binding)
     pf = sc.func
     jf = JaFunc.new(n, pf, @funcs.size)
+    jf.analysis = self
     @funcs.push(jf)
     n.x = jf
     pf.inner.push(jf)
@@ -547,40 +744,113 @@ use frontend/parser
     jf.arrow = n.kind == :arrow
     jf.strict = pf.strict || n.has?(F_STRICT)
     jf.name = n.str == nil ? "" : n.str
-    jf.fail("async") if n.has?(F_ASYNC)
-    jf.fail("generator") if n.has?(F_GENERATOR)
+    jf.fail0("async") if n.has?(F_ASYNC)
+    jf.fail0("generator") if n.has?(F_GENERATOR)
     fs = new_scope(:function, sc, jf, n)
     jf.scope = fs
     if n.kind == :function && n.str != nil && binding == nil
       jf.self_binding = fs.declare(self, n.str, :self)
+    # parameters: plain names, or patterns with defaults and a rest element (non-simple)
+    jf.param_nodes = n.list
+    nlen = -1
     i = 0
     while i < n.list.size
       p = n.list[i]
       if p.kind == :ident
         b = fs.declare(self, p.str, :param)
         jf.params.push(b)
+        p.x = JaRef.new(b, fs)
       else
+        jf.simple = false
+        nlen = i if nlen < 0 && (p.kind == :assign_pattern || p.kind == :rest)
+        names = bound_names(p, [])
+        q = 0
+        while q < names.size
+          fs.declare(self, names[q], :param)
+          q += 1
         jf.fail("parameter " + p.kind.to_s)
       i += 1
-    jf.nparams = jf.params.size
+    jf.nparams = nlen < 0 ? n.list.size : nlen
     if !jf.arrow && (n.has?(F_USES_ARGS) || n.has?(F_HAS_EVAL))
       jf.uses_args = true
+      if fs.names["arguments"] == nil
+        jf.args_binding = fs.declare(self, "arguments", :arguments)
+        jf.args_binding.writes = 1
+        jf.mapped_args = !jf.strict && jf.simple
       jf.fail("arguments")
-    jf.dynamic = true if n.has?(F_HAS_EVAL)
+    if n.has?(F_HAS_EVAL)
+      jf.dynamic = true
+    # defaults and patterns are evaluated in the parameter scope
+    i = 0
+    while i < n.list.size
+      walk_pattern(n.list[i], fs, true) if n.list[i].kind != :ident
+      i += 1
     if jf.arrow && n.has?(F_EXPR_BODY)
       jf.body_scope = fs
       walk_expr(n.b, fs)
     else
       body = n.b
       if body == nil
-        jf.fail("lazy body")
+        jf.fail0("lazy body")
         return nil
-      hoist_body(jf, fs, body, true)
-      jf.body_scope = fs
-      walk_stmts(body, fs)
+      # a non-simple parameter list gives the body's declarations their own scope, where a
+      # var named like a parameter starts with its value (FunctionDeclarationInstantiation)
+      bs = fs
+      if !jf.simple
+        bs = new_scope(:body, fs, jf, n)
+      hoist_body(jf, bs, body, true)
+      if bs != fs
+        bs.order.each ->(b)
+          pb = fs.names[b.name]
+          jf.param_copies.push([pb, b]) if pb != nil && pb.kind == :param && b.kind == :var
+      jf.body_scope = bs
+      walk_stmts(body, bs)
     nil
 
-  # A function expression assigned to a binding: remember it (call-only candidates).
+  # A binding or assignment pattern: annotate its identifiers, walk its defaults and
+  # computed keys. decl: the identifiers are declarations (already declared in sc).
+  -> walk_pattern(p, sc, decl)
+    return nil if p == nil
+    k = p.kind
+    if k == :ident
+      b = ref(p, sc)
+      note_write(b, sc, p.pos)
+    elsif k == :assign_pattern
+      walk_pattern(p.a, sc, decl)
+      walk_expr(p.b, sc)
+      name_fn(p.b, p.a.str) if p.a.kind == :ident
+    elsif k == :rest
+      walk_pattern(p.a, sc, decl)
+    elsif k == :array_pattern
+      i = 0
+      while i < p.list.size
+        walk_pattern(p.list[i], sc, decl) if p.list[i] != nil
+        i += 1
+    elsif k == :object_pattern
+      i = 0
+      while i < p.list.size
+        e = p.list[i]
+        if e.kind == :rest
+          walk_pattern(e.a, sc, decl)
+        else
+          walk_expr(e.a, sc) if e.has?(F_COMPUTED)
+          walk_pattern(e.b, sc, decl)
+        i += 1
+    elsif k == :member
+      walk_expr(p, sc)
+    else
+      walk_expr(p, sc)
+    nil
+
+  # NamedEvaluation (§8.4.5): an anonymous function or arrow takes the name it is bound to.
+  -> name_fn(e, name)
+    return nil if e == nil || name == nil
+    k = e.kind
+    if (k == :function || k == :arrow) && e.str == nil && e.x.is_a?(JaFunc)
+      e.x.name = name
+    nil
+
+  # A function expression assigned to a binding.
   -> note_fn_value(e, b)
     nil
 
@@ -652,6 +922,111 @@ use frontend/parser
       note_read(g.this_binding, sc, 0, false)
     nil
 
+  # ---- classes ----
+
+  # A class: its scope holds the inner name binding and one binding per private name
+  # ("#x", a fresh JS:PrivateName per evaluation). Methods are functions defined in that
+  # scope; field initializers and static blocks become synthetic methods too, so `this`
+  # and closures work as in any function.
+  -> walk_class(n, sc, outer)
+    f = sc.func
+    cs = map_scope(n, new_scope(:class, sc, f, n))
+    if n.str != nil
+      inner = cs.declare(self, n.str, :class_inner)
+      inner.writes = 1
+    i = 0
+    while i < n.list.size
+      m = n.list[i]
+      if (m.kind == :method_def || m.kind == :field_def) && m.a != nil && m.a.kind == :private_name
+        pb = cs.names["#" + m.a.str]
+        if pb == nil
+          pb = cs.declare(self, "#" + m.a.str, :private)
+          pb.writes = 1
+        m.a.x = JaRef.new(pb, cs)
+      i += 1
+    walk_expr(n.a, cs) if n.a != nil
+    ctor = nil
+    i = 0
+    while i < n.list.size
+      m = n.list[i]
+      if m.kind == :method_def
+        walk_expr(m.a, cs) if m.has?(F_COMPUTED)
+        walk_function(m.b, cs, nil)
+        jf = m.b.x
+        jf.method_kind = m.str
+        jf.is_static = m.has?(F_STATIC)
+        jf.home = true
+        jf.class_node = n
+        if m.str == "constructor"
+          jf.class_ctor = true
+          jf.derived = n.a != nil
+          jf.name = n.str == nil ? "" : n.str
+          ctor = jf
+        elsif !m.has?(F_COMPUTED)
+          kn = m.a.kind == :private_name ? "#" + m.a.str : (m.a.kind == :num ? nil : m.a.str)
+          jf.name = (m.str == "get" || m.str == "set") ? m.str + " " + kn.to_s : kn.to_s if kn != nil
+      elsif m.kind == :field_def
+        walk_expr(m.a, cs) if m.has?(F_COMPUTED)
+        if m.b != nil
+          body = [JsNode.new(:return, m.b.pos, m.b.fin, nil, m.b, nil, nil, nil, 0)]
+          fn = JsNode.new(:function, m.pos, m.fin, nil, nil, body, nil, [], F_STRICT | F_METHOD)
+          walk_function(fn, cs, nil)
+          fn.x.field_init = true
+          fn.x.home = true
+          fn.x.is_static = m.has?(F_STATIC)
+          m.x = fn.x
+          name_fn(m.b, m.a.kind == :private_name ? "#" + m.a.str : m.a.str) if !m.has?(F_COMPUTED) && m.a.kind != :num
+      elsif m.kind == :static_block
+        fn = JsNode.new(:function, m.pos, m.fin, nil, nil, m.list, nil, [], F_STRICT | F_METHOD)
+        walk_function(fn, cs, nil)
+        fn.x.field_init = true
+        fn.x.home = true
+        fn.x.is_static = true
+        m.x = fn.x
+      i += 1
+    if ctor == nil
+      # the default constructor (§15.7.14 step 10)
+      fn = JsNode.new(:function, n.pos, n.fin, nil, nil, [], nil, [], F_STRICT | F_METHOD)
+      walk_function(fn, cs, nil)
+      ctor = fn.x
+      ctor.class_ctor = true
+      ctor.default_ctor = true
+      ctor.derived = n.a != nil
+      ctor.home = true
+      ctor.name = n.str == nil ? "" : n.str
+    ctor.class_node = n
+    n.d = ctor.node
+    note_write(outer, sc, n.pos) if outer != nil
+    nil
+
+  # A private name reference (#x): annotate it with its binding in the class scope.
+  -> priv_ref(node, sc)
+    b = resolve("#" + node.str, sc)
+    sc.func.fail0("undeclared private name #" + node.str) if b.kind != :private
+    node.x = JaRef.new(b, sc)
+    note_read(b, sc, node.pos, false)
+    b
+
+  # new.target (:nt) or the running method's own object (:fo, for super) seen from an
+  # arrow: a binding of the enclosing function, like `this`.
+  -> note_special(sc, which)
+    f = sc.func
+    g = f
+    while g.arrow
+      g = g.parent
+    return nil if g.script
+    if which == :nt
+      if g.nt_binding == nil
+        g.nt_binding = g.scope.declare(self, "new.target", :newtarget)
+        g.nt_binding.writes = 1
+      note_read(g.nt_binding, sc, 0, false) if f != g
+    else
+      if g.fo_binding == nil
+        g.fo_binding = g.scope.declare(self, "%home", :fnobj)
+        g.fo_binding.writes = 1
+      note_read(g.fo_binding, sc, 0, false) if f != g
+    nil
+
   # ---- layout ----
 
   -> finish
@@ -679,6 +1054,17 @@ use frontend/parser
       f = @funcs[i]
       if f.single == nil
         f.free.values.each ->(b)
+          if b.slot < 0
+            b.slot = b.scope.env_count
+            b.scope.env_count = b.scope.env_count + 1
+      i += 1
+    # a sloppy function with a mapped arguments object aliases its parameters through it:
+    # they live in the environment so the object stays valid after the call returns
+    i = 1
+    while i < @funcs.size
+      f = @funcs[i]
+      if f.mapped_args
+        f.params.each ->(b)
           if b.slot < 0
             b.slot = b.scope.env_count
             b.scope.env_count = b.scope.env_count + 1
@@ -730,6 +1116,7 @@ use frontend/parser
     false
 
   -> single_ok?(b)
+    return false if b.kind == :param && b.scope.func.mapped_args
     return true if b.kind == :param && b.writes == 0
     return true if b.kind == :this
     if b.kind == :const || b.kind == :let || b.kind == :var

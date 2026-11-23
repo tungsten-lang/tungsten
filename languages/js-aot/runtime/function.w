@@ -20,20 +20,24 @@ CODE_ARROW = 2
 CODE_METHOD = 4
 CODE_CTOR = 8          # constructible (ordinary functions and classes)
 CODE_CLASS = 16        # class constructor (throws when called without new)
+CODE_DERIVED = 32      # derived class constructor (`this` comes from super())
 
 + Code
-  rw :name, :nparams, :index, :flags, :url, :start, :fin
+  rw :name, :nparams, :index, :flags, :url, :start, :fin, :node
 
+  # node: tier 0's form of the function (its analysed JaFunc), when it has one.
   -> new(@name, @nparams, @index, @flags)
     @url = nil
     @start = 0
     @fin = 0
+    @node = nil
 
 FN_IBASE = 4
 FN_INLINE = 4
 # Function kind byte bits above the kind (KIND_PROTO is 128).
 FNV_DONE = 64          # name/length were made real properties
 FNV_PROTO = 32         # prototype was created (or a script defined it)
+FNV_CTOR = 16          # (natives) callable with new
 
 + Function < JS:Base
   rw :code, :env, :s0, :s1, :s2, :s3
@@ -120,6 +124,28 @@ FNV_PROTO = 32         # prototype was created (or a script defined it)
       set_vflag(FNV_PROTO)
     super(key, v, attrs)
 
+# A method or class constructor: a function with a home object (for super) and, for a
+# class constructor, its instance fields ([key, initializer function or nil] pairs) and
+# private methods ([private name, function, kind] triples).
++ Method < JS:Function
+  rw :home, :fields, :privs
+
+  -> new(@shape, @code, @env)
+    @ext = nil
+    @s0 = nil
+    @s1 = nil
+    @s2 = nil
+    @s3 = nil
+    @home = nil
+    @fields = nil
+    @privs = nil
+    jsr_set_kind(wvalue_bits(self) ## i64, KIND_FUNCTION)
+
+-> js_method_closure(code, env, home)
+  m = JS:Method.new(js_realm().fn_shape, code, env)
+  m.home = home
+  m
+
 + NativeFunction < JS:Base
   rw :fn, :name, :len, :data, :s0, :s1
 
@@ -133,11 +159,50 @@ FNV_PROTO = 32         # prototype was created (or a script defined it)
   -> callable?
     true
 
+  # A builtin constructor (new F() calls it with new_target).
+  -> ctor?
+    (jsr_kind(wvalue_bits(self) ## i64) & FNV_CTOR) != 0
+
+  -> set_ctor
+    ob = wvalue_bits(self) ## i64
+    jsr_set_kind(ob, jsr_kind(ob) | FNV_CTOR)
+    nil
+
   -> get_virtual(key)
     return JS_HOLE if (jsr_kind(wvalue_bits(self) ## i64) & FNV_DONE) != 0
     return @name if key == "name"
     return @len.to_f if key == "length"
     JS_HOLE
+
+  # length and name become real (non-enumerable, configurable) properties, in that
+  # order, before any change to them or a listing of the own keys.
+  -> materialize
+    ob = wvalue_bits(self) ## i64
+    return nil if (jsr_kind(ob) & FNV_DONE) != 0
+    jsr_set_kind(ob, jsr_kind(ob) | FNV_DONE)
+    add_property("length", @len.to_f, ATTR_C) if @shape.slot_of("length") < 0
+    add_property("name", @name, ATTR_C) if @shape.slot_of("name") < 0
+    nil
+
+  -> own_keys
+    materialize()
+    super()
+
+  -> delete_own(key)
+    materialize() if key == "name" || key == "length"
+    super(key)
+
+  -> set(key, v, receiver = nil)
+    materialize() if key == "name" || key == "length"
+    super(key, v, receiver)
+
+  -> define(key, v, attrs = ATTR_DEFAULT)
+    materialize() if key == "name" || key == "length"
+    super(key, v, attrs)
+
+  -> define_accessor(key, g, st, flags = ATTR_E + ATTR_C)
+    materialize() if key == "name" || key == "length"
+    super(key, g, st, flags)
 
 NF_IBASE = 6
 NF_INLINE = 2
@@ -191,6 +256,8 @@ JS_NO_ARGS = []
   k = jsr_kind(wvalue_bits(f) ## i64) & 15
   if k == KIND_NATIVE
     return f.fn.call(this, js_args_array(argc, a0, a1, a2, a3, more), nil)
+  if k == KIND_BOUND
+    return js_call_arr(f.target, f.bthis, f.args + js_args_array(argc, a0, a1, a2, a3, more))
   js_throw_type(js_to_display_short(f) + " is not a function")
 
 -> js_to_display_short(v)
@@ -242,14 +309,16 @@ JS_NEW_TARGET = [nil]
       if js_object?(proto)
         JS_IC[k + 4] = pb
         JS_IC[k + 5] = wvalue_bits(sh) ## i64
-    obj = JS:Object.new(sh)
+    obj = (f.code.flags & CODE_DERIVED) != 0 ? nil : JS:Object.new(sh)
     saved = JS_NEW_TARGET[0]
     JS_NEW_TARGET[0] = f
     r = js_dispatch(f.code.index, f, obj, argc, a0, a1, a2, a3, more)
     JS_NEW_TARGET[0] = saved
     return js_object?(r) ? r : obj
-  if kind == KIND_NATIVE
+  if kind == KIND_NATIVE && f.ctor?
     return f.fn.call(nil, js_args_array(argc, a0, a1, a2, a3, more), f)
+  if kind == KIND_BOUND
+    return js_construct(f, js_args_array(argc, a0, a1, a2, a3, more).dup, f)
   js_throw_type(js_to_display_short(f) + " is not a constructor")
 
 -> js_new_arr(f, args)
@@ -273,3 +342,70 @@ fn jsr_code_is(fb, cb) (i64 i64) i64
   fb = wvalue_bits(f) ## i64
   cb = wvalue_bits(c) ## i64
   jsr_code_is(fb, cb) != 0
+
+# [[Construct]](args, newTarget) for any constructor: the object (unless a derived class
+# constructor makes its own through super()), created from newTarget's prototype.
+-> js_construct(f, args, nt = nil)
+  nt = f if nt == nil
+  n = args.size
+  a0 = n > 0 ? args[0] : nil
+  a1 = n > 1 ? args[1] : nil
+  a2 = n > 2 ? args[2] : nil
+  a3 = n > 3 ? args[3] : nil
+  more = n > 4 ? args : nil
+  fb = wvalue_bits(f) ## i64
+  kind = jsr_kind(fb) & 15
+  if kind == KIND_FUNCTION && (f.code.flags & CODE_CTOR) != 0
+    obj = nil
+    if (f.code.flags & CODE_DERIVED) == 0
+      proto = jget(nt, "prototype")
+      obj = js_new_object(js_object?(proto) ? proto : js_realm().object_proto)
+    saved = JS_NEW_TARGET[0]
+    JS_NEW_TARGET[0] = nt
+    r = js_dispatch(f.code.index, f, obj, n, a0, a1, a2, a3, more)
+    JS_NEW_TARGET[0] = saved
+    return js_object?(r) ? r : obj
+  if kind == KIND_NATIVE && f.ctor?
+    return f.fn.call(nil, args, nt)
+  return f.construct(args, nt) if kind == KIND_BOUND || kind == KIND_EXOTIC
+  js_throw_type(js_to_display_short(f) + " is not a constructor")
+
+-> js_is_constructor?(f)
+  fb = wvalue_bits(f) ## i64
+  kind = jsr_kind(fb) & 15
+  return (f.code.flags & CODE_CTOR) != 0 if kind == KIND_FUNCTION
+  return f.ctor? if kind == KIND_NATIVE
+  return f.constructor? if kind == KIND_BOUND || kind == KIND_EXOTIC
+  false
+
+# The instance elements of a class (§7.3.34 InitializeInstanceElements): private methods,
+# then fields in order.
+-> js_init_fields(obj, f)
+  return nil if !f.is_a?(JS:Method)
+  ps = f.privs
+  if ps != nil
+    i = 0
+    while i < ps.size
+      e = ps[i]
+      if e[2] == "method"
+        obj.priv_add_method(e[0], e[1])
+      else
+        obj.priv_add_accessor(e[0], e[2] == "get" ? e[1] : nil, e[2] == "set" ? e[1] : nil)
+      i += 1
+  fs = f.fields
+  if fs != nil
+    i = 0
+    while i < fs.size
+      fd = fs[i]
+      v = fd[1] == nil ? nil : js_call(fd[1], obj, 0, nil, nil, nil, nil, nil)
+      if fd[0].is_a?(JS:PrivateName)
+        obj.priv_add(fd[0], v)
+      else
+        jdefine_own_or_throw(obj, fd[0], v)
+      i += 1
+  nil
+
+-> jdefine_own_or_throw(o, key, v)
+  ok = jdefine_own_property(o, key, JS:PropDesc.data(v, ATTR_DEFAULT))
+  js_throw_type("Cannot define property " + js_to_display(js_key_display(key))) if !ok
+  nil

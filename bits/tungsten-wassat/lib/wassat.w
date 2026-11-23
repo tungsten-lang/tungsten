@@ -283,6 +283,15 @@ use cover_split
     << text
   0
 
+-> wassat_cli_exit(code)
+  if env("WASSAT_NO_FAST_EXIT") == "1"
+    exit(code)
+  begin
+    ccall("__w_fast_exit", code)
+  rescue
+    exit(code)
+  exit(code)
+
 -> wassat_emit_sat_model(model, quiet)
   if quiet
     rtext = wassat_sat_text(model)
@@ -507,13 +516,11 @@ use cover_split
   # use it for constant-time admission gates, and ordinary routing reuses the
   # same object below instead of rescanning every unrelated formula.
   config_started = wassat_prof_clock()
-  config = WassatConfig.from_lens(
-    formula["nvars"], formula["flat_lens"], formula["flat_ncl"], flat_lens_bits
-  )
+  config = WassatConfig.from_formula(formula)
   formula["config"] = config
   if config_started != 0
     z = wassat_prof("config.shape", config_started)
-    z = wassat_prof_note("config.shape scanned_clauses=[formula["flat_ncl"]]")
+    z = wassat_prof_note("config.shape scanned_clauses=[formula["flat_ncl"]] cached=[formula.has_key?("shape_hdr") ? 1 : 0]")
   tprof = wassat_prof("cli.input_setup", tprof)
   wrat_out = wassat_reserve_output(wrat_final, input, "WRAT")
   drat_out = nil
@@ -563,7 +570,14 @@ use cover_split
   # Proof modes cite the original empty clause and keep normal atomic output
   # publication and stdout/stderr separation.
   if config.empty_clause_count > 0
-    empty_id = flat32_raw ? wassat_first_empty_clause_32(formula["flat_lens"], formula["flat_ncl"]) : wassat_first_empty_clause(formula["flat_lens"], formula["flat_ncl"])
+    empty_id = 0
+    if formula.has_key?("shape_hdr") && formula["shape_hdr"] != nil && formula["shape_hdr"].size >= 14
+      empty_id = formula["shape_hdr"][13]
+    if empty_id == 0
+      if flat32_raw
+        empty_id = formula["flat_lens"].size >= formula["flat_ncl"] ? wassat_first_empty_clause_32(formula["flat_lens"], formula["flat_ncl"]) : wassat_first_empty_clause_offs_32(formula["flat_offs"], formula["flat_ncl"])
+      else
+        empty_id = wassat_first_empty_clause(formula["flat_lens"], formula["flat_ncl"])
     raise "internal error: empty-clause count has no witness" if empty_id == 0
     wtext = ""
     unless wrat_final == nil
@@ -1062,10 +1076,9 @@ use cover_split
         wassat_discard_output(wrat_out, wrat_final)
         wassat_discard_output(drat_out, drat_final)
         wassat_print_sat_model_sign(lucky_lasg, formula["nvars"], 2, quiet)
-        z = ccall("w_value_free_w", lucky_lasg)
         wassat_status(quiet, "c mode: [wassat_mode_of(options)] (lucky phases)")
         wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: [formula["nvars"]]")
-        exit(10)
+        wassat_cli_exit(10)
     else
       # The shared output guard below verifies this candidate exactly once.
       flat_lucky = wassat_flat_lucky_candidate(formula)
@@ -1082,7 +1095,7 @@ use cover_split
         wassat_print_sat_model(flat_lucky, quiet)
         wassat_status(quiet, "c mode: [wassat_mode_of(options)] (lucky phases)")
         wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: [formula["nvars"]]")
-        exit(10)
+        wassat_cli_exit(10)
   # Large generated instances can contain a compact contradiction among a
   # bounded star of ORIGINAL clauses.  Search that star in complete isolation:
   # SAT/UNKNOWN says nothing about the parent and only consumes budget, while
@@ -2559,7 +2572,7 @@ use cover_split
           << "c lane: comparison-cones" if rr["comparison_cones_won"] == true
           << "c conflicts: [budget_used], decisions: 0, props: 0"
           << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(won_stats, pre_msr)
-          exit(rr["status"] == 1 ? 10 : 20)
+          wassat_cli_exit(rr["status"] == 1 ? 10 : 20)
         if rr != nil
           budget_used += rr["conflicts"]
           # A bounded lone continuation is still the serial solver. Reuse
@@ -2838,9 +2851,10 @@ use cover_split
   # statement after it. parse_raise already dodges this by stopping at
   # parse_assignment (see its comment); parse_exit still needs the same fix.
   if result["status"] == 1
-    exit(10)
+    wassat_cli_exit(10)
   if result["status"] == -1
-    exit(20)
+    wassat_cli_exit(20)
+  wassat_cli_exit(0)
   0
 
 # `wassat sls <cnf> --flips <n> --seed <s>`: run the stochastic local search

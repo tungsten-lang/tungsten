@@ -100,12 +100,13 @@
   offs = formula["flat_offs"]
   lens = formula["flat_lens"]
   ncl = formula["flat_ncl"]
-  interleaved = lens.size == 0
+  sentinel = formula.has_key?("offs_sentinel") && formula["offs_sentinel"] == true && lens.size == 0
+  interleaved = !sentinel && lens.size == 0
   clauses = []
   k = 0
   while k < ncl
     o = interleaved ? offs[2 * k] : offs[k]
-    n = interleaved ? offs[2 * k + 1] : lens[k]
+    n = sentinel ? (offs[k + 1] - o) : (interleaved ? offs[2 * k + 1] : lens[k])
     c = []
     j = 0
     while j < n
@@ -310,7 +311,7 @@
 
 -> wassat_parse_cnf_mapped_planned(mapping)
   started = wassat_prof_clock
-  hdr = i64[8]
+  hdr = i64[16]
   plan = i64[64]
   parallel_ok = ccall("__w_dimacs_plan", mapping, hdr, plan)
   wassat_parse_cnf_check_header(hdr)
@@ -325,16 +326,17 @@
   if use_32
     lits32 = i32[cap_l]
     offs32 = i32[cap_c]
-    lens32 = i32[cap_c]
-    z = ccall("__w_dimacs_fill_plan", mapping, lits32, offs32, lens32, hdr, plan, 32)
+    lens32 = i32[0]
+    z = ccall("__w_dimacs_fill_plan", mapping, lits32, offs32, nil, hdr, plan, 32)
     z = ccall("w_value_free_w", plan)
     if env("WASSAT_PROFILE") == "1"
       z = wassat_prof("parse.native", fill_started)
-      z = wassat_prof_note("parse.native literals=[hdr[3]] clauses=[hdr[2]] literal_capacity=[cap_l] clause_capacity=[cap_c] bits=32 parallel=[parallel_ok] error=[hdr[4]]")
+      z = wassat_prof_note("parse.native literals=[hdr[3]] clauses=[hdr[2]] literal_capacity=[cap_l] clause_capacity=[cap_c] bits=32 lens=0 parallel=[parallel_ok] error=[hdr[4]]")
     wassat_parse_cnf_check_header(hdr)
     return { "nvars": nvars, "clauses": [], "boxed": false,
              "flat_lits": lits32, "flat_offs": offs32, "flat_lens": lens32,
-             "flat_ncl": ncl, "flat_nlits": nlits, "flat_lits_bits": 32 }
+             "flat_ncl": ncl, "flat_nlits": nlits, "flat_lits_bits": 32,
+             "offs_sentinel": true, "shape_hdr": hdr }
   lits64 = i64[cap_l]
   offs64 = i64[cap_c]
   lens64 = i64[cap_c]
@@ -346,7 +348,7 @@
   wassat_parse_cnf_check_header(hdr)
   { "nvars": nvars, "clauses": [], "boxed": false,
     "flat_lits": lits64, "flat_offs": offs64, "flat_lens": lens64,
-    "flat_ncl": ncl, "flat_nlits": nlits }
+    "flat_ncl": ncl, "flat_nlits": nlits, "offs_sentinel": true, "shape_hdr": hdr }
 
 # Large files cannot be represented by String. The caller owns the mapping
 # through both strict scans. The count pass bounds allocation by actual syntax

@@ -461,6 +461,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 200
 -> wassat_sls_flat_size_32(fla, fcs, fcl, stamp, pm, stp) (i32[] i32[] i32[] i32[] i64[] i64[]) i64
   ncl = pm[0]
   nv = pm[1]
+  has_lens = fcl.size >= ncl ? 1 : 0 ## i64
   keep = 0
   lits = 0
   empty = 0
@@ -472,7 +473,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 200
         pm[5] = 1
         return 0
     o = fcs[ci]
-    n = fcl[ci]
+    n = has_lens == 1 ? fcl[ci] : (fcs[ci + 1] - o)
     empty = 1 if n == 0
     if gen >= 2147483000
       wassat_sls_zero_i32(stamp, 2 * nv + 4)
@@ -550,6 +551,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 200
 -> wassat_sls_flat_fill_32(fla, fcs, fcl, stamp, ofla, ofcs, ofcl, pm, stp) (i32[] i32[] i32[] i32[] i32[] i32[] i32[] i64[] i64[]) i64
   ncl = pm[0]
   nv = pm[1]
+  has_lens = fcl.size >= ncl ? 1 : 0 ## i64
   gen = 0
   out = 0
   pos = 0
@@ -560,7 +562,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 200
         pm[5] = 1
         return 0
     o = fcs[ci]
-    n = fcl[ci]
+    n = has_lens == 1 ? fcl[ci] : (fcs[ci + 1] - o)
     if gen >= 2147483000
       wassat_sls_zero_i32(stamp, 2 * nv + 4)
       gen = 0

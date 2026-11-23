@@ -130,8 +130,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     elsif flat["config"] != nil && flat["config"].nvars == @nvars && flat["config"].nclauses == flat["flat_ncl"]
       @config = flat["config"]
     else
-      lbits = flat.has_key?("flat_lits_bits") && flat["flat_lits_bits"] == 32 ? 32 : 64
-      @config = WassatConfig.from_lens(@nvars, flat["flat_lens"], flat["flat_ncl"], lbits)
+      @config = WassatConfig.from_formula(flat)
     @passign = i8[nv + 1]        # root assignment: 0 / 1 / -1
     @preason = i32[nv + 1]       # root reason clause index, -1 = none
     @tpos = i32[nv + 1]          # trail position, for hint ordering
@@ -3887,13 +3886,14 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 
 -> wassat_pre_intake_32(slits, soffs, slens, fla, fcs, fcl, falive, ftaut, fsig, fpgid, och, ocn, ocv, ocount, pm) (i32[] i32[] i32[] i32[] i32[] i32[] i8[] i8[] i64[] i64[] i32[] i32[] i32[] i32[] i64[])
   ncl = pm[0]
+  has_lens = slens.size >= ncl ? 1 : 0 ## i64
   has_pgid = fpgid.size > 0
   asize = 0
   osize = 0
   k = 0
   while k < ncl
     o = soffs[k] ## i64
-    n = slens[k] ## i64
+    n = has_lens == 1 ? (slens[k] ## i64) : ((soffs[k + 1] - o) ## i64)
     fcs[k] = asize
     fcl[k] = n
     falive[k] = 1
@@ -3951,7 +3951,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   ncl = parse["flat_ncl"]
   lbits = parse.has_key?("flat_lits_bits") && parse["flat_lits_bits"] == 32 ? 32 : 64
   c = cfg == nil ? parse["config"] : cfg
-  c = WassatConfig.from_lens(nvars, parse["flat_lens"], ncl, lbits) if c == nil || c.nvars != nvars || c.nclauses != ncl
+  c = WassatConfig.from_formula(parse) if c == nil || c.nvars != nvars || c.nclauses != ncl
   # No side tables at all: every clause is alive and proof ids are
   # sequential, so the loader synthesizes both from the index ("fsynth").
   # Materializing them cost three ncl-sized allocations plus their fills —

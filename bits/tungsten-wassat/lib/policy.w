@@ -77,6 +77,32 @@ use cnf
   out[5] = empty
   out
 
+-> wassat_shape_counts_offs_32(offs, ncl) (i32[] i64) i64[]
+  total = 0 ## i64
+  longest = 0 ## i64
+  units = 0 ## i64
+  binary = 0 ## i64
+  ternary = 0 ## i64
+  empty = 0 ## i64
+  i = 0 ## i64
+  while i < ncl
+    n = (offs[i + 1] - offs[i]) ## i64
+    total += n
+    longest = n if n > longest
+    units += n == 1 ? 1 : 0
+    binary += n == 2 ? 1 : 0
+    ternary += n == 3 ? 1 : 0
+    empty += n == 0 ? 1 : 0
+    i += 1
+  out = i64[8]
+  out[0] = total
+  out[1] = longest
+  out[2] = units
+  out[3] = binary
+  out[4] = ternary
+  out[5] = empty
+  out
+
 # Called only when the shape pass counted an empty clause. Return its
 # one-based original clause id for a one-step hinted refutation.
 -> wassat_first_empty_clause(lens, ncl) (i64[] i64) i64
@@ -90,6 +116,13 @@ use cnf
   i = 0 ## i64
   while i < ncl
     return i + 1 if lens[i] == 0
+    i += 1
+  0
+
+-> wassat_first_empty_clause_offs_32(offs, ncl) (i32[] i64) i64
+  i = 0 ## i64
+  while i < ncl
+    return i + 1 if offs[i + 1] == offs[i]
     i += 1
   0
 
@@ -678,7 +711,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
   capacity + capacity * percent / 100
 
 + WassatConfig
-  ro :nvars, :nclauses, :nliterals, :units, :binary, :ternary, :max_clause, :empty_clause_count
+  ro :nvars, :nclauses, :nliterals, :units, :binary, :ternary, :width4, :width5, :has_width_census, :max_clause, :empty_clause_count
 
   -> large
     @nclauses - @units - @binary - @ternary - @empty_clause_count
@@ -687,6 +720,9 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     @nliterals = 0
     @binary = 0
     @ternary = 0
+    @width4 = 0
+    @width5 = 0
+    @has_width_census = true
     @units = 0
     @max_clause = 0
     @empty_clause_count = 0
@@ -697,6 +733,8 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
       @units += 1 if n == 1
       @binary += 1 if n == 2
       @ternary += 1 if n == 3
+      @width4 += 1 if n == 4
+      @width5 += 1 if n == 5
       @empty_clause_count += 1 if n == 0
 
   # Shape counters straight from the parser's flat length array, for the
@@ -708,6 +746,22 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     c.adopt_counts(ncl, counts)
     c
 
+  -> .from_formula(formula)
+    nv = formula["nvars"]
+    ncl = formula["flat_ncl"]
+    if formula.has_key?("shape_hdr")
+      sh = formula["shape_hdr"]
+      if sh != nil && sh.size >= 14 && sh[2] == ncl
+        c = WassatConfig.new(nv, [])
+        c.adopt_shape_hdr(ncl, sh)
+        return c
+    lbits = formula.has_key?("flat_lits_bits") && formula["flat_lits_bits"] == 32 ? 32 : 64
+    if lbits == 32 && formula["flat_lens"].size < ncl
+      c = WassatConfig.new(nv, [])
+      c.adopt_counts(ncl, wassat_shape_counts_offs_32(formula["flat_offs"], ncl))
+      return c
+    WassatConfig.from_lens(nv, formula["flat_lens"], ncl, lbits)
+
   -> adopt_counts(ncl, counts)
     @nclauses = ncl
     @nliterals = counts[0]
@@ -716,6 +770,22 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     @binary = counts[3]
     @ternary = counts[4]
     @empty_clause_count = counts[5]
+    @width4 = 0
+    @width5 = 0
+    @has_width_census = false
+    0
+
+  -> adopt_shape_hdr(ncl, hdr)
+    @nclauses = ncl
+    @nliterals = hdr[3]
+    @max_clause = hdr[6]
+    @empty_clause_count = hdr[7]
+    @units = hdr[8]
+    @binary = hdr[9]
+    @ternary = hdr[10]
+    @width4 = hdr[11]
+    @width5 = hdr[12]
+    @has_width_census = true
     0
 
   # Reuse the already computed shape counts; no extra formula scan or buffer.

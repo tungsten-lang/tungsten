@@ -444,6 +444,10 @@ JS_UNITS_CACHE = [nil, nil, nil, nil]
 
 # ---- objects ----
 
+# Identity (for JS arrays too, which core == compares by contents).
+-> js_ident?(a, b)
+  (wvalue_bits(a) ## i64) == (wvalue_bits(b) ## i64)
+
 # cls / internal of a JS:Special; nil for any other value.
 -> js_cls(o)
   o.is_a?(JS:Special) ? o.cls : nil
@@ -454,7 +458,18 @@ JS_UNITS_CACHE = [nil, nil, nil, nil]
 -> js_special?(o, cls)
   o.is_a?(JS:Special) && o.cls == cls
 
+# The target of a Proxy (b_reflect.w).
+-> js_proxy_target(p)
+  p.proxy_target
+
 # ---- regular expressions ----
+
+# IsRegExp (§7.2.8)
+-> js_is_regexp?(v)
+  return false if !js_object?(v)
+  m = jget(v, SYM_MATCH)
+  return js_truthy(m) if m != nil
+  js_special?(v, "RegExp")
 
 # A regex literal /pattern/flags (stand-in until runtime/regexp.w lands).
 -> js_regexp_create(pattern, flags)

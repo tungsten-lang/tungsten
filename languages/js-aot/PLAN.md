@@ -10,6 +10,19 @@ Audience: the agent that implements it. Every stage has an exit criterion with a
 |---|---|
 | M0 | done: `frontend/`, `tier0/` (Blade 99b7307 + the aot body-scope fix), `tools/jsrun.w`, `tools/memstat.sh`, `bench/`, `BASELINE.md` |
 | M1 | exit met: see Appendix B.1 (speed, blocks, spike, scale). Tests: T1 on tier 1 6 pass / 17 fail (missing builtins: M2) / 24 unsupported constructs (M3); the test262 sample needs M2's builtins (its harness uses Object, Array, String, Error) and moves there |
+| M2 | in progress. Tier 0 is a new tree walker (`tier0/walk.w`, deviation 7) running the whole language but eval/with; generators/async on goroutines (`runtime/coro.w`, waits for the Promise port). Builtins being ported from `tier0/b_*.w` into `runtime/b_*.w` (helper agent). T1 on tier 0: 18/47 (the rest wait on builtins and eval/with). |
+| M3 | translator coverage in progress (helper agent: `translate/`), following the walker's semantics |
+
+Next, in order: finish M2 (builtins, eval/with in tier 0, T1 47/47, test262 parity), then M6's
+Blade switch on tier 0 of the new runtime (compat layer: `JsObject < JS:Special` with the old
+constructor, `is_a?(JsObject)` → `js_object?`, `js_call(f, t, args)` → `js_call_arr`, `.elems` →
+the array itself; 15,460 binding lines, ~1,000 call sites to touch), then M5 units (translated
+functions + a fast-path prelude, runtime entries through a table handed to `jsu_init`, extracted
+from a normal compile) so Blade runs compiled code (`BLADE_JS_ENGINE=aot`). Generators and async
+stay in tier 0 until M4. `BLADE_JS_ENGINE=tier0` means the new runtime with units off: the old
+closure interpreter and the new runtime cannot be linked into one binary (their global function
+names collide), so the old engine is retired when Blade switches.
+
 
 Deviations from the plan as written, each with its reason:
 
@@ -37,6 +50,11 @@ Deviations from the plan as written, each with its reason:
    compiler binary plus the JS front end and sets the hook. The JS runtime is ordinary Tungsten
    source (`runtime/main.w`) loaded as the program; the translated script is appended as
    `Tungsten:AST` nodes. Stage identity verified after the change.
+7. **Tier 0 is a new tree walker** (the M9 option, taken in M2 instead of porting `interp.w`):
+   it shares `analyze.w`'s layout with tier 1 for free (one owner, so closures cross tiers),
+   allocates nothing per node (activations are pooled), and was already faster than the closure
+   interpreter on the T3 core before any tuning. Per-node inline caches live in the JsNode's
+   annotation slot.
 6. **Raw-value discipline.** Fast paths are `fn … (i64 …) i64` functions with `ll` bodies on raw
    WValue bits (`runtime/prims.w`). Measured traps, now rules: a heap value passed to an `ll` fn
    as bits is invisible to escape analysis and gets freed, so pointers are only *stored* through

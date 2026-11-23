@@ -118,14 +118,26 @@ JS_LEXICAL = {}
   if js_array?(o)
     if k.is_a?(String) && js_array_index?(k)
       i = k.to_i
-      if i < o.size
+      if i < o.size && o[i] != JS_HOLE
+        if js_array_sealed?(o)
+          js_throw_type("Cannot delete property '" + k + "' of \[object Array]") if strict
+          return false
         o[i] = JS_HOLE
         ab = wvalue_bits(o) ## i64
         jsr_set_aflags(ab, jsr_aflags(ab) | JS_AF_HOLES)
-      return true
-    return false if k == "length"
+        return true
+      x = js_array_slow_elem(o, k)
+      return true if x == nil
+      ok = x.delete_own(k)
+      js_throw_type("Cannot delete property '" + k + "' of \[object Array]") if !ok && strict
+      return ok
+    if k == "length"
+      js_throw_type("Cannot delete property 'length' of \[object Array]") if strict
+      return false
     return true if (js_array_flags(o) & JS_AF_EXT) == 0
-    return js_array_ext(o, false).delete_own(k)
+    ok = js_array_ext(o, false).delete_own(k)
+    js_throw_type("Cannot delete property '" + js_to_display(js_key_display(k)) + "'") if !ok && strict
+    return ok
   return true if !o.is_a?(JS:Base)
   ok = o.delete_own(k)
   js_throw_type("Cannot delete property '" + js_to_display(js_key_display(k)) + "'") if !ok && strict
@@ -145,16 +157,13 @@ JS_LEXICAL = {}
     o = o.proto
   false
 
+# v instanceof f (§13.10.2): f's @@hasInstance when it is not Function.prototype's own.
 -> js_instanceof(v, f)
+  js_throw_type("Right-hand side of 'instanceof' is not an object") if !js_object?(f)
+  h = js_get_method(f, SYM_HAS_INSTANCE)
+  return js_truthy(js_call_arr(h, f, [v])) if h != nil && h != js_realm().intrinsics["%FunctionProto_hasInstance%"]
   js_throw_type("Right-hand side of 'instanceof' is not callable") if !js_callable?(f)
-  return false if !js_object?(v)
-  p = js_get_value(f, "prototype")
-  js_throw_type("Function has non-object prototype in instanceof check") if !js_object?(p)
-  o = js_array?(v) ? js_array_proto(v) : v.proto
-  while o != nil
-    return true if o == p
-    o = o.proto
-  false
+  js_ordinary_has_instance(f, v)
 
 # ---- running a script ----
 
@@ -164,6 +173,7 @@ JS_EXIT = [0]
 JS_T0 = [clock_ms()]
 
 -> js_finish
+  js_realm().run_jobs
   << "(" + (clock_ms() - JS_T0[0]).to_s + " ms)" if Env.get("JSRUN_TIME", "") == "1"
   ccall("w_flush")
   if Env.get("JSRUN_PAUSE", "") == "1"
@@ -237,3 +247,53 @@ JS_CODE_AT = {}
   js_array_ext(a, true).define(JS_AK_LENRO, true, 0)
   js_array_ext(a, true).prevent_extensions
   nil
+
+# ---- shared by both tiers (moved from tier0/walk.w) ----
+
+# A substitution in a template literal: ToString, which a Symbol refuses.
+-> js_template_string(v)
+  return v if js_string?(v)
+  js_to_string(v)
+
+# CopyDataProperties (spread in object literals and rest patterns).
+-> js_copy_data_properties(o, src, excluded)
+  return o if js_nullish?(src)
+  from = js_object?(src) ? src : js_realm().wrap_primitive(src)
+  ks = jown_keys(from)
+  j = 0
+  while j < ks.size
+    kk = ks[j]
+    if !excluded.include?(kk) && jenumerable?(from, kk)
+      o.define(kk, jget(from, kk, src), ATTR_DEFAULT)
+    j += 1
+  o
+
+# SetFunctionName for a computed key (the static ones are named by the analysis).
+-> js_set_fn_name(f, key, prefix)
+  return nil if !f.is_a?(JS:Function)
+  nm = key.is_a?(JS:Symbol) ? (key.description == nil ? "" : "\[" + key.description + "]") : js_to_string(key)
+  nm = prefix + " " + nm if prefix != nil
+  f.define("name", nm, ATTR_C)
+  nil
+
+-> js_priv_get(o, pn)
+  js_throw_type("Cannot read private member " + pn.to_s + " from an object whose class did not declare it") if !o.is_a?(JS:Base)
+  o.priv_get(pn)
+
+-> js_priv_set(o, pn, v)
+  js_throw_type("Cannot write private member " + pn.to_s + " to an object whose class did not declare it") if !o.is_a?(JS:Base)
+  o.priv_set(pn, v)
+
+-> js_bigint_literal(s)
+  t = s
+  base = 10
+  if t.size > 2 && t.byte_at(0) == 48
+    b = t.byte_at(1) | 32
+    base = b == 120 ? 16 : (b == 111 ? 8 : (b == 98 ? 2 : 10))
+    t = t.slice(2, t.size - 2) if base != 10
+  v = 0
+  i = 0
+  while i < t.size
+    v = v * base + js_digit(t.byte_at(i))
+    i += 1
+  JS:BigIntValue.new(v)

@@ -14,5 +14,12 @@ use support
 use arguments
 use helpers
 use b_object
+use b_array
+use b_string
+use b_number
+use b_json
+use b_iter
 use b_collections
+use b_promise
+use coro
 use b_basics

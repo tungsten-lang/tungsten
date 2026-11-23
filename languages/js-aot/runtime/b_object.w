@@ -9,7 +9,7 @@ in JS
 
 # A Proxy (its internal methods are traps, so no fast paths apply).
 -> js_proxy?(o)
-  (jsr_kind(wvalue_bits(o) ## i64) & 127) == KIND_EXOTIC && o.proxy?
+  (jsr_kind(wvalue_bits(o) ## i64) & 15) == KIND_EXOTIC && o.proxy?
 
 # ToPropertyDescriptor
 -> js_to_desc(v)
@@ -78,23 +78,23 @@ in JS
 -> js_set_integrity(o, level)
   return o if !js_object?(o)
   js_throw_type("Cannot prevent extensions") if !jprevent_extensions(o)
+  t = o
   if js_array?(o)
-    x = js_array_ext(o, true)
-    x.define(JS_AK_SEALED, true, 0)
+    t = js_array_ext(o, true)
+    t.define(JS_AK_SEALED, true, 0)
     if level == :frozen
-      x.define(JS_AK_FROZEN, true, 0)
-      x.define(JS_AK_LENRO, true, 0)
-    o = x
-  ks = jown_keys(o)
+      t.define(JS_AK_FROZEN, true, 0)
+      t.define(JS_AK_LENRO, true, 0)
+  ks = jown_keys(t)
   i = 0
   while i < ks.size
     k = ks[i]
-    d = jget_own_property(o, k)
+    d = jget_own_property(t, k)
     if d != nil
       nd = JS:PropDesc.new
       nd.configurable = false
       nd.writable = false if level == :frozen && !d.accessor?
-      js_define_property_or_throw(o, k, nd)
+      js_define_property_or_throw(t, k, nd)
     i += 1
   o
 
@@ -118,12 +118,20 @@ in JS
 -> js_own_enum_keys(o)
   out = []
   if js_array?(o)
+    if (js_array_flags(o) & JS_AF_EXT) == 0
+      i = 0
+      while i < o.size
+        out.push(i.to_s) if o[i] != JS_HOLE
+        i += 1
+      return out
+    # elements may live in the side object (array.w): its own keys keep index order
+    ak = js_array_own_keys(o)
     i = 0
-    while i < o.size
-      out.push(i.to_s) if o[i] != JS_HOLE
+    while i < ak.size
+      k = ak[i]
+      out.push(k) if js_string?(k) && jenumerable?(o, k)
       i += 1
-    return out if (js_array_flags(o) & JS_AF_EXT) == 0
-    o = js_array_ext(o, false)
+    return out
   ex = js_proxy?(o)
   ks = jown_keys(o)
   i = 0
@@ -251,7 +259,7 @@ in JS
   0
 
 -> js_builtin_tag(o)
-  return "Array" if js_array?(o)
+  return "Array" if js_is_array(o)
   return "Function" if js_callable?(o)
   c = js_cls(o)
   return c if c == "Error" || c == "Boolean" || c == "Number" || c == "String" || c == "Date" || c == "RegExp" || c == "Arguments"

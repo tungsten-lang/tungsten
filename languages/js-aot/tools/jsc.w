@@ -5,7 +5,8 @@
 # This program is the Tungsten compiler with one addition: when JSC_JS names a
 # JavaScript file, the program being compiled (runtime/main.w, the JS runtime) gets
 # the translated script appended as Tungsten AST (compiler program_ast_hook). No
-# Tungsten source text is generated. JSC_DUMP=1 prints the analysis summary, JSC_DUMP=2 the generated Tungsten AST.
+# Tungsten source text is generated. JSC_DUMP=1 prints the analysis summary, JSC_DUMP=2 the generated Tungsten AST,
+# JSC_STATS=1 (with JSC_PARTIAL=1) stops after translating: the scale check without a compile.
 
 use ../../../compiler/lib/driver_modules
 use ../frontend/parser
@@ -38,6 +39,8 @@ use ../translate/translate
     t.errors.each ->(er) hist[er[1]] = (hist[er[1]] == nil ? 0 : hist[er[1]]) + 1
     ks = hist.keys.sort_by(->(k) 0 - hist[k])
     ks.each ->(k) ccall("w_eputs", "jsc: unsupported " + hist[k].to_s + " " + k.to_s)
+  if env("JSC_STATS") == "1"
+    exit(0)
   if env("JSC_DUMP") == "2" && nodes != nil
     nodes.each ->(x) ccall("w_eputs", ast_to_tree(x, ""))
   if nodes == nil || (t.errors.size > 0 && !partial)

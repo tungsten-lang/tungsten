@@ -20,7 +20,7 @@ WK_CONTINUE = 2
 WK_RETURN = 3
 
 + WkAct
-  rw :f, :fobj, :fe, :this, :locals, :env, :argc, :args, :nt, :sig, :label, :rv, :env_at_entry
+  rw :f, :fobj, :fe, :this, :locals, :env, :argc, :args, :nt, :sig, :label, :rv, :env_at_entry, :coro
 
   -> new(@f, @fobj, @fe, @this, n)
     @locals = Array.new(n, nil)
@@ -32,6 +32,7 @@ WK_RETURN = 3
     @label = nil
     @rv = nil
     @env_at_entry = nil
+    @coro = nil
 
   -> reset(f, fobj, fe, this, n)
     @f = f
@@ -46,6 +47,7 @@ WK_RETURN = 3
     @label = nil
     @rv = nil
     @env_at_entry = nil
+    @coro = nil
     l = @locals
     while l.size > n
       l.pop
@@ -76,8 +78,10 @@ WK_POOL = []
 -> wk_code(jf)
   c = jf.code
   if c == nil
-    ctor = !jf.arrow && !jf.script && (jf.method_kind == nil || jf.class_ctor) && !jf.field_init
-    flags = (jf.strict ? CODE_STRICT : 0) + (jf.arrow ? CODE_ARROW : 0) + (ctor ? CODE_CTOR : 0) + (jf.class_ctor ? CODE_CLASS : 0) + (jf.class_ctor && jf.derived ? CODE_DERIVED : 0)
+    gen = jf.node.has?(F_GENERATOR)
+    asy = jf.node.has?(F_ASYNC)
+    ctor = !jf.arrow && !jf.script && (jf.method_kind == nil || jf.class_ctor) && !jf.field_init && !gen && !asy
+    flags = (jf.strict ? CODE_STRICT : 0) + (jf.arrow ? CODE_ARROW : 0) + (ctor ? CODE_CTOR : 0) + (jf.class_ctor ? CODE_CLASS : 0) + (jf.class_ctor && jf.derived ? CODE_DERIVED : 0) + (gen ? CODE_GEN : 0) + (asy ? CODE_ASYNC : 0)
     c = JS:Code.new(jf.name, jf.nparams, -1, flags)
     c.node = jf
     jf.code = c
@@ -85,14 +89,19 @@ WK_POOL = []
 
 # ---- running scripts ----
 
--> wk_run(src, url)
+# Run a script (mode nil), indirect eval code (:eval) or the source new Function builds.
+# Returns the completion value of the last expression statement.
+-> wk_run(src, url, mode = nil)
   p = JsParser.new(src, false)
   prog = nil
   begin
     prog = p.parse_program()
   rescue e
     js_throw(js_make_error("SyntaxError", p.error == nil ? e.to_s : p.error.to_s))
-  an = JaAnalysis.new(prog, false).run
+  an = JaAnalysis.new(prog, false)
+  an.src = src
+  an.eval_mode = mode != nil
+  an.run
   bad = []
   an.funcs.each ->(f) bad.push(f.unsupported0) if f.unsupported0 != nil
   js_throw(js_make_error("SyntaxError", "tier 0 cannot run this yet: " + bad[0].to_s)) if bad.size > 0
@@ -104,12 +113,27 @@ WK_POOL = []
   act.rv
 
 -> wk_hoist_script(f, act)
+  ev = f.analysis.eval_mode
+  return nil if ev && f.strict
   vn = f.script ? JaAnalysis.new(nil, false).var_names(f.node.list, [], f.strict, true) : []
   i = 0
   while i < vn.size
-    js_gdeclare(js_gcell(vn[i]), nil, false)
+    js_gdeclare(js_gcell(vn[i]), nil, false, ev ? ATTR_W + ATTR_E + ATTR_C : ATTR_W + ATTR_E)
     i += 1
   nil
+
+# Source text of a function tier 0 runs (Function.prototype.toString).
+-> wk_fn_source(f)
+  jf = f.code.node
+  return nil if !jf.is_a?(JaFunc)
+  s = jf.analysis.src
+  return nil if s == nil
+  n = jf.class_ctor && jf.class_node != nil ? jf.class_node : jf.node
+  s.slice(n.pos, n.fin - n.pos)
+
+JS_EVAL_HOOK[0] = ->(src) wk_run(src, "eval", :eval)
+JS_FUNCTION_HOOK[0] = ->(src) wk_run(src, "Function", :function)
+JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
 
 # ---- calls into tier 0 ----
 
@@ -119,6 +143,9 @@ WK_POOL = []
   nt = JS_NEW_TARGET[0]
   JS_NEW_TARGET[0] = nil
   js_throw_type("Class constructor " + jf.name + " cannot be invoked without 'new'") if jf.class_ctor && nt == nil
+  n = jf.node
+  if n.has?(F_GENERATOR) || n.has?(F_ASYNC)
+    return wk_call_suspendable(jf, f, this, argc, a0, a1, a2, a3, more)
   act = wk_act(jf, f, js_fenv(f), this, jf.nlocals)
   act.argc = argc
   act.args = more
@@ -157,7 +184,48 @@ WK_POOL = []
   return js_env_get(act.env_at_entry, b.slot) if b != nil && b.slot >= 0
   act.this
 
+# A generator, async function or async generator: the activation is set up now (its
+# parameters bound) and the body runs on a coroutine; the activation is never pooled.
+-> wk_call_suspendable(jf, f, this, argc, a0, a1, a2, a3, more)
+  act = WkAct.new(jf, f, js_fenv(f), this, jf.nlocals)
+  act.argc = argc
+  act.args = more
+  n = jf.node
+  gen = n.has?(F_GENERATOR)
+  if n.has?(F_ASYNC) && !gen
+    # parameter errors reject the promise rather than throw
+    c = JS:Coro.new(nil)
+    act.coro = c
+    c.body = ->() wk_whole(jf, act, argc, a0, a1, a2, a3, more)
+    return js_async_start_coro(c)
+  wk_prologue(jf, act, argc, a0, a1, a2, a3, more)
+  if gen && n.has?(F_ASYNC)
+    g = js_async_gen_create(f, nil)
+    act.coro = g.coro
+    g.coro.body = ->() wk_body(jf, act)
+    return g
+  g = js_gen_create(f, nil)
+  act.coro = g.coro
+  g.coro.body = ->() wk_body(jf, act)
+  g
+
+-> wk_whole(jf, act, argc, a0, a1, a2, a3, more)
+  wk_prologue(jf, act, argc, a0, a1, a2, a3, more)
+  wk_body(jf, act)
+
 -> wk_enter(jf, act, argc, a0, a1, a2, a3, more)
+  wk_prologue(jf, act, argc, a0, a1, a2, a3, more)
+  wk_body(jf, act)
+
+-> wk_body(jf, act)
+  n = jf.node
+  if jf.arrow && n.has?(F_EXPR_BODY)
+    return wk_ev(n.b, act)
+  wk_hoist_functions(n.b, act)
+  wk_stmts(n.b, act)
+  act.sig == WK_RETURN ? act.rv : nil
+
+-> wk_prologue(jf, act, argc, a0, a1, a2, a3, more)
   if jf.uses_this && !jf.strict && !jf.arrow
     act.this = js_sloppy_this(act.this)
   sc = jf.scope
@@ -182,15 +250,12 @@ WK_POOL = []
   else
     wk_bind_params(jf, act, argc, a0, a1, a2, a3, more)
   n = jf.node
-  if jf.arrow && n.has?(F_EXPR_BODY)
-    return wk_ev(n.b, act)
+  return nil if jf.arrow && n.has?(F_EXPR_BODY)
   bs = jf.body_scope
   if bs != sc
     wk_scope_enter(bs, act)
     jf.param_copies.each ->(pc) wk_write(pc[1], wk_read_binding_from(pc[0], bs, act), act)
-  wk_hoist_functions(n.b, act)
-  wk_stmts(n.b, act)
-  act.sig == WK_RETURN ? act.rv : nil
+  nil
 
 # A non-simple parameter list: defaults, patterns and a rest element, in order.
 -> wk_bind_params(jf, act, argc, a0, a1, a2, a3, more)
@@ -240,16 +305,29 @@ WK_POOL = []
     i = 0
     while i < p.list.size
       e = p.list[i]
+      # a member target's object and key are evaluated before the value (§13.15.5.5)
+      t = e == nil ? nil : (e.kind == :rest || e.kind == :assign_pattern ? e.a : e)
+      mem = !decl && t != nil && t.kind == :member && t.a.kind != :super
+      mo = nil
+      mk = nil
+      if mem
+        mo = wk_ev(t.a, act)
+        mk = t.has?(F_COMPUTED) ? js_to_property_key(wk_ev(t.b, act)) : t.b.str
+      x = nil
       if e != nil && e.kind == :rest
         rest = []
         while !rec.done
-          x = js_iter_step(rec)
-          rest.push(x) if x != JS_ITER_DONE
-        wk_bind(e.a, js_mark_array(rest), act, decl)
+          y = js_iter_step(rec)
+          rest.push(y) if y != JS_ITER_DONE
+        x = js_mark_array(rest)
       else
         x = rec.done ? JS_ITER_DONE : js_iter_step(rec)
         x = nil if x == JS_ITER_DONE
-        wk_bind(e, x, act, decl) if e != nil
+      if mem
+        x = wk_ev(e.b, act) if e.kind == :assign_pattern && x == nil
+        js_setv(mo, mk, x, act.f.strict)
+      elsif e != nil
+        wk_bind(e.kind == :rest ? e.a : e, x, act, decl)
       i += 1
   rescue ex
     js_iter_close_quiet(rec)
@@ -277,7 +355,16 @@ WK_POOL = []
     else
       key = e.has?(F_COMPUTED) ? js_to_property_key(wk_ev(e.a, act)) : wk_prop_key(e.a)
       used.push(key)
-      wk_bind(e.b, js_get_value(v, key), act, decl)
+      t = e.b.kind == :assign_pattern ? e.b.a : e.b
+      if !decl && t.kind == :member && t.a.kind != :super
+        # the target's object and key first, then the value (§13.15.5.6)
+        mo = wk_ev(t.a, act)
+        mk = t.has?(F_COMPUTED) ? js_to_property_key(wk_ev(t.b, act)) : t.b.str
+        x = js_get_value(v, key)
+        x = wk_ev(e.b.b, act) if e.b.kind == :assign_pattern && x == nil
+        js_setv(mo, mk, x, act.f.strict)
+      else
+        wk_bind(e.b, js_get_value(v, key), act, decl)
     i += 1
   nil
 
@@ -363,7 +450,7 @@ WK_POOL = []
       b = jf.binding
       fo = js_closure(wk_code(jf), wk_env_for(jf, act))
       if b.global?
-        js_gdeclare(wk_cell(b), fo, true)
+        js_gdeclare(wk_cell(b), fo, true, act.f.analysis.eval_mode ? ATTR_W + ATTR_E + ATTR_C : ATTR_W + ATTR_E)
       else
         wk_write_decl(jf, fo, act)
     i += 1
@@ -416,7 +503,8 @@ WK_POOL = []
 -> wk_ex(s, act)
   k = s.kind
   if k == :expr_stmt
-    wk_ev(s.a, act)
+    # the completion value (eval); a function's return value replaces it on return
+    act.rv = wk_ev(s.a, act)
   elsif k == :var_decl
     i = 0
     while i < s.list.size
@@ -577,7 +665,54 @@ WK_POOL = []
   act.env = saved
   nil
 
+# for await (x of o) (§14.7.5.6): o's @@asyncIterator, or its @@iterator with each value
+# awaited (CreateAsyncFromSyncIterator without the wrapper object).
+-> wk_for_await(s, act, labels)
+  fs = s.x
+  saved = act.env
+  per = fs.is_a?(JaScope) && fs.has_env?
+  o = wk_ev(s.b, act)
+  c = act.coro
+  sync = js_get_method(o, SYM_ASYNC_ITERATOR) == nil
+  rec = js_get_iterator(o, true)
+  begin
+    while true
+      r = js_call_arr(rec.next_fn, rec.iterator, JS_NO_ARGS)
+      r = js_await(c, r) if !sync
+      js_throw_type("Iterator result " + js_to_display_short(r) + " is not an object") if !js_object?(r)
+      if js_truthy(jget(r, "done"))
+        rec.done = true
+        break
+      v = jget(r, "value")
+      v = js_await(c, v) if sync
+      if per
+        act.env = saved
+        wk_scope_enter(fs, act)
+      wk_for_head(s, v, act)
+      wk_ex(s.d, act)
+      r = wk_loop_signal(act, labels)
+      if r != 0 && r != WK_CONTINUE
+        rec.done = true
+        ret = js_get_method(rec.iterator, "return")
+        if ret != nil
+          x = js_await(c, js_call_arr(ret, rec.iterator, JS_NO_ARGS))
+          js_throw_type("Iterator result " + js_to_display_short(x) + " is not an object") if !js_object?(x)
+        break
+  rescue ex
+    if !rec.done
+      rec.done = true
+      begin
+        ret = js_get_method(rec.iterator, "return")
+        js_await(c, js_call_arr(ret, rec.iterator, JS_NO_ARGS)) if ret != nil
+      rescue e2
+        nil
+    act.env = saved
+    raise ex
+  act.env = saved
+  nil
+
 -> wk_for_of(s, act, labels)
+  return wk_for_await(s, act, labels) if s.has?(F_AWAIT)
   fs = s.x
   saved = act.env
   per = fs.is_a?(JaScope) && fs.has_env?
@@ -761,6 +896,14 @@ WK_POOL = []
       v = wk_ev(e.list[i], act)
       i += 1
     return v
+  if k == :yield
+    v = e.a == nil ? nil : wk_ev(e.a, act)
+    c = act.coro
+    return js_yield_star(c, v) if e.has?(F_DELEGATE)
+    return js_async_yield(c, v) if act.f.node.has?(F_ASYNC)
+    return js_yield(c, v)
+  if k == :await
+    return js_await(act.coro, wk_ev(e.a, act))
   if k == :class
     return wk_class(e, act)
   if k == :meta_property
@@ -784,10 +927,6 @@ WK_POOL = []
     return js_bigint_literal(e.str)
   js_throw(js_make_error("SyntaxError", "tier 0: expression " + k.to_s))
 
-# A substitution in a template literal: ToString, which a Symbol refuses.
--> js_template_string(v)
-  return v if js_string?(v)
-  js_to_string(v)
 
 -> wk_tagged(e, act)
   t = e.b
@@ -1107,26 +1246,7 @@ WK_OPS = {"+" => 1, "-" => 2, "*" => 3, "/" => 4, "%" => 5, "<" => 6, ">" => 7, 
 -> wk_anonymous_fn?(n)
   (n.kind == :function || n.kind == :arrow) && n.str == nil
 
-# CopyDataProperties (spread in object literals and rest patterns).
--> js_copy_data_properties(o, src, excluded)
-  return o if js_nullish?(src)
-  from = js_object?(src) ? src : js_realm().wrap_primitive(src)
-  ks = jown_keys(from)
-  j = 0
-  while j < ks.size
-    kk = ks[j]
-    if !excluded.include?(kk) && jenumerable?(from, kk)
-      o.define(kk, jget(from, kk, src), ATTR_DEFAULT)
-    j += 1
-  o
 
-# SetFunctionName for a computed key (the static ones are named by the analysis).
--> js_set_fn_name(f, key, prefix)
-  return nil if !f.is_a?(JS:Function)
-  nm = key.is_a?(JS:Symbol) ? (key.description == nil ? "" : "\[" + key.description + "]") : js_to_string(key)
-  nm = prefix + " " + nm if prefix != nil
-  f.define("name", nm, ATTR_C)
-  nil
 
 # Parse and analyse a script without running it (test262 parse-phase negatives): raises
 # the SyntaxError a run would.
@@ -1295,24 +1415,5 @@ WK_OPS = {"+" => 1, "-" => 2, "*" => 3, "/" => 4, "%" => 5, "<" => 6, ">" => 7, 
   act.this = obj if !f.arrow
   nil
 
--> js_priv_get(o, pn)
-  js_throw_type("Cannot read private member " + pn.to_s + " from an object whose class did not declare it") if !o.is_a?(JS:Base)
-  o.priv_get(pn)
 
--> js_priv_set(o, pn, v)
-  js_throw_type("Cannot write private member " + pn.to_s + " to an object whose class did not declare it") if !o.is_a?(JS:Base)
-  o.priv_set(pn, v)
 
--> js_bigint_literal(s)
-  t = s
-  base = 10
-  if t.size > 2 && t.byte_at(0) == 48
-    b = t.byte_at(1) | 32
-    base = b == 120 ? 16 : (b == 111 ? 8 : (b == 98 ? 2 : 10))
-    t = t.slice(2, t.size - 2) if base != 10
-  v = 0
-  i = 0
-  while i < t.size
-    v = v * base + js_digit(t.byte_at(i))
-    i += 1
-  JS:BigIntValue.new(v)

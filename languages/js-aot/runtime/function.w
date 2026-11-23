@@ -21,6 +21,8 @@ CODE_METHOD = 4
 CODE_CTOR = 8          # constructible (ordinary functions and classes)
 CODE_CLASS = 16        # class constructor (throws when called without new)
 CODE_DERIVED = 32      # derived class constructor (`this` comes from super())
+CODE_GEN = 64          # generator function
+CODE_ASYNC = 128       # async function
 
 + Code
   rw :name, :nparams, :index, :flags, :url, :start, :fin, :node
@@ -63,7 +65,17 @@ FNV_CTOR = 16          # (natives) callable with new
 
   -> get_virtual(key)
     if key == "prototype"
-      return JS_HOLE if vflag?(FNV_PROTO) || (@code.flags & CODE_CTOR) == 0
+      return JS_HOLE if vflag?(FNV_PROTO)
+      fl = @code.flags
+      if (fl & CODE_GEN) != 0
+        # a generator's prototype inherits %GeneratorPrototype% and has no constructor
+        set_vflag(FNV_PROTO)
+        r = js_realm()
+        gp = r.intrinsics[(fl & CODE_ASYNC) != 0 ? "%AsyncGeneratorPrototype%" : "%GeneratorPrototype%"]
+        p = js_new_object(gp == nil ? r.object_proto : gp)
+        define("prototype", p, ATTR_W)
+        return p
+      return JS_HOLE if (fl & CODE_CTOR) == 0
       set_vflag(FNV_PROTO)
       p = js_new_object(js_realm().object_proto)
       p.define("constructor", self, ATTR_W + ATTR_C)

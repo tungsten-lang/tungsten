@@ -122,6 +122,12 @@ JS_NAN_KEY = JS:NanKey.new
   adder = m.get(adder_name, m)
   js_throw_type("'" + js_to_display(adder) + "' returned for property '" + adder_name + "' of object '#<" + cls + ">' is not callable") if !js_callable?(adder)
   native_add = adder == r.intrinsic("%" + cls + "_" + adder_name + "%")
+  if js_array?(it) && js_array_iter_pristine?(it)
+    i = 0
+    while i < it.size
+      js_coll_add_item(m, adder, native_add, js_arr_elem(it, i), pairs, cls)
+      i += 1
+    return m
   rec = js_get_iterator(it)
   begin
     while true

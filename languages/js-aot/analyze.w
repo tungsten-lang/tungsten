@@ -135,9 +135,11 @@ use frontend/parser
     fail(why)
 
 + JaAnalysis
-  rw :program, :funcs, :strict, :bind_count, :scope_count, :unsupported_counts
+  rw :program, :funcs, :strict, :bind_count, :scope_count, :unsupported_counts, :src, :eval_mode
 
   -> new(@program, @strict)
+    @src = nil
+    @eval_mode = false
     @funcs = []
     @bind_count = 0
     @scope_count = 0
@@ -240,10 +242,11 @@ use frontend/parser
   # top-level let, const or class of the body already declares are not vars.)
   -> hoist_body(f, sc, stmts, top)
     vn = var_names(stmts, [], f.strict, true)
+    # strict eval code keeps its vars and functions to itself
+    gvars = sc.kind == :script && !(@eval_mode && f.strict)
     i = 0
     while i < vn.size
-      kind = sc.kind == :script ? :global : :var
-      sc.declare(self, vn[i], kind)
+      sc.declare(self, vn[i], gvars ? :global : :var)
       i += 1
     if !f.strict
       pnames = []
@@ -252,7 +255,7 @@ use frontend/parser
       i = 0
       while i < an.size
         b = sc.names[an[i]]
-        sc.declare(self, an[i], sc.kind == :script ? :global : :var) if b == nil
+        sc.declare(self, an[i], gvars ? :global : :var) if b == nil
         i += 1
     hoist_block(sc, stmts, top)
 
@@ -339,7 +342,9 @@ use frontend/parser
 
   # Lexical declarations and function declarations directly in a statement list.
   -> hoist_block(sc, stmts, top)
-    script = sc.kind == :script
+    # eval code's top-level let, const and class are its own (a fresh declarative scope)
+    script = sc.kind == :script && !@eval_mode
+    gfuns = sc.kind == :script && !(@eval_mode && sc.func.strict)
     i = 0
     while i < stmts.size
       s = stmts[i]
@@ -358,7 +363,7 @@ use frontend/parser
         b = sc.declare(self, s.str, script ? :lexical : :class)
         b.decl_pos = s.fin
       elsif s.kind == :function_decl && s.str != nil
-        b = sc.declare(self, s.str, script ? :global : :function)
+        b = sc.declare(self, s.str, gfuns ? :global : :function)
         b.writes += 1
       i += 1
     nil
@@ -491,7 +496,7 @@ use frontend/parser
       walk_stmt(s.b, sc)
     elsif k == :for_in || k == :for_of
       f.fail(k.to_s)
-      f.fail0("for await") if s.has?(F_AWAIT)
+      f.fail("for await") if s.has?(F_AWAIT)
       fs = sc
       a = s.a
       if a.kind == :var_decl && a.str != "var"
@@ -678,6 +683,8 @@ use frontend/parser
     elsif k == :spread
       f.fail("spread")
       walk_expr(e.a, sc)
+    elsif k == :yield || k == :await
+      walk_expr(e.a, sc) if e.a != nil
     elsif k == :regex
       f.fail("regex")
     elsif k == :meta_property
@@ -744,8 +751,8 @@ use frontend/parser
     jf.arrow = n.kind == :arrow
     jf.strict = pf.strict || n.has?(F_STRICT)
     jf.name = n.str == nil ? "" : n.str
-    jf.fail0("async") if n.has?(F_ASYNC)
-    jf.fail0("generator") if n.has?(F_GENERATOR)
+    jf.fail("async") if n.has?(F_ASYNC)
+    jf.fail("generator") if n.has?(F_GENERATOR)
     fs = new_scope(:function, sc, jf, n)
     jf.scope = fs
     if n.kind == :function && n.str != nil && binding == nil
@@ -777,7 +784,7 @@ use frontend/parser
         jf.args_binding = fs.declare(self, "arguments", :arguments)
         jf.args_binding.writes = 1
         jf.mapped_args = !jf.strict && jf.simple
-      jf.fail("arguments")
+      jf.fail(jf.mapped_args ? "mapped arguments" : "arguments")
     if n.has?(F_HAS_EVAL)
       jf.dynamic = true
     # defaults and patterns are evaluated in the parameter scope

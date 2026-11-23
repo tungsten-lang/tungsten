@@ -7,6 +7,10 @@
 #   JS_AF_EXT     it has an entry in JS_AEXT: named properties, a non-default prototype,
 #                 sparse elements or a non-writable length, kept in a JS:Object
 #
+# Elements with non-default attributes (accessors, read-only, non-enumerable or
+# non-configurable ones) live in the side object under their index keys, with a hole in
+# the dense store so every fast path misses on them (V8's dictionary elements, roughly).
+#
 # A core copy or dup of a JS array is an unflagged core Array, so engine-internal arrays
 # never pass for JS ones by accident. (V8 tracks the same facts as elements kinds and a
 # separate properties backing store; JSC calls them indexing types and the butterfly.)
@@ -77,6 +81,8 @@ JS_AEXT_KEEP = {}
       if i < a.size
         v = a[i]
         return v if v != JS_HOLE
+      x = js_array_slow_elem(a, key)
+      return x.get(key, a) if x != nil
       return js_proto_get(js_array_proto(a), key, a)
   if (js_array_flags(a) & JS_AF_EXT) != 0
     x = js_array_ext(a, false)
@@ -100,13 +106,21 @@ JS_AEXT_KEEP = {}
       return js_array_set_length(a, v)
     if js_array_index?(key)
       return js_array_set_index(a, key.to_i, v)
-  js_array_ext(a, true).set(key, v, js_array_ext(a, true))
-  true
+  x = js_array_ext(a, true)
+  x.set(key, v, x)
 
 ARRAY_GAP = 65536
 
 -> js_array_set_index(a, i, v)
   n = a.size
+  if (js_array_flags(a) & JS_AF_EXT) != 0
+    # frozen: no element is writable; not extensible (sealed too): no element is added
+    return false if js_array_frozen?(a)
+    if i >= n || a[i] == JS_HOLE
+      x = js_array_ext(a, false)
+      k = i.to_s
+      return js_array_set_slow(a, x, k, v) if x.has_own?(k)
+      return false if !js_array_ext(a, false).is_extensible? || (i >= n && !js_array_length_writable?(a))
   if i < n
     a[i] = v
     return true
@@ -125,6 +139,21 @@ ARRAY_GAP = 65536
   n = js_to_number(v)
   len = js_to_uint32(n)
   js_throw_range("Invalid array length") if len.to_f != n
+  if (js_array_flags(a) & JS_AF_EXT) != 0 && len != a.size
+    return false if !js_array_length_writable?(a)
+    # sealed elements are not configurable, so none can be removed
+    return false if len < a.size && js_array_sealed?(a)
+    # nor can a non-configurable element: the length stops just past it
+    x = js_array_ext(a, false)
+    j = a.size - 1
+    while j >= len
+      if a[j] == JS_HOLE
+        k = j.to_s
+        if x.has_own?(k) && !x.delete_own(k)
+          while a.size > j + 1
+            a.pop
+          return false
+      j -= 1
   while a.size > len
     a.pop
   if a.size < len
@@ -137,13 +166,18 @@ ARRAY_GAP = 65536
 
 -> js_array_own_keys(a)
   out = []
+  x = (js_array_flags(a) & JS_AF_EXT) != 0 ? js_array_ext(a, false) : nil
   i = 0
   while i < a.size
-    out.push(i.to_s) if a[i] != JS_HOLE
+    if a[i] != JS_HOLE
+      out.push(i.to_s)
+    elsif x != nil
+      k = i.to_s
+      out.push(k) if x.has_own?(k)
     i += 1
   out.push("length")
-  if (js_array_flags(a) & JS_AF_EXT) != 0
-    js_array_ext(a, false).own_keys.each ->(k) out.push(k)
+  if x != nil
+    x.own_keys.each ->(k) out.push(k) if !(k.is_a?(String) && js_array_index?(k))
   out
 
 # ---- the array exotic object's internal methods (§10.4.2) ----
@@ -153,7 +187,9 @@ ARRAY_GAP = 65536
     return a.size.to_f if key == "length"
     if js_array_index?(key)
       i = key.to_i
-      return i < a.size && a[i] != JS_HOLE ? a[i] : JS_HOLE
+      return a[i] if i < a.size && a[i] != JS_HOLE
+      x = js_array_slow_elem(a, key)
+      return x == nil ? JS_HOLE : x.get_own(key)
   return JS_HOLE if (js_array_flags(a) & JS_AF_EXT) == 0
   js_array_ext(a, false).get_own(key)
 
@@ -166,10 +202,51 @@ ARRAY_GAP = 65536
       return JS:PropDesc.data(a.size.to_f, js_array_length_writable?(a) ? ATTR_W : 0)
     if js_array_index?(key)
       i = key.to_i
-      return nil if i >= a.size || a[i] == JS_HOLE
+      return nil if i >= a.size
+      if a[i] == JS_HOLE
+        x = js_array_slow_elem(a, key)
+        return x == nil ? nil : x.get_own_property(key)
       return JS:PropDesc.data(a[i], js_array_frozen?(a) ? ATTR_E : (js_array_sealed?(a) ? ATTR_E + ATTR_W : ATTR_DEFAULT))
   return nil if (js_array_flags(a) & JS_AF_EXT) == 0
   js_array_ext(a, false).get_own_property(key)
+
+# The side object when it holds element key (one with non-default attributes), else nil.
+-> js_array_slow_elem(a, key)
+  return nil if (js_array_flags(a) & JS_AF_EXT) == 0
+  x = js_array_ext(a, false)
+  x.has_own?(key) ? x : nil
+
+# a[i] = v on an element kept in the side object x.
+-> js_array_set_slow(a, x, key, v)
+  d = x.get_own_property(key)
+  if d.accessor?
+    return false if d.setter == nil
+    js_call_arr(d.setter, a, [v])
+    return true
+  return false if d.writable != true
+  nd = JS:PropDesc.new
+  nd.value = v
+  nd.has_value = true
+  x.define_own_property(key, nd)
+
+# Give element i non-default attributes: it moves to the side object.
+-> js_array_define_slow(a, i, key, d)
+  n = a.size
+  exists = i < n && a[i] != JS_HOLE
+  return false if !exists && i >= n && !js_array_length_writable?(a)
+  x = js_array_ext(a, true)
+  if exists
+    # (a failed redefinition of a sealed or frozen element leaves the same property)
+    x.define(key, a[i], js_array_frozen?(a) ? ATTR_E : (js_array_sealed?(a) ? ATTR_E + ATTR_W : ATTR_DEFAULT))
+  ok = x.define_own_property(key, d)
+  return false if !ok && !exists
+  js_throw_range("Array index far past the end is not supported yet") if i - n > ARRAY_GAP
+  while a.size <= i
+    a.push(JS_HOLE)
+  a[i] = JS_HOLE
+  ab = wvalue_bits(a) ## i64
+  jsr_set_aflags(ab, jsr_aflags(ab) | JS_AF_HOLES)
+  ok
 
 -> js_array_length_writable?(a)
   return true if (js_array_flags(a) & JS_AF_EXT) == 0
@@ -204,12 +281,12 @@ ARRAY_GAP = 65536
       return true
     if js_array_index?(key)
       i = key.to_i
+      x = js_array_slow_elem(a, key)
+      return x.define_own_property(key, d) if x != nil
       if d.accessor? || (d.writable == false) || (d.enumerable == false) || (d.configurable == false)
-        # non-default attributes on an element: elements no longer fit the dense store
-        js_throw_type("Array element with non-default attributes is not supported yet")
+        return js_array_define_slow(a, i, key, d)
       return false if i >= a.size && !js_array_length_writable?(a)
-      js_array_set_index(a, i, d.has_value ? d.value : (i < a.size && a[i] != JS_HOLE ? a[i] : nil))
-      return true
+      return js_array_set_index(a, i, d.has_value ? d.value : (i < a.size && a[i] != JS_HOLE ? a[i] : nil))
   js_array_ext(a, true).define_own_property(key, d)
 
 -> js_array_set_proto(a, p)

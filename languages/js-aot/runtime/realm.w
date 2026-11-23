@@ -100,10 +100,21 @@ in JS
     nil
 
   # Run queued jobs until none remain (HTML's "perform a microtask checkpoint").
+  # Jobs run in batches (FIFO; what a job enqueues runs after the batch); an exception
+  # thrown by one is reported and the rest still run.
   -> run_jobs
     while @jobs.size > 0
-      j = @jobs.shift
-      j.call()
+      q = @jobs
+      @jobs = []
+      i = 0
+      while i < q.size
+        j = q[i]
+        q[i] = nil
+        i += 1
+        begin
+          j.call()
+        rescue e
+          js_report_uncaught(e)
     nil
 
   # ---- symbols ----
@@ -325,9 +336,10 @@ fn jsr_gcell_fast(cb) (i64) i64
   v
 
 # A top-level var or function declaration (configurable: false, as declared bindings are).
--> js_gdeclare(c, v, is_fn)
+# A script's var or function declaration (eval code's are configurable: attrs).
+-> js_gdeclare(c, v, is_fn, attrs = ATTR_W + ATTR_E)
   if c.value == JS_HOLE
-    js_realm().global.define(c.name, is_fn ? v : nil, ATTR_W + ATTR_E)
+    js_realm().global.define(c.name, is_fn ? v : nil, attrs)
   elsif is_fn
     c.value = v
   nil
@@ -357,6 +369,9 @@ fn jsr_gcell_fast(cb) (i64) i64
   return js_realm().number_proto.get(key, o) if js_number?(o)
   return js_realm().boolean_proto.get(key, o) if o == true || o == false
   return js_realm().symbol_proto.get(key, o) if o.is_a?(JS:Symbol)
+  if o.is_a?(JS:BigIntValue)
+    bp = js_realm().intrinsics["BigInt.prototype"]
+    return bp == nil ? nil : bp.get(key, o)
   js_throw_type("Cannot read properties of " + js_to_display(o) + " (reading '" + js_to_display(js_key_display(key)) + "')") if js_nullish?(o)
   nil
 

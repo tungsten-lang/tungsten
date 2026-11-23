@@ -220,7 +220,7 @@ JS_ROOT_KEEP = []
   (jsr_kind(wvalue_bits(o) ## i64) & KIND_PROTO) != 0
 
 -> js_exotic_bits?(ob)
-  (jsr_kind(ob) & 127) == KIND_EXOTIC
+  (jsr_kind(ob) & 15) == KIND_EXOTIC
 
 -> js_bump_epoch
   JS_EPOCH[0] = JS_EPOCH[0] + 1
@@ -781,7 +781,7 @@ fn jsr_ic_set(ic, k, ob, epoch) (i64[] i64 i64 i64) i64
 
 # Objects whose properties all live in plain slots (exotic classes override get).
 -> js_ivar_cacheable?(o)
-  k = jsr_kind(wvalue_bits(o) ## i64) & 127
+  k = jsr_kind(wvalue_bits(o) ## i64) & 15
   k == KIND_OBJECT || k == KIND_FUNCTION
 
 # o[key] = v for a site with cache k. Returns v.

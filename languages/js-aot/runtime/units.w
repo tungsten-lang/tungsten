@@ -23,6 +23,8 @@ use unit_id
 JSU_UNITS = []
 # Loaded object files cached by path (one mmap per .o; jsu_init builds closures per ctx).
 JSU_OBJ_FP = {}
+# Parsed manifests cached by path (native Tungsten Hash/Array via JSON.parse).
+JSU_MAN_CACHE = {}
 
 + Unit
   rw :path, :ctx, :keep, :nentries
@@ -132,8 +134,8 @@ fn jsu_raw(t) (i64[]) i64
   return codes[key.to_i] if kind == "code"
   return js_lit_shape(s[2]) if kind == "shape"
   if kind == "tmpl"
-    cooked = s[2][0].map(->(x) x == JS_NULL ? nil : x)
-    return js_template_object(cooked, s[2][1])
+    cooked = s[2][0].map(->(x) x == nil || x == JS_NULL ? nil : x)
+    return js_template_object(cooked, s[2][1].dup)
   return i64[s[2].to_i < 8 ? 8 : s[2].to_i] if kind == "ic"
   if kind == "const"
     return js_realm() if key == "JSR"
@@ -146,14 +148,18 @@ fn jsu_raw(t) (i64[]) i64
 # Load the unit at obj_path for a script whose functions' JS:Code descriptors are codes
 # (indexed like the script's functions). Returns the JS:Unit, or a String saying why not.
 -> js_unit_load(obj_path, manifest_text, codes)
-  man = js_json_parse(manifest_text, nil)
-  return "manifest is not an object" if !js_object?(man)
-  return "unit ABI " + js_to_string(jget(man, "abi")) + ", host " + JSU_ABI.to_s if jget(man, "abi") != JSU_ABI.to_f
-  return "unit from engine " + js_to_string(jget(man, "engine")) + ", host " + JSU_ENGINE_ID if jget(man, "engine") != JSU_ENGINE_ID
-  rt = jget(man, "rt")
-  slots = jget(man, "slots")
-  entries = jget(man, "entries")
-  nfuncs = jget(man, "funcs").to_i
+  man = JSU_MAN_CACHE[obj_path]
+  if man == nil
+    man = JSON.parse(manifest_text)
+    JSU_MAN_CACHE[obj_path] = man if man.is_a?(Hash)
+  return "manifest is not an object" if !man.is_a?(Hash)
+  abi = man["abi"]
+  return "unit ABI " + abi.to_s + ", host " + JSU_ABI.to_s if abi == nil || abi.to_i != JSU_ABI
+  eng = man["engine"]
+  return "unit from engine " + eng.to_s + ", host " + JSU_ENGINE_ID if eng != JSU_ENGINE_ID
+  rt = man["rt"]
+  slots = man["slots"]
+  nfuncs = man["funcs"].to_i
   return "the unit's script has " + nfuncs.to_s + " functions, the host's " + codes.size.to_s if nfuncs != codes.size
   u = JS:Unit.new(obj_path)
   ctx = i64[1024 + slots.size]

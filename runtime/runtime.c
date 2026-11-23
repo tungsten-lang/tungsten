@@ -47464,10 +47464,11 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
 
     size_t code_pages = (code_sz + 0x3fff) & ~(size_t)0x3fff; if (!code_pages) code_pages = 0x4000;
     size_t data_pages = (data_sz + 0x3fff) & ~(size_t)0x3fff; if (!data_pages) data_pages = 0x4000;
-    uint8_t *code = (uint8_t *)mmap(NULL, code_pages, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    /* Keep code and data adjacent in one mapping so ADRP (±4GB) always reaches data. */
+    size_t total_pages = code_pages + data_pages;
+    uint8_t *code = (uint8_t *)mmap(NULL, total_pages, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (code == MAP_FAILED) { free(fb); return W_NIL; }
-    uint8_t *data = (uint8_t *)mmap(NULL, data_pages, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (data == MAP_FAILED) { munmap(code, code_pages); free(fb); return W_NIL; }
+    uint8_t *data = code + code_pages;
 
     uint8_t *sect_base[128];
     for (int i = 0; i < nsect; i++)
@@ -47484,6 +47485,12 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
     uint8_t *stub_base = code + stub_region;
     size_t stub_n = 0;
     int ok = 1;
+    /* one stub per distinct far target (a big object calls the same runtime function
+     * from thousands of sites): open-addressed target -> stub index */
+    enum { STUB_TAB = 8192 };
+    uint64_t *stub_key = (uint64_t *)calloc(STUB_TAB, sizeof(uint64_t));
+    uint32_t *stub_idx = (uint32_t *)calloc(STUB_TAB, sizeof(uint32_t));
+    if (!stub_key || !stub_idx) { free(stub_key); free(stub_idx); munmap(code, total_pages); free(fb); return W_NIL; }
 
     /* loaded address of symbol index `idx`: undefined → host (dlsym), else the
      * split base of its defining section + the symbol's offset within it. */
@@ -47501,6 +47508,10 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
 
     for (int i = 0; i < nsect && ok; i++) {
         struct section_64 *s = sects[i];
+        /* unwind and debug tables are never read in a loaded object (Tungsten raises
+         * through setjmp/longjmp, not unwinding), so their relocations are left alone */
+        if (strncmp(s->segname, "__LD", 16) == 0 || strncmp(s->segname, "__DWARF", 16) == 0 ||
+            strncmp(s->sectname, "__eh_frame", 16) == 0) continue;
         struct relocation_info *r = (struct relocation_info *)(fb + s->reloff);
         for (uint32_t k = 0; k < s->nreloc && ok; k++) {
             struct relocation_info ri = r[k];
@@ -47530,12 +47541,22 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
             case ARM64_RELOC_BRANCH26: {
                 int64_t disp = (int64_t)tgt - (int64_t)(uintptr_t)loc;
                 if (disp > (1 << 27) - 1 || disp < -(1 << 27)) {  /* out of BL ±128MB → stub */
-                    if (stub_n >= MAX_STUBS) { ok = 0; break; }
-                    uint8_t *stub = stub_base + stub_n * 16;
-                    stub_n++;
-                    ((uint32_t *)stub)[0] = 0x58000050;   /* ldr x16, [pc, #8] */
-                    ((uint32_t *)stub)[1] = 0xd61f0200;   /* br  x16          */
-                    *(uint64_t *)(stub + 8) = tgt;
+                    uint64_t h = (tgt >> 2) * 0x9E3779B97F4A7C15ull;
+                    size_t slot = (size_t)(h >> 51) & (STUB_TAB - 1);
+                    while (stub_key[slot] != 0 && stub_key[slot] != tgt) slot = (slot + 1) & (STUB_TAB - 1);
+                    uint8_t *stub;
+                    if (stub_key[slot] == tgt) {
+                        stub = stub_base + (size_t)stub_idx[slot] * 16;
+                    } else {
+                        if (stub_n >= MAX_STUBS) { ok = 0; break; }
+                        stub = stub_base + stub_n * 16;
+                        stub_key[slot] = tgt;
+                        stub_idx[slot] = (uint32_t)stub_n;
+                        stub_n++;
+                        ((uint32_t *)stub)[0] = 0x58000050;   /* ldr x16, [pc, #8] */
+                        ((uint32_t *)stub)[1] = 0xd61f0200;   /* br  x16          */
+                        *(uint64_t *)(stub + 8) = tgt;
+                    }
                     disp = (int64_t)(uintptr_t)stub - (int64_t)(uintptr_t)loc;
                 }
                 uint32_t ins = *(uint32_t *)loc;
@@ -47570,12 +47591,14 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
         }
     }
     #undef JIT_RESOLVE
+    free(stub_key);
+    free(stub_idx);
     /* NB: keep `fb` alive — the symbol/string tables scanned below live in it,
      * not in the loaded regions (only section *data* was copied). */
-    if (!ok) { munmap(code, code_pages); munmap(data, data_pages); free(fb); return W_NIL; }
+    if (!ok) { munmap(code, total_pages); free(fb); return W_NIL; }
 
     if (mprotect(code, code_pages, PROT_READ | PROT_EXEC) != 0) {
-        munmap(code, code_pages); munmap(data, data_pages); free(fb); return W_NIL;
+        munmap(code, total_pages); free(fb); return W_NIL;
     }
     sys_icache_invalidate(code, code_pages);  /* data region stays R-W (inline caches) */
 
@@ -47618,6 +47641,20 @@ WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
                         break;
                     }
                 }
+            }
+        }
+    }
+    if (result == W_NIL) {
+        /* no metadata row: the function's profiler alias `w:<name>` (a hidden external
+         * symbol in the object; a compiled JavaScript unit's jsu_init is found this way) */
+        size_t wl = strlen(want);
+        for (uint32_t k = 0; k < st->nsyms && result == W_NIL; k++) {
+            struct nlist_64 *ns = &syms[k];
+            if ((ns->n_type & N_TYPE) == N_UNDF || ns->n_sect < 1 || ns->n_sect > nsect) continue;
+            const char *nm = strs + ns->n_un.n_strx;
+            if (strncmp(nm, "_w:", 3) == 0 && strlen(nm + 3) == wl && memcmp(nm + 3, want, wl) == 0) {
+                uint64_t a = (uint64_t)(uintptr_t)(sect_base[ns->n_sect - 1] + (ns->n_value - sects[ns->n_sect - 1]->addr));
+                result = w_int((int64_t)(intptr_t)a);
             }
         }
     }
@@ -51746,6 +51783,39 @@ WValue w_closure_call_4(WValue closure_val, WValue arg1, WValue arg2, WValue arg
     WClosure *cl = as_closure(closure_val);
     typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue);
     return ((fn_t)cl->fn_ptr)(cl->captures, arg1, arg2, arg3, arg4);
+}
+
+/* Wider closure calls (no Ruby-style destructuring): a compiled JavaScript unit calls its
+ * host's runtime entries and compiled entries through these (languages/js-aot). */
+WValue w_closure_call_5(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5);
+}
+WValue w_closure_call_6(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5, a6);
+}
+WValue w_closure_call_7(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5, a6, a7);
+}
+WValue w_closure_call_8(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7, WValue a8) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5, a6, a7, a8);
+}
+WValue w_closure_call_9(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7, WValue a8, WValue a9) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5, a6, a7, a8, a9);
+}
+WValue w_closure_call_10(WValue closure_val, WValue a1, WValue a2, WValue a3, WValue a4, WValue a5, WValue a6, WValue a7, WValue a8, WValue a9, WValue a10) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10);
 }
 
 /* ---- Command-line arguments ---- */

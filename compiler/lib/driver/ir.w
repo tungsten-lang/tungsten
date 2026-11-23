@@ -657,6 +657,12 @@ driver_probe_memo = {}
   target_probe_cache_configure(dir)
   nil
 
+# A front end that supplies part of a program as Tungsten AST registers a transform
+# of the loaded program here (languages/js-aot/tools/jsc.w: JavaScript translated to
+# Tungsten AST and appended to its runtime). nil for every other compile.
+# (A lowercase Hash global: the bootstrap C VM reads module state only that way.)
+program_ast_hook = {fn: nil}
+
 -> emit_ir(file_path, emit_wire, verbose, intern_algo, sidemap_path = nil, emit_ll_only_arg = false, build_defines = nil, no_static_slab = false)
   # Emit LLVM IR (or WIRE text) for a single file, return ll_path or nil
   configure_target_probe_cache()
@@ -664,6 +670,8 @@ driver_probe_memo = {}
   loader = Loader.new(verbose)
   load_started_at = clock
   ast = loader.load_program_ast(file_path)
+  if program_ast_hook[:fn] != nil
+    ast = program_ast_hook[:fn].call(ast, file_path)
   gpu_artifacts = gpu_preflight(ast, file_path)
   g_incremental[:manifest] = loader.manifest_files()
   if ast_stats

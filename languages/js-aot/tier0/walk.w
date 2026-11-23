@@ -518,6 +518,11 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
     if b.kind == :lexical
       return init ? js_linit(c, v, wk_const?(b)) : js_lset(c, v)
     return js_gset(c, v, act.f.strict)
+  if b.kind == :self
+    # a named function expression's own name is immutable: ignored in sloppy code
+    js_throw_type("Assignment to constant variable.") if act.f.strict
+    return v
+  js_throw_type("Assignment to constant variable.") if !init && (b.kind == :const || b.kind == :class_inner)
   if b.slot >= 0
     js_env_set(wk_env_at(act, wk_hops(ref)), b.slot, v)
     return v
@@ -1061,7 +1066,11 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
   c = e.a
   this = nil
   f = nil
-  if c.kind == :member
+  if c.kind == :member && c.a.kind == :super
+    # super.tag`…`: the home object's prototype has the tag, this is the method's this
+    f = wk_super_get(c, act)
+    this = wk_this_for(c.a, act)
+  elsif c.kind == :member
     this = wk_ev(c.a, act)
     f = c.has?(F_COMPUTED) ? js_getv(this, wk_ev(c.b, act)) : js_getp_ic(this, c.b.str, wk_ic(c))
   else

@@ -1439,8 +1439,12 @@
       emit_wire_call_direct_i64(wfn, nil, [closure_reg, arg_regs[0]], nil, nil, "w_closure_call_1", nil, nil, temp)
     elsif arg_regs.size() == 2
       emit_wire_call_direct_i64(wfn, nil, [closure_reg, arg_regs[0], arg_regs[1]], nil, nil, "w_closure_call_2", nil, nil, temp)
+    elsif arg_regs.size() == 3
+      emit_wire_call_direct_i64(wfn, nil, [closure_reg, arg_regs[0], arg_regs[1], arg_regs[2]], nil, nil, "w_closure_call_3", nil, nil, temp)
+    elsif arg_regs.size() == 4
+      emit_wire_call_direct_i64(wfn, nil, [closure_reg, arg_regs[0], arg_regs[1], arg_regs[2], arg_regs[3]], nil, nil, "w_closure_call_4", nil, nil, temp)
     else
-      raise compile_error_for_node(:E_LOWER_CLOSURE_CALL_ARITY, "closure call '" + name + "' supports 0..2 args, got " + arg_regs.size().to_s(), ctx[:source_path], node)
+      raise compile_error_for_node(:E_LOWER_CLOSURE_CALL_ARITY, "closure call '" + name + "' supports 0..4 args, got " + arg_regs.size().to_s(), ctx[:source_path], node)
     return typed_value(:i64, temp)
 
   # Inside a class method: implicit self dispatch for non-top-level calls
@@ -1517,7 +1521,10 @@
     pack_count = splat_info[:param_count]
     if node.block != nil && splat_info[:block_param_index] >= 0
       pack_count -= 1
-    arg_regs = lower_splat_call_arg_regs(ctx, args, splat_info[:splat_index], pack_count)
+    kw_count = splat_info[:kw_count]
+    if kw_count == nil
+      kw_count = 0
+    arg_regs = lower_splat_call_arg_regs(ctx, args, splat_info[:splat_index], pack_count, kw_count)
   else
     arg_regs = []
     i = 0
@@ -1527,14 +1534,6 @@
       arg_regs.push(ensure_i64_value(wfn, val))
       i += 1
 
-  # If call has a block, materialize bindings for capture analysis
-  cblk = node.block
-  if cblk != nil && is_ast_node?(cblk)
-    materialize_bindings(ctx)
-    closure_tv = lower_block_closure(ctx, cblk)
-    closure_reg = ensure_i64_value(wfn, closure_tv)
-    arg_regs.push(closure_reg)
-
   # Compile-time arity contract of a statically known source function.
   # Without it a short call was nil-padded below and a long call died at
   # emit time with an internal WIRE contract mismatch.
@@ -1542,11 +1541,24 @@
   if fn_def != nil
     check_static_call_arity(ctx, node, fn_def, "'" + name + "'", args.size())
 
-  # Pad with nil for missing keyword/default params
+  # Pad with nil for missing keyword/default params BEFORE appending the
+  # trailing block closure (the physical block slot is always last, matching
+  # lower_direct_static_method_call).
+  cblk = node.block
+  has_cblk = cblk != nil && is_ast_node?(cblk)
   expected = ctx[:mod][:known_fn_param_counts][name]
   if expected != nil
-    while arg_regs.size() < expected
+    pad_to = expected
+    if has_cblk
+      pad_to -= 1
+    while arg_regs.size() < pad_to
       arg_regs.push(w_nil.to_s())
+
+  if has_cblk
+    materialize_bindings(ctx)
+    closure_tv = lower_block_closure(ctx, cblk)
+    closure_reg = ensure_i64_value(wfn, closure_tv)
+    arg_regs.push(closure_reg)
 
   temp = next_temp(wfn)
   # Mangle name for compiled functions
@@ -1649,9 +1661,10 @@
 
 # Lower source arguments exactly once, then reshape them to the physical ABI
 # of a definition containing `*rest`: fixed leading slots, one boxed Array for
-# the collected middle, then right-aligned trailing slots. This mirrors the
-# interpreter binder while preserving left-to-right side-effect order.
--> lower_splat_call_arg_regs(ctx, args, splat_index, param_count)
+# the collected middle positional args, right-aligned trailing positional slots,
+# then keyword slots (placing any trailing kwargs hash in the first keyword
+# slot so w_kwargs_remap12 maps every keyword param by name).
+-> lower_splat_call_arg_regs(ctx, args, splat_index, param_count, kw_count = 0)
   wfn = ctx[:func]
   source_regs = []
   i = 0
@@ -1662,6 +1675,19 @@
     i += 1
 
   n_source = source_regs.size()
+  has_kwh = false
+  kwh_reg = w_nil.to_s()
+  if kw_count > 0 && n_source > 0
+    last_arg = args[n_source - 1]
+    if is_ast_node?(last_arg) && ast_kind(last_arg) == :hash_literal && last_arg.from_kwargs == true
+      has_kwh = true
+      kwh_reg = source_regs[n_source - 1]
+      n_source -= 1
+
+  trailing_pos = param_count - splat_index - 1 - kw_count
+  if trailing_pos < 0
+    trailing_pos = 0
+
   out = []
   i = 0
   while i < splat_index
@@ -1671,7 +1697,7 @@
       out.push(w_nil.to_s())
     i += 1
 
-  rest_count = n_source - param_count + 1
+  rest_count = n_source - splat_index - trailing_pos
   if rest_count < 0
     rest_count = 0
   rest = next_temp(wfn)
@@ -1686,14 +1712,22 @@
       ri += 1
   out.push(rest)
 
-  i = splat_index + 1
-  while i < param_count
-    source_index = n_source - param_count + i
-    if source_index >= 0 && source_index < n_source
+  ti = 0
+  while ti < trailing_pos
+    source_index = n_source - trailing_pos + ti
+    if source_index >= splat_index && source_index < n_source
       out.push(source_regs[source_index])
     else
       out.push(w_nil.to_s())
-    i += 1
+    ti += 1
+
+  ki = 0
+  while ki < kw_count
+    if ki == 0 && has_kwh
+      out.push(kwh_reg)
+    else
+      out.push(w_nil.to_s())
+    ki += 1
   out
 
 -> lower_direct_static_method_call(ctx, static_info, recv_node, args, block = nil)
@@ -1709,7 +1743,10 @@
     pack_count = static_info[:param_count]
     if block != nil && static_info[:block_param_index] != nil && static_info[:block_param_index] >= 0
       pack_count -= 1
-    packed = lower_splat_call_arg_regs(ctx, call_args, static_info[:splat_index], pack_count)
+    skw = static_info[:kw_count]
+    if skw == nil
+      skw = 0
+    packed = lower_splat_call_arg_regs(ctx, call_args, static_info[:splat_index], pack_count, skw)
     pi = 0
     n_packed = packed.size()
     while pi < n_packed

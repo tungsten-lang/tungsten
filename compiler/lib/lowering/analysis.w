@@ -118,6 +118,8 @@
 # the existing machine-int code paths handle them as if the user had written
 # `## i64: name`.
 
+promote_scan_state = {filter: nil, def_filter: nil, skip_defs: false}
+
 -> ensure_promote_record(records, name)
   if records[name] == nil
     records[name] = {has_int_assign: false, has_other_assign: false, has_escape: false}
@@ -142,8 +144,10 @@
     return nil
 
   if t == :var
-    rec = ensure_promote_record(records, node.name)
-    rec[:has_escape] = true
+    flt = promote_scan_state[:filter]
+    if flt == nil || flt[node.name] == true
+      rec = ensure_promote_record(records, node.name)
+      rec[:has_escape] = true
     return nil
 
   case t
@@ -262,10 +266,20 @@
     mark_subtree_escape(node.value, records)
 
   when :class_def, :module_def, :trait_def
+    if promote_scan_state[:skip_defs] == true
+      return nil
+    df = promote_scan_state[:def_filter]
+    if df != nil && df.size() == 0
+      return nil
     mark_subtree_escape(node.superclass, records)
     free_scan_list(node.body, {}, records)
 
   when :method_def, :fn_def, :gpu_kernel_def
+    if promote_scan_state[:skip_defs] == true
+      return nil
+    df = promote_scan_state[:def_filter]
+    if df != nil && df.size() == 0
+      return nil
     mark_nested_def_free_reads(node, records)
 
   when :param
@@ -317,6 +331,8 @@
 # fall back to the position-blind walk (conservative, never unsound).
 
 -> free_bound_copy(bound)
+  if bound.size() == 0
+    return {}
   copy = {}
   ks = bound.keys()
   n_ks = ks.size()
@@ -329,12 +345,15 @@
 -> free_bind_name(entry, bound)
   if entry == nil
     return nil
+  nm = nil
   if is_ast_node?(entry)
-    if entry.name != nil
-      bound[entry.name] = true
-    return nil
-  if type(entry) == "String"
-    bound[entry] = true
+    nm = entry.name
+  elsif type(entry) == "String"
+    nm = entry
+  if nm != nil
+    df = promote_scan_state[:def_filter]
+    if df == nil || df[nm] == true
+      bound[nm] = true
   nil
 
 -> free_bind_params(params, bound)
@@ -391,7 +410,8 @@
     return nil
   t = ast_kind(node)
   if t == :var
-    if bound[node.name] != true
+    df = promote_scan_state[:def_filter]
+    if (df == nil || df[node.name] == true) && bound[node.name] != true
       rec = ensure_promote_record(records, node.name)
       rec[:has_escape] = true
     return nil
@@ -406,7 +426,9 @@
     free_scan_node(node.value, bound, records)
     target = node.target
     if target != nil && is_ast_node?(target) && ast_kind(target) == :var
-      bound[target.name] = true
+      df = promote_scan_state[:def_filter]
+      if df == nil || df[target.name] == true
+        bound[target.name] = true
     else
       free_scan_node(target, bound, records)
 
@@ -416,7 +438,9 @@
     if target != nil && is_ast_node?(target) && ast_kind(target) == :var
       # `x += v` reads x before binding it — a free read when unbound.
       free_scan_node(target, bound, records)
-      bound[target.name] = true
+      df = promote_scan_state[:def_filter]
+      if df == nil || df[target.name] == true
+        bound[target.name] = true
     else
       free_scan_node(target, bound, records)
 
@@ -424,12 +448,14 @@
     free_scan_node(node.value, bound, records)
     targets = multi_assign_leaf_targets(node)
     if targets != nil
+      df = promote_scan_state[:def_filter]
       n_targets = targets.size()
       i = 0
       while i < n_targets
         tg = targets[i]
         if tg != nil && is_ast_node?(tg) && ast_kind(tg) == :var
-          bound[tg.name] = true
+          if df == nil || df[tg.name] == true
+            bound[tg.name] = true
         else
           free_scan_node(tg, bound, records)
         i += 1
@@ -1372,7 +1398,7 @@
       i += 1
   promoted
 
--> raw_int_candidate_map(body, declared_types, mod = nil, raw_return = false)
+-> raw_int_candidate_map(body, declared_types, mod = nil, raw_return = false, is_toplevel = false)
   candidates = {}
   hinted = {}
   collect_raw_candidate_names_list(body, candidates, hinted, declared_types)
@@ -1392,6 +1418,17 @@
   n_declared_names = declared_names.size()
   hinted_names = hinted.keys()
   n_hinted_names = hinted_names.size()
+  def_filter = candidates
+  if is_toplevel && mod != nil && mod[:extern_var_refs] != nil
+    ext = mod[:extern_var_refs]
+    def_filter = {}
+    ei = 0
+    while ei < candidate_names.size()
+      cn = candidate_names[ei]
+      if ext[cn] == true
+        def_filter[cn] = true
+      ei += 1
+  first_round = true
   loop
     known = {}
     dki = 0
@@ -1421,7 +1458,14 @@
       mod[:promote_raw_return] = true
     if mod != nil && has_typed_ctx
       mod[:promote_typed_context] = true
+    promote_scan_state[:filter] = candidates
+    promote_scan_state[:def_filter] = def_filter
+    promote_scan_state[:skip_defs] = !first_round
     visit_promote_list(body, records, known, mod)
+    promote_scan_state[:filter] = nil
+    promote_scan_state[:def_filter] = nil
+    promote_scan_state[:skip_defs] = false
+    first_round = false
     if mod != nil && raw_return
       mod[:promote_raw_return] = nil
     if mod != nil && has_typed_ctx
@@ -1500,6 +1544,24 @@
       ntarget = node.target
       if ast_kind(ntarget) == :var
         assigned[ntarget.name] = true
+    when :multi_assign
+      mtargets = multi_assign_leaf_targets(node)
+      if mtargets != nil
+        mi = 0
+        while mi < mtargets.size()
+          mt = mtargets[mi]
+          if mt != nil && is_ast_node?(mt) && ast_kind(mt) == :var
+            assigned[mt.name] = true
+          mi += 1
+    when :begin
+      if node.rescue_var != nil
+        assigned[node.rescue_var] = true
+      scan_assigns_for_params(node.body, assigned)
+      scan_assigns_for_params(node.rescue_body, assigned)
+      scan_assigns_for_params(node.ensure_body, assigned)
+    when :call
+      if node.block != nil && is_ast_node?(node.block)
+        scan_assigns_for_params(node.block.body, assigned)
     when :if
       scan_assigns_for_params(node.then_body, assigned)
       scan_assigns_for_params(node.else_body, assigned)

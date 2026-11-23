@@ -274,7 +274,7 @@ module Tungsten
       # `- data` declarations are class-body STATEMENTS; allow_multi_assign
       # is only passed at statement level, which keeps a parenthesized
       # unary minus (`(-(x)).abs`) inside a class body out of this branch.
-      if allow_multi_assign && @in_class_body && @token.type?(:-)
+      if allow_multi_assign && @in_class_body && @token.type?(:-) && check(/\A +[a-zA-Z_]/)
         node = parse_data_declaration
         node.set_location(start_file, start_row, start_col)
         return node
@@ -1517,6 +1517,9 @@ module Tungsten
 
       when :TYPE
         type_name = @token.value
+        loc_file = @token.file
+        loc_row = @token.row
+        loc_col = @token.col
         next_token
         # A local or parameter spelled like the type (`u8 = [1, 2]`) is a
         # variable: `u8[1]` indexes it. Every enclosing scope counts, as in
@@ -1529,8 +1532,7 @@ module Tungsten
           next_token
           TypedArray.new(type_name, size)
         else
-          # Bare type name as value
-          Var.new(type_name)
+          parse_var_or_call_tail(type_name, false, loc_file, loc_row, loc_col)
         end
 
       when :ID
@@ -3185,6 +3187,11 @@ module Tungsten
 
       @last_call_parens = false
       next_token
+      parse_var_or_call_tail(name, is_class_ref, loc_file, loc_row, loc_col)
+    end
+
+    def parse_var_or_call_tail(name, is_class_ref, loc_file, loc_row, loc_col)
+      @last_call_parens = false
 
       # Namespace path: Name:Constant (e.g., Forge:Server, Frame:INTERNAL_ERROR)
       if @token.type?(:SYMBOL) && @token.value.to_s.match?(/\A:[A-Z]/)
@@ -3540,9 +3547,19 @@ module Tungsten
     def parse_yield
       next_token
       args = []
-      unless @token.type?(:NL) || @token.type?(:EOF) || @token.type?(:DEDENT)
+      if @token.type?(:"(")
+        next_token_skip_whitespace
+        unless @token.type?(:")")
+          args << parse_expression
+          while @token.type?(:",")
+            next_token_skip_whitespace
+            args << parse_expression
+          end
+        end
+        consume :")"
+      elsif !(@token.type?(:NL) || @token.type?(:EOF) || @token.type?(:DEDENT) || @token.type?(:")"))
         skip_space
-        unless @token.suffix?
+        unless @token.suffix? || @token.type?(:")")
           args << parse_assignment_no_control
           while @token.type?(:",")
             next_token_skip_whitespace
@@ -3568,13 +3585,95 @@ module Tungsten
       Yield.new(args)
     end
 
+    # True when `if`/`unless` right after bare `return` or `recase` introduces
+    # a value expression (`return if cond then a else b` or indented body) rather
+    # than a postfix statement modifier (`return if cond`).
+    def return_if_value_expression?
+      return false unless @token.keyword?(:if) || @token.keyword?(:unless)
+
+      src = string
+      line_start = src.rindex("\n", [pos - 1, 0].max)
+      line_start = line_start ? line_start + 1 : 0
+      cur_indent = src[line_start..].match(/\A */)[0].length
+
+      tail = rest
+      depth = 0
+      i = 0
+      n = tail.bytesize
+      in_str = nil
+      saw_arrow = false
+      while i < n
+        b = tail.getbyte(i)
+        if in_str
+          if b == 92
+            i += 2
+            next
+          end
+          in_str = nil if b == in_str
+        elsif b == 34 || b == 39
+          in_str = b
+        elsif b == 35
+          nl = tail.index("\n", i)
+          return false unless nl
+
+          i = nl
+          next
+        elsif b == 40 || b == 91 || b == 123
+          depth += 1
+        elsif b == 41 || b == 93 || b == 125
+          depth -= 1 if depth.positive?
+        elsif depth.zero?
+          if b == 45 && i + 1 < n && tail.getbyte(i + 1) == 62
+            saw_arrow = true
+            i += 2
+            next
+          end
+          if b == 116 && tail.byteslice(i, 4) == "then" &&
+             (i.zero? || tail.getbyte(i - 1) <= 47) &&
+             (i + 4 >= n || tail.getbyte(i + 4) <= 47)
+            return true
+          end
+          if b == 10
+            return false if saw_arrow
+
+            return next_nonblank_indent(tail, i + 1) > cur_indent
+          end
+        end
+        i += 1
+      end
+      false
+    end
+
+    def next_nonblank_indent(tail, start_idx)
+      j = start_idx
+      n = tail.bytesize
+      while j < n
+        ind = 0
+        ind += 1 while j + ind < n && tail.getbyte(j + ind) == 32
+        k = j + ind
+        if k >= n || tail.getbyte(k) == 10 || tail.getbyte(k) == 35
+          nl = tail.index("\n", k)
+          return -1 unless nl
+
+          j = nl + 1
+          next
+        end
+        return ind
+      end
+      -1
+    end
+
     def parse_return
       next_token
       if @token.type?(:NL) || @token.type?(:EOF) || @token.type?(:DEDENT)
         Return.new(nil)
       else
         skip_space
-        @token.suffix? ? Return.new(nil) : Return.new(parse_assignment_no_control)
+        if @token.suffix? && !return_if_value_expression?
+          Return.new(nil)
+        else
+          Return.new(parse_assignment_no_control)
+        end
       end
     end
 
@@ -3584,7 +3683,11 @@ module Tungsten
         Recase.new(nil)
       else
         skip_space
-        @token.suffix? ? Recase.new(nil) : Recase.new(parse_assignment_no_control)
+        if @token.suffix? && !return_if_value_expression?
+          Recase.new(nil)
+        else
+          Recase.new(parse_assignment_no_control)
+        end
       end
     end
 
@@ -3856,11 +3959,14 @@ module Tungsten
     def with_isolated_scope(create_scope = true, &block)
       return yield unless create_scope
 
+      previous_in_class_body = @in_class_body
       begin
+        @in_class_body = false
         @scopes.push(Set.new)
         yield
       ensure
         @scopes.pop
+        @in_class_body = previous_in_class_body
       end
     end
 

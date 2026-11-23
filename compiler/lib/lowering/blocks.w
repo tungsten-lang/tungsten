@@ -882,10 +882,13 @@
     emit_wire_null_ptr(wfn, cap_ptr)
 
   closure = next_temp(wfn)
-  # block_arity carries the DECLARED param count so single-arg yields can
-  # destructure an Array element across a multi-param block
-  # (w_closure_call_1). Free-var implicit blocks stay arity 0 — implicit
-  # binding is first-reference order, never destructuring.
+  # block_arity encodes both declared vs implicit params and physical LLVM
+  # param count: >= 0 is declared params (enabling Array destructuring in
+  # w_closure_call_1 when >= 2), < 0 is -block_params.size() for implicit
+  # free-var blocks (never destructured; calling with too few args raises a
+  # clean runtime error instead of reading uninitialized registers).
   declared_arity = block.params.size()
+  if declared_arity == 0 && block_params.size() > 0
+    declared_arity = 0 - block_params.size()
   emit_wire_closure_new(wfn, declared_arity, captures.size(), cap_ptr, fn_name, closure)
   typed_value(:i64, closure)

@@ -425,7 +425,7 @@ end
 TUNGSTEN_FILE = File.join(ROOT, "compiler/lib/lowering/literal_units.w")
 TUNGSTEN_SHARD_DIR = File.join(ROOT, "compiler/lib/lowering/literal_units")
 
-C_FILE = File.join(ROOT, "runtime/runtime.c")
+C_FILE = File.join(ROOT, "runtime/runtime_units.c")
 C_START = "/* --- BEGIN GENERATED: unit_names --- */"
 C_END   = "/* --- END GENERATED: unit_names --- */"
 

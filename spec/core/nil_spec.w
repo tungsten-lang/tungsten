@@ -53,7 +53,6 @@ check("inspect", nil.inspect == "nil")
 # check("to_f", nil.to_f == ~0.0)
 # BUG: Nil#to_c is declared bodyless and has no runtime implementation (undefined interpreted, nil compiled)
 # check("to_c", nil.to_c == Complex.new(0, 0))
-# BUG: nil.is_a?(Nil) is true interpreted but false compiled
-# check("is_a? Nil", nil.is_a?(Nil))
+check("is_a? Nil", nil.is_a?(Nil))
 
 << "ALL PASS nil_spec ([passed.load()] checks)"

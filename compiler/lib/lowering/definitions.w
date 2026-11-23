@@ -252,6 +252,38 @@
     i += 1
   -1
 
+-> method_trailing_kw_count(node)
+  if node.params == nil
+    return 0
+  splat = method_splat_index(node)
+  count = 0
+  i = splat + 1
+  while i < node.params.size()
+    if node.params[i].keyword == true
+      count += 1
+    i += 1
+  count
+
+# Packed signature flags passed to w_class_add_method_splat_wv /
+# w_class_add_static_method_splat_wv when dynamic argument binding needs
+# splat, trailing keyword-param count, or block-slot right-alignment:
+#   -1: plain/range signature (no splat, no optional-before-block)
+#   0..254: legacy plain splat index (no trailing kwargs, no block slot)
+#   0x100000 | ((splat+1)&0xFF) | ((kw_count&0xFF)<<8) | (has_block<<16)
+-> method_encoded_splat_flags(node, arity, min_arity)
+  splat = method_splat_index(node)
+  kw_count = method_trailing_kw_count(node)
+  has_block = 0
+  if method_lowering_analysis(node)[:yield_block_name] != nil || method_block_param_index(node) >= 0
+    has_block = 1
+  if splat < 0
+    if has_block == 1 && min_arity < arity
+      return 1048576 + (has_block << 16)
+    return -1
+  if kw_count == 0 && has_block == 0
+    return splat
+  1048576 + ((splat + 1) & 255) + ((kw_count & 255) << 8) + (has_block << 16)
+
 -> method_block_param_index(node)
   if node.params == nil
     return -1
@@ -269,14 +301,14 @@
 -> method_min_runtime_arity(node)
   splat_index = method_splat_index(node)
   if splat_index >= 0
-    # __self plus every required fixed parameter. The splat itself accepts
-    # zero values; defaults and the block slot are optional regardless of
-    # whether they appear before or after it.
+    # __self plus every required fixed positional parameter. The splat itself
+    # accepts zero values; defaults, keywords, and the block slot are optional
+    # regardless of whether they appear before or after it.
     arity = 1
     i = 0
     while i < node.params.size()
       p = node.params[i]
-      if p.splat != true && p.block_param != true && p.default == nil
+      if p.splat != true && p.block_param != true && p.keyword != true && p.default == nil
         arity += 1
       i += 1
     return arity
@@ -293,7 +325,7 @@
     if node.params[i].block_param == true
       i -= 1
       next
-    if node.params[i].default == nil
+    if node.params[i].default == nil && node.params[i].keyword != true
       break
     arity -= 1
     i -= 1
@@ -685,27 +717,51 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
       i += 1
   false
 
-# Automatic alias scopes: in a typed-signature fn the array-typed parameters
-# are assumed PAIRWISE DISTINCT arrays (a documented language rule, like
-# Fortran dummy-argument aliasing) — payload accesses through different
-# params get disjoint LLVM alias scopes so loads can hoist and vectorize
-# across stores to other arrays. A rebound param drops out; fewer than two
-# array params means nothing to separate. TUNGSTEN_NO_ALIAS_SCOPES=1
-# disables the whole feature. Returns {param name → slot} or nil.
+# Automatic alias scopes:
+# - In a typed-signature fn, non-reassigned array-typed parameters are assumed
+#   PAIRWISE DISTINCT arrays (Fortran dummy-argument rule).
+# - Top-level single-assignment local allocations (`buf = u8[n]` with no
+#   `## reuse` and no stack promotion) are freshly allocated after function
+#   entry, so each is provably disjoint from every parameter and from every
+#   other such local allocation.
+# Payload accesses through distinct slotted names carry disjoint LLVM
+# !alias.scope / !noalias metadata so loads can hoist and vectorize across
+# stores. Fewer than two slotted arrays means nothing to separate.
+# TUNGSTEN_NO_ALIAS_SCOPES=1 disables the whole feature.
 -> alias_scope_slots(node, var_types, assign_counts = nil)
-  if node.param_types == nil || node.params == nil || env("TUNGSTEN_NO_ALIAS_SCOPES") == "1"
+  if env("TUNGSTEN_NO_ALIAS_SCOPES") == "1"
     return nil
   slots = {}
   nslots = 0
-  pti = 0
-  while pti < node.param_types.size() && pti < node.params.size() && nslots < 32
-    pname = param_runtime_name(node.params[pti])
-    ptv = var_types[pname]
-    reassigned = assign_counts != nil ? (assign_counts[pname] != nil && assign_counts[pname] > 0) : alias_name_reassigned?(node.body, pname)
-    if ptv != nil && ptv.to_s().starts_with?("typed_array_") && !reassigned
-      slots[pname] = nslots
-      nslots += 1
-    pti += 1
+  param_names = {}
+  if node.params != nil
+    pi = 0
+    while pi < node.params.size()
+      param_names[param_runtime_name(node.params[pi])] = true
+      pi += 1
+  if node.param_types != nil && node.params != nil
+    pti = 0
+    while pti < node.param_types.size() && pti < node.params.size() && nslots < 32
+      pname = param_runtime_name(node.params[pti])
+      ptv = var_types[pname]
+      reassigned = assign_counts != nil ? (assign_counts[pname] != nil && assign_counts[pname] > 0) : alias_name_reassigned?(node.body, pname)
+      if ptv != nil && ptv.to_s().starts_with?("typed_array_") && !reassigned
+        slots[pname] = nslots
+        nslots += 1
+      pti += 1
+  if node.body != nil && assign_counts != nil && nslots < 32
+    si = 0
+    while si < node.body.size() && nslots < 32
+      stmt = node.body[si]
+      if is_ast_node?(stmt) && ast_kind(stmt) == :assign
+        target = stmt.target
+        rhs = stmt.value
+        if target != nil && is_ast_node?(target) && ast_kind(target) == :var && rhs != nil && is_ast_node?(rhs) && ast_kind(rhs) in (:typed_array :typed_array_new)
+          vname = target.name
+          if param_names[vname] != true && slots[vname] == nil && assign_counts[vname] == 1 && ast_get(rhs, :reuse_safe) != true && !typed_array_new_stack_promoted?(rhs)
+            slots[vname] = nslots
+            nslots += 1
+      si += 1
   if nslots < 2
     return nil
   slots
@@ -1884,7 +1940,7 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
   emit_wire_load_class(main_fn, cname, cls_reload)
-  emit_wire_class_add_method(main_fn, arity, cls_reload, method_table_fn_name(cname, node), mbyte_len, mstr_id, min_arity, method_splat_index(node))
+  emit_wire_class_add_method(main_fn, arity, cls_reload, method_table_fn_name(cname, node), mbyte_len, mstr_id, min_arity, method_encoded_splat_flags(node, arity, min_arity))
   # Stash the method-def AST so specialize_method can clone+re-lower
   # it under a child context with `__self` typed to a concrete variant.
   # Also stash an arity-keyed entry so monomorphization of an OVERLOADED method
@@ -1997,6 +2053,7 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
       accepts_block: accepts_block,
       param_count: node.params.size(),
       splat_index: method_splat_index(node),
+      kw_count: method_trailing_kw_count(node),
       block_param_index: method_block_param_index(node)
     }
     register_known_static_method_info(mod, lookup_key, info, min_arity - 1, arity - 1)
@@ -2004,7 +2061,7 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
   emit_wire_load_class(main_fn, cname, cls_reload)
-  emit_wire_class_add_static_method(main_fn, arity, cls_reload, method_table_fn_name(cname, node), mbyte_len, mstr_id, min_arity, method_splat_index(node))
+  emit_wire_class_add_static_method(main_fn, arity, cls_reload, method_table_fn_name(cname, node), mbyte_len, mstr_id, min_arity, method_encoded_splat_flags(node, arity, min_arity))
 
 # Accessor methods synthesized from `ro :x` / `rw :x` (a class-body
 # declaration or the constructor's trailing marker) carry the declaration's
@@ -2853,7 +2910,11 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     emit_wire_call_direct_i64(wfn, nil, [block_reg, arg_regs[0]], nil, nil, "w_closure_call_1", nil, nil, temp)
   elsif arg_regs.size() == 2
     emit_wire_call_direct_i64(wfn, nil, [block_reg, arg_regs[0], arg_regs[1]], nil, nil, "w_closure_call_2", nil, nil, temp)
+  elsif arg_regs.size() == 3
+    emit_wire_call_direct_i64(wfn, nil, [block_reg, arg_regs[0], arg_regs[1], arg_regs[2]], nil, nil, "w_closure_call_3", nil, nil, temp)
+  elsif arg_regs.size() == 4
+    emit_wire_call_direct_i64(wfn, nil, [block_reg, arg_regs[0], arg_regs[1], arg_regs[2], arg_regs[3]], nil, nil, "w_closure_call_4", nil, nil, temp)
   else
-    # Fallback: use call_1 with first arg (best effort)
-    emit_wire_call_direct_i64(wfn, nil, [block_reg, arg_regs[0]], nil, nil, "w_closure_call_1", nil, nil, temp)
+    # Fallback: use call_4 with first 4 args (best effort)
+    emit_wire_call_direct_i64(wfn, nil, [block_reg, arg_regs[0], arg_regs[1], arg_regs[2], arg_regs[3]], nil, nil, "w_closure_call_4", nil, nil, temp)
   typed_value(:i64, temp)

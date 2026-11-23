@@ -493,7 +493,10 @@
 -> return_class_collect_dependency_calls(mod, node, class_name, dependencies)
   if node == nil || !is_ast_node?(node)
     return nil
-  if ast_kind(node) == :call
+  k = ast_kind(node)
+  if k in (:int :string :symbol :bool :nil_val :nil_lit :float :ivar :cvar :gvar :self_ref :break :next :var :class_ref :return_nil)
+    return nil
+  if k == :call
     receiver_fact = nil
     recv = node.receiver
     if recv != nil && ast_kind(recv) == :self_ref && class_name != nil
@@ -510,6 +513,30 @@
       if key != nil
         dependencies[key] = true
       wi += 1
+  if ccall_nobox("w_is_node_extern", node) == 1
+    kid = ccall_nobox("w_node_kind_extern", node)
+    if kid == nil || kid < 1 || kid > KIND_MAX
+      return nil
+    offsets = slab_child_offsets_table[kid]
+    if offsets == nil
+      return nil
+    n_off = offsets.size()
+    i = 0
+    while i < n_off
+      v = ccall_nobox("w_node_field_load", node, offsets[i])
+      if v != nil
+        if is_ast_node?(v)
+          return_class_collect_dependency_calls(mod, v, class_name, dependencies)
+        elsif type(v) == "Array"
+          n_v = v.size()
+          j = 0
+          while j < n_v
+            elt = v[j]
+            if is_ast_node?(elt)
+              return_class_collect_dependency_calls(mod, elt, class_name, dependencies)
+            j += 1
+      i += 1
+    return nil
   children = ast_children(node)
   ci = 0
   while ci < children.size()

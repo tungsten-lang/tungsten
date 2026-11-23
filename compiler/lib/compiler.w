@@ -299,11 +299,11 @@ use target
                 elsif ckind == :binop
                   ml = wire_inline_map_operand(cand[:l_idx], cand[:lhs], args)
                   mr = wire_inline_map_operand(cand[:r_idx], cand[:rhs], args)
-                  instrs[ii] = wire_instruction({op: cand[:op], lhs: ml, rhs: mr, temp: temp})
+                  instrs[ii] = wire_make_dynamic_3(cand[:op], :lhs, ml, :rhs, mr, :temp, temp)
                   inlined += 1
                 elsif ckind == :unop
                   mv = wire_inline_map_operand(cand[:v_idx], cand[:val], args)
-                  instrs[ii] = wire_instruction({op: cand[:op], value: mv, temp: temp})
+                  instrs[ii] = wire_make_dynamic_2(cand[:op], :temp, temp, :value, mv)
                   inlined += 1
           ii += 1
         bi += 1

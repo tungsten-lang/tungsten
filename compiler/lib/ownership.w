@@ -21,6 +21,8 @@ use cfg
   m = {}
   names = [
     "w_string", "w_hash_new", "w_array_new", "w_array_new_empty", "w_array_new_uninit_sized",
+    "w_array_zeros", "w_array_new_inline", "w_array_new_uninit", "w_array_new_filled",
+    "w_array_new_aligned", "w_bytes_new", "w_bool_array_new",
     "w_hash_keys", "w_hash_values",
     "w_strbuf_new", "w_str_concat", "w_str_concat_free_rhs", "w_str_concat_free_lhs",
     "w_str_concat_own", "w_str_concat_i64", "w_i64_concat_str", "w_str_concat_int_wv",
@@ -63,7 +65,9 @@ heap_producer_calls_map = init_heap_producer_calls_map()
     return 1
   if name == "w_hash_set"
     return 1
-  if name == "w_array_set"
+  if name == "w_array_new_filled"
+    return 1
+  if name == "w_array_set" || name == "w_bool_array_set" || name == "w_bytes_set"
     return 2
   nil
 
@@ -96,12 +100,19 @@ heap_producer_calls_map = init_heap_producer_calls_map()
   m = {}
   names = [
     "w_array_get", "w_array_get_i64", "w_array_idx_i64", "__w_array_get_i64_fast", "__w_array_idx_i64_fast",
+    "__w_ta_bounds_check", "__w_ta_bounds_check_boxed",
+    "w_array_size", "w_bool_array_size", "w_bool_array_get", "w_bytes_length", "w_bytes_get",
+    "w_array_min_signed", "w_array_min_unsigned", "w_array_min_float",
+    "w_array_max_signed", "w_array_max_unsigned", "w_array_max_float",
+    "w_array_sum_signed", "w_array_sum_unsigned", "w_array_sum_float",
+    "w_array_fastsum_float", "w_array_sumsq_float", "w_array_dot_i8", "w_array_dot_float",
     "w_string_byte_length", "w_hash_get", "w_hash_has_key", "w_hash_keys", "w_hash_values",
     "w_eq", "w_neq", "w_eq_lit", "w_neq_lit", "__w_streq_fast", "__w_streq2_fast",
     "__w_eq_fast", "__w_neq_fast", "__w_eq_lit_fast", "__w_neq_lit_fast",
     "__w_lt_fast", "__w_gt_fast", "__w_lte_fast", "__w_gte_fast",
     "w_string_index", "w_string_rindex", "w_string_count", "w_string_repeat",
-    "__w_string_byte_length_fast", "__w_switch_canonical_fast", "w_switch_canonical", "w_wire_sequence_from_array"
+    "__w_string_byte_length_fast", "__w_switch_canonical_fast", "w_switch_canonical", "w_wire_sequence_from_array",
+    "w_value_is_a"
   ]
   i = 0
   while i < names.size()
@@ -196,7 +207,7 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
   name = wire_get(inst, :name)
   if mod != nil && mod[:fresh_heap_kinds] != nil && mod[:fresh_heap_kinds][name] != nil
     return mod[:fresh_heap_kinds][name]
-  if name in ("w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_hash_keys" "w_hash_values")
+  if name in ("w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_array_zeros" "w_array_new_inline" "w_array_new_uninit" "w_array_new_filled" "w_array_new_aligned" "w_bytes_new" "w_bool_array_new" "w_hash_keys" "w_hash_values")
     return :array
   if name in ("w_string" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_concat_own" "w_int_to_s" "w_string_repeat")
     return :string
@@ -410,6 +421,15 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
   # Raw stores whose slot may hold a boxed WValue (w64[] typed arrays,
   # `- data` inline element slots).
   if op in (:typed_array_store_u64 :view_store_inline_elem)
+    escaped[wire_get(inst, :value)] = true
+    return nil
+
+  # Raw-pointer extraction from an array/view buffer: the pointer may outlive
+  # the handle (FFI, parallel/GPU arg blocks, manual views), so pin the owner.
+  if op == :arr_data_ptr
+    escaped[wire_get(inst, :arr)] = true
+    return nil
+  if op in (:ta_data_addr :view_base_ptr)
     escaped[wire_get(inst, :value)] = true
     return nil
 
@@ -743,26 +763,67 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
       blocks[bi][:instructions] = new_instrs
     bi += 1
 
+-> loop_release_parallel_worker(state)
+  functions = state[:functions]
+  loop_plans = state[:loop_plans]
+  n_funcs = functions.size()
+  start_idx = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000008)
+  while start_idx < n_funcs
+    end_idx = start_idx + 8
+    if end_idx > n_funcs
+      end_idx = n_funcs
+    index = start_idx
+    while index < end_idx
+      func = functions[index]
+      if func[:blocks].size() > 1 && func[:incremental_core_frozen] != true
+        own = func[:ownership]
+        if own == nil || (!own[:has_setjmp] && own[:has_store_i64] && own[:has_loop_arith])
+          loop_plans[index] = loop_carried_compute_plan(func)
+      index += 1
+    start_idx = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000008)
+  true
+
 -> free_insertion_parallel_worker(state)
   functions = state[:functions]
   slot_plans = state[:slot_plans]
+  int_plans = state[:int_plans]
   mod = state[:mod]
   fresh = state[:fresh]
   strings = state[:strings]
-  index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
-  while index < functions.size()
-    func = functions[index]
-    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
-      own = func[:ownership]
-      run_slot = false
-      if own == nil || own[:int_fresh_known] != true
-        if own == nil || (!own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_direct_call]))
-          run_slot = true
-      elsif !own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_heap_producer])
-        run_slot = true
-      if run_slot
-        slot_plans[index] = owned_slot_compute_plan(func, mod, fresh, strings)
-    index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  slot_rel = state[:slot_rel]
+  n_funcs = functions.size()
+  start_idx = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000008)
+  while start_idx < n_funcs
+    end_idx = start_idx + 8
+    if end_idx > n_funcs
+      end_idx = n_funcs
+    index = start_idx
+    while index < end_idx
+      func = functions[index]
+      if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
+        own = func[:ownership]
+        splan = nil
+        if slot_rel
+          run_slot = false
+          if own == nil || own[:int_fresh_known] != true
+            if own == nil || (!own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_direct_call]))
+              run_slot = true
+          elsif !own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_heap_producer])
+            run_slot = true
+          if run_slot
+            splan = owned_slot_compute_plan(func, mod, fresh, strings)
+            slot_plans[index] = splan
+        if splan == nil && int_plans != nil
+          run_int = false
+          if own == nil || own[:int_fresh_known] != true
+            if own == nil || (!own[:has_setjmp] && (own[:has_int_arith] || (fresh.size() > 0 && own[:has_direct_call])))
+              run_int = true
+          elsif !own[:has_setjmp] && own[:has_int_arith]
+            run_int = true
+          if run_int
+            int_plans[index] = int_temp_compute_plan(func, strings, fresh, mod)
+      index += 1
+    start_idx = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000008)
   true
 
 # Entry point for free insertion across all functions.
@@ -771,6 +832,26 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
   slot_rel = env("TUNGSTEN_SLOT_RELEASE") != "0"
   funcs = mod[:functions]
   n_funcs = funcs.size()
+  jobs = ownership_parallel_job_count(mod)
+  loop_plans = nil
+  if loop_rel && jobs > 1 && env("TUNGSTEN_LOOP_RELEASE_DEBUG") != "1"
+    loop_plans = Array.new(n_funcs)
+    lstate = {
+      functions: funcs,
+      loop_plans: loop_plans,
+      cursor: ccall("w_atomic_new", u0xFFFA000000000000)
+    }
+    lworkers = []
+    lw = 1
+    while lw < jobs
+      lworkers.push(Thread.new ->
+        loop_release_parallel_worker(lstate))
+      lw += 1
+    loop_release_parallel_worker(lstate)
+    lw = 0
+    while lw < lworkers.size()
+      ccall("w_thread_join_release", lworkers[lw])
+      lw += 1
   has_work = false
   fi = 0
   while fi < n_funcs
@@ -779,8 +860,12 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
       has_work = true
       own = func[:ownership]
       insert_frees(func)
-      if loop_rel && func[:blocks].size() > 1 && (own == nil || (!own[:has_setjmp] && own[:has_store_i64] && own[:has_loop_arith]))
-        ignored = loop_carried_releases(func)
+      if loop_rel
+        if loop_plans != nil
+          if loop_plans[fi] != nil
+            ignored = loop_carried_apply_plan(func, loop_plans[fi])
+        elsif func[:blocks].size() > 1 && (own == nil || (!own[:has_setjmp] && own[:has_store_i64] && own[:has_loop_arith]))
+          ignored = loop_carried_releases(func)
     fi += 1
   if !has_work
     return nil
@@ -797,13 +882,16 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
     int_fresh_apply_seals(mod[:int_fresh_cands], fresh)
   else
     fresh = int_fresh_returns(mod)
-  jobs = slot_rel ? ownership_parallel_job_count(mod) : 1
   slot_plans = nil
-  if slot_rel && jobs > 1
-    slot_plans = Array.new(n_funcs)
+  int_plans = nil
+  if jobs > 1 && env("TUNGSTEN_INT_TEMP_RELEASE_DEBUG") != "1"
+    slot_plans = slot_rel ? Array.new(n_funcs) : nil
+    int_plans = Array.new(n_funcs)
     state = {
       functions: funcs,
       slot_plans: slot_plans,
+      int_plans: int_plans,
+      slot_rel: slot_rel,
       mod: mod,
       fresh: fresh,
       strings: strings,
@@ -825,17 +913,24 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
     func = funcs[fi]
     if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       own = func[:ownership]
+      slot_modified = false
       if slot_rel
         if slot_plans != nil
           if slot_plans[fi] != nil
             ignored = owned_slot_apply_plan(func, slot_plans[fi])
+            slot_modified = true
         else
           if own == nil || own[:int_fresh_known] != true
             if own == nil || (!own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_direct_call]))
               ignored = owned_slot_releases(func, mod, fresh, strings)
+              slot_modified = true
           elsif !own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_heap_producer])
             ignored = owned_slot_releases(func, mod, fresh, strings)
-      if own == nil || own[:int_fresh_known] != true
+            slot_modified = true
+      if int_plans != nil && !slot_modified
+        if int_plans[fi] != nil
+          ignored = int_temp_apply_plan(func, int_plans[fi])
+      elsif own == nil || own[:int_fresh_known] != true
         if own == nil || (!own[:has_setjmp] && (own[:has_int_arith] || (fresh.size() > 0 && own[:has_direct_call])))
           ignored = int_temp_releases(func, strings, fresh, mod)
       elsif !own[:has_setjmp] && own[:has_int_arith]
@@ -1051,14 +1146,14 @@ loop_release_compiled_runtime = runtime_identity() in ("compiled-runtime" "tungs
         pi += 1
   body
 
--> loop_carried_releases(func)
+-> loop_carried_compute_plan(func)
   blocks = func[:blocks]
   slots = func[:var_slots]
-  return 0 if slots == nil || slots.size() == 0 || blocks.size() < 2
+  return nil if slots == nil || slots.size() == 0 || blocks.size() < 2
   own = func[:ownership]
-  return 0 if own != nil && own[:has_setjmp]
+  return nil if own != nil && own[:has_setjmp]
   promoted = func[:promoted_vars]
-  return 0 if promoted != nil && promoted.size() == slots.size()
+  return nil if promoted != nil && promoted.size() == slots.size()
   slot_ptr = nil
 
   # Cheap pre-filter, linear and without a CFG: some arithmetic-helper result
@@ -1075,7 +1170,7 @@ loop_release_compiled_runtime = runtime_identity() in ("compiled-runtime" "tungs
       inst = instrs[ii]
       k = wire_kind(inst)
       if k == :setjmp
-        return 0
+        return nil
       if k == :call_direct_i64
         if loop_release_arith?(wire_get(inst, :name)) && wire_get(inst, :temp) != nil
           if arith_temps == nil
@@ -1095,7 +1190,7 @@ loop_release_compiled_runtime = runtime_identity() in ("compiled-runtime" "tungs
             break
       ii += 1
     bi += 1
-  return 0 if !candidate || (own == nil && has_setjmp(func))
+  return nil if !candidate || (own == nil && has_setjmp(func))
 
   cfg = build_cfg(func)
   idom = compute_dominators(cfg)
@@ -1119,7 +1214,7 @@ loop_release_compiled_runtime = runtime_identity() in ("compiled-runtime" "tungs
           edges.push({header: target, tail: bi})
         si += 1
     bi += 1
-  return 0 if edges.size() == 0
+  return nil if edges.size() == 0
   back_count = {}
   ei = 0
   while ei < edges.size()
@@ -1175,9 +1270,7 @@ loop_release_compiled_runtime = runtime_identity() in ("compiled-runtime" "tungs
     bi += 1
 
   dbg = env("TUNGSTEN_LOOP_RELEASE_DEBUG") == "1"
-  inserted = 0
-  before_inst = {}
-  before_term = {}
+  plan = nil
   ei = 0
   while ei < edges.size()
     h = edges[ei][:header]
@@ -1275,26 +1368,40 @@ loop_release_compiled_runtime = runtime_identity() in ("compiled-runtime" "tungs
         ignored = ccall("w_eputs", "loop-release " + func[:name].to_s() + " slot=" + ptr.to_s() + " header=" + blocks[h][:label].to_s() + " ok=" + ok.to_s() + " members=" + members.keys().size().to_s() + " inter=" + inter.size().to_s())
       next if !ok
 
-      init_tmp = next_temp(func)
-      prev_tmp = next_temp(func)
       extra = inter.size()
       extra = 2 if extra > 2
       t1 = extra >= 1 ? inter[0] : "0"
       t2 = extra >= 2 ? inter[1] : "0"
-      if before_term[pre] == nil
-        before_term[pre] = []
-      before_term[pre].push(wire_make_load_i64(ptr, init_tmp))
-      skey = (sb << 20) + body_store[1]
-      if before_inst[skey] == nil
-        before_inst[skey] = []
-      before_inst[skey].push(wire_make_load_i64(ptr, prev_tmp))
-      before_inst[-(sb + 1)] = true
-      if before_term[l] == nil
-        before_term[l] = []
-      before_term[l].push(wire_make_call_direct_void([extra.to_s(), init_tmp, prev_tmp, nxt, t1, t2], "w_value_release_loop"))
-      inserted += 1
+      plan = [] if plan == nil
+      plan.push({pre: pre, sb: sb, si: body_store[1], l: l, ptr: ptr, nxt: nxt, extra: extra, t1: t1, t2: t2})
+  plan
 
-  return 0 if inserted == 0
+-> loop_carried_apply_plan(func, plan)
+  return 0 if plan == nil || plan.size() == 0
+  blocks = func[:blocks]
+  before_inst = {}
+  before_term = {}
+  pi = 0
+  while pi < plan.size()
+    e = plan[pi]
+    pi += 1
+    pre = e[:pre]
+    sb = e[:sb]
+    l = e[:l]
+    ptr = e[:ptr]
+    init_tmp = next_temp(func)
+    prev_tmp = next_temp(func)
+    if before_term[pre] == nil
+      before_term[pre] = []
+    before_term[pre].push(wire_make_load_i64(ptr, init_tmp))
+    skey = (sb << 20) + e[:si]
+    if before_inst[skey] == nil
+      before_inst[skey] = []
+    before_inst[skey].push(wire_make_load_i64(ptr, prev_tmp))
+    before_inst[-(sb + 1)] = true
+    if before_term[l] == nil
+      before_term[l] = []
+    before_term[l].push(wire_make_call_direct_void([e[:extra].to_s(), init_tmp, prev_tmp, e[:nxt], e[:t1], e[:t2]], "w_value_release_loop"))
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
@@ -1320,7 +1427,12 @@ loop_release_compiled_runtime = runtime_identity() in ("compiled-runtime" "tungs
         ii += 1
       blocks[bi][:instructions] = rebuilt
     bi += 1
-  inserted
+  plan.size()
+
+-> loop_carried_releases(func)
+  plan = loop_carried_compute_plan(func)
+  return 0 if plan == nil
+  loop_carried_apply_plan(func, plan)
 
 # ---------------------------------------------------------------------------
 # Dead integer temporaries.
@@ -1441,11 +1553,11 @@ int_temp_reader_map = init_int_temp_reader_map()
 -> int_temp_producer?(name, fresh)
   int_temp_arith?(name) || (fresh != nil && fresh[name] == true)
 
--> int_temp_releases(func, strings, fresh, mod)
+-> int_temp_compute_plan(func, strings, fresh, mod)
   blocks = func[:blocks]
-  return 0 if blocks.size() == 0
+  return nil if blocks.size() == 0
   own = func[:ownership]
-  return 0 if own != nil && own[:has_setjmp]
+  return nil if own != nil && own[:has_setjmp]
   # Cheap pre-filter: most functions never produce an integer temporary.
   arith = []
   arith_set = nil
@@ -1457,7 +1569,7 @@ int_temp_reader_map = init_int_temp_reader_map()
       inst = instrs[ii]
       k = wire_kind(inst)
       if k == :setjmp
-        return 0
+        return nil
       if k == :call_direct_i64
         cname = wire_get(inst, :name)
         t = wire_get(inst, :temp)
@@ -1475,7 +1587,7 @@ int_temp_reader_map = init_int_temp_reader_map()
           arith.push(t)
       ii += 1
     bi += 1
-  return 0 if arith_set == nil || (own == nil && has_setjmp(func))
+  return nil if arith_set == nil || (own == nil && has_setjmp(func))
 
   defs = {}
   uses = {}
@@ -1498,7 +1610,7 @@ int_temp_reader_map = init_int_temp_reader_map()
       if refs == nil
         if env("TUNGSTEN_INT_TEMP_RELEASE_DEBUG") == "1"
           ignored = ccall("w_eputs", "int-temp " + func[:name].to_s() + " skipped: opaque " + k.to_s())
-        return 0
+        return nil
       ri = 0
       while ri < refs.size()
         r = refs[ri]
@@ -1510,9 +1622,7 @@ int_temp_reader_map = init_int_temp_reader_map()
       ii += 1
     bi += 1
 
-  # after[block][index] = releases to insert after that instruction
-  after = {}
-  inserted = 0
+  plan = nil
   ai = 0
   while ai < arith.size()
     t = arith[ai]
@@ -1615,14 +1725,24 @@ int_temp_reader_map = init_int_temp_reader_map()
     while wi < 3
       args.push(wi < checks.size() ? checks[wi] : "0")
       wi += 1
-    key = (tb << 20) + last
+    plan = [] if plan == nil
+    plan.push([tb, (tb << 20) + last, args])
+  plan
+
+-> int_temp_apply_plan(func, plan)
+  return 0 if plan == nil || plan.size() == 0
+  blocks = func[:blocks]
+  after = {}
+  pi = 0
+  while pi < plan.size()
+    entry = plan[pi]
+    pi += 1
+    tb = entry[0]
+    key = entry[1]
     if after[key] == nil
       after[key] = []
-    after[key].push(wire_make_call_direct_void(args, "__w_int_temp_release"))
+    after[key].push(wire_make_call_direct_void(entry[2], "__w_int_temp_release"))
     after[-(tb + 1)] = true
-    inserted += 1
-
-  return 0 if inserted == 0
   bi = 0
   while bi < blocks.size()
     if after[-(bi + 1)] == true
@@ -1642,8 +1762,13 @@ int_temp_reader_map = init_int_temp_reader_map()
       blocks[bi][:instructions] = rebuilt
     bi += 1
   if env("TUNGSTEN_INT_TEMP_RELEASE_DEBUG") == "1"
-    ignored = ccall("w_eputs", "int-temp " + func[:name].to_s() + " released " + inserted.to_s())
-  inserted
+    ignored = ccall("w_eputs", "int-temp " + func[:name].to_s() + " released " + plan.size().to_s())
+  plan.size()
+
+-> int_temp_releases(func, strings, fresh, mod)
+  plan = int_temp_compute_plan(func, strings, fresh, mod)
+  return 0 if plan == nil
+  int_temp_apply_plan(func, plan)
 
 # Functions whose every return is a fresh integer: the result of an integer
 # arithmetic helper or of another such function, read in the function only
@@ -2423,12 +2548,28 @@ int_temp_reader_map = init_int_temp_reader_map()
 -> owned_slot_plain_read?(inst, v, kind, strings, defs, blocks, mod)
   k = wire_kind(inst)
   return true if k == :truthy_inline
+  if kind == :heap
+    if k in (:typed_array_get_inline :typed_array_load_u64 :typed_array_prefetch :array_get_inline :bool_array_get_inline :bool_array_get_byte_inline :ta_size_raw :array_size_raw :ta_cap_raw :poly_array_guard)
+      return true
+    if k in (:typed_array_set_inline :typed_array_compound_op_inline :typed_array_store_u64)
+      return wire_get(inst, :arr) == v && wire_get(inst, :value) != v
+    if k in (:bool_array_set_inline :bool_array_set_byte_inline)
+      return wire_get(inst, :arr) == v && wire_get(inst, :val) != v
   if k == :call_direct_i64
     name = wire_get(inst, :name)
     if kind == :int
       return true if int_temp_arith?(name) || int_temp_reader?(name)
     else
       return true if is_nonretaining_consumer(name)
+      kept = container_store_first_kept(name)
+      if kept != nil
+        args = wire_get(inst, :args)
+        if args != nil
+          ai = kept
+          while ai < wire_sequence_size(args)
+            return false if wire_sequence_get(args, ai) == v
+            ai += 1
+          return true
     summary = fn_escape_summary(mod, name)
     return false if summary == nil
     flags = kind == :int ? summary[:int_stored_escs] : summary[:escs]

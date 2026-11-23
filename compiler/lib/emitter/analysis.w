@@ -213,46 +213,33 @@ novec_md_state = {kinds: [], refs: {}}
   o.to_s()
 
 # Scoped no-alias metadata for fused elementwise workers (lowering stamps the
-# loop's source loads / output store with ewscope:<site-id> — see
-# fuse_ew_emit_range_loop). The output is the site's fresh malloc, provably
+# loop's source loads / output store with per-function ewscope:<0, 1, ...> —
+# see fuse_ew_emit_range_loop). The output is the site's fresh malloc, provably
 # disjoint from every source, but TBAA can't express it (all elements are
 # warray_data), so without this -O3 versions the loop behind per-source
-# runtime overlap checks. Per site: one distinct scope in a shared domain,
-# referenced through a scope-list node; the store carries `!alias.scope`
-# (it writes inside the scope) and the loads carry `!noalias` (they never
-# touch the scope's memory). IDs live at 300000+ — far above the TBAA block
-# and the novec range (31423+k), which would need ~270k stamped loops to
-# collide. Deterministic: sites are numbered in lowering order and the map
-# fills in render order.
-ewscope_md_state = {ids: {}}
-
--> ewscope_list_id(sid)
-  cached = ewscope_md_state[:ids][sid]
-  if cached != nil
-    return cached
-  k = ewscope_md_state[:ids].size()
-  list_id = (300001 + k * 2).to_s()
-  ewscope_md_state[:ids][sid] = list_id
-  list_id
-
+# runtime overlap checks. Scope IDs are FIXED per intra-function index k (just
+# like alias_scope_md_defs below): scoped-noalias is intra-function and LLVM's
+# inliner clones callee scopes, so functions share !299999 / !(300000+2k) /
+# !(300001+2k) and stay cache-safe, parallel-render-safe, and stage-identical.
 -> ewscope_store_suffix(inst)
-  if wire_get(inst, :ewscope) == nil
+  sid = wire_get(inst, :ewscope)
+  if sid == nil
     return ""
-  ", !alias.scope !" + ewscope_list_id(wire_get(inst, :ewscope))
+  ", !alias.scope !" + (300001 + sid * 2).to_s()
 
 -> ewscope_load_suffix(inst)
-  if wire_get(inst, :ewscope) == nil
+  sid = wire_get(inst, :ewscope)
+  if sid == nil
     return ""
-  ", !noalias !" + ewscope_list_id(wire_get(inst, :ewscope))
+  ", !noalias !" + (300001 + sid * 2).to_s()
 
--> ewscope_md_defs()
-  n = ewscope_md_state[:ids].size()
-  if n == 0
+-> ewscope_md_defs(nsites = 0)
+  if nsites == nil || nsites <= 0
     return ""
   o = StringBuffer(96)
   o << "!299999 = distinct !{!299999, !\"tungsten.fusedew\"}\n"
   i = 0
-  while i < n
+  while i < nsites
     scope_id = (300000 + i * 2).to_s()
     list_id = (300001 + i * 2).to_s()
     o << "!" + scope_id + " = distinct !{!" + scope_id + ", !299999}\n"
@@ -565,8 +552,6 @@ function_emit_cache_state = {
     ii = 0
     while ii < ninstrs
       inst = instrs[ii]
-      if wire_get(inst, :ewscope) != nil
-        return false
       if wire_kind(inst) == :br
         unroll_count = wire_get(inst, :unroll_count)
         if wire_get(inst, :novec) == true || (unroll_count != nil && unroll_count > 0)
@@ -671,6 +656,21 @@ function_emit_cache_state = {
 
 -> sym_idx_call?(inst)
   sym_idx_get_call?(inst) || sym_idx_set_call?(inst)
+
+-> fast_idx_get_call?(inst)
+  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_sequence_size(wire_get(inst, :args)) == 1 && wire_get(inst, :fast_builtin) == :idx_get
+
+-> fast_idx_set_call?(inst)
+  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_sequence_size(wire_get(inst, :args)) == 2 && wire_get(inst, :fast_builtin) == :idx_set
+
+-> fast_size_call?(inst)
+  wire_kind(inst) == :call_method_i64 && (wire_get(inst, :args) == nil || wire_sequence_size(wire_get(inst, :args)) == 0) && wire_get(inst, :fast_builtin) == :size
+
+-> fast_push_call?(inst)
+  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_sequence_size(wire_get(inst, :args)) == 1 && wire_get(inst, :fast_builtin) == :push
+
+-> fast_builtin_call?(inst)
+  wire_get(inst, :fast_builtin) != nil && (fast_idx_get_call?(inst) || fast_idx_set_call?(inst) || fast_size_call?(inst) || fast_push_call?(inst))
 
 # Return the runtime function names that an instruction will reference when rendered.
 -> runtime_fns_for_inst(inst, string_wvs = nil)
@@ -808,12 +808,20 @@ function_emit_cache_state = {
     argc = 0
     if wire_get(inst, :args) != nil
       argc = wire_sequence_size(wire_get(inst, :args))
-    if argc == 0
+    if fast_size_call?(inst)
+      runtime_fns.push("w_fast_size")
+    elsif argc == 0
       runtime_fns.push("w_method_call_cached_0")
     elsif sym_idx_get_call?(inst)
       runtime_fns.push("w_fast_sym_get")
     elsif sym_idx_set_call?(inst)
       runtime_fns.push("w_fast_sym_set")
+    elsif fast_idx_get_call?(inst)
+      runtime_fns.push("w_fast_idx_get")
+    elsif fast_idx_set_call?(inst)
+      runtime_fns.push("w_fast_idx_set")
+    elsif fast_push_call?(inst)
+      runtime_fns.push("w_fast_push")
     elsif scalar_source_one_call?(inst)
       runtime_fns.push("w_method_call_cached_1")
     elsif scalar_source_two_call?(inst)

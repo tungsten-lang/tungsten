@@ -59,9 +59,6 @@
       ii = 0
       while ii < instructions.size()
         inst = instructions[ii]
-        sid = wire_get(inst, :ewscope)
-        if sid != nil
-          ewscope_list_id(sid)
         if wire_kind(inst) == :br
           novec = wire_get(inst, :novec) == true
           unroll_count = wire_get(inst, :unroll_count)

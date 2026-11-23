@@ -149,10 +149,37 @@ use runtime_types
 -> return_inference_collect_calls(node, unique_names, dependencies)
   if node == nil || !is_ast_node?(node)
     return nil
-  if ast_kind(node) == :call && node.receiver == nil && node.name != nil
+  k = ast_kind(node)
+  if k in (:int :string :symbol :bool :nil_val :nil_lit :float :ivar :cvar :gvar :self_ref :break :next :var :class_ref :return_nil)
+    return nil
+  if k == :call && node.receiver == nil && node.name != nil
     dep = unique_names[node.name]
     if dep != nil
       dependencies[dep] = true
+  if ccall_nobox("w_is_node_extern", node) == 1
+    kid = ccall_nobox("w_node_kind_extern", node)
+    if kid == nil || kid < 1 || kid > KIND_MAX
+      return nil
+    offsets = slab_child_offsets_table[kid]
+    if offsets == nil
+      return nil
+    n_off = offsets.size()
+    i = 0
+    while i < n_off
+      v = ccall_nobox("w_node_field_load", node, offsets[i])
+      if v != nil
+        if is_ast_node?(v)
+          return_inference_collect_calls(v, unique_names, dependencies)
+        elsif type(v) == "Array"
+          n_v = v.size()
+          j = 0
+          while j < n_v
+            elt = v[j]
+            if is_ast_node?(elt)
+              return_inference_collect_calls(elt, unique_names, dependencies)
+            j += 1
+      i += 1
+    return nil
   children = ast_children(node)
   i = 0
   while i < children.size()

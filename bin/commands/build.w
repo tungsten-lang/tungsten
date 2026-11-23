@@ -3683,7 +3683,12 @@ else
     max_bit_jobs = 4
     if pending_bits.size < max_bit_jobs
       max_bit_jobs = pending_bits.size
-    bit_extra_env = (FORCE_BUILD ? "TUNGSTEN_SHARD_CACHE=0 " : "") + (max_bit_jobs > 1 ? "TUNGSTEN_SHARD_JOBS=2 " : "")
+    bit_shard_jobs = System.cpu_count / max_bit_jobs
+    if bit_shard_jobs < 2
+      bit_shard_jobs = 2
+    if bit_shard_jobs > 8
+      bit_shard_jobs = 8
+    bit_extra_env = (FORCE_BUILD ? "TUNGSTEN_SHARD_CACHE=0 " : "") + (max_bit_jobs > 1 ? ("TUNGSTEN_SHARD_JOBS=" + bit_shard_jobs.to_s + " ") : "")
     bit_procs = Array.new(pending_bits.size)
     bit_starts = Array.new(pending_bits.size)
     next_launch = 0

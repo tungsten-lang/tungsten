@@ -188,7 +188,7 @@ content_hash_codegen_fields = [
   :b_label, :b_value, :base, :block_arity, :boxed, :buf,
   :call_conv, :cap, :captures_ptr, :cases, :class_temp, :codepoint,
   :col, :compound_op, :const_name, :count, :default_label, :dest,
-  :dispatch_key, :elem, :entry_label, :fields, :file_byte_len,
+  :dispatch_key, :elem, :entry_label, :fast_builtin, :fields, :file_byte_len,
   :file_str_id, :fp_flags, :headerless, :is_symbol, :ivar_byte_len,
   :ivar_str_id, :kind, :kind_id, :lhs_boxed, :line, :method_byte_len,
   :method_str_id, :min_arity, :n, :name_byte_len, :name_str_id,
@@ -295,6 +295,7 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
     return nil
 
   if op == :call_method_i64
+    encode_codegen_meta_field(:fast_builtin, wire_get(inst, :fast_builtin), buf, temp_map, mod)
     encode_codegen_meta_field(:scalar_source_argc1, wire_get(inst, :scalar_source_argc1), buf, temp_map, mod)
     encode_codegen_meta_field(:scalar_source_argc2, wire_get(inst, :scalar_source_argc2), buf, temp_map, mod)
     encode_codegen_meta_field(:sym_idx_get, wire_get(inst, :sym_idx_get), buf, temp_map, mod)
@@ -1442,6 +1443,7 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
 
 -> content_hash_batch_worker(state)
   batch = state[:batch]
+  n = batch.size()
   mod = state[:mod]
   fn_hashes = state[:fn_hashes]
   op_codes = state[:op_codes]
@@ -1450,15 +1452,23 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
   contents = state[:contents]
   hash_contents_arr = state[:hash_contents_arr]
   hashes = state[:hashes]
-  index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
-  while index < batch.size()
-    func = batch[index]
-    content = canonical_content(func, mod, fn_hashes, op_codes, release_mode)
-    hash_content = content_hash_salted_content(func, lib_paths, content)
-    contents[index] = content
-    hash_contents_arr[index] = hash_content
-    hashes[index] = wyhash64_hex_string(hash_content)
-    index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  # Grab small chunks to avoid atomic cursor contention across workers while
+  # keeping load balanced across varying function sizes.
+  start_idx = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000008)
+  while start_idx < n
+    end_idx = start_idx + 8
+    if end_idx > n
+      end_idx = n
+    index = start_idx
+    while index < end_idx
+      func = batch[index]
+      content = canonical_content(func, mod, fn_hashes, op_codes, release_mode)
+      hash_content = content_hash_salted_content(func, lib_paths, content)
+      contents[index] = content
+      hash_contents_arr[index] = hash_content
+      hashes[index] = wyhash64_hex_string(hash_content)
+      index += 1
+    start_idx = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000008)
   true
 
 -> content_hash_commit_entry(func, content, hash_content, h, fn_hashes, fn_contents, hash_contents)
@@ -1478,53 +1488,50 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
   fn_content_put(fn_contents, func[:name], content)
   nil
 
--> content_hash_persistent_worker(state)
-  seen_epoch = 0
-  while true
-    cur_epoch = ccall("w_atomic_get", state[:epoch])
-    while cur_epoch == seen_epoch
-      cur_epoch = ccall("w_atomic_get", state[:epoch])
-    if ccall("w_atomic_get", state[:stop]) != 0
-      return true
-    seen_epoch = cur_epoch
-    content_hash_batch_worker(state)
-    ccall("w_atomic_add", state[:done], u0xFFFA000000000001)
-  true
-
 -> content_hash_flush_batches(batches, total_count, mod, fn_hashes, fn_contents, hash_contents, op_codes, release_mode)
   if total_count == 0
     return nil
   lib_paths = env("TUNGSTEN_LIBRARY_REACHABILITY") == "0" ? nil : mod[:library_reachability_paths]
-  jobs = content_hash_parallel_job_count(total_count)
-  if jobs > 1 && batches.size() > 0
-    state = {
-      batch: nil,
-      mod: mod,
-      fn_hashes: fn_hashes,
-      op_codes: op_codes,
-      release_mode: release_mode,
-      lib_paths: lib_paths,
-      contents: nil,
-      hash_contents_arr: nil,
-      hashes: nil,
-      cursor: ccall("w_atomic_new", u0xFFFA000000000000),
-      done: ccall("w_atomic_new", u0xFFFA000000000000),
-      epoch: ccall("w_atomic_new", u0xFFFA000000000000),
-      stop: ccall("w_atomic_new", u0xFFFA000000000000)
-    }
-    naming_cache_state[:frozen] = true
-    workers = []
-    w = 1
-    while w < jobs
-      workers.push(Thread.new ->
-        content_hash_persistent_worker(state))
-      w += 1
-    worker_count = workers.size()
-    bi = 0
-    while bi < batches.size()
-      batch = batches[bi]
-      n = batch.size()
-      if n <= 4
+  bi = 0
+  while bi < batches.size()
+    batch = batches[bi]
+    n = batch.size()
+    if n > 0
+      jobs = content_hash_parallel_job_count(n)
+      if jobs > 1
+        contents = Array.new(n)
+        hash_contents_arr = Array.new(n)
+        hashes = Array.new(n)
+        state = {
+          batch: batch,
+          mod: mod,
+          fn_hashes: fn_hashes,
+          op_codes: op_codes,
+          release_mode: release_mode,
+          lib_paths: lib_paths,
+          contents: contents,
+          hash_contents_arr: hash_contents_arr,
+          hashes: hashes,
+          cursor: ccall("w_atomic_new", u0xFFFA000000000000)
+        }
+        naming_cache_state[:frozen] = true
+        workers = []
+        w = 1
+        while w < jobs
+          workers.push(Thread.new ->
+            content_hash_batch_worker(state))
+          w += 1
+        content_hash_batch_worker(state)
+        w = 0
+        while w < workers.size()
+          ccall("w_thread_join_release", workers[w])
+          w += 1
+        naming_cache_state[:frozen] = false
+        i = 0
+        while i < n
+          content_hash_commit_entry(batch[i], contents[i], hash_contents_arr[i], hashes[i], fn_hashes, fn_contents, hash_contents)
+          i += 1
+      else
         i = 0
         while i < n
           func = batch[i]
@@ -1533,45 +1540,6 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
           h = wyhash64_hex_string(hash_content)
           content_hash_commit_entry(func, content, hash_content, h, fn_hashes, fn_contents, hash_contents)
           i += 1
-      else
-        contents = Array.new(n)
-        hash_contents_arr = Array.new(n)
-        hashes = Array.new(n)
-        state[:batch] = batch
-        state[:contents] = contents
-        state[:hash_contents_arr] = hash_contents_arr
-        state[:hashes] = hashes
-        ccall("w_atomic_set", state[:cursor], u0xFFFA000000000000)
-        ccall("w_atomic_set", state[:done], u0xFFFA000000000000)
-        ccall("w_atomic_add", state[:epoch], u0xFFFA000000000001)
-        content_hash_batch_worker(state)
-        while ccall("w_atomic_get", state[:done]) < worker_count
-          nil
-        i = 0
-        while i < n
-          content_hash_commit_entry(batch[i], contents[i], hash_contents_arr[i], hashes[i], fn_hashes, fn_contents, hash_contents)
-          i += 1
-      bi += 1
-    ccall("w_atomic_set", state[:stop], u0xFFFA000000000001)
-    ccall("w_atomic_add", state[:epoch], u0xFFFA000000000001)
-    w = 0
-    while w < worker_count
-      ccall("w_thread_join_release", workers[w])
-      w += 1
-    naming_cache_state[:frozen] = false
-    return nil
-  bi = 0
-  while bi < batches.size()
-    batch = batches[bi]
-    n = batch.size()
-    i = 0
-    while i < n
-      func = batch[i]
-      content = canonical_content(func, mod, fn_hashes, op_codes, release_mode)
-      hash_content = content_hash_salted_content(func, lib_paths, content)
-      h = wyhash64_hex_string(hash_content)
-      content_hash_commit_entry(func, content, hash_content, h, fn_hashes, fn_contents, hash_contents)
-      i += 1
     bi += 1
   nil
 
@@ -1743,45 +1711,55 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
         pi += 1
     fi += 1
 
-  # Hash each function in bottom-up SCC topological order, grouping independent waves.
-  batches = []
-  total_batch_fns = 0
-  batch = []
-  in_batch = Array.new(n_hash)
-  batch_indices = []
+  # Group bottom-up SCCs into maximal DAG wave levels so independent
+  # functions hash together in a handful of wide waves instead of hundreds of
+  # tiny DFS-ordered slices. Multi-node SCC members keep strict ascending wave
+  # indices (base_wave + ci) so intra-SCC callee visibility matches sequential
+  # Tarjan commit order byte-for-byte.
+  scc_id = Array.new(n_hash)
   si = 0
   while si < sccs.size()
     scc = sccs[si]
     ci = 0
     while ci < scc.size()
-      fidx = scc[ci]
-      func = hash_functions[fidx]
-      if func[:is_toplevel] != true && func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
-        edges = adj[fidx]
-        depends_on_batch = false
-        if edges != nil
-          ei = 0
-          while ei < edges.size()
-            if in_batch[edges[ei]] == true
-              depends_on_batch = true
-              break
-            ei += 1
-        if depends_on_batch
-          batches.push(batch)
-          bi = 0
-          while bi < batch_indices.size()
-            in_batch[batch_indices[bi]] = false
-            bi += 1
-          batch = []
-          batch_indices = []
-        batch.push(func)
-        total_batch_fns += 1
-        in_batch[fidx] = true
-        batch_indices.push(fidx)
+      scc_id[scc[ci]] = si
       ci += 1
     si += 1
-  if batch.size() > 0
-    batches.push(batch)
+
+  node_wave = Array.new(n_hash)
+  batches = []
+  total_batch_fns = 0
+  si = 0
+  while si < sccs.size()
+    scc = sccs[si]
+    base_wave = 0
+    ci = 0
+    while ci < scc.size()
+      v = scc[ci]
+      edges = adj[v]
+      if edges != nil
+        ei = 0
+        while ei < edges.size()
+          w = edges[ei]
+          if scc_id[w] != si
+            cand = node_wave[w] + 1
+            if cand > base_wave
+              base_wave = cand
+          ei += 1
+      ci += 1
+    ci = 0
+    while ci < scc.size()
+      fidx = scc[ci]
+      wlevel = base_wave + ci
+      node_wave[fidx] = wlevel
+      func = hash_functions[fidx]
+      if func[:is_toplevel] != true && func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
+        while batches.size() <= wlevel
+          batches.push([])
+        batches[wlevel].push(func)
+        total_batch_fns += 1
+      ci += 1
+    si += 1
   content_hash_flush_batches(batches, total_batch_fns, mod, fn_hashes, fn_contents, hash_contents, op_codes, release_mode)
 
   # Group by hash

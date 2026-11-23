@@ -360,6 +360,8 @@
 
     # Range methods
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :range
+      if name == "is_a?" && args.size() == 1
+        return is_a_class?(recv, args[0])
       from = recv[:from]
       to = recv[:to]
       # A bound can be a whole-valued Decimal (`1e10`, common
@@ -473,8 +475,9 @@
     # Builtins. The receiver-method arms in builtins.w state their argument
     # contract in builtin_fallback_arity; a call outside it raises here
     # (same message as a source method) instead of the arm dropping or
-    # padding arguments.
-    if is_builtin?(name)
+    # padding arguments. Global-only OS/file builtins (`file?`, `read_file`,
+    # `write_file`, ...) are excluded so arbitrary receivers raise NoMethodError.
+    if is_method_builtin?(name)
       if env("TUNGSTEN_ARITY") != "off"
         fallback_contract = builtin_fallback_arity(name)
         if fallback_contract != nil
@@ -1174,6 +1177,40 @@
       return result
     call_w_method_inner(recv, method, args, block, env)
 
+  # Coerce an integer argument to the declared machine-int parameter width,
+  # matching the compiled engine's wrapping/truncating truncation at call entry.
+  -> coerce_machine_param_value(val, pt_name)
+    if !(type(val) in ("Int" "BigInt"))
+      return val
+    case pt_name
+    when "u8"
+      return val & 255
+    when "i8"
+      v = val & 255
+      return v >= 128 ? v - 256 : v
+    when "u16"
+      return val & 65535
+    when "i16"
+      v = val & 65535
+      return v >= 32768 ? v - 65536 : v
+    when "u32"
+      return val & 4294967295
+    when "i32"
+      v = val & 4294967295
+      return v >= 2147483648 ? v - 4294967296 : v
+    when "u64"
+      return val & ((1 << 64) - 1)
+    when "i64"
+      v = val & ((1 << 64) - 1)
+      return v >= (1 << 63) ? v - (1 << 64) : v
+    when "u128"
+      return val & ((1 << 128) - 1)
+    when "i128"
+      v = val & ((1 << 128) - 1)
+      return v >= (1 << 127) ? v - (1 << 128) : v
+    else
+      return val
+
   -> call_w_method_inner(recv, method, args, block, env)
     # Barrier scope: a method/function body is lexically isolated from the
     # top-level (and caller) locals. Without the barrier, a callee that
@@ -1207,21 +1244,40 @@
       # expressions containing self/$value belong to the callee, not the
       # caller whose method happened to invoke it.
       params = ast_get(method, :params)
-      args = kwargs_remap_args(params, args)
-      # Locate a `*rest` splat param (at most one). When present, the arg
-      # binder switches from positional-with-nil-pad to Ruby's splat model:
-      # fixed params before the splat keep their slots, the splat slot
-      # collects the middle args into a real array ([] when none remain
-      # after satisfying trailing fixed params), and trailing fixed params
-      # right-align against the end of args.
+      # Locate a `*rest` splat param (at most one). When present, handle
+      # trailing kwargs separately before collecting `*rest` so keyword
+      # parameters never steal positional arguments or subtract from the
+      # splat count.
       splat_index = -1
       nparams = params.size()
+      has_kw_param = false
       i = 0
       while i < nparams
-        if ast_get(params[i], :splat) == true
+        if ast_get(params[i], :splat) == true && splat_index == -1
           splat_index = i
-          break
+        if ast_get(params[i], :keyword) == true
+          has_kw_param = true
         i += 1
+      splat_kwh = nil
+      splat_kwkeys = nil
+      splat_pos_args = args
+      splat_trailing_pos = 0
+      if splat_index == -1
+        args = kwargs_remap_args(params, args)
+      else
+        if has_kw_param && args.size() > 0 && args[args.size() - 1] != nil && ccall("w_hash_is_kwargs", args[args.size() - 1]) == true
+          splat_kwh = args[args.size() - 1]
+          splat_kwkeys = splat_kwh.keys()
+          splat_pos_args = []
+          pi2 = 0
+          while pi2 < args.size() - 1
+            splat_pos_args.push(args[pi2])
+            pi2 += 1
+        ti2 = splat_index + 1
+        while ti2 < nparams
+          if ast_get(params[ti2], :keyword) != true && ast_get(params[ti2], :block_param) != true
+            splat_trailing_pos += 1
+          ti2 += 1
       # Arity contract, mirroring the compiled engine's compile-time check:
       # more args than params, or fewer than the leading plain params, is
       # an error — never silently dropped or nil-padded. A splat, keyword,
@@ -1249,6 +1305,8 @@
           elsif arity_max != arity_required
             arity_expected = arity_required.to_s() + ".." + arity_max.to_s()
           raise "'" + ast_get(method, :name).to_s() + "' takes " + arity_expected + " argument" + (arity_expected == "1" ? "" : "s") + ", got " + args.size().to_s() + " — arguments are never silently dropped or padded"
+      m_param_types = method[:param_types]
+      trailing_seen = 0
       i = 0
       while i < params.size()
         param = params[i]
@@ -1257,14 +1315,32 @@
           if i < args.size()
             value = args[i]
         elsif i < splat_index
-          if i < args.size()
-            value = args[i]
+          if i < splat_pos_args.size()
+            value = splat_pos_args[i]
         elsif i == splat_index
-          value = splat_collect(args, splat_index, nparams)
-        else
-          idx = args.size() - nparams + i
-          if idx >= 0 && idx < args.size()
-            value = args[idx]
+          rcount = splat_pos_args.size() - splat_index - splat_trailing_pos
+          if rcount < 0
+            rcount = 0
+          rest_out = []
+          ri = 0
+          while ri < rcount
+            rest_out.push(splat_pos_args[splat_index + ri])
+            ri += 1
+          value = rest_out
+        elsif ast_get(param, :keyword) == true
+          if splat_kwh != nil
+            keyname = ast_get(param, :name)
+            kj = 0
+            while kj < splat_kwkeys.size()
+              if splat_kwkeys[kj].to_s() == keyname
+                value = splat_kwh[splat_kwkeys[kj]]
+                break
+              kj += 1
+        elsif ast_get(param, :block_param) != true
+          idx = splat_pos_args.size() - splat_trailing_pos + trailing_seen
+          trailing_seen += 1
+          if idx >= splat_index && idx < splat_pos_args.size()
+            value = splat_pos_args[idx]
         # nil is the missing-argument sentinel, exactly as in the compiled
         # engine (call sites pad with nil; the default guard selects on
         # nil). A nil-valued slot — absent, padded, or left empty by the
@@ -1277,6 +1353,9 @@
         # compiled engine, where both spellings reach the block param.
         if value == nil && block != nil && ast_get(param, :block_param) == true
           value = block
+
+        if m_param_types != nil && i < m_param_types.size() && value != nil
+          value = coerce_machine_param_value(value, "" + m_param_types[i].to_s())
 
         method_env.define(ast_get(param, :name), value)
 

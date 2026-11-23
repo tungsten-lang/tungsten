@@ -714,8 +714,8 @@ module Tungsten
         token text.to_sym
 
       # unary operators
-      # ++ -- +@ -@ ~@
-      elsif (text = scan(%r[\+\+|--|\+@|-@|~@]))
+      # ++ -- +@ -@ ~@ (don't steal `@` from `@ivar`, `@@cvar`, or `@1`)
+      elsif (text = scan(%r[\+\+|--|(?:\+@|-@|~@)(?![a-zA-Z_0-9@])]))
         token text.to_sym
 
       # splat operators (prefix *, ** followed by identifier or bracket)

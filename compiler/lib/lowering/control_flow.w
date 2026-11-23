@@ -1354,9 +1354,26 @@
     i += 1
 
   # Emit nested loop headers (outer to inner)
+  with_var_types = ctx[:var_types]
+  with_absent = :__with_absent_type
+  with_saved_types = []
+  with_outer_unboxed = ctx[:unboxed_vars]
   i = 0
   while i < binding_info.size()
     info = binding_info[i]
+    if with_var_types.has_key?(info[:name])
+      with_saved_types.push(with_var_types[info[:name]])
+    else
+      with_saved_types.push(with_absent)
+    if ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][info[:name]] != nil
+      filtered = {}
+      ukeys = ctx[:unboxed_vars].keys()
+      ui = 0
+      while ui < ukeys.size()
+        if ukeys[ui] != info[:name]
+          filtered[ukeys[ui]] = ctx[:unboxed_vars][ukeys[ui]]
+        ui += 1
+      ctx[:unboxed_vars] = filtered
 
     emit_wire_br(wfn, info[:pre_label], nil, nil)
     start_block(wfn, info[:pre_label])
@@ -1420,7 +1437,12 @@
     emit_wire_add_i64(wfn, info[:phi_reg], "1", info[:inc_next])
     emit_wire_br(wfn, info[:header_label], nil, nil)
     start_block(wfn, info[:exit_label])
+    if with_saved_types[i] == with_absent
+      with_var_types.delete(info[:name])
+    else
+      with_var_types[info[:name]] = with_saved_types[i]
     i -= 1
+  ctx[:unboxed_vars] = with_outer_unboxed
   nil
 
 -> lower_break(ctx)

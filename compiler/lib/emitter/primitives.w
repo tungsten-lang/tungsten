@@ -499,7 +499,11 @@
   out << declare_fn("w_method_call_cached_2", wv, join_arg_types5(wv, wv, wv, wv, "ptr"))
   out << declare_fn("w_fast_sym_get", wv, join_arg_types3(wv, wv, "ptr"))
   out << declare_fn("w_fast_sym_set", wv, join_arg_types4(wv, wv, wv, "ptr"))
-  out << declare_fn("w_value_is_a", wv, wv2)
+  out << declare_fn("w_fast_idx_get", wv, join_arg_types3(wv, wv, "ptr"))
+  out << declare_fn("w_fast_idx_set", wv, join_arg_types4(wv, wv, wv, "ptr"))
+  out << declare_fn("w_fast_size", wv, join_arg_types2(wv, "ptr"))
+  out << declare_fn("w_fast_push", wv, join_arg_types3(wv, wv, "ptr"))
+  out << declare_fn_attrs("w_value_is_a", wv, wv2, "nounwind willreturn memory(read)")
 
   # Classes / objects
   out << declare_fn("w_class_new", wv, ptr_wv)
@@ -591,6 +595,8 @@
   out << declare_fn("w_closure_call_0", wv, wv)
   out << declare_fn("w_closure_call_1", wv, wv2)
   out << declare_fn("w_closure_call_2", wv, wv3)
+  out << declare_fn("w_closure_call_3", wv, join_arg_types4(wv, wv, wv, wv))
+  out << declare_fn("w_closure_call_4", wv, join_arg_types5(wv, wv, wv, wv, wv))
 
   # Goroutines
   out << declare_fn("w_goroutine_spawn", wv, wv)

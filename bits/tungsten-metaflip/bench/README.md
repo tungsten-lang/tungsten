@@ -192,7 +192,7 @@ Every number is a function of the JSONL files and of `--reps`: `metascore summar
 ## 8. The metaflip algorithms and the walker switches
 
 `metaflip/V0` is the wide directed walker as the record hunt ran it. `tools/wide_rect_walk.w` exposes its ablation switches; every default equals the
-campaign behaviour, and a run without options is byte-identical to the walker before the switches existed (`PORT-REPORT-eval.md` lists the evidence).
+campaign behaviour, and a run without options is byte-identical to the walker before the switches existed.
 
 | switch | values | default | effect |
 | --- | --- | --- | --- |

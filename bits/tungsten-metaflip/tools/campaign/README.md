@@ -6,5 +6,4 @@ deepening). They keep the machine-specific paths they ran with (`/Users/erik/tun
 and `wide-rect-walk`), so they do not run elsewhere without edits; `spec/fixtures/gf2_cascade/generate.py` runs them from a scratch directory
 with those constants rewritten and a `pub.py` that reads the fixture's tables, to produce the goldens of `spec/gf2_cascade_test.w`.
 
-The Tungsten ports are `tools/cascade.w` (subcommands `parents`, `screen`, `pick`, `sweep`, `iterate`) and `lib/metaflip/gf2/cascade.w`;
-PORT-REPORT-cascade.md at the repository root has what they were checked against.
+The Tungsten ports are `tools/cascade.w` (subcommands `parents`, `screen`, `pick`, `sweep`, `iterate`) and `lib/metaflip/gf2/cascade.w`.

@@ -59,13 +59,20 @@ Deviations from the plan as written, each with its reason:
    annotation slot.
 8. **Units are runtime-bound through host closures** (refines section 1.4 after the M1 spike):
    a unit calls the host's runtime only through a table of host closures (one per
-   "name/arity", `runtime/unit_rt.w`, generated): the context holds each closure's code pointer
-   and captures, and the unit calls the code directly (a closure's code takes its captures and
-   raw WValues, so no boxing and no four-argument limit). This needs no symbol exports and no
+   "name/arity", `runtime/unit_rt.w`, generated): the context holds each closure, and the unit
+   calls it through the runtime's C entry `w_closure_call_N` (no four-argument limit). A first
+   version jumped to the closure's code pointer with raw bits; the host's escape analysis could
+   not see values crossing that edge and freed arrays a unit had allocated, so every crossing,
+   both ways, is now a C call the compiler treats as an escape. A unit makes no method sends
+   either: dynamic dispatch would search the host's method tables, which only hold what the host
+   itself sends, so the few the translator emits (list `[]`, `size`, `push`, Float `/`) become
+   runtime calls. This needs no symbol exports and no
    compiler unit mode: a unit is an ordinary Tungsten compile of `unit/prelude.w` plus the
    translated functions (unsharded, so `jsu_init` reaches each entry through its `w:` profiler
    alias), loaded with the runtime's in-memory Mach-O loader (`w_jit_load_object`, which now finds
-   functions by alias and skips unwind sections). Host values (strings longer than five bytes,
+   functions by alias, skips unwind sections, and shares one far-call stub per target: a
+   2,000-function window of base.js has about 120,000 branches to the host, far beyond the
+   loader's 4,096 stubs when each branch took its own). Host values (strings longer than five bytes,
    cells, codes, literal shapes, template objects, the cache table, the prototype epoch) are
    context slots. The prelude keeps fast lanes inline (numbers, booleans, inline caches, plain
    globals, and calls of compiled functions, which jump to the callee's entry without the host).

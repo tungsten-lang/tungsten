@@ -20,9 +20,11 @@ WK_CONTINUE = 2
 WK_RETURN = 3
 
 + WkAct
-  rw :f, :fobj, :fe, :this, :locals, :env, :argc, :args, :nt, :sig, :label, :rv, :env_at_entry, :coro
+  rw :f, :fobj, :fe, :this, :locals, :env, :argc, :args, :nt, :sig, :label, :rv, :env_at_entry, :coro, :pos, :caller
 
   -> new(@f, @fobj, @fe, @this, n)
+    @pos = 0
+    @caller = nil
     @locals = Array.new(n, nil)
     @env = @fe
     @argc = 0
@@ -48,6 +50,8 @@ WK_RETURN = 3
     @rv = nil
     @env_at_entry = nil
     @coro = nil
+    @pos = 0
+    @caller = nil
     l = @locals
     while l.size > n
       l.pop
@@ -100,6 +104,7 @@ WK_POOL = []
     js_throw(js_make_error("SyntaxError", p.error == nil ? e.to_s : p.error.to_s))
   an = JaAnalysis.new(prog, false)
   an.src = src
+  an.url = url
   an.eval_mode = mode != nil
   an.run
   bad = []
@@ -107,10 +112,44 @@ WK_POOL = []
   js_throw(js_make_error("SyntaxError", "tier 0 cannot run this yet: " + bad[0].to_s)) if bad.size > 0
   f = an.funcs[0]
   act = wk_act(f, nil, nil, js_realm().global, f.nlocals)
-  wk_hoist_script(f, act)
-  wk_hoist_functions(prog.list, act)
-  wk_stmts(prog.list, act)
+  act.caller = JS_CUR_ACT[0]
+  JS_CUR_ACT[0] = act
+  begin
+    wk_hoist_script(f, act)
+    wk_hoist_functions(prog.list, act)
+    wk_stmts(prog.list, act)
+  rescue e
+    JS_CUR_ACT[0] = act.caller
+    raise e
+  JS_CUR_ACT[0] = act.caller
   act.rv
+
+# The JS stack as JavaScriptCore prints it (Blade presents as Safari): one
+# "name@url:line:col" per frame, innermost first, scripts as "global code@...".
+-> wk_stack_lines
+  out = []
+  a = JS_CUR_ACT[0]
+  while a != nil && a.f != nil && out.size < 100
+    jf = a.f
+    an = jf.analysis
+    loc = js_src_location(an.src, an.url, a.pos)
+    if jf.script
+      out.push((an.eval_mode ? "eval code@" : "global code@") + loc)
+    else
+      out.push(jf.name.to_s + "@" + loc)
+    a = a.caller
+  out.join("\n")
+
+# [url, line, column] of the innermost frame.
+-> wk_top_location
+  a = JS_CUR_ACT[0]
+  return ["", 1, 1] if a == nil || a.f == nil
+  an = a.f.analysis
+  lc = js_src_linecol(an.src, a.pos)
+  [an.url == nil ? "" : an.url, lc[0], lc[1]]
+
+JS_STACK_HOOK[0] = ->() wk_stack_lines()
+JS_LOCATION_HOOK[0] = ->() wk_top_location()
 
 -> wk_hoist_script(f, act)
   ev = f.analysis.eval_mode
@@ -150,10 +189,13 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
   act.argc = argc
   act.args = more
   act.nt = nt
+  act.caller = JS_CUR_ACT[0]
+  JS_CUR_ACT[0] = act
   if jf.class_ctor
     r = wk_construct_body(jf, act, argc, a0, a1, a2, a3, more)
   else
     r = wk_enter(jf, act, argc, a0, a1, a2, a3, more)
+  JS_CUR_ACT[0] = act.caller
   wk_release(act)
   r
 
@@ -196,18 +238,48 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
     # parameter errors reject the promise rather than throw
     c = JS:Coro.new(nil)
     act.coro = c
-    c.body = ->() wk_whole(jf, act, argc, a0, a1, a2, a3, more)
+    c.body = ->() wk_on_stack(act, ->() wk_whole(jf, act, argc, a0, a1, a2, a3, more))
     return js_async_start_coro(c)
   wk_prologue(jf, act, argc, a0, a1, a2, a3, more)
   if gen && n.has?(F_ASYNC)
     g = js_async_gen_create(f, nil)
     act.coro = g.coro
-    g.coro.body = ->() wk_body(jf, act)
+    g.coro.body = ->() wk_on_stack(act, ->() wk_body(jf, act))
     return g
   g = js_gen_create(f, nil)
   act.coro = g.coro
-  g.coro.body = ->() wk_body(jf, act)
+  g.coro.body = ->() wk_on_stack(act, ->() wk_body(jf, act))
   g
+
+# Run a coroutine body as the top of the JS stack (yield and await hand it back).
+-> wk_on_stack(act, f)
+  act.caller = JS_CUR_ACT[0]
+  JS_CUR_ACT[0] = act
+  r = nil
+  begin
+    r = f.call()
+  rescue e
+    JS_CUR_ACT[0] = act.caller
+    raise e
+  JS_CUR_ACT[0] = act.caller
+  r
+
+# Suspend at yield or await (k: 0 yield, 1 yield*, 2 async-generator yield, 3 await).
+-> wk_suspend(act, k, v)
+  JS_CUR_ACT[0] = act.caller
+  c = act.coro
+  r = nil
+  if k == 0
+    r = js_yield(c, v)
+  elsif k == 1
+    r = js_yield_star(c, v)
+  elsif k == 2
+    r = js_async_yield(c, v)
+  else
+    r = js_await(c, v)
+  act.caller = JS_CUR_ACT[0]
+  JS_CUR_ACT[0] = act
+  r
 
 -> wk_whole(jf, act, argc, a0, a1, a2, a3, more)
   wk_prologue(jf, act, argc, a0, a1, a2, a3, more)
@@ -551,7 +623,9 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
     act.sig = WK_CONTINUE
     act.label = s.str
   elsif k == :throw
-    js_throw(wk_ev(s.a, act))
+    v = wk_ev(s.a, act)
+    act.pos = s.pos
+    js_throw(v)
   elsif k == :try
     wk_try(s, act)
   elsif k == :function_decl
@@ -777,6 +851,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
     else
       wk_ex(s.a, act)
   rescue ex
+    JS_CUR_ACT[0] = act
     pending = ex
   act.env = saved
   sg = act.sig
@@ -797,6 +872,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
   begin
     wk_ex(s.a, act)
   rescue ex
+    JS_CUR_ACT[0] = act
     act.env = saved
     cs = s.x
     cs = nil if !cs.is_a?(JaScope)
@@ -866,6 +942,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
     return js_priv_get(o, wk_read_ref(e.b.x, act)) if e.b.kind == :private_name
     return js_getp_ic(o, e.b.str, wk_ic(e))
   if k == :call
+    act.pos = e.pos
     return wk_call_expr(e, act)
   if k == :binary
     return wk_binary(e, act)
@@ -896,6 +973,7 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
     jf = e.x
     return js_closure(wk_code(jf), wk_env_for(jf, act))
   if k == :new
+    act.pos = e.pos
     return wk_new(e, act)
   if k == :array
     return wk_array(e, act)
@@ -910,12 +988,14 @@ JS_FN_SOURCE_HOOK[0] = ->(f) wk_fn_source(f)
     return v
   if k == :yield
     v = e.a == nil ? nil : wk_ev(e.a, act)
-    c = act.coro
-    return js_yield_star(c, v) if e.has?(F_DELEGATE)
-    return js_async_yield(c, v) if act.f.node.has?(F_ASYNC)
-    return js_yield(c, v)
+    act.pos = e.pos
+    return wk_suspend(act, 1, v) if e.has?(F_DELEGATE)
+    return wk_suspend(act, 2, v) if act.f.node.has?(F_ASYNC)
+    return wk_suspend(act, 0, v)
   if k == :await
-    return js_await(act.coro, wk_ev(e.a, act))
+    v = wk_ev(e.a, act)
+    act.pos = e.pos
+    return wk_suspend(act, 3, v)
   if k == :class
     return wk_class(e, act)
   if k == :meta_property

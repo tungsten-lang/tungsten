@@ -72,6 +72,59 @@ in JS
   jsr_set_aflags(ab, JS_AF_ARRAY | JS_AF_HOLES)
   a
 
+# ---- the JS call stack (positions for Error.stack and host tools) ----
+
+# The innermost running activation of tier 0 (each links to its caller), nil outside JS.
+JS_CUR_ACT = [nil]
+# ->() the stack lines, ->() [url, line, column]: set by tier 0.
+JS_STACK_HOOK = [nil]
+JS_LOCATION_HOOK = [nil]
+
+-> js_stack_lines
+  JS_STACK_HOOK[0] == nil ? "" : JS_STACK_HOOK[0].call()
+
+-> js_top_location
+  JS_LOCATION_HOOK[0] == nil ? ["", 1, 1] : JS_LOCATION_HOOK[0].call()
+
+-> js_src_location(src, url, p)
+  return "\[native code]" if src == nil
+  lc = js_src_linecol(src, p)
+  (url == nil ? "" : url) + ":" + lc[0].to_s + ":" + lc[1].to_s
+
+# Line and column (1-based) of byte offset p; the newline index of the last few sources
+# is kept (a stack walks frames of a few big scripts).
+JS_LINE_CACHE = [[], []]
+
+-> js_src_linecol(src, p)
+  return [1, 1] if src == nil
+  srcs = JS_LINE_CACHE[0]
+  nls = nil
+  ci = 0
+  while ci < srcs.size && nls == nil
+    nls = JS_LINE_CACHE[1][ci] if js_ident?(srcs[ci], src)
+    ci += 1
+  if nls == nil
+    nls = []
+    i = 0
+    n = src.size
+    while i < n
+      nls.push(i) if src.byte_at(i) == 10
+      i += 1
+    if srcs.size >= 8
+      srcs.shift
+      JS_LINE_CACHE[1].shift
+    srcs.push(src)
+    JS_LINE_CACHE[1].push(nls)
+  lo = 0
+  hi = nls.size
+  while lo < hi
+    mid = (lo + hi) / 2
+    if nls[mid] < p
+      lo = mid + 1
+    else
+      hi = mid
+  [lo + 1, lo == 0 ? p + 1 : p - nls[lo - 1]]
+
 # ---- script-level lexical bindings (top-level let, const, class) ----
 
 JS_LEXICAL = {}

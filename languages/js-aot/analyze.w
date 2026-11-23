@@ -135,10 +135,11 @@ use frontend/parser
     fail(why)
 
 + JaAnalysis
-  rw :program, :funcs, :strict, :bind_count, :scope_count, :unsupported_counts, :src, :eval_mode
+  rw :program, :funcs, :strict, :bind_count, :scope_count, :unsupported_counts, :src, :eval_mode, :url
 
   -> new(@program, @strict)
     @src = nil
+    @url = nil
     @eval_mode = false
     @funcs = []
     @bind_count = 0

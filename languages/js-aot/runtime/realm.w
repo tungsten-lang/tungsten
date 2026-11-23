@@ -14,7 +14,7 @@ in JS
     @kind_shapes = {}
     @global = nil
     @intrinsics = {}
-    @jobs = []
+    @jobs = JS:JobQueue.new
     @host = nil
     @symbol_registry = {}
     @template_cache = {}
@@ -100,22 +100,30 @@ in JS
     @jobs.push(job)
     nil
 
+  # A frame's realm shares its parent's queue (one microtask queue per agent).
+  -> share_jobs(parent)
+    @jobs.each ->(j) parent.jobs.push(j)
+    @jobs = parent.jobs
+    nil
+
   # Run queued jobs until none remain (HTML's "perform a microtask checkpoint").
   # Jobs run in batches (FIFO; what a job enqueues runs after the batch); an exception
   # thrown by one is reported and the rest still run.
   -> run_jobs
-    while @jobs.size > 0
-      q = @jobs
-      @jobs = []
-      i = 0
-      while i < q.size
-        j = q[i]
-        q[i] = nil
-        i += 1
-        begin
-          j.call()
-        rescue e
-          js_report_uncaught(e)
+    q = @jobs
+    top = JS_CUR_ACT[0]
+    while q.head < q.list.size
+      j = q.list[q.head]
+      q.list[q.head] = nil
+      q.head += 1
+      begin
+        j.call()
+      rescue e
+        js_report_uncaught(e)
+      # (a reaction's exception is caught natively: the stack is back where it was)
+      JS_CUR_ACT[0] = top
+      q.compact if q.head >= 4096
+    q.compact
     nil
 
   # ---- symbols ----
@@ -126,6 +134,38 @@ in JS
       sy = JS:Symbol.new(key)
       @symbol_registry[key] = sy
     sy
+
+# The microtask queue: jobs run in FIFO order, nested checkpoints included (a job that
+# runs a checkpoint continues the same queue).
++ JobQueue
+  rw :list, :head
+  -> new
+    @list = []
+    @head = 0
+
+  -> push(j)
+    @list.push(j)
+    nil
+
+  -> size
+    @list.size - @head
+
+  -> each(f)
+    i = @head
+    while i < @list.size
+      f.call(@list[i])
+      i += 1
+    nil
+
+  # Drop the jobs already run.
+  -> compact
+    return nil if @head == 0
+    if @head >= @list.size
+      @list = []
+    else
+      @list = @list.slice(@head, @list.size - @head)
+    @head = 0
+    nil
 
 BUILTIN_ATTRS = ATTR_W + ATTR_C
 
@@ -457,7 +497,10 @@ fn jsr_gcell_fast(cb) (i64) i64
   p = r.proto_of(kind)
   e = js_new_special(p, "Error")
   e.define("message", msg, ATTR_W + ATTR_C)
-  e.define("stack", kind + ": " + msg, ATTR_W + ATTR_C)
+  if JS_STACK_HOOK[0] == nil
+    e.define("stack", kind + ": " + msg, ATTR_W + ATTR_C)
+  else
+    js_error_locate(e)
   e
 
 -> js_throw_type(msg)

@@ -30,8 +30,21 @@ Script time only (`JSRUN_TIME=1`, used for the speed ratios): closure 992 ms, pr
 
 ## T2 — test262
 
-`tools/test262.py build/test262 ~/src/test262 build/t262_m0.txt language built-ins annexB`;
-per-directory pass rates are in `build/t262_m0.summary` (filled in when the run completes).
+`tools/test262.py build/test262 ~/src/test262 build/t262_m0.txt language built-ins annexB`
+(the old engine, Blade 99b7307): 48,803 tests, 7,408 skipped (features and flags the runner
+skips), 35,327 pass and 6,068 fail of the 41,395 run (85.3%). Per directory
+(`build/t262_m0.summary` has every subdirectory):
+
+| Directory | Pass / run |
+|---|---|
+| built-ins (all) | 16,047 / 18,062 |
+| language/expressions | 8,951 / 10,666 |
+| language/statements | 7,664 / 9,167 |
+| language/eval-code | 155 / 342 |
+| annexB/language | 533 / 819 |
+| built-ins/RegExp | 1,047 / 1,720 |
+| built-ins/Array | 2,838 / 3,067 |
+| built-ins/Object | 3,356 / 3,410 |
 
 ## YouTube (Blade 99b7307 + this agent's fixes: script-mode output, the AOT body scope, fresh
 ## layouts for geometry reads, incremental stylesheet reloads)

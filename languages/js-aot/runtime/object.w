@@ -31,6 +31,7 @@ ATTR_W = 1
 ATTR_E = 2
 ATTR_C = 4
 ATTR_DEFAULT = 7
+ATTR_ALL = 7
 ATTR_ACCESSOR = 8     # the slot holds a JS:Accessor
 
 # Kind byte in the instance header (jsr_kind). 0x80 marks an object used as a prototype.
@@ -55,7 +56,7 @@ JS_EPOCH = i64[1]
 JS_IC_SCRATCH = 0
 
 + Shape
-  rw :proto, :parent, :key, :kattrs, :count, :inline, :ibase, :index, :trans, :alt, :keys, :dict, :attrs
+  rw :proto, :parent, :key, :kattrs, :count, :inline, :ibase, :index, :trans, :alt, :keys, :dict, :attrs, :nonext
 
   -> new(@proto, @parent, @key, @kattrs, @count, @inline, @ibase)
     @index = nil
@@ -64,6 +65,21 @@ JS_IC_SCRATCH = 0
     @keys = nil
     @dict = false
     @attrs = nil
+    @nonext = false
+
+  # The same layout under another prototype: the keys replayed from that prototype's
+  # root (a dictionary shape keeps its table and only changes its prototype).
+  -> with_proto(p)
+    if @dict
+      @proto = p
+      return self
+    s = js_root_shape(p, @inline, @ibase)
+    pairs = index_keys()
+    i = 0
+    while i < pairs.size
+      s = s.add(pairs[i][0], pairs[i][1].kattrs)
+      i += 1
+    s
 
   # Slot of key, or -1. Builds the key → defining-shape index on first use.
   -> slot_of(key)
@@ -145,6 +161,7 @@ JS_IC_SCRATCH = 0
   -> to_dict
     d = JS:Shape.new(@proto, nil, nil, ATTR_DEFAULT, @count, @inline, @ibase)
     d.dict = true
+    d.nonext = @nonext
     h = {}
     ks = []
     at = nil
@@ -232,68 +249,111 @@ JS_ROOT_KEEP = []
       @ext[e] = v
     v
 
-  # ---- the internal methods (exotic subclasses override these) ----
+  # ---- the internal methods (ECMA-262 §10.1; exotic subclasses override these) ----
+  # Names and receiver defaults follow Blade's engine (blade/js/value.w), whose bindings
+  # call them. The prototype is nil for a null prototype (JS code sees JS_NULL).
 
   -> proto
     @shape.proto
 
-  -> get_own_slot(key)
-    @shape.slot_of(key)
+  -> get_prototype_of
+    p = @shape.proto
+    p == nil ? JS_NULL : p
+
+  -> callable?
+    false
+
+  -> htmldda?
+    false
+
+  -> proxy?
+    false
+
+  # Properties some classes compute until written (a function's name, length, prototype).
+  -> get_virtual(key)
+    JS_HOLE
 
   -> has_own?(key)
+    @shape.slot_of(key) >= 0 || get_virtual(key) != JS_HOLE
+
+  -> has_own_slot?(key)
     @shape.slot_of(key) >= 0
 
-  # The value of an own data property (accessors are not called), or JS_HOLE.
+  -> accessor?(key)
+    @shape.slot_of(key) >= 0 && (@shape.attrs_of(key) & ATTR_ACCESSOR) != 0
+
+  # The attribute bits of an own property (ATTR_W/E/C, plus ATTR_ACCESSOR).
+  -> attr(key)
+    @shape.attrs_of(key)
+
+  -> enumerable?(key)
+    (@shape.attrs_of(key) & ATTR_E) != 0
+
+  # The value of an own data property, accessors not called; JS_HOLE when absent.
   -> get_own(key)
     i = @shape.slot_of(key)
-    return JS_HOLE if i < 0
+    return get_virtual(key) if i < 0
     slot_get(i)
 
-  # [[Get]] with receiver.
-  -> get(key, receiver)
+  -> getter_of(key)
+    i = @shape.slot_of(key)
+    return nil if i < 0
+    a = slot_get(i)
+    a.is_a?(JS:Accessor) ? a.getter : nil
+
+  -> setter_of(key)
+    i = @shape.slot_of(key)
+    return nil if i < 0
+    a = slot_get(i)
+    a.is_a?(JS:Accessor) ? a.setter : nil
+
+  # [[Get]]
+  -> get(key, receiver = nil)
+    r = receiver == nil ? self : receiver
     o = self
     while o != nil
+      return o.get(key, r) if o != self && o.exotic?
       s = o.shape
       i = s.slot_of(key)
       if i >= 0
         v = o.slot_get(i)
-        return js_accessor_get(v, receiver) if (s.attrs_of(key) & ATTR_ACCESSOR) != 0
+        return js_accessor_get(v, r) if (s.attrs_of(key) & ATTR_ACCESSOR) != 0
         return v
       v = o.get_virtual(key)
       return v if v != JS_HOLE
       o = s.proto
     nil
 
-  # Properties some classes compute until written (a function's name, length, prototype).
-  -> get_virtual(key)
-    JS_HOLE
+  -> exotic?
+    (jsr_kind(wvalue_bits(self) ## i64) & 127) == KIND_EXOTIC
 
   # [[Set]]: own writable data property, an inherited setter, or a new own property.
-  -> set(key, v, receiver)
-    s = @shape
-    i = s.slot_of(key)
+  -> set(key, v, receiver = nil)
+    r = receiver == nil ? self : receiver
+    o = self
+    while o != nil
+      return o.set(key, v, r) if o != self && o.exotic?
+      s = o.shape
+      i = s.slot_of(key)
+      if i >= 0
+        a = s.attrs_of(key)
+        return js_accessor_set(o.slot_get(i), r, v) if (a & ATTR_ACCESSOR) != 0
+        return false if (a & ATTR_W) == 0
+        break
+      gv = o.get_virtual(key)
+      if gv != JS_HOLE
+        break
+      o = s.proto
+    return js_set_on_receiver(r, key, v) if r != self
+    i = @shape.slot_of(key)
     if i >= 0
-      a = s.attrs_of(key)
-      if (a & ATTR_ACCESSOR) != 0
-        return js_accessor_set(slot_get(i), receiver, v)
-      return false if (a & ATTR_W) == 0
       slot_set(i, v)
       return true
-    p = s.proto
-    while p != nil
-      ps = p.shape
-      j = ps.slot_of(key)
-      if j >= 0
-        pa = ps.attrs_of(key)
-        return js_accessor_set(p.slot_get(j), receiver, v) if (pa & ATTR_ACCESSOR) != 0
-        return false if (pa & ATTR_W) == 0
-        break
-      p = ps.proto
-    return receiver.set(key, v, receiver) if receiver != self
+    return false if !is_extensible?
     add_property(key, v, ATTR_DEFAULT)
     true
 
-  # Define an own property (no setter call, no writability check on add).
+  # Create or update a data property without setters or writability checks.
   -> put_own(key, v)
     i = @shape.slot_of(key)
     if i >= 0
@@ -302,18 +362,34 @@ JS_ROOT_KEEP = []
       add_property(key, v, ATTR_DEFAULT)
     v
 
-  -> define(key, v, attrs)
+  # Define an own data property with the given attributes.
+  -> define(key, v, flags = ATTR_DEFAULT)
     i = @shape.slot_of(key)
     if i >= 0
-      if @shape.attrs_of(key) != attrs
-        to_dictionary()
-        @shape.attrs = {} if @shape.attrs == nil
-        @shape.attrs[key] = attrs
+      if @shape.attrs_of(key) != flags
+        change_attrs(key, flags)
       slot_set(i, v)
-      js_bump_epoch() if js_is_proto?(self)
       return v
-    add_property(key, v, attrs)
+    add_property(key, v, flags)
     v
+
+  -> define_accessor(key, g, st, flags = ATTR_E + ATTR_C)
+    a = JS:Accessor.new(g, st)
+    fl = (flags & (ATTR_E + ATTR_C)) | ATTR_ACCESSOR
+    i = @shape.slot_of(key)
+    if i >= 0
+      change_attrs(key, fl) if @shape.attrs_of(key) != fl
+      slot_set(i, a)
+      return nil
+    add_property(key, a, fl)
+    nil
+
+  -> change_attrs(key, flags)
+    to_dictionary()
+    @shape.attrs = {} if @shape.attrs == nil
+    @shape.attrs[key] = flags
+    js_bump_epoch() if js_is_proto?(self)
+    nil
 
   -> add_property(key, v, attrs)
     s = @shape
@@ -359,7 +435,10 @@ JS_ROOT_KEEP = []
     s.index.delete(key)
     s.attrs.delete(key) if s.attrs != nil
     ks = []
-    s.keys.each ->(k) ks.push(k) if k != key
+    q = 0
+    while q < s.keys.size
+      ks.push(s.keys[q]) if s.keys[q] != key
+      q += 1
     s.keys = ks
     q = 0
     while q < ks.size
@@ -367,7 +446,8 @@ JS_ROOT_KEEP = []
       q += 1
     true
 
-  # Own keys in spec order: integer-like keys ascending, then strings, then symbols.
+  # Own keys in spec order: integer-like keys ascending, then strings, then symbols
+  # (private names never appear).
   -> own_keys
     ks = @shape.dict ? @shape.keys : @shape.key_list
     ints = []
@@ -376,23 +456,134 @@ JS_ROOT_KEEP = []
     i = 0
     while i < ks.size
       k = ks[i]
-      if k.is_a?(String)
+      if js_string?(k)
         if js_array_index?(k)
           ints.push(k)
         else
           strs.push(k)
-      else
+      elsif !k.is_a?(JS:PrivateName)
         syms.push(k)
       i += 1
     if ints.size > 1
       ints = ints.sort_by(->(k) k.to_i)
     ints + strs + syms
 
-  -> enumerable?(key)
-    (@shape.attrs_of(key) & ATTR_E) != 0
+  -> get_own_property(key)
+    i = @shape.slot_of(key)
+    if i < 0
+      v = get_virtual(key)
+      return nil if v == JS_HOLE
+      return JS:PropDesc.data(v, ATTR_C)
+    a = @shape.attrs_of(key)
+    d = JS:PropDesc.new
+    if (a & ATTR_ACCESSOR) != 0
+      acc = slot_get(i)
+      d.getter = acc.getter
+      d.setter = acc.setter
+      d.has_get = true
+      d.has_set = true
+    else
+      d.value = slot_get(i)
+      d.has_value = true
+      d.writable = (a & ATTR_W) != 0
+    d.enumerable = (a & ATTR_E) != 0
+    d.configurable = (a & ATTR_C) != 0
+    d
 
-  -> callable?
+  # ValidateAndApplyPropertyDescriptor (§10.1.6.3). Returns false when not allowed.
+  -> define_own_property(key, desc)
+    cur = get_own_property(key)
+    if cur == nil
+      return false if !is_extensible?
+      if desc.accessor?
+        define_accessor(key, desc.getter, desc.setter, desc.flags & (ATTR_E + ATTR_C))
+      else
+        define(key, desc.value, desc.flags)
+      return true
+    if cur.configurable == false
+      return false if desc.configurable == true
+      return false if desc.enumerable != nil && desc.enumerable != cur.enumerable
+      if desc.accessor? || desc.data?
+        return false if desc.accessor? != cur.accessor?
+      if cur.accessor? && desc.accessor?
+        return false if desc.has_get && desc.getter != cur.getter
+        return false if desc.has_set && desc.setter != cur.setter
+      elsif !cur.accessor? && cur.writable == false
+        return false if desc.writable == true
+        return false if desc.has_value && !js_same_value(desc.value, cur.value)
+    en = desc.enumerable == nil ? cur.enumerable : desc.enumerable
+    co = desc.configurable == nil ? cur.configurable : desc.configurable
+    fl = (en ? ATTR_E : 0) | (co ? ATTR_C : 0)
+    if desc.accessor?
+      g = desc.has_get ? desc.getter : (cur.accessor? ? cur.getter : nil)
+      st = desc.has_set ? desc.setter : (cur.accessor? ? cur.setter : nil)
+      define_accessor(key, g, st, fl)
+    elsif desc.data? || !cur.accessor?
+      w = desc.writable == nil ? (cur.accessor? ? false : cur.writable) : desc.writable
+      v = desc.has_value ? desc.value : (cur.accessor? ? nil : cur.value)
+      define(key, v, fl | (w ? ATTR_W : 0))
+    else
+      define_accessor(key, cur.getter, cur.setter, fl)
+    true
+
+  -> has_property?(key)
+    o = self
+    while o != nil
+      return o.has_property?(key) if o != self && o.exotic?
+      return true if o.has_own?(key)
+      o = o.proto
     false
+
+  -> is_extensible?
+    !@shape.nonext
+
+  -> prevent_extensions
+    to_dictionary()
+    @shape.nonext = true
+    true
+
+  # [[SetPrototypeOf]]: false when not allowed (non-extensible, or a cycle).
+  -> set_prototype_of(p)
+    p = nil if p == JS_NULL
+    cur = @shape.proto
+    return true if cur == p
+    return false if !is_extensible?
+    q = p
+    while q != nil
+      return false if q == self
+      break if q.exotic?
+      q = q.proto
+    js_bump_epoch() if js_is_proto?(self)
+    @shape = @shape.with_proto(p)
+    true
+
+  # ---- private names (#x): own properties keyed by a JS:PrivateName ----
+
+  -> priv_has?(pn)
+    @shape.slot_of(pn) >= 0
+
+  -> priv_get(pn)
+    i = @shape.slot_of(pn)
+    js_throw_type("Cannot read private member " + pn.to_s + " from an object whose class did not declare it") if i < 0
+    v = slot_get(i)
+    return js_accessor_get(v, self) if (@shape.attrs_of(pn) & ATTR_ACCESSOR) != 0
+    v
+
+  -> priv_set(pn, v)
+    i = @shape.slot_of(pn)
+    js_throw_type("Cannot write private member " + pn.to_s + " to an object whose class did not declare it") if i < 0
+    a = @shape.attrs_of(pn)
+    if (a & ATTR_ACCESSOR) != 0
+      js_throw_type("'" + pn.to_s + "' was defined without a setter") if !js_accessor_set(slot_get(i), self, v)
+      return v
+    js_throw_type("Private method is not writable") if (a & ATTR_W) == 0
+    slot_set(i, v)
+    v
+
+  -> priv_add(pn, v)
+    js_throw_type("Cannot initialize " + pn.to_s + " twice on the same object") if @shape.slot_of(pn) >= 0
+    add_property(pn, v, ATTR_W)
+    v
 
 + Object < JS:Base
   rw :s0, :s1, :s2, :s3, :s4, :s5
@@ -413,6 +604,64 @@ OBJ_IBASE = 2
 # A new ordinary object with the given prototype (nil: null prototype).
 -> js_new_object(proto)
   JS:Object.new(js_root_shape(proto, OBJ_INLINE, OBJ_IBASE))
+
+# A property descriptor (§6.2.6); nil fields are absent.
++ PropDesc
+  rw :value, :getter, :setter, :writable, :enumerable, :configurable, :has_value, :has_get, :has_set
+
+  -> new
+    @value = nil
+    @getter = nil
+    @setter = nil
+    @writable = nil
+    @enumerable = nil
+    @configurable = nil
+    @has_value = false
+    @has_get = false
+    @has_set = false
+
+  -> accessor?
+    @has_get || @has_set
+
+  -> data?
+    @has_value || @writable != nil
+
+  -> .data(v, flags)
+    d = JS:PropDesc.new
+    d.value = v
+    d.has_value = true
+    d.writable = (flags & ATTR_W) != 0
+    d.enumerable = (flags & ATTR_E) != 0
+    d.configurable = (flags & ATTR_C) != 0
+    d
+
+  -> flags
+    f = 0
+    f = f | ATTR_W if @writable == true
+    f = f | ATTR_E if @enumerable == true
+    f = f | ATTR_C if @configurable == true
+    f
+
++ PrivateName
+  rw :description, :is_method
+  -> new(@description)
+    @is_method = false
+  -> to_s
+    "#" + @description.to_s
+
+# OrdinarySet's last step when the receiver is another object (§10.1.9.2 3.d-e).
+-> js_set_on_receiver(r, key, v)
+  return false if !js_object?(r)
+  return js_array_set(r, key, v) if js_array?(r)
+  d = r.get_own_property(key)
+  if d != nil
+    return false if d.accessor? || d.writable == false
+    vd = JS:PropDesc.new
+    vd.value = v
+    vd.has_value = true
+    return r.define_own_property(key, vd)
+  return false if !r.is_extensible?
+  r.define_own_property(key, JS:PropDesc.data(v, ATTR_DEFAULT))
 
 # Holes in arrays and absent results of get_own.
 + Hole

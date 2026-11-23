@@ -21,10 +21,11 @@
 use frontend/parser
 
 + JaBinding
-  rw :name, :kind, :scope, :slot, :local, :captured, :writes, :reads, :value_uses, :callee_uses, :fnode, :tdz, :decl_pos, :early_read, :init_before_fns, :id
+  rw :name, :kind, :scope, :slot, :local, :captured, :writes, :reads, :value_uses, :callee_uses, :fnode, :tdz, :decl_pos, :early_read, :init_before_fns, :id, :lidx
 
   -> new(@name, @kind, @scope)
     @slot = -1
+    @lidx = -1
     @local = nil
     @captured = false
     @writes = 0
@@ -43,6 +44,12 @@ use frontend/parser
 
   -> in_env?
     @slot >= 0
+
+# A resolved identifier occurrence: the binding and the scope it is written in.
++ JaRef
+  rw :binding, :scope
+  -> new(@binding, @scope)
+    nil
 
 + JaScope
   rw :kind, :parent, :func, :names, :env_count, :id, :node, :per_iter, :order
@@ -68,7 +75,7 @@ use frontend/parser
     @env_count > 0
 
 + JaFunc
-  rw :node, :parent, :index, :scope, :strict, :arrow, :uses_this, :uses_args, :dynamic, :free, :fclass, :single, :inner, :binding, :self_binding, :unsupported, :name, :def_scope, :nparams, :params, :this_binding, :body_scope, :script
+  rw :node, :parent, :index, :scope, :strict, :arrow, :uses_this, :uses_args, :dynamic, :free, :fclass, :single, :inner, :binding, :self_binding, :unsupported, :name, :def_scope, :nparams, :params, :this_binding, :body_scope, :script, :nlocals, :code, :scopes
 
   -> new(@node, @parent, @index)
     @scope = nil
@@ -91,6 +98,9 @@ use frontend/parser
     @this_binding = nil
     @body_scope = nil
     @script = false
+    @nlocals = 0
+    @code = nil
+    @scopes = []
 
   -> fail(why)
     @unsupported = why if @unsupported == nil
@@ -111,6 +121,7 @@ use frontend/parser
     s = JaScope.new(kind, parent, func, node)
     @scope_count += 1
     s.id = @scope_count
+    func.scopes.push(s)
     s
 
   -> run
@@ -272,7 +283,7 @@ use frontend/parser
         if d.a.kind != :ident
           f.fail("destructuring")
         else
-          b = resolve(d.a.str, sc)
+          b = ref(d.a, sc)
           if d.b != nil
             note_fn_value(d.b, b)
             walk_expr(d.b, sc)
@@ -398,7 +409,7 @@ use frontend/parser
     f = sc.func
     k = e.kind
     if k == :ident
-      note_read(resolve(e.str, sc), sc, e.pos, false)
+      note_read(ref(e, sc), sc, e.pos, false)
     elsif k == :num || k == :string || k == :null || k == :true || k == :false
       nil
     elsif k == :this
@@ -412,7 +423,7 @@ use frontend/parser
         if c.str == "eval"
           f.dynamic = true
           f.fail("eval")
-        note_read(resolve(c.str, sc), sc, c.pos, true)
+        note_read(ref(c, sc), sc, c.pos, true)
       elsif (c.kind == :function || c.kind == :arrow) && !c.has?(F_ASYNC) && !c.has?(F_GENERATOR)
         walk_function(c, sc, nil)
         jf = fn_of(c)
@@ -435,7 +446,7 @@ use frontend/parser
       walk_expr(e.a, sc)
     elsif k == :unary
       if e.str == "typeof" && e.a.kind == :ident
-        note_read(resolve(e.a.str, sc), sc, e.a.pos, false)
+        note_read(ref(e.a, sc), sc, e.a.pos, false)
       elsif e.str == "delete" && e.a.kind == :ident
         f.fail("delete of a binding")
       else
@@ -447,7 +458,7 @@ use frontend/parser
       walk_expr(e.b, sc)
     elsif k == :assign
       if e.a.kind == :ident
-        b = resolve(e.a.str, sc)
+        b = ref(e.a, sc)
         note_read(b, sc, e.a.pos, false) if e.str != "="
         note_fn_value(e.b, nil)
         walk_expr(e.b, sc)
@@ -500,7 +511,7 @@ use frontend/parser
 
   -> walk_target(t, sc)
     if t.kind == :ident
-      b = resolve(t.str, sc)
+      b = ref(t, sc)
       note_read(b, sc, t.pos, false)
       note_write(b, sc, t.pos)
     else
@@ -510,25 +521,25 @@ use frontend/parser
   # ---- functions ----
 
   -> fn_of(node)
-    @fnmap[node_key(node)]
+    node.x
 
   -> node_key(node)
     node.kind.to_s + ":" + node.pos.to_s + ":" + node.fin.to_s
 
   # The scope the analysis made for a block, for, catch or switch node (else sc).
   -> scope_for(node, sc)
-    s = @scopemap[node_key(node)]
-    s == nil ? sc : s
+    s = node.x
+    s.is_a?(JaScope) ? s : sc
 
   -> map_scope(node, s)
-    @scopemap[node_key(node)] = s
+    node.x = s
     s
 
   -> walk_function(n, sc, binding)
     pf = sc.func
     jf = JaFunc.new(n, pf, @funcs.size)
     @funcs.push(jf)
-    @fnmap[node_key(n)] = jf
+    n.x = jf
     pf.inner.push(jf)
     jf.def_scope = sc
     jf.binding = binding
@@ -574,6 +585,12 @@ use frontend/parser
     nil
 
   # ---- references ----
+
+  # Resolve an identifier node and annotate it with its JaRef.
+  -> ref(node, sc)
+    b = resolve(node.str, sc)
+    node.x = JaRef.new(b, sc)
+    b
 
   # The binding name refers to from sc (declaring an implicit global when unresolved).
   -> resolve(name, sc)
@@ -666,7 +683,44 @@ use frontend/parser
             b.slot = b.scope.env_count
             b.scope.env_count = b.scope.env_count + 1
       i += 1
+    # local slots (tier 0's activation array): every binding not in an environment
+    i = 0
+    while i < @funcs.size
+      f = @funcs[i]
+      n = 0
+      j = 0
+      while j < f.scopes.size
+        sc = f.scopes[j]
+        q = 0
+        while q < sc.order.size
+          b = sc.order[q]
+          if !b.global? && b.slot < 0 && b.kind != :this
+            b.lidx = n
+            n += 1
+          q += 1
+        j += 1
+      f.nlocals = n
+      i += 1
     nil
+
+  # Environment hops from scope sc to the environment of scope target (an ancestor
+  # with an environment), as tier 0 walks them: through the environment-bearing scopes
+  # of sc's function, then from the function's fe along its definition scopes.
+  -> env_hops(sc, target)
+    h = 0
+    s = sc
+    f = sc.func
+    while s != nil && s.func == f
+      return h if s == target
+      h += 1 if s.has_env?
+      s = s.parent
+    s = f.def_scope
+    while s != nil
+      if s.has_env?
+        return h if s == target
+        h += 1
+      s = s.parent
+    -1
 
   -> inner_captures?(f)
     i = 0

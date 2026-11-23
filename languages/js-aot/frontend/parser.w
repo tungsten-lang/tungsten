@@ -164,10 +164,14 @@ C_NOIN_MASK = 15
 
 JS_PREC = js_prec_table()
 
+# x: the analysis's annotation (js-aot analyze.w): the JaFunc of a function, the JaScope
+# of a block, the JaRef of an identifier. (The eleventh ivar costs nothing: a JsNode was
+# already an 88-byte request in a 96-byte malloc block.)
 + JsNode
-  rw :kind, :pos, :fin, :str, :a, :b, :c, :d, :list, :flags
+  rw :kind, :pos, :fin, :str, :a, :b, :c, :d, :list, :flags, :x
   -> new(@kind, @pos, @fin, @str, @a, @b, @c, @list, @flags)
     @d = nil
+    @x = nil
 
   -> has?(f)
     (@flags & f) != 0

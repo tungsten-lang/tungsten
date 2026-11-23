@@ -9,7 +9,7 @@ Audience: the agent that implements it. Every stage has an exit criterion with a
 | Milestone | State |
 |---|---|
 | M0 | done: `frontend/`, `tier0/` (Blade 99b7307 + the aot body-scope fix), `tools/jsrun.w`, `tools/memstat.sh`, `bench/`, `BASELINE.md` |
-| M1 | exit met: see Appendix B.1 (speed, blocks, spike, scale) |
+| M1 | exit met: see Appendix B.1 (speed, blocks, spike, scale). Tests: T1 on tier 1 6 pass / 17 fail (missing builtins: M2) / 24 unsupported constructs (M3); the test262 sample needs M2's builtins (its harness uses Object, Array, String, Error) and moves there |
 
 Deviations from the plan as written, each with its reason:
 
@@ -162,7 +162,12 @@ key = sha256(source) "-" JS_AST_VERSION "-" JS_ABI "-" <compiler exe identity> "
 | `eval(str)`, `new Function`, string timers, inline handlers | Tier 0. If the same source text gets hot (BotGuard's VM), it is keyed by its own SHA-256 like any script. |
 | JS builtins shipped with the host (Blade's 75 KB `web.js`, compiled per realm today) | Compiled at host build time and linked statically. |
 
-Estimates to be confirmed in milestone 1 (they come from synthetic functions, Appendix A.2): the executed subset of `youtube-main.js` (assume 10,000 functions) costs about 1 s to lower and 20 s of clang CPU at -O2, so a few seconds of wall time on eight cores. The whole file would be about 100 s of CPU and, extrapolating compiler memory, more than 2 GB in one piece, so full-script builds are sharded at 2,000 functions per compile.
+Measured in milestone 1 on `youtube-main.js` (Appendix B.1): lowering costs 0.22 ms and about
+270 KB of compiler memory per translated function, clang about 2.7 ms of CPU, and the code is
+844 bytes per function. The executed subset (assume 10,000 functions) is therefore about 2 s of
+lowering and 27 s of clang CPU, a few seconds of wall time on eight cores. The whole file (44,535
+functions the slice translates) needs more than 16 GB in one compile (it was stopped at the cap
+after 40 s), so units are sharded at 2,000 functions per compile (about 1.1 GB each).
 
 Rejected alternatives:
 
@@ -867,3 +872,81 @@ Wall times were 5–20 s longer than CPU in every run. A sample of the compiler 
 ### A.5 Corpus
 
 `apps/blade/test/js-corpus`: 43 files, 12 MB. `youtube-main.js` is 10.9 MB with 47,407 `function` keywords and 9 arrows.
+
+## Appendix B. Implementation measurements
+
+Machine as in Appendix A (Apple M5, other work running). Tier 0 is `tools/jsrun.w` (the closure
+interpreter, BLADE_JS_AOT=0); tier 1 is `tools/jsc.sh --release`. Times are the script's own
+(`JSRUN_TIME=1`), best of 3 (tier 0) or 5 (tier 1).
+
+### B.1 Milestone 1 exit
+
+| Benchmark | Tier 0 | Tier 1 | Ratio | Target | Live blocks per iteration (tier 1) |
+|---|---|---|---|---|---|
+| closure (1 M closures + calls) | 992 ms | 39 ms | 25× | ≥ 8× | 1 (80-byte block: the function object; its one captured variable is its @env) |
+| property (1 M `new P` + method) | 1,452 ms | 94 ms | 15× | ≥ 6× | 1 (the object, 80 bytes) |
+| arithmetic (fib(27) + 3 M `(h*31+i)\|0`) | 1,621 ms | 49 ms | 33× | ≥ 30× | 0 |
+
+- For reference, fib(27) plus the loop takes V8 13.5 ms, JavaScriptCore 14.5–16.7 ms, the planner's
+  hand translation about 20 ms. Split: fib(27) alone is 4 ms in tier 1 (a guarded direct call to the
+  callee's entry; 227 ms in tier 0); the 3 M-iteration loop over globals is 45 ms (over function
+  locals 39 ms). The loop's cost is the boxed double arithmetic and ToInt32 on every iteration:
+  the int32 lane of section 3.2 (M3) is what brings it to V8's level.
+- Blocks per operation (tests/blocks/, `memstat.sh --heap`, live malloc blocks after the run):
+  IIFE and call-only local functions 0 per call; calls with ≤ 4 arguments 0; object literal
+  `{a, b, c}` 1 block (80 bytes); closure creation 1 block. (A call to a native builtin still
+  allocates its arguments Array, 2 blocks: fixed-argument natives are M8.)
+- Peak RSS: closure 80 MB (tier 0: 482 MB), property 80 MB (314 MB), arithmetic 3 MB (7 MB), with
+  no collector.
+
+Loading spike (A.3 repeated with translated code): `function f(o, cb){ return cb(o.x + 1) * 2 }`
+translated by jsc, its entry extracted into a 50 KB dylib, loaded into a host built from the same
+runtime, called through an `ll` trampoline with a host object and a host native: correct result
+(43). A host → unit → host round trip that does a property inline-cache read through the host
+runtime, a call of a host native, an add and a multiply costs 33 ns. The three C1 items, confirmed
+or corrected:
+
+1. Exported entries: confirmed (the entry must be `define`, with a stable exported name).
+2. No `main`, no second copy of core: confirmed — the unit contains only translated functions.
+   Corrected: binding to the host by symbol name does not work, because Tungsten symbols are
+   content hashes and whole-program inference specializes the host's own copies (parameter
+   representations included). The unit is *runtime-bound through a table*: `jsu_init(table)` receives
+   the addresses of the host runtime entries it calls (taken in the host with `ptrtoint` of the
+   `w:<name>` aliases), and those host entries must keep the generic boxed ABI (they are external
+   entry points: no parameter specialization).
+3. Keep-list: confirmed — the host dead-strips runtime functions its own code does not reference;
+   building the table references them. With sharded codegen the alias must be visible across
+   shards (the spike used `TUNGSTEN_SHARD_CODEGEN=0`).
+4. New: typed-array parameters arrive in `ll` bodies as raw element pointers; strings longer than
+   five bytes are slab-interned per module, so a unit needs its own string table (or strings
+   interned through the host at init).
+
+Scale check on `youtube-main.js` (10.9 MB, 47,134 functions):
+
+| | |
+|---|---|
+| Functions the slice translates | 44,535 (94.5%) |
+| Not yet (first reason) | `arguments` 1,303, `finally` 848, regex literal 234, `for…in` 181, named function expression as a value 26, accessor in a literal 8 |
+| Lowering, 2,000 functions | 0.44 s over an empty program (0.22 ms per function, ~4,500 per second) |
+| Compiler memory | 1.0 GB at 2,000 functions, 1.8 GB at 5,000 (≈ 270 KB per function); all 44,535 in one compile exceeded 16 GB |
+| clang, 2,000 functions | +2.7 s wall (sharded), ≈ 2.7 ms CPU per function |
+| Code size | +1.69 MB text for 2,000 functions: 844 bytes per function (R4 target median ≤ 1.5 KB) |
+
+Analysis over the whole js-corpus (43 files, 12 MB, 48,724 functions, `tools/fnstats.w`):
+
+| Class (section 3.9) | Functions |
+|---|---|
+| call-only (local declarations only called) | 715 |
+| IIFE | 233 |
+| escaping (lean object) | 47,776 (98%) |
+| no captured variables (no environment, class c) | 12,626 (26%) |
+| exactly one captured, unchanging variable (stored in @env) | 7,944 (16%) |
+| using direct eval or `with` | 0 |
+
+Function scopes needing no environment record: 43,350 of 48,767 (89%). Object literal property
+counts: 0: 3,600, 1: 14,476, 2: 9,772, 3: 3,894, 4: 1,154, 5: 558, 6: 366, 7–16: ~770, more: 227
+(six inline slots cover 96%). Constructors' distinct `this.x =` names: 1: 2,406, 2: 740, 3: 334,
+4: 199, 5: 94, 6: 86, more: ~207 (six cover 95%). As R14 expected, almost every function value
+escapes (Closure Compiler output stores functions in properties); the lean one-block object is
+the floor there. `var h = function(){}` locals that are only called are not yet classed call-only
+(the analysis must first prove no call precedes the assignment): M3.

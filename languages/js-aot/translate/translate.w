@@ -49,6 +49,8 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
     @var_names = nil
     @translated = 0
     @hoisted = {}
+    @partial = false
+    @omit = {}
 
   # ---- program ----
 
@@ -66,12 +68,23 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
       i += 1
     return nil if @errors.size > 0 && !partial
     @translated = 0
+    @partial = partial
+    # which functions this program compiles (partial: the supported ones, up to limit;
+    # the rest would stay in tier 0 and are reached only through code descriptors)
+    @omit = {}
+    i = 0
+    n = 0
+    while i < fs.size
+      f = fs[i]
+      if partial && (f.unsupported != nil || (limit >= 0 && n >= limit && !f.script))
+        @omit[f.index] = true
+      else
+        n += 1
+      i += 1
     i = 0
     while i < fs.size
       f = fs[i]
-      if partial && (f.unsupported != nil || (limit >= 0 && @translated >= limit && !f.script))
-        @defs.push(stub(f))
-      else
+      if @omit[f.index] != true
         nerr = @errors.size
         nd = @defs.size
         tr_function(f)
@@ -96,7 +109,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
     while i < fs.size
       f = fs[i]
       flags = (f.strict ? 1 : 0) + (f.arrow ? 2 : 0) + ((f.arrow || f.script) ? 0 : 8)
-      out.push(ta_set("JSC_" + i.to_s, ta_send(ta_var("JS:Code"), "new", [ta_str(f.name), ta_int(f.nparams), ta_int(i), ta_int(flags)])))
+      out.push(ta_set("JSC_" + i.to_s, ta_send(ta_var("JS:Code"), "new", [ta_str(f.name), ta_int(f.nparams), ta_int(i), ta_int(flags)]))) if @omit[i] != true
       i += 1
     i = 0
     while i < @lit_shapes.size
@@ -126,7 +139,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
     fs = @an.funcs
     i = 0
     while i < fs.size
-      if fs[i].fclass == :escaping && !fs[i].script
+      if fs[i].fclass == :escaping && !fs[i].script && @omit[i] != true
         arms.push([ta_int(i), [ta_call("jsf_" + i.to_s, entry_args("f"))]])
       i += 1
     body = arms.size == 0 ? [ta_nil] : [ta_case(ta_var("i"), arms, [ta_nil])]
@@ -258,7 +271,16 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
 
   # The function object for jf, created in scope sc.
   -> closure(jf, sc)
-    ta_call("js_closure", [ta_var("JSC_" + jf.index.to_s), env_for(jf, sc)])
+    ta_call("js_closure", [code_ref(jf), env_for(jf, sc)])
+
+  # The JS:Code of jf: a global of this program, or (for a function it does not compile)
+  # the descriptor the host keeps.
+  -> code_ref(jf)
+    return ta_call("js_code_at", [ta_int(jf.index)]) if @omit[jf.index] == true
+    ta_var("JSC_" + jf.index.to_s)
+
+  -> compiled?(jf)
+    @omit[jf.index] != true
 
   # What jf's fe is when created (or called directly) at scope sc: the innermost
   # environment around its definition, reached from sc.
@@ -654,7 +676,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
     b = binding_of(e.str, sc)
     if b.kind == :global && @an.funcs[0].scope.names[e.str] == b && b.writes == 0
       return ta_nil if e.str == "undefined"
-      return ta_num(js_nan()) if e.str == "NaN"
+      return ta_num(~0.0 / ~0.0) if e.str == "NaN"
       return ta_num(~1.0 / ~0.0) if e.str == "Infinity"
     read_binding(b, sc)
 
@@ -819,6 +841,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
       b = binding_of(c.str, sc)
       jf = b.fnode
       if jf != nil && jf.fclass == :call_only && !b.global?
+        return with_temps(args, ta_call("js_call", [closure(jf, sc), ta_nil] + args[1])) if !compiled?(jf)
         return with_temps(args, ta_call("jsd_" + jf.index.to_s, [env_for(jf, sc), ta_nil] + args[1]))
       if b.kind == :self
         # recursion through a function expression's own name (from its own body)
@@ -830,11 +853,24 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
     if (c.kind == :function || c.kind == :arrow)
       jf = @an.fn_of(c)
       if jf != nil && jf.fclass == :iife
+        return with_temps(args, ta_call("js_call", [closure(jf, sc), ta_nil] + args[1])) if !compiled?(jf)
         return with_temps(args, ta_call("jsd_" + jf.index.to_s, [env_for(jf, sc), ta_nil] + args[1]))
     if c.kind == :member
+      # the callee is read before the arguments are evaluated
+      simple = args[0].size == 0 && args[1].all?(->(x) simple_arg?(x))
       if c.has?(F_COMPUTED)
-        return with_temps(args, ta_call("js_call_computed", [tr_expr(c.a, sc), tr_expr(c.b, sc)] + args[1]))
-      return with_temps(args, ta_call("js_call_method", [tr_expr(c.a, sc), ta_str(c.b.str), ta_int(site(1))] + args[1]))
+        return with_temps(args, ta_call("js_call_computed", [tr_expr(c.a, sc), tr_expr(c.b, sc)] + args[1])) if simple
+        ot = tmp()
+        ft = tmp()
+        pre = [ta_set(ot, tr_expr(c.a, sc)), ta_set(ft, ta_call("js_getv", [ta_var(ot), tr_expr(c.b, sc)]))]
+        args = call_args(e.list, sc)
+        return ta_seq(pre + args[0] + [ta_call("js_call", [ta_var(ft), ta_var(ot)] + args[1])])
+      return with_temps(args, ta_call("js_call_method", [tr_expr(c.a, sc), ta_str(c.b.str), ta_int(site(1))] + args[1])) if simple
+      ot = tmp()
+      ft = tmp()
+      pre = [ta_set(ot, tr_expr(c.a, sc)), ta_set(ft, ta_call("js_getp", [ta_var(ot), ta_str(c.b.str), ta_int(site(1))]))]
+      args = call_args(e.list, sc)
+      return ta_seq(pre + args[0] + [ta_call("js_call", [ta_var(ft), ta_var(ot)] + args[1])])
     with_temps(args, ta_call("js_call", [tr_expr(c, sc), ta_nil] + args[1]))
 
   # f(args) where f is expected to be jf's object: a direct call when its code matches,
@@ -856,6 +892,7 @@ JT_OPS = {"+" => "js_add", "-" => "js_sub", "*" => "js_mul", "/" => "js_div", "%
       i += 1
     direct = ta_call("jsd_" + jf.index.to_s, [ta_nil, ta_nil] + vals)
     generic = ta_call("js_call", [ta_var(ft), ta_nil] + vals)
+    return ta_seq(pre + [generic]) if !compiled?(jf)
     ta_seq(pre + [ta_if(ta_call("js_code_is?", [ta_var(ft), ta_var("JSC_" + jf.index.to_s)]), [direct], [generic])])
 
   -> simple_arg?(x)

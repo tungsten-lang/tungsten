@@ -174,3 +174,14 @@ JS_T0 = [clock_ms()]
 # Called by the entry of a function this program does not compile (partial builds).
 -> js_tier0_only(i)
   js_throw_type("function " + i.to_s + " is not compiled in this build")
+
+# The code descriptor of a function this program does not compile (partial builds; in a
+# unit the host hands these over).
+JS_CODE_AT = {}
+
+-> js_code_at(i)
+  c = JS_CODE_AT[i]
+  if c == nil
+    c = JS:Code.new("", 0, -1, 8)
+    JS_CODE_AT[i] = c
+  c

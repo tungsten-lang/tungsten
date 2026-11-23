@@ -35,6 +35,16 @@ check("decimal not Float", !vals[3].is_a?(Float))
 check("string is String", vals[4].is_a?(String))
 check("string not Symbol", !vals[4].is_a?(Symbol))
 
+# Long concatenated strings stay WRope until flattened; is_a? must recognize them.
+rope = "https://accounts.google.com/v3/signin/" + "identifier?hl=en&passive=true&" + "continue=https://www.google.com/&flowName=GlifWebSignIn"
+str_cls = String
+check("rope is String", rope.is_a?(String))
+check("rope is String (var)", rope.is_a?(str_cls))
+check("rope is String (name)", rope.is_a?("String"))
+check("rope not Symbol", !rope.is_a?(Symbol))
+check("rope not Int", !rope.is_a?(Int))
+check("rope not Hash", !rope.is_a?(Hash))
+
 check("symbol is Symbol", vals[5].is_a?(Symbol))
 check("symbol not String", !vals[5].is_a?(String))
 

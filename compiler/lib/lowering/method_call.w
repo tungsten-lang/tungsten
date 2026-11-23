@@ -2038,7 +2038,10 @@
     arg0 = node.args[0]
     if is_ast_node?(arg0) && ast_kind(arg0) == :class_ref && !(ctx[:locals] != nil && ctx[:locals][arg0.name] != nil)
       tname = arg0.name
-      if tname in ("Nil" "Boolean" "BigInt" "Int" "Integer" "String" "Symbol" "Float" "Hash") && !primitive_is_a_subclassed?(ctx[:mod], tname)
+      # String is excluded from the single-tag inline list because lazy
+      # WRope concatenations are strings with heap-generic tag rather than
+      # 0xFFF9; they route through direct w_value_is_a (memory(read)).
+      if tname in ("Nil" "Boolean" "BigInt" "Int" "Integer" "Symbol" "Float" "Hash") && !primitive_is_a_subclassed?(ctx[:mod], tname)
         if tname == "Nil"
           cmp = next_temp(wfn)
           emit_wire_icmp_i64(wfn, receiver_reg, "eq", "0", cmp)
@@ -2060,12 +2063,6 @@
           emit_wire_sub_i64(wfn, receiver_reg, "-1688849860263936", diff)
           cmp = next_temp(wfn)
           emit_wire_icmp_i64(wfn, diff, "ult", "562949953421312", cmp)
-          return typed_value(:i1, cmp)
-        if tname == "String"
-          masked = next_temp(wfn)
-          emit_wire_and_i64(wfn, receiver_reg, "-281474976710655", masked)
-          cmp = next_temp(wfn)
-          emit_wire_icmp_i64(wfn, masked, "eq", "-1970324836974592", cmp)
           return typed_value(:i1, cmp)
         if tname == "Symbol"
           masked = next_temp(wfn)

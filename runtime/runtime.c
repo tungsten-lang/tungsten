@@ -37860,7 +37860,7 @@ WValue w_value_is_a(WValue recv, WValue target) {
             if (tn[0] == 'N' && strcmp(tn, "Number") == 0) return W_TRUE;
             return W_FALSE;
         }
-        if (w_is_string(recv)) {
+        if (w_is_string(recv) || w_is_rope(recv)) {
             return w_bool(tn[0] == 'S' && strcmp(tn, "String") == 0);
         }
         const char *pn =
@@ -37874,12 +37874,23 @@ WValue w_value_is_a(WValue recv, WValue target) {
 
     /* String target: compare generic specializations by base name. Resolve
      * instances first — the hot overload-gate path — before probing primitive
-     * tags or constructing a primitive type name. */
-    if (w_is_stringy(target)) {
-        char sbuf[6];
+     * tags or constructing a primitive type name. Read ropes into a stack
+     * buffer (never w_rope_flatten) so w_value_is_a preserves memory(read). */
+    if (w_is_stringy(target) || w_is_rope(target)) {
+        char sbuf[128];
         const char *tn;
         size_t tn_len;
-        w_str_data(target, sbuf, &tn, &tn_len);
+        if (w_is_rope(target)) {
+            uint32_t rlen = w_rope_len(target);
+            if (rlen >= sizeof(sbuf)) return w_bool(0);
+            uint32_t pos = 0;
+            w_rope_write(target, sbuf, &pos);
+            sbuf[pos] = '\0';
+            tn = sbuf;
+            tn_len = pos;
+        } else {
+            w_str_data(target, sbuf, &tn, &tn_len);
+        }
         if (w_is_instance(recv)) {
             WClass *k = g_class_table[((WObject *)w_as_ptr(recv))->class_id];
             while (k) {
@@ -37893,7 +37904,7 @@ WValue w_value_is_a(WValue recv, WValue target) {
         const char *pn =
             w_is_int(recv) ? "Int" :
             w_is_double(recv) ? "Float" :
-            w_is_string(recv) ? "String" :
+            (w_is_string(recv) || w_is_rope(recv)) ? "String" :
             w_is_symbol(recv) ? "Symbol" :
             (w_is_array(recv) || w_is_body(recv) || w_is_wire_sequence(recv)) ? "Array" :
             w_is_hash(recv) ? "Hash" :

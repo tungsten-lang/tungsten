@@ -364,7 +364,7 @@ structure DirichletLOps :=
 -> DirichletLLaws (ops : DirichletLOps) : Prop :=
   (∀ chi s, 0 < complex.re s → ops.gamma_fn chi s ≠ complex.zero) ∧
   (∀ chi, dchar.is_primitive chi → ops.root_num chi ≠ complex.zero) ∧
-  (∀ chi s, dchar.is_primitive chi →
+  (∀ chi s, dchar.is_primitive chi → 0 < complex.re s → complex.re s < 1 →
     complex.mul (ops.gamma_fn chi s) (ops.l_fn chi s)
       = complex.mul (ops.root_num chi) (complex.mul (ops.gamma_fn (dchar.inv chi) (complex.sub complex.one s)) (ops.l_fn (dchar.inv chi) (complex.sub complex.one s)))) ∧
   (∀ chi psi s, dchar.valid chi → dchar.is_primitive psi → dchar.induced_by chi psi →
@@ -432,7 +432,7 @@ structure DirichletLOps :=
   have hc : completed_l_of ops chi s = complex.zero := hgam_iff.mpr hz
   have hlaws := laws
   unfold DirichletLLaws at hlaws
-  have hfe := hlaws.2.2.1 chi s hprim
+  have hfe := hlaws.2.2.1 chi s hprim hs0 hs1
   unfold completed_l_of at hc
   rw [hc] at hfe
   have h1s_pos : 0 < complex.re (complex.sub complex.one s) := by rw [one_sub_re]; linarith

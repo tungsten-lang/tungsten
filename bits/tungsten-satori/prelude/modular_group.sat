@@ -1,0 +1,251 @@
+-- Bundled Modular Group SL_2(ℤ), Upper Half-Plane Action, Automorphy Cocycle,
+-- and Weight-k Slash Operator (`tungsten/core/algebra/modular_forms.w`).
+--
+-- Uses Satori's sound HOL law-bearing `structure SL2Z` with dependent determinant
+-- invariant `(det_one : a * d - b * c = 1)` and verified `Group SL2Z` instance!
+
+import arith
+import complex
+
+structure SL2Z :=
+  (a b c d : ℤ)
+  (det_one : a * d - b * c = 1)
+
++ SL2Z.ext (g h : SL2Z) (ha : g.a = h.a) (hb : g.b = h.b) (hc : g.c = h.c) (hd : g.d = h.d) : g = h
+  ext
+  · exact ha
+  · exact hb
+  · exact hc
+  · exact hd
+
+-> sl2z.I : SL2Z := SL2Z.mk 1 0 0 1
+-> sl2z.S : SL2Z := SL2Z.mk 0 (-1) 1 0
+-> sl2z.T : SL2Z := SL2Z.mk 1 1 0 1
+-> sl2z.T_pow (k : ℤ) : SL2Z := SL2Z.mk 1 k 0 1
+
+-> sl2z.mul (g h : SL2Z) : SL2Z :=
+  SL2Z.mk (g.a * h.a + g.b * h.c) (g.a * h.b + g.b * h.d)
+          (g.c * h.a + g.d * h.c) (g.c * h.b + g.d * h.d)
+
+-> sl2z.inv (g : SL2Z) : SL2Z := SL2Z.mk g.d (-g.b) (-g.c) g.a
+
++ sl2z.T_pow.valid (k : ℤ) : SL2Z.Valid (sl2z.T_pow k)
+  unfold sl2z.T_pow SL2Z.Valid; simp
+
++ sl2z.mul.valid (g h : SL2Z) : SL2Z.Valid (sl2z.mul g h)
+  have hg := g.det_one; have hh := h.det_one
+  unfold sl2z.mul SL2Z.Valid; simp
+  linear_combination (g.a * g.d - g.b * g.c) * hh + hg
+
++ sl2z.inv.valid (g : SL2Z) : SL2Z.Valid (sl2z.inv g)
+  have hg := g.det_one
+  unfold sl2z.inv SL2Z.Valid; simp
+  linear_combination hg
+
+@[auto] + sl2z.mul_assoc (g1 g2 g3 : SL2Z) : sl2z.mul (sl2z.mul g1 g2) g3 = sl2z.mul g1 (sl2z.mul g2 g3)
+  ext <;> (unfold sl2z.mul; simp; ring)
+
+@[auto] + sl2z.one_mul (g : SL2Z) : sl2z.mul sl2z.I g = g
+  ext <;> (unfold sl2z.mul sl2z.I; simp)
+
++ sl2z.mul_one (g : SL2Z) : sl2z.mul g sl2z.I = g
+  ext <;> (unfold sl2z.mul sl2z.I; simp)
+
+@[auto] + sl2z.mul_left_inv (g : SL2Z) : sl2z.mul (sl2z.inv g) g = sl2z.I
+  have hg := g.det_one
+  apply SL2Z.ext
+  · unfold sl2z.mul sl2z.inv sl2z.I; simp; linear_combination hg
+  · unfold sl2z.mul sl2z.inv sl2z.I; simp; ring
+  · unfold sl2z.mul sl2z.inv sl2z.I; simp; ring
+  · unfold sl2z.mul sl2z.inv sl2z.I; simp; linear_combination hg
+
++ sl2z.mul_right_inv (g : SL2Z) : sl2z.mul g (sl2z.inv g) = sl2z.I
+  have hg := g.det_one
+  apply SL2Z.ext
+  · unfold sl2z.mul sl2z.inv sl2z.I; simp; linear_combination hg
+  · unfold sl2z.mul sl2z.inv sl2z.I; simp; ring
+  · unfold sl2z.mul sl2z.inv sl2z.I; simp; ring
+  · unfold sl2z.mul sl2z.inv sl2z.I; simp; linear_combination hg
+
+instance sl2z_one : One SL2Z := One.mk sl2z.I
+instance sl2z_mul_inst : Mul SL2Z := Mul.mk sl2z.mul
+instance sl2z_monoid : Monoid SL2Z :=
+  Monoid.mk sl2z.I sl2z.mul
+  proof
+    unfold Monoid.Valid sl2z_monoid
+    simp
+    exact ⟨by intro x y z; ext <;> (unfold sl2z.mul; simp; ring), by intro x; ext <;> (unfold sl2z.mul sl2z.I; simp), by intro x; ext <;> (unfold sl2z.mul sl2z.I; simp)⟩
+
+-- ---- Integer Bézout GCD & Coprime Matrix Completion --------------------------------
+
++ int.bezout_gcd (a b : ℤ) :
+    ∃ g u v : ℤ, 0 ≤ g ∧ (∃ ka : ℤ, a = g * ka) ∧ (∃ kb : ℤ, b = g * kb) ∧ u * a + v * b = g
+  have hnat : ∀ N : ℕ, ∀ x y : ℕ, y ≤ N →
+      ∃ (g : ℕ) (u v : ℤ), (∃ kx : ℕ, x = g * kx) ∧ (∃ ky : ℕ, y = g * ky) ∧ u * (x : ℤ) + v * (y : ℤ) = (g : ℤ)
+    intro N; induction N with x y hy M ihM x y hy
+    · have hy0 : y = 0 := by omega
+      use x, 1, 0
+      exact ⟨⟨1, by ring⟩, ⟨0, by rw [hy0]; ring⟩, by rw [hy0, cast_zero.int]; ring⟩
+    · rw [succ_eq_add_one.nat] at hy
+      by_cases hy0 : y = 0
+      · use x, 1, 0
+        exact ⟨⟨1, by ring⟩, ⟨0, by rw [hy0]; ring⟩, by rw [hy0, cast_zero.int]; ring⟩
+      · have hrem_lt := mod_lt.nat x y (by omega)
+        have hdm := div_add_mod.nat x y
+        obtain ⟨g, u1, v1, ⟨ky, hky⟩, ⟨kr, hkr⟩, hbez⟩ := ihM y (x % y) (by omega)
+        use g, v1, u1 - v1 * ((x / y : ℕ) : ℤ)
+        constructor
+        · use ky * (x / y) + kr
+          set q := x / y with hq_def
+          have h1 : y * q + x % y = x := hdm
+          rw [← h1, hkr, hky]; ring
+        · constructor; exact ⟨ky, hky⟩
+          have hcast : ((y * (x / y) + x % y : ℕ) : ℤ) = (x : ℤ) := by rw [hdm]
+          rw [cast_add.int, cast_mul.int] at hcast
+          linear_combination hbez - v1 * hcast
+  set an := nat_of_int (abs a) with han_def
+  set bn := nat_of_int (abs b) with hbn_def
+  have han : (an : ℤ) = abs a := by rw [han_def]; exact int_of_nat_of_int (abs a) (abs_nonneg.int a)
+  have hbn : (bn : ℤ) = abs b := by rw [hbn_def]; exact int_of_nat_of_int (abs b) (abs_nonneg.int b)
+  obtain ⟨g, u0, v0, ⟨ka, hka⟩, ⟨kb, hkb⟩, hbez⟩ := hnat bn an bn (by omega)
+  have hsign : ∀ t : ℤ, ∃ s : ℤ, s * t = abs t ∧ s * abs t = t
+    intro t; obtain ⟨e, _⟩ | ⟨e, _⟩ := abs_cases.int t
+    · exact ⟨1, by rw [e]; ring, by rw [e]; ring⟩
+    · exact ⟨-1, by rw [e]; ring, by rw [e]; ring⟩
+  obtain ⟨sa, hsa1, hsa2⟩ := hsign a
+  obtain ⟨sb, hsb1, hsb2⟩ := hsign b
+  use (g : ℤ), u0 * sa, v0 * sb
+  constructor; exact (cast_le.int 0 g).mpr (by omega)
+  constructor
+  · use sa * (ka : ℤ); have h1 : (an : ℤ) = (g : ℤ) * (ka : ℤ) := by rw [hka, cast_mul.int]
+    rw [← hsa2, ← han, h1]; ring
+  · constructor
+    · use sb * (kb : ℤ); have h1 : (bn : ℤ) = (g : ℤ) * (kb : ℤ) := by rw [hkb, cast_mul.int]
+      rw [← hsb2, ← hbn, h1]; ring
+    · rw [han, hbn] at hbez; linear_combination hbez + u0 * hsa1 + v0 * hsb1
+
+-- ---- Upper Half-Plane ℍ Action & Automorphy Cocycle --------------------------------
+
+-> c_of_int (k : ℤ) : ℂ := complex.of_real (k : ℝ)
+
++ c_of_int.add (x y : ℤ) : c_of_int (x + y) = complex.add (c_of_int x) (c_of_int y)
+  unfold c_of_int; rw [int_cast_add.real, complex.of_real_add]
+
++ c_of_int.mul (x y : ℤ) : c_of_int (x * y) = complex.mul (c_of_int x) (c_of_int y)
+  unfold c_of_int; rw [int_cast_mul.real, complex.of_real_mul]
+
++ c_of_int.one  : c_of_int 1 = complex.one  := by unfold c_of_int; exact complex.of_real_one
++ c_of_int.zero : c_of_int 0 = complex.zero := by unfold c_of_int; exact complex.of_real_zero
+
+-> uhp.j      (g : SL2Z) (z : ℂ) : ℂ := complex.add (complex.mul (c_of_int g.c) z) (c_of_int g.d)
+-> uhp.num    (g : SL2Z) (z : ℂ) : ℂ := complex.add (complex.mul (c_of_int g.a) z) (c_of_int g.b)
+-> uhp.mobius (g : SL2Z) (z : ℂ) : ℂ := complex.div (uhp.num g z) (uhp.j g z)
+
++ uhp.lin_ne_zero (c d : ℤ) (hcd : ¬ (c = 0 ∧ d = 0)) (z : ℂ) (hz : 0 < complex.im z) :
+    complex.add (complex.mul (c_of_int c) z) (c_of_int d) ≠ complex.zero
+  intro h0
+  have hre : complex.re (complex.add (complex.mul (c_of_int c) z) (c_of_int d)) = complex.re complex.zero := by rw [h0]
+  have him : complex.im (complex.add (complex.mul (c_of_int c) z) (c_of_int d)) = complex.im complex.zero := by rw [h0]
+  unfold c_of_int at hre him; simp at hre him
+  by_cases hc : c = 0
+  · have hd : d ≠ 0 := by intro hd0; exact hcd ⟨hc, hd0⟩
+    rw [hc, int_cast_zero.real] at hre
+    have hd_r : (d : ℝ) = 0 := by linarith
+    have hd_z : d = 0 := (int_cast_inj.real d 0).mp (by rw [int_cast_zero.real]; exact hd_r)
+    exact hd hd_z
+  · have hc_ne : (c : ℝ) ≠ 0
+      intro hcz
+      exact hc ((int_cast_inj.real c 0).mp (by rw [int_cast_zero.real]; exact hcz))
+    by_cases hcp : 0 < (c : ℝ)
+    · have hp := mul_pos.real (c : ℝ) (complex.im z) hcp hz; linarith
+    · have hp := mul_pos.real (-(c : ℝ)) (complex.im z) (by linarith) hz; linarith
+
++ uhp.j_ne_zero (g : SL2Z) (z : ℂ) (hz : 0 < complex.im z) : uhp.j g z ≠ complex.zero
+  unfold uhp.j
+  have hne : ¬ (g.c = 0 ∧ g.d = 0)
+    intro h; have hd := g.det_one; rw [h.1, h.2] at hd; omega
+  exact uhp.lin_ne_zero g.c g.d hne z hz
+
++ uhp.im_mobius (g : SL2Z) (z : ℂ) (hz : 0 < complex.im z) :
+    complex.im (uhp.mobius g z) = complex.im z / complex.norm_sq (uhp.j g z) ∧
+    0 < complex.im (uhp.mobius g z)
+  have hj_ne := uhp.j_ne_zero g z hz
+  have hns_pos : 0 < complex.norm_sq (uhp.j g z) := complex.norm_sq_pos (uhp.j g z) hj_ne
+  have hdet_r : (g.a : ℝ) * (g.d : ℝ) - (g.b : ℝ) * (g.c : ℝ) = 1
+    have h1 : ((g.a * g.d - g.b * g.c : ℤ) : ℝ) = ((1 : ℤ) : ℝ) := by rw [g.det_one]
+    rw [int_cast_sub.real, int_cast_mul.real, int_cast_mul.real, int_cast_one.real] at h1; exact h1
+  have him_eq : complex.im (uhp.mobius g z) = complex.im z / complex.norm_sq (uhp.j g z)
+    have hmul_j : complex.mul (uhp.mobius g z) (uhp.j g z) = uhp.num g z
+      unfold uhp.mobius complex.div
+      rw [complex.mul_assoc, complex.inv_mul_cancel (uhp.j g z) hj_ne, complex.mul_one]
+    have hmul_D : complex.mul (uhp.mobius g z) (complex.of_real (complex.norm_sq (uhp.j g z))) =
+        complex.mul (uhp.num g z) (complex.conj (uhp.j g z))
+      rw [← complex.mul_conj (uhp.j g z), ← complex.mul_assoc, hmul_j]
+    have him_D : complex.im (complex.mul (uhp.mobius g z) (complex.of_real (complex.norm_sq (uhp.j g z)))) =
+        complex.im (complex.mul (uhp.num g z) (complex.conj (uhp.j g z))) := by rw [hmul_D]
+    have hL : complex.im (complex.mul (uhp.mobius g z) (complex.of_real (complex.norm_sq (uhp.j g z)))) =
+        complex.im (uhp.mobius g z) * complex.norm_sq (uhp.j g z) := by simp
+    have hR : complex.im (complex.mul (uhp.num g z) (complex.conj (uhp.j g z))) = complex.im z
+      unfold uhp.num uhp.j c_of_int; simp; linear_combination complex.im z * hdet_r
+    have heq_mul : complex.im (uhp.mobius g z) * complex.norm_sq (uhp.j g z) = complex.im z := by linarith
+    have hcan := mul_inv_cancel.real (complex.norm_sq (uhp.j g z)) (by linarith)
+    rw [div_def.real (complex.im z) (complex.norm_sq (uhp.j g z)), ← heq_mul]
+    linear_combination -(complex.im (uhp.mobius g z)) * hcan
+  constructor; exact him_eq
+  rw [him_eq, div_def.real (complex.im z) (complex.norm_sq (uhp.j g z))]
+  have hinv_pos : 0 < 1 / complex.norm_sq (uhp.j g z)
+    by_contra hle
+    have hc := mul_inv_cancel.real (complex.norm_sq (uhp.j g z)) (by linarith)
+    have h0 := mul_le_mul_of_nonneg_left.real (1 / complex.norm_sq (uhp.j g z)) 0 (complex.norm_sq (uhp.j g z)) (by linarith) (by linarith)
+    linarith
+  exact mul_pos.real (complex.im z) (1 / complex.norm_sq (uhp.j g z)) hz hinv_pos
+
++ uhp.automorphy_cocycle (g1 g2 : SL2Z) (z : ℂ) (hz : 0 < complex.im z) :
+    uhp.j (sl2z.mul g1 g2) z = complex.mul (uhp.j g1 (uhp.mobius g2 z)) (uhp.j g2 z)
+  have hj2 := uhp.j_ne_zero g2 z hz
+  unfold uhp.j uhp.mobius uhp.num sl2z.mul complex.div; simp
+  rw [c_of_int.add, c_of_int.add, c_of_int.mul, c_of_int.mul, c_of_int.mul, c_of_int.mul]
+  have hcan : complex.mul (complex.mul (complex.add (complex.mul (c_of_int g2.a) z) (c_of_int g2.b)) (complex.inv (uhp.j g2 z))) (uhp.j g2 z) =
+      complex.add (complex.mul (c_of_int g2.a) z) (c_of_int g2.b)
+    rw [complex.mul_assoc, complex.inv_mul_cancel (uhp.j g2 z) hj2, complex.mul_one]
+  have hre : complex.mul (complex.add (complex.mul (c_of_int g1.c) (complex.mul (complex.add (complex.mul (c_of_int g2.a) z) (c_of_int g2.b)) (complex.inv (uhp.j g2 z)))) (c_of_int g1.d)) (uhp.j g2 z) =
+      complex.add (complex.mul (c_of_int g1.c) (complex.mul (complex.mul (complex.add (complex.mul (c_of_int g2.a) z) (c_of_int g2.b)) (complex.inv (uhp.j g2 z))) (uhp.j g2 z))) (complex.mul (c_of_int g1.d) (uhp.j g2 z))
+    apply complex.ext <;> simp <;> ring
+  have hgoal : complex.mul (complex.add (complex.mul (c_of_int g1.c) (complex.mul (complex.add (complex.mul (c_of_int g2.a) z) (c_of_int g2.b)) (complex.inv (complex.add (complex.mul (c_of_int g2.c) z) (c_of_int g2.d))))) (c_of_int g1.d)) (complex.add (complex.mul (c_of_int g2.c) z) (c_of_int g2.d)) =
+      complex.add (complex.mul (c_of_int g1.c) (complex.add (complex.mul (c_of_int g2.a) z) (c_of_int g2.b))) (complex.mul (c_of_int g1.d) (complex.add (complex.mul (c_of_int g2.c) z) (c_of_int g2.d)))
+    unfold uhp.j at hre hcan; rw [hre, hcan]
+  rw [hgoal]; apply complex.ext <;> simp <;> ring
+
++ uhp.mobius_mul (g1 g2 : SL2Z) (z : ℂ) (hz : 0 < complex.im z) :
+    uhp.mobius (sl2z.mul g1 g2) z = uhp.mobius g1 (uhp.mobius g2 z)
+  have hj2 := uhp.j_ne_zero g2 z hz
+  have hz2 : 0 < complex.im (uhp.mobius g2 z) := (uhp.im_mobius g2 z hz).2
+  have hj1 := uhp.j_ne_zero g1 (uhp.mobius g2 z) hz2
+  have hj12 := uhp.j_ne_zero (sl2z.mul g1 g2) z hz
+  have hnum : uhp.num (sl2z.mul g1 g2) z = complex.mul (uhp.num g1 (uhp.mobius g2 z)) (uhp.j g2 z)
+    unfold uhp.num uhp.mobius sl2z.mul complex.div; simp
+    rw [c_of_int.add, c_of_int.add, c_of_int.mul, c_of_int.mul, c_of_int.mul, c_of_int.mul]
+    have hcan : complex.mul (complex.mul (complex.add (complex.mul (c_of_int g2.a) z) (c_of_int g2.b)) (complex.inv (uhp.j g2 z))) (uhp.j g2 z) =
+        complex.add (complex.mul (c_of_int g2.a) z) (c_of_int g2.b)
+      rw [complex.mul_assoc, complex.inv_mul_cancel (uhp.j g2 z) hj2, complex.mul_one]
+    have hre : complex.mul (complex.add (complex.mul (c_of_int g1.a) (complex.mul (complex.add (complex.mul (c_of_int g2.a) z) (c_of_int g2.b)) (complex.inv (uhp.j g2 z)))) (c_of_int g1.b)) (uhp.j g2 z) =
+        complex.add (complex.mul (c_of_int g1.a) (complex.mul (complex.mul (complex.add (complex.mul (c_of_int g2.a) z) (c_of_int g2.b)) (complex.inv (uhp.j g2 z))) (uhp.j g2 z))) (complex.mul (c_of_int g1.b) (uhp.j g2 z))
+      apply complex.ext <;> simp <;> ring
+    rw [hre, hcan]; unfold uhp.j; apply complex.ext <;> simp <;> ring
+  have hcoc := uhp.automorphy_cocycle g1 g2 z hz
+  have hmul_eq : complex.mul (uhp.mobius (sl2z.mul g1 g2) z) (uhp.j (sl2z.mul g1 g2) z) =
+      complex.mul (uhp.mobius g1 (uhp.mobius g2 z)) (uhp.j (sl2z.mul g1 g2) z)
+    have hA : complex.mul (uhp.mobius (sl2z.mul g1 g2) z) (uhp.j (sl2z.mul g1 g2) z) = uhp.num (sl2z.mul g1 g2) z
+      unfold uhp.mobius complex.div
+      rw [complex.mul_assoc, complex.inv_mul_cancel (uhp.j (sl2z.mul g1 g2) z) hj12, complex.mul_one]
+    have hB : complex.mul (uhp.mobius g1 (uhp.mobius g2 z)) (uhp.j g1 (uhp.mobius g2 z)) = uhp.num g1 (uhp.mobius g2 z)
+      have hgen : ∀ (w : ℂ), uhp.j g1 w ≠ complex.zero → complex.mul (uhp.mobius g1 w) (uhp.j g1 w) = uhp.num g1 w
+        intro w hw; unfold uhp.mobius complex.div
+        rw [complex.mul_assoc, complex.inv_mul_cancel (uhp.j g1 w) hw, complex.mul_one]
+      exact hgen (uhp.mobius g2 z) hj1
+    rw [hA, hnum, hcoc, ← complex.mul_assoc, hB]
+  have hfin : complex.mul (complex.mul (uhp.mobius (sl2z.mul g1 g2) z) (uhp.j (sl2z.mul g1 g2) z)) (complex.inv (uhp.j (sl2z.mul g1 g2) z)) =
+      complex.mul (complex.mul (uhp.mobius g1 (uhp.mobius g2 z)) (uhp.j (sl2z.mul g1 g2) z)) (complex.inv (uhp.j (sl2z.mul g1 g2) z))
+    rw [hmul_eq]
+  rw [complex.mul_assoc, complex.mul_assoc, complex.mul_inv_cancel (uhp.j (sl2z.mul g1 g2) z) hj12, complex.mul_one, complex.mul_one] at hfin
+  exact hfin

@@ -138,7 +138,7 @@ structure complex := (re : ℝ) (im : ℝ)
 + complex.right_distrib (a b c : ℂ) : complex.mul (complex.add a b) c = complex.add (complex.mul a c) (complex.mul b c)
   apply complex.ext <;> simp <;> ring
 
-+ complex.one_ne_zero : complex.one ≠ complex.zero
+@[auto] + complex.one_ne_zero : complex.one ≠ complex.zero
   intro h
   have hr : complex.re complex.one = complex.re complex.zero := by rw [h]
   simp at hr
@@ -259,7 +259,7 @@ structure complex := (re : ℝ) (im : ℝ)
   rw [complex.mul_comm]
   exact complex.mul_inv_cancel z hz
 
-+ complex.mul_ne_zero (z w : ℂ) (hz : z ≠ complex.zero) (hw : w ≠ complex.zero) : complex.mul z w ≠ complex.zero
+@[auto] + complex.mul_ne_zero (z w : ℂ) (hz : z ≠ complex.zero) (hw : w ≠ complex.zero) : complex.mul z w ≠ complex.zero
   intro h0
   have hn0 : complex.norm_sq (complex.mul z w) = 0 := (complex.norm_sq_eq_zero (complex.mul z w)).mpr h0
   rw [complex.norm_sq_mul] at hn0
@@ -320,13 +320,16 @@ structure complex := (re : ℝ) (im : ℝ)
 
 -- ---- algebraic typeclass instances for ℂ -------------------------------------------
 
-instance complex_zero   : Zero   ℂ := Zero.mk   complex.zero
-instance complex_one    : One    ℂ := One.mk    complex.one
-instance complex_add    : Add    ℂ := Add.mk    complex.add
-instance complex_sub    : Sub    ℂ := Sub.mk    complex.sub
-instance complex_neg    : Neg    ℂ := Neg.mk    complex.neg
-instance complex_mul    : Mul    ℂ := Mul.mk    complex.mul
-instance complex_div    : Div    ℂ := Div.mk    complex.div
-instance complex_ring   : Ring   ℂ := Ring.mk   complex.zero complex.one complex.add complex.neg complex.mul
-instance complex_field  : Field  ℂ := Field.mk  complex.zero complex.one complex.add complex.neg complex.mul complex.inv
-instance complex_normed : Normed ℂ := Normed.mk complex.abs
+instance complex_zero      : Zero           ℂ := Zero.mk   complex.zero
+instance complex_one       : One            ℂ := One.mk    complex.one
+instance complex_add       : Add            ℂ := Add.mk    complex.add
+instance complex_sub       : Sub            ℂ := Sub.mk    complex.sub
+instance complex_neg       : Neg            ℂ := Neg.mk    complex.neg
+instance complex_mul       : Mul            ℂ := Mul.mk    complex.mul
+instance complex_div       : Div            ℂ := Div.mk    complex.div
+instance complex_add_group : AddCommGroup   ℂ := AddCommGroup.mk complex.zero complex.add complex.neg
+instance complex_ring      : Ring           ℂ := Ring.mk   complex.zero complex.one complex.add complex.neg complex.mul
+instance complex_comm_ring : CommRing       ℂ := CommRing.mk complex.zero complex.one complex.add complex.neg complex.mul
+instance complex_domain    : IntegralDomain ℂ := IntegralDomain.mk complex.zero complex.one complex.add complex.neg complex.mul
+instance complex_field     : Field          ℂ := Field.mk  complex.zero complex.one complex.add complex.neg complex.mul complex.inv
+instance complex_normed    : Normed         ℂ := Normed.mk complex.abs

@@ -76,6 +76,22 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
     return 0
   if args[0] == "check-transfer" || args[0] == "emit-transfer"
     return satori_transfer_main(args)
+  if args[0] == "--build-satc"
+    if args.size != 4
+      return 1
+    root = satori_root
+    s = Session.new(root)
+    s.suppress_stdout = true
+    s.load_prelude
+    s.prelude_mode = args[3].slice(0, 1) == "P"
+    s.quiet = args[3].slice(1, 1) == "Q"
+    s.current_dir = args[1]
+    s.in_subbuild = true
+    begin
+      s.run_import(args[2])
+    rescue _e
+      return 1
+    return s.failures == 0 ? 0 : 1
   if args[0] == "find"
     return satori_find(satori_root, args)
   stats = false

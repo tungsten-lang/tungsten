@@ -6,13 +6,23 @@ SATC_TOOLCHAIN_CACHE = {}
 SATC_LIB_FILES = [
   "term.w", "printer.w", "checkers.w", "eval.w", "kernel.w", "derived.w",
   "lexer.w", "parser.w", "elab.w", "simp.w", "arith.w", "satbridge.w",
-  "polynomial.w", "tactics.w", "pattern.w", "session.w", "satori.w"
+  "transfer.w", "polynomial.w", "polynomial_sign.w", "tactics.w", "pattern.w",
+  "session.w", "satori.w", "find.w"
 ]
 
 -> satori_cache_dir
   env = Env.get("SATORI_CACHE_DIR")
   if env != nil && env != ""
     return env
+  cache = Env.get("TUNGSTEN_CACHE_DIR")
+  if cache != nil && cache != ""
+    return cache + "/satori"
+  store = Env.get("TUNGSTEN_BUILD_STORE")
+  if store != nil && store != ""
+    return store + "/satori"
+  tungsten_home = Env.get("TUNGSTEN_HOME")
+  if tungsten_home != nil && tungsten_home != ""
+    return tungsten_home + "/cache/satori"
   home = Env.get("HOME")
   if home == nil || home == ""
     return "/tmp/.tungsten/cache/satori"
@@ -344,6 +354,16 @@ SATC_LIB_FILES = [
       @op_sb.append(satc_esc(f))
     @op_sb.append("\n")
 
+  -> add_laws(sname, laws)
+    @op_sb.append("O_LAWS\t")
+    @op_sb.append(satc_esc(sname))
+    @op_sb.append("\t")
+    @op_sb.append(laws.size.to_s)
+    laws.each -> (l)
+      @op_sb.append("\t")
+      @op_sb.append(satc_esc(l))
+    @op_sb.append("\n")
+
   -> add_class(cname, params, fields)
     @op_sb.append("O_CLASS\t")
     @op_sb.append(satc_esc(cname))
@@ -526,7 +546,7 @@ SATC_LIB_FILES = [
   ro :k, :d, :elab, :theorems, :simp_rules, :simp_by_head, :simp_general, :messages, :stats, :root, :failures, :auto_rules, :auto_rule_version
   ro :premise_retry, :split_premises
   ro :auto_default_names
-  rw :prelude_mode, :quiet, :only, :no_cache, :keep_messages, :auto_rule_index, :auto_default_index
+  rw :prelude_mode, :quiet, :only, :no_cache, :keep_messages, :auto_rule_index, :auto_default_index, :suppress_stdout, :current_dir, :in_subbuild
 
   -> new(@root)
     @k = KKernel.new
@@ -556,6 +576,9 @@ SATC_LIB_FILES = [
     @messages = []
     @keep_messages = false
     @prelude_mode = false
+    @loading_prelude = false
+    @suppress_stdout = false
+    @in_subbuild = Env.get("SATORI_IN_SUBBUILD") == "1"
     @quiet = false
     @no_cache = Env.get("SATORI_NO_CACHE") == "1"
     @stats = {"theorems" => 0, "defs" => 0, "axioms" => 0, "lines" => 0}
@@ -581,7 +604,8 @@ SATC_LIB_FILES = [
     if @keep_messages
       @messages.push(s)
     if !@quiet
-      << s
+      if !@suppress_stdout
+        << s
       if @rec != nil
         @rec.add_say(s)
 
@@ -760,9 +784,79 @@ SATC_LIB_FILES = [
 
   -> load_prelude
     old = @prelude_mode
+    old_lp = @loading_prelude
     @prelude_mode = true
-    run_import("prelude")
-    @prelude_mode = old
+    @loading_prelude = true
+    begin
+      run_import("prelude")
+    ensure
+      @loading_prelude = old_lp
+      @prelude_mode = old
+
+  -> scan_import_names(src)
+    out = []
+    src.split("\n").each -> (line)
+      s = line.strip
+      if s.starts_with?("import ")
+        rest = s.slice(7, s.size - 7).strip
+        tok = rest.split(" ")[0].split("\t")[0]
+        if tok != nil && tok != "" && !tok.starts_with?("--")
+          out.push(tok)
+    out
+
+  -> collect_uncached_imports(name, cur_dir, prel, quiet, visited, plan)
+    pdir = prelude_dir
+    c1 = pdir + "/" + name.gsub(".", "/") + ".sat"
+    found = nil
+    if File.exist?(c1)
+      found = c1
+    else
+      c2 = cur_dir + "/" + name + ".sat"
+      if File.exist?(c2)
+        found = c2
+    if found == nil || visited.has_key?(found)
+      return
+    visited[found] = true
+    inprel = prel || found.starts_with?(pdir)
+    q = quiet || inprel
+    src = File.read(found)
+    fdir = path_dirname(found)
+    scan_import_names(src).each -> (imp)
+      if !@loaded.has_key?(imp)
+        collect_uncached_imports(imp, fdir, inprel, q, visited, plan)
+    src_sig = Digest.sha256(src)
+    mode_tag = (inprel ? "P" : "U") + (q ? "Q" : "V")
+    ckey = Digest.sha256(satc_toolchain_sig(@root) + ":" + mode_tag + ":" + found + ":" + src_sig)
+    satc_path = satc_mod_dir + "/mod-" + ckey + ".satc"
+    if !File.exist?(satc_path)
+      plan.push([fdir, name, mode_tag, satc_path])
+
+  -> spawn_satc_builder(cur_dir, mod_name, mode_tag)
+    bin = Env.get("SATORI_BIN")
+    if bin == nil || bin == ""
+      exe = System.executable_path
+      if exe != nil && exe != "" && !exe.ends_with?("/tungsten") && !exe.ends_with?("/tungsten-compiler")
+        bin = exe
+    if bin != nil && bin != "" && File.exist?(bin)
+      p = Process.spawn(["/bin/sh", "-c", "SATORI_IN_SUBBUILD=1 SATORI_ROOT=\"$1\" \"$0\" --build-satc \"$2\" \"$3\" \"$4\"", bin, @root, cur_dir, mod_name, mode_tag])
+      p.wait
+      return
+    tbin = @root + "/bin/tungsten"
+    sw = @root + "/bits/tungsten-satori/bin/satori.w"
+    if File.exist?(tbin) && File.exist?(sw)
+      p = Process.spawn(["/bin/sh", "-c", "SATORI_IN_SUBBUILD=1 SATORI_ROOT=\"$1\" \"$0\" \"$2\" -- --build-satc \"$3\" \"$4\" \"$5\"", tbin, @root, sw, cur_dir, mod_name, mode_tag])
+      p.wait
+
+  -> prewarm_uncached_imports(name, cur_dir, prel, quiet)
+    visited = {}
+    plan = []
+    collect_uncached_imports(name, cur_dir, prel, quiet, visited, plan)
+    plan.each -> (item)
+      if !File.exist?(item[3])
+        spawn_satc_builder(item[0], item[1], item[2])
+        if !File.exist?(item[3])
+          return false
+    true
 
   -> run_file(path)
     src = File.read(path)
@@ -799,6 +893,8 @@ SATC_LIB_FILES = [
       mode_tag = (@prelude_mode ? "P" : "U") + (@quiet ? "Q" : "V")
       ckey = Digest.sha256(satc_toolchain_sig(@root) + ":" + mode_tag + ":" + found + ":" + src_sig)
       satc_path = satc_mod_dir + "/mod-" + ckey + ".satc"
+      if !File.exist?(satc_path) && !@loading_prelude && !@in_subbuild
+        prewarm_uncached_imports(name, path_dirname(found), @prelude_mode, @quiet)
       if File.exist?(satc_path)
         old_dir = @current_dir
         @current_dir = path_dirname(found)
@@ -1010,6 +1106,15 @@ SATC_LIB_FILES = [
               flist[j] = flds[4 + j]
               j += 1
             @elab.register_fields(snm, cnm, flist)
+          elsif tag == "O_LAWS"
+            snm = flds[1]
+            nl = flds[2].to_i
+            llist = Array.new(nl)
+            j = 0
+            while j < nl
+              llist[j] = flds[3 + j]
+              j += 1
+            @elab.register_laws(snm, llist)
           elsif tag == "O_CLASS"
             cnm = flds[1]
             np = flds[2].to_i
@@ -1122,7 +1227,7 @@ SATC_LIB_FILES = [
     when :theorem
       exec_theorem(c)
     when :hash
-      if @rec != nil
+      if @rec != nil && c.name != "axioms"
         @rec.abort!
       exec_hash(c)
     when :attr
@@ -1138,6 +1243,7 @@ SATC_LIB_FILES = [
     @elab.reset
     params = c.params
     @elab.set_pending(c.name, params)
+    @elab.set_type_params(params)
     ctors = []
     c.ctors.each -> (ct)
       args = []
@@ -1145,6 +1251,7 @@ SATC_LIB_FILES = [
         args.push(@elab.elab_type(a[1]))
       ctors.push([ct[0], args])
     @elab.set_pending(nil, [])
+    @elab.set_type_params([])
     @k.inductive(c.name, params, ctors)
     if @rec != nil
       @rec.add_inductive(c.name, params, ctors)
@@ -1158,14 +1265,32 @@ SATC_LIB_FILES = [
       say("✓ inductive " + c.name)
 
   -> exec_structure(c)
-    exec_inductive(c)
     ct = c.ctors[0]
-    fields = []
+    data_fields = []
+    law_fields = []
+    @elab.reset
+    @elab.set_pending(c.name, c.params)
+    @elab.set_type_params(c.params)
     ct[1].each -> (f)
+      if @elab.type_expr?(f[1])
+        data_fields.push(f)
+      else
+        law_fields.push(f)
+    @elab.set_pending(nil, [])
+    @elab.set_type_params([])
+    c_ind = Cmd.new(:inductive)
+    c_ind.name = c.name
+    c_ind.params = c.params
+    c_ind.ctors = [[ct[0], data_fields]]
+    c_ind.line = c.line
+    exec_inductive(c_ind)
+    fields = []
+    data_fields.each -> (f)
       fields.push(f[0])
     info = @k.inductives[c.name]
     self_ty = ty_con(c.name, c.params.map ->(p) ty_var(p))
     arg_tys = info.ctors[0][1]
+    mk_rules = []
     i = 0
     while i < fields.size
       vs = []
@@ -1190,20 +1315,137 @@ SATC_LIB_FILES = [
       th = @d.gen_all(xs, eq)
       add_theorem(pname + ".mk", th)
       add_simp_thm(pname, th)
+      mk_rules.push(make_rule(@d, th, pname + ".mk"))
       i += 1
     @elab.register_fields(c.name, ct[0], fields)
     if @rec != nil
       @rec.add_fields(c.name, ct[0], fields)
+    if law_fields.size > 0
+      self_v = mk_var("self", self_ty)
+      projs = []
+      i = 0
+      while i < fields.size
+        projs.push([fields[i], mk_app(mk_const_raw(c.name + "." + fields[i], ty_fun(self_ty, arg_tys[i])), self_v)])
+        i += 1
+      law_names = []
+      law_tms = []
+      law_fields.each -> (lf)
+        law_names.push(lf[0])
+        @elab.reset
+        @elab.set_type_params(c.params)
+        @elab.push_local("self", self_v)
+        projs.each -> (pr)
+          @elab.push_local(pr[0], pr[1])
+        ast_law = lf[1].kind == :either ? lf[1].kids[0] : lf[1]
+        raw_p = @elab.elab(ast_law)
+        @elab.unify(@elab.tyof(raw_p), ty_bool)
+        p_tm = @elab.finalize(raw_p, false)
+        @elab.check(p_tm)
+        law_tms.push(p_tm)
+      conj_tm = law_tms[law_tms.size - 1]
+      li = law_tms.size - 2
+      while li >= 0
+        conj_tm = @k.bin("∧", law_tms[li], conj_tm)
+        li -= 1
+      valid_name = c.name + ".Valid"
+      valid_lam = mk_lam(self_v, conj_tm)
+      valid_def_th = define_const(valid_name, valid_lam)
+      veq = @k.trans(@d.ap_thm(valid_def_th, self_v), @k.beta(mk_app(valid_lam, self_v)))
+      veq_gen = @k.gen(self_v, veq)
+      set_eqns(valid_name, [veq_gen])
+      add_theorem(valid_name + ".def", veq_gen)
+      xs = []
+      j = 0
+      while j < arg_tys.size
+        xs.push(mk_var(fields[j], arg_tys[j]))
+        j += 1
+      mk_tm = mk_apps(mk_const_raw(ct[0], ty_funs(arg_tys, self_ty)), xs)
+      inst_veq = @k.spec(mk_tm, veq_gen)
+      simp_mk = Simp.new(@d, mk_rules).simp_conv(dest_binop(inst_veq.concl, "=")[1])
+      th_vmk = @d.gen_all(xs, @k.trans(inst_veq, simp_mk))
+      add_theorem(valid_name + ".mk", th_vmk)
+      add_simp_thm(valid_name + ".mk", th_vmk)
+      valid_hyp_tm = mk_app(mk_const_raw(valid_name, ty_fun(self_ty, ty_bool)), self_v)
+      cur_conj = @k.eq_mp(veq, @k.assume(valid_hyp_tm))
+      li = 0
+      while li < law_names.size
+        part_th = li + 1 < law_names.size ? @k.conj1(cur_conj) : cur_conj
+        if li + 1 < law_names.size
+          cur_conj = @k.conj2(cur_conj)
+        law_th = @k.gen(self_v, @k.disch(valid_hyp_tm, part_th))
+        add_theorem(c.name + "." + law_names[li], law_th)
+        li += 1
+      @elab.register_laws(c.name, law_names)
+      if @rec != nil
+        @rec.add_laws(c.name, law_names)
 
   -> exec_class(c)
     exec_structure(c)
-    ct = c.ctors[0]
+    info = @k.inductives[c.name]
     fields = []
-    ct[1].each -> (f)
-      fields.push(f[0])
+    c.ctors[0][1].each -> (f)
+      if @k.has_const?(c.name + "." + f[0]) && @k.defs.has_key?(c.name + "." + f[0])
+        fields.push(f[0])
     @elab.register_class(c.name, c.params, fields)
     if @rec != nil
       @rec.add_class(c.name, c.params, fields)
+
+  -> prove_valid_for_const(const_name, cmd_binders, explicit_tactics, must_succeed)
+    ty = @k.const_type(const_name)
+    arg_tys = []
+    cur = ty
+    while cur.fun?
+      arg_tys.push(cur.dom)
+      cur = cur.cod
+    if cur.tag != :c || !@elab.has_laws?(cur.name)
+      return
+    vars = []
+    val_hyps = []
+    intro_names = []
+    i = 0
+    while i < arg_tys.size
+      aty = arg_tys[i]
+      bname = (cmd_binders != nil && i < cmd_binders.size && cmd_binders[i].name != nil && cmd_binders[i].name != "") ? cmd_binders[i].name : ("a" + i.to_s)
+      v = mk_var(bname, aty)
+      vars.push(v)
+      intro_names.push(bname)
+      if aty.tag == :c && @elab.has_laws?(aty.name)
+        val_hyps.push([bname + "_valid", mk_app(mk_const_raw(aty.name + ".Valid", ty_fun(aty, ty_bool)), v)])
+      i += 1
+    app_tm = mk_apps(mk_const_raw(const_name, ty), vars)
+    concl = mk_app(mk_const_raw(cur.name + ".Valid", ty_fun(cur, ty_bool)), app_tm)
+    stmt = concl
+    hi = val_hyps.size - 1
+    while hi >= 0
+      stmt = @k.bin("⇒", val_hyps[hi][1], stmt)
+      hi -= 1
+    vi = vars.size - 1
+    while vi >= 0
+      stmt = @k.quant("∀", vars[vi], stmt)
+      vi -= 1
+    val_hyps.each -> (vh)
+      intro_names.push(vh[0])
+    th = nil
+    begin
+      if explicit_tactics != nil
+        th = prove_with_tactics(stmt, intro_names, explicit_tactics)
+      else
+        p = Prover.new(self)
+        root = GoalRef.new(Goal.new([], [], stmt), nil, 0)
+        p.goals = [root]
+        gcur = root
+        intro_names.each -> (nm)
+          gcur = p.intro1(gcur, nm)
+        p.auto_prove_valid_state(const_name, cur.name)
+        if p.goals.size > 0
+          raise "unsolved law obligation:\n" + p.goals[0].goal.show(@k)
+        th = root.thm
+    rescue e
+      if must_succeed
+        raise "instance " + const_name + " failed law check (" + cur.name + ".Valid): " + e.to_s
+      return
+    if th != nil && th.hyps.size == 0 && tm_eq(th.concl, stmt)
+      add_theorem(const_name + ".valid", th)
 
   -> exec_instance(c)
     exec_def(c)
@@ -1215,6 +1457,8 @@ SATC_LIB_FILES = [
       cur = cur.cod
     if !@elab.is_class_ty?(cur)
       raise "instance " + c.name + " must return a declared typeclass, got " + ty_show(cur)
+    if @elab.has_laws?(cur.name)
+      prove_valid_for_const(c.name, c.binders, c.tactics, true)
     @elab.register_instance(c.name, cur.name, cur, dep_tys)
     if @rec != nil
       @rec.add_instance(c.name, cur.name, cur, dep_tys)
@@ -1273,6 +1517,8 @@ SATC_LIB_FILES = [
       @rec.def_count = @rec.def_count + 1
     if !@quiet || @keep_messages
       say("✓ def " + c.name + " : " + ty_show(type_of(body)))
+    if c.kind == :def
+      prove_valid_for_const(c.name, c.binders, nil, false)
 
   -> exec_pattern_def(c)
     pd = PatternDef.new(self, c)

@@ -1,0 +1,208 @@
+-- Spec for Satori ergonomics & sound HOL bundled law-bearing structures/typeclasses:
+--   1. `have h : P := by ...; outer_tactic` subproof early-close continuation
+--   2. `_` holes in theorem applications + polymorphic `if_pos` / `if_neg`
+--   3. `induction` preserving reverted local hypothesis names automatically
+--   4. `omega` on disjunction goals/hyps, `abs`, `min`/`max`/`ite`, and modular residues
+--   5. Bundled `structure` with `Prop` law fields (`SL2ZTest` with `det_one`)
+--   6. Bundled `class` with `Prop` law fields + polymorphic operator dispatch on `α`
+
+import arith
+import algebra
+import complex
+import exp_calculus
+import trig_calculus
+
+-- 1. Inline `have ... := by ...;` continuation
++ have_semi_chain (x y : ℕ) (hxy : x + y = 10) (hy : y = 4) : 2 * x = 12
+  have hx : x = 6 := by omega; rw [hx]; decide
+
++ have_nested_semi (a b : ℤ) (h1 : a + b = 7) (h2 : a - b = 3) : a * b = 10
+  have ha : a = 5 := by omega; have hb : b = 2 := by omega; rw [ha, hb]; ring
+
+-- 2. `_` holes in applications & polymorphic `if_pos` / `if_neg`
++ hole_application (p q : ℕ) (hp : 0 < p + 3) (hq : 0 < q + 1) : 0 < (p + 3) * (q + 1) :=
+  mul_pos.nat _ _ hp hq
+
++ poly_ite_rewrite (x : ℤ) (hx : 0 < x) (a b : ℤ × ℤ) : (if 0 < x then a else b) = a
+  rw [if_pos hx]
+
++ poly_ite_neg_rewrite (x : ℕ) (hx : x = 0) (u v : list ℕ) : (if 0 < x then u else v) = v
+  have hnot : ¬ (0 < x) := by omega; rw [if_neg hnot]
+
++ poly_ite_anon_conj (a b : ℕ) (ha : 0 < a) (hb : 0 < b) : (if 0 < a ∧ 0 < b then (7 : ℕ) else 3) = 7
+  rw [if_pos ⟨ha, hb⟩]
+
++ have_by_then_all (k : ℕ) (hk : 0 < k ∨ 2 < k) : k ≠ 0
+  have hne : k ≠ 0 := by obtain ha | hb := hk <;> omega
+  exact hne
+
+-> my_dvd_test (d n : ℕ) : Prop := ∃ q : ℕ, n = d * q
+
++ def_existential_obtain_and_use (d n : ℕ) (h : my_dvd_test d n) : my_dvd_test d (2 * n)
+  obtain ⟨q, hq⟩ := h
+  use 2 * q
+  rw [hq]; ring
+
+-- 3. `induction` with reverted local hypotheses keeps original names automatically
++ pow2_double_ind (n q : ℕ) (hq : q = 2 ^ n) : q + q = 2 ^ (n + 1)
+  induction n with k ih
+  · simp at hq; rw [hq]; decide
+  · have hsucc : 2 ^ succ k = 2 * 2 ^ k := by rw [succ_eq_add_one.nat, pow_succ.nat]; ring
+    rw [hsucc] at hq
+    have step := ih -- `hq` kept its name instead of stealing `ih`!
+    rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat]
+    omega
+
++ rev_hyp_used_directly (n m : ℕ) (hm : m = n + 1) : n < m
+  induction n with k ih
+  · omega
+  · omega
+
+-- 4. `omega` upgrades: disjunction goals, disjunction hyps, `abs`, `min`/`max`/`ite`, `%`
++ omega_disj_goal (x : ℕ) (hx : x ≤ 2) : x = 0 ∨ x = 1 ∨ x = 2 := by omega
+
++ omega_disj_hyp (x y : ℤ) (h : x ≤ 3 ∨ x ≤ 5) (hy : y = x + 2) : y ≤ 7 := by omega
+
++ omega_abs_triangle (x y : ℤ) : abs (x + y) ≤ abs x + abs y := by omega
+
++ omega_ite_bound (x : ℤ) : (if 0 ≤ x then x else -x) ≥ 0 := by omega
+
++ omega_mod_poly (p k : ℕ) : (p * 2 + 4 * k) % 2 = 0 := by omega
+
++ omega_mul_one_subterm (f : ℕ → ℕ) (p : ℕ) (h : f p = 5) : f (p * 1) = 5 := by omega
+
++ omega_ne_with_distractors (a x u1 u2 u3 u4 u5 : ℕ)
+    (d1 : u1 ≠ 1) (d2 : u2 ≠ 1) (d3 : u3 ≠ 1) (d4 : u4 ≠ 1) (d5 : u5 ≠ 1)
+    (hle : a ≤ x) (hne : x ≠ a) : a + 1 ≤ x := by omega
+
+-- 5. Bundled `structure` with dependent `Prop` law field (`SL2ZTest`)
+structure SL2ZTest :=
+  (a b c d : ℤ)
+  (det_one : a * d - b * c = 1)
+
+-> sl2z_test_S : SL2ZTest := SL2ZTest.mk 0 (-1) 1 0
+-> sl2z_test_T : SL2ZTest := SL2ZTest.mk 1 1 0 1
+
++ sl2z_det_check (g : SL2ZTest) : g.a * g.d - g.b * g.c = 1 := g.det_one
+
++ sl2z_S_det : sl2z_test_S.a * sl2z_test_S.d - sl2z_test_S.b * sl2z_test_S.c = 1 :=
+  sl2z_test_S.det_one
+
++ sl2z_exists_T : ∃ g : SL2ZTest, g.b = 1 := by use SL2ZTest.mk 1 1 0 1
+
+-- 6. Bundled `class` with `Prop` laws + polymorphic operator dispatch on `α`
+class AddCommGroupTest α :=
+  (zero : α)
+  (add  : α → α → α)
+  (neg  : α → α)
+  (add_assoc : ∀ x y z : α, add (add x y) z = add x (add y z))
+  (add_comm  : ∀ x y : α, add x y = add y x)
+  (zero_add  : ∀ x : α, add zero x = x)
+  (add_left_neg : ∀ x : α, add (neg x) x = zero)
+
+instance acg_to_zero [G : AddCommGroupTest α] : Zero α := Zero.mk G.zero
+instance acg_to_add  [G : AddCommGroupTest α] : Add  α := Add.mk  G.add
+instance acg_to_neg  [G : AddCommGroupTest α] : Neg  α := Neg.mk  G.neg
+instance acg_to_sub  [G : AddCommGroupTest α] : Sub  α := Sub.mk  (fun x y => G.add x (G.neg y))
+
+instance int_acg_test : AddCommGroupTest ℤ :=
+  AddCommGroupTest.mk 0 (fun x y => x + y) (fun x => -x)
+
++ acg_sub_add_cancel [G : AddCommGroupTest α] (x y : α) : (x - y) + y = x
+  unfold acg_to_add acg_to_sub
+  simp
+  rw [G.add_assoc x (G.neg y) y, G.add_left_neg y, G.add_comm x G.zero, G.zero_add x]
+
++ int_acg_instantiate (a b : ℤ) : Add.add (acg_to_add int_acg_test) (Sub.sub (acg_to_sub int_acg_test) a b) b = a :=
+  acg_sub_add_cancel a b
+
+-- 7. `intro` destructuring patterns (`⟨...⟩`, `(h1 | h2)`), head-predicate unfolding, & shallow `min`/`max` in `omega`
+-> pred_forall_test (n : ℕ) : Prop := ∀ k : ℕ, k ≤ n → k < n + 1
+
++ intro_unfolds_head_pred (n : ℕ) : pred_forall_test n
+  intro k hk; omega
+
++ intro_destruct_tuple_and_or : ∀ (n : ℕ), (∃ q : ℕ, 1 ≤ q ∧ n = 2 * q) → (n = 0 ∨ 0 < n) → n = 0 ∨ 2 ≤ n
+  intro n ⟨q, hq1, hq⟩ (hz | hpos)
+  · left; exact hz
+  · right; omega
+
+-> nonlinear_box (n : ℕ) : ℕ := n * n + 3 * n + 1
+
++ omega_min_defined_fn (n k : ℕ) (hge : k + 1 ≤ nonlinear_box n) :
+    min (nonlinear_box n) k = k ∧ max (nonlinear_box n) k = nonlinear_box n
+  constructor <;> omega
+
+-- 8. Native `ring` over `ℂ` (including `conj`, `of_real`, `smul`, `norm_sq`) & `field_simp` over `ℝ` / `ℚ`
++ complex_ring_direct (z w : ℂ) (r : ℝ) :
+    complex.mul (complex.add z w) (complex.sub z w) = complex.sub (complex.mul z z) (complex.mul w w) ∧
+    complex.mul z (complex.conj z) = complex.of_real (complex.norm_sq z) ∧
+    complex.smul r (complex.add z w) = complex.add (complex.smul r z) (complex.smul r w)
+  ring
+
++ field_simp_direct_eq (t a b sz lg gam : ℝ) (ht : 0 < t) (hb : b ≠ 0) (ha : a + 1 ≠ 0) :
+    t / (t * t) = 1 / t ∧
+    b * sz = a * (lg - 1 - gam) + b * (sz - (a / b) * lg + (1 + gam) * (a / b)) ∧
+    1 / (t / (a + 1)) = (a + 1) / t
+  constructor
+  · field_simp
+  · constructor
+    · field_simp
+    · field_simp
+
++ field_simp_nat_cast_and_pow (N k : ℕ) (R C c : ℝ) (hR : 0 < R) (hc : 0 < c) :
+    (C / R ^ k) / c * R ^ k = C / c ∧
+    (1 / ((N + 1 : ℕ) : ℝ) - 1 / ((N + 2 : ℕ) : ℝ)) = 1 / (((N + 1 : ℕ) : ℝ) * ((N + 2 : ℕ) : ℝ))
+  constructor
+  · field_simp
+  · field_simp
+
++ field_simp_ineq (a b x : ℝ) (hx : 0 < x) (hab : a ≤ b) :
+    a / (2 * x) ≤ b / (2 * x)
+  field_simp; nlinarith
+
++ field_simp_rat (p q : ℚ) (hq : q ≠ 0) :
+    (p / q + 1) * q - p = q
+  field_simp
+
+-- 9. Native `continuity` tactic (compositional ℝ + ℂ projections + shifts + quantified hyps)
++ continuity_composite (a b : ℝ) :
+    ∀ x : ℝ, continuous_at (fun y => exp (-a * y) * cos (2 * pi * y + b) - |y ^ 3 - 1| / 6 + min y (1 / 2)) x
+  continuity
+
++ continuity_complex_re_im (g : ℝ → ℂ) (w : ℂ)
+    (hcr : ∀ u : ℝ, 1 ≤ u → continuous_at (fun x => complex.re (g x)) u)
+    (hci : ∀ u : ℝ, 1 ≤ u → continuous_at (fun x => complex.im (g x)) u) :
+    ∀ u : ℝ, 1 ≤ u →
+      continuous_at (fun x => complex.re (complex.mul (g x) (complex.exp (complex.smul x w)))) u ∧
+      continuous_at (fun x => complex.im (complex.mul (g x) (complex.exp (complex.smul x w)))) u
+  continuity
+
++ continuity_shift_comp (f : ℝ → ℝ) (a t : ℝ) (hf : ∀ u : ℝ, continuous_at f u) :
+    continuous_at (fun x => (1 / 2) * (f (a + x) + f (a - x))) t
+  continuity
+
++ intro_underscore_no_shadow : ∀ P Q : Prop, P → Q → P
+  intro P Q h1 _
+  exact h1
+
+#axioms have_semi_chain
+#axioms hole_application
+#axioms poly_ite_rewrite
+#axioms pow2_double_ind
+#axioms omega_abs_triangle
+#axioms sl2z_det_check
+#axioms acg_sub_add_cancel
+#axioms int_acg_instantiate
+#axioms intro_unfolds_head_pred
+#axioms intro_destruct_tuple_and_or
+#axioms omega_min_defined_fn
+#axioms complex_ring_direct
+#axioms field_simp_direct_eq
+#axioms field_simp_nat_cast_and_pow
+#axioms field_simp_ineq
+#axioms field_simp_rat
+#axioms continuity_composite
+#axioms continuity_complex_re_im
+#axioms continuity_shift_comp
+#axioms intro_underscore_no_shadow

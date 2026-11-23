@@ -637,7 +637,7 @@
     c = parse_structure_cmd(toks, block)
     c.kind = :class
   elsif head.kind == :kw && head.text == "instance"
-    c = parse_def_cmd(toks, block)
+    c = parse_def_cmd(toks, block, true)
     c.kind = :instance
   elsif head.kind == :sym && head.text == "#"
     c = Cmd.new(:hash)
@@ -684,7 +684,7 @@
       c.body = parse_expr_toks(after)
   c
 
--> parse_def_cmd(toks, block)
+-> parse_def_cmd(toks, block, allow_proof_block = false)
   c = Cmd.new(:def)
   c.name = toks[1].text
   p = EParser.new(toks, 2)
@@ -700,7 +700,13 @@
   if p.accept(":=")
     # the body may continue on more-indented lines below the definition
     btoks = arr_sub(toks, p.pos, toks.size - p.pos)
-    flatten_block(block, btoks)
+    body_blocks = []
+    block.each -> (b)
+      if allow_proof_block && b.toks.size == 1 && b.toks[0].text == "proof"
+        c.tactics = b.block
+      else
+        body_blocks.push(b)
+    flatten_block(body_blocks, btoks)
     c.body = parse_expr_toks(btoks)
   else
     # pattern equations:  | pats => rhs
@@ -774,7 +780,7 @@
     while p.peek != nil && p.peek.kind == :id
       names.push(p.next_tok.text)
     p.expect(":")
-    ty = p.parse_type
+    ty = p.parse_expr_or_type
     p.expect(")")
     names.each -> (fname)
       fields.push([fname, ty])

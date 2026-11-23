@@ -1,0 +1,1127 @@
+-- Finite Combinatorics, Prime Fields F_p, Wilson's Theorem, Lagrange Root Bound,
+-- Coprime Chinese Remainder Theorem, & Euler's Totient Function (`tungsten/core/algebra/finite_field.w`).
+--
+-- Pure unconditional elementary number theory & finite combinatorics on Satori's untouched HOL kernel
+-- (ZERO custom axioms!).
+
+import adelic
+import binomial
+import zmod
+import modular_group
+
+-- ====================================================================================
+-- 1. Divisibility, Prime Bounds, & Interior Binomial Divisibility
+-- ====================================================================================
+
++ not_dvd_of_pos_lt (p x : ℕ) (hx1 : 0 < x) (hxp : x < p) : ¬ (p ∣ x)
+  intro hd; have h := le_of_dvd.nat x p hx1 hd; omega
+
++ not_dvd_one_of_ge_two (p : ℕ) (hp : 2 ≤ p) : ¬ (p ∣ 1)
+  exact not_dvd_of_pos_lt p 1 (by decide) (by omega)
+
++ dvd.mul_right_nat (p a b : ℕ) (hp : 0 < p) (h : p ∣ a) : p ∣ (a * b)
+  obtain ⟨q, hq⟩ := (dvd.iff_exists p a hp).mp h
+  exact (dvd.iff_exists p (a * b) hp).mpr ⟨q * b, by rw [hq]; ring⟩
+
++ dvd.mul_left_nat (p a b : ℕ) (hp : 0 < p) (h : p ∣ b) : p ∣ (a * b)
+  obtain ⟨q, hq⟩ := (dvd.iff_exists p b hp).mp h
+  exact (dvd.iff_exists p (a * b) hp).mpr ⟨a * q, by rw [hq]; ring⟩
+
++ dvd.sub_nat (p a b : ℕ) (hp : 0 < p) (hab : b ≤ a) (ha : p ∣ a) (hb : p ∣ b) : p ∣ (a - b)
+  obtain ⟨qa, hqa⟩ := (dvd.iff_exists p a hp).mp ha
+  obtain ⟨qb, hqb⟩ := (dvd.iff_exists p b hp).mp hb
+  have hle : qb ≤ qa
+    by_contra hgt
+    have h2 := mul_le_mul_of_nonneg_left.nat (qa + 1) qb p (by omega) (by omega)
+    have h3 : p * (qa + 1) = p * qa + p := by ring
+    omega
+  have heq : a - b = p * (qa - qb)
+    have he : qb + (qa - qb) = qa := by omega
+    have hm : p * qb + p * (qa - qb) = p * qa := by
+      have hd : p * qb + p * (qa - qb) = p * (qb + (qa - qb)) := by ring
+      rw [hd, he]
+    omega
+  exact (dvd.iff_exists p (a - b) hp).mpr ⟨qa - qb, heq⟩
+
++ mod_eq_iff_dvd_sub (p a b : ℕ) (hp : 0 < p) (hab : b ≤ a) :
+    a % p = b % p ↔ p ∣ (a - b)
+  have hda := div_add_mod.nat a p
+  have hdb := div_add_mod.nat b p
+  have hra := mod_lt.nat a p hp
+  have hrb := mod_lt.nat b p hp
+  constructor
+  · intro hmod
+    have hle : b / p ≤ a / p
+      by_contra hgt
+      have h2 := mul_le_mul_of_nonneg_left.nat (a / p + 1) (b / p) p (by omega) (by omega)
+      have h3 : p * (a / p + 1) = p * (a / p) + p := by ring
+      omega
+    have heq : a - b = p * (a / p - b / p)
+      have he : b / p + (a / p - b / p) = a / p := by omega
+      have hm : p * (b / p) + p * (a / p - b / p) = p * (a / p) := by
+        have hd : p * (b / p) + p * (a / p - b / p) = p * (b / p + (a / p - b / p)) := by ring
+        rw [hd, he]
+      omega
+    exact (dvd.iff_exists p (a - b) hp).mpr ⟨a / p - b / p, heq⟩
+  · intro hd
+    obtain ⟨q, hq⟩ := (dvd.iff_exists p (a - b) hp).mp hd
+    have ha_eq : a = b + p * q := by omega
+    rw [ha_eq, add_mul_mod.nat]
+
++ prime.not_dvd_fact_lt (p : ℕ) (hprime : is_prime_nat p) :
+    ∀ m < p, ¬ (p ∣ fact m)
+  have hp : 2 ≤ p := hprime.1
+  intro m; induction m with hm hd r ihr hm hd
+  · rw [fact_zero] at hd; exact not_dvd_one_of_ge_two p hp hd
+  · rw [succ_eq_add_one.nat] at hm hd; rw [fact_succ] at hd
+    obtain h1 | h2 := hprime.2 (r + 1) (fact r) hd
+    · exact not_dvd_of_pos_lt p (r + 1) (by omega) hm h1
+    · exact ihr (by omega) h2
+
++ prime.dvd_choose (p k : ℕ) (hprime : is_prime_nat p) (hk1 : 0 < k) (hk2 : k < p) :
+    p ∣ choose p k
+  have hp : 2 ≤ p := hprime.1
+  have hcf := choose_mul_fact p k (by omega)
+  have hfp : fact p = p * fact (p - 1)
+    have hp1 : p = (p - 1) + 1 := by omega
+    have hs := fact_succ (p - 1); rw [← hp1] at hs; exact hs
+  have hdvd : p ∣ (choose p k * fact k * fact (p - k)) :=
+    (dvd.iff_exists p (choose p k * fact k * fact (p - k)) (by omega)).mpr ⟨fact (p - 1), by rw [hcf, hfp]⟩
+  obtain h12 | h3 := hprime.2 (choose p k * fact k) (fact (p - k)) hdvd
+  · obtain h1 | h2 := hprime.2 (choose p k) (fact k) h12
+    · exact h1
+    · exfalso; exact prime.not_dvd_fact_lt p hprime k hk2 h2
+  · exfalso; exact prime.not_dvd_fact_lt p hprime (p - k) (by omega) h3
+
+-- ====================================================================================
+-- 2. Fermat's Little Theorem, Prime-Field Inverse, Cancellation, & Roots of Unity
+-- ====================================================================================
+
++ fermat.nat_mod (p a : ℕ) (hprime : is_prime_nat p) : (a ^ p) % p = a % p
+  have hp : 2 ≤ p := hprime.1
+  have hp_pos : 0 < p := by omega
+  induction a with m ih
+  · have h0 : 0 ^ p = 0 := by
+      have hp1 : p = (p - 1) + 1 := by omega
+      rw [hp1, pow_succ.nat]; ring
+    rw [h0]
+  · rw [succ_eq_add_one.nat]
+    have hbin := add_pow.nat m 1 p
+    have h1p : ∀ k : ℕ, 1 ^ k = 1 := by
+      intro k; induction k with r ihr
+      · rw [pow_zero.nat]
+      · rw [succ_eq_add_one.nat, pow_succ.nat, ihr]; ring
+    have hsplit : (m + 1) ^ p = m ^ p + 1 + ∑ k < p - 1, m ^ (k + 1) * choose p (k + 1)
+      rw [hbin, sum_range_succ'.nat (fun k => m ^ k * 1 ^ (p - k) * choose p k) p]
+      have hpm : p = (p - 1) + 1 := by omega
+      have htop : (∑ i < p, m ^ (i + 1) * 1 ^ (p - (i + 1)) * choose p (i + 1)) =
+          (∑ i < p - 1, m ^ (i + 1) * 1 ^ (p - (i + 1)) * choose p (i + 1)) + m ^ p * 1 ^ 0 * choose p p
+        have hstep : ∑ i < (p - 1) + 1, m ^ (i + 1) * 1 ^ (p - (i + 1)) * choose p (i + 1) =
+            (∑ i < p - 1, m ^ (i + 1) * 1 ^ (p - (i + 1)) * choose p (i + 1)) + m ^ ((p - 1) + 1) * 1 ^ (p - ((p - 1) + 1)) * choose p ((p - 1) + 1) := rfl
+        have hpp : p - ((p - 1) + 1) = 0 := by omega
+        rw [hpp] at hstep; rw [← hpm] at hstep; exact hstep
+      rw [htop]
+      have hcongr : (∑ i < p - 1, m ^ (i + 1) * 1 ^ (p - (i + 1)) * choose p (i + 1)) = ∑ i < p - 1, m ^ (i + 1) * choose p (i + 1)
+        apply sum_congr.nat; intro i hi; rw [h1p (p - (i + 1))]; ring
+      rw [hcongr, h1p (p - 0), h1p 0, pow_zero.nat, choose_zero_right, choose_self]; ring
+    have hdvd_mid : p ∣ (∑ k < p - 1, m ^ (k + 1) * choose p (k + 1))
+      have hall : ∀ n ≤ p - 1, p ∣ (∑ k < n, m ^ (k + 1) * choose p (k + 1))
+        intro n hn; induction n with hn r ihr hn
+        · simp; exact (dvd.iff_exists p 0 hp_pos).mpr ⟨0, by ring⟩
+        · rw [succ_eq_add_one.nat] at hn ⊢; rw [sum_below_succ]
+          have hd1 := ihr (by omega)
+          have hd2 := dvd.mul_left_nat p (m ^ (r + 1)) (choose p (r + 1)) hp_pos (prime.dvd_choose p (r + 1) hprime (by omega) (by omega))
+          exact dvd.add_nat p (∑ k < r, m ^ (k + 1) * choose p (k + 1)) (m ^ (r + 1) * choose p (r + 1)) hp_pos hd1 hd2
+      exact hall (p - 1) (by omega)
+    obtain ⟨q, hq⟩ := (dvd.iff_exists p (∑ k < p - 1, m ^ (k + 1) * choose p (k + 1)) hp_pos).mp hdvd_mid
+    rw [hsplit, hq, add_mul_mod.nat, add_mod.nat (m ^ p) 1 p, ih, ← add_mod.nat m 1 p]
+
++ fp.pow_p_sub_one (p a : ℕ) (hprime : is_prime_nat p) (hnd : ¬ (p ∣ a)) :
+    (a ^ (p - 1)) % p = 1
+  have hp : 2 ≤ p := hprime.1
+  have ha_pos : 1 ≤ a
+    by_contra h0; have ha0 : a = 0 := by omega
+    apply hnd; rw [ha0]; exact (dvd.iff_exists p 0 (by omega)).mpr ⟨0, by ring⟩
+  have hap1 : 1 ≤ a ^ (p - 1) := by have h := pow_pos.nat a (p - 1) (by omega); omega
+  have hfm := fermat.nat_mod p a hprime
+  have hp1 : p = (p - 1) + 1 := by omega
+  have hm : a ^ p = a ^ (p - 1) * a := by have h1 := pow_succ.nat a (p - 1); rw [← hp1] at h1; exact h1
+  have hale : a ≤ a ^ p := by have hge := mul_le_mul_of_nonneg_right.nat 1 (a ^ (p - 1)) a hap1 (by omega); omega
+  have hdvd_diff : p ∣ (a ^ p - a) := (mod_eq_iff_dvd_sub p (a ^ p) a (by omega) hale).mp hfm
+  have hfac : a ^ p - a = a * (a ^ (p - 1) - 1)
+    have h1 : a * (a ^ (p - 1) - 1) + a = a * ((a ^ (p - 1) - 1) + 1) := by ring
+    have h2 : (a ^ (p - 1) - 1) + 1 = a ^ (p - 1) := by omega
+    rw [h2] at h1; omega
+  rw [hfac] at hdvd_diff
+  have hdvd1 : p ∣ (a ^ (p - 1) - 1)
+    obtain h1 | h2 := hprime.2 a (a ^ (p - 1) - 1) hdvd_diff
+    · exfalso; exact hnd h1
+    · exact h2
+  have hmod := (mod_eq_iff_dvd_sub p (a ^ (p - 1)) 1 (by omega) hap1).mpr hdvd1
+  rw [(div_mod_of_lt.nat 1 p (by omega)).2] at hmod; exact hmod
+
+-> fp.inv (p a : ℕ) : ℕ := (a ^ (p - 2)) % p
+
++ fp.mul_inv_mod (p a : ℕ) (hprime : is_prime_nat p) (hnd : ¬ (p ∣ a)) :
+    (a * fp.inv p a) % p = 1
+  have hp : 2 ≤ p := hprime.1
+  unfold fp.inv
+  rw [mul_mod.nat a (a ^ (p - 2) % p) p, zmod.mod_mod (a ^ (p - 2)) p, ← mul_mod.nat a (a ^ (p - 2)) p]
+  have hpow : a * a ^ (p - 2) = a ^ (p - 1)
+    have hp1 : p - 1 = (p - 2) + 1 := by omega
+    have h1 := pow_succ.nat a (p - 2); rw [← hp1] at h1; linarith
+  rw [hpow]; exact fp.pow_p_sub_one p a hprime hnd
+
++ fp.inv_pos_lt (p a : ℕ) (hprime : is_prime_nat p) (hnd : ¬ (p ∣ a)) :
+    1 ≤ fp.inv p a ∧ fp.inv p a < p
+  have hp : 2 ≤ p := hprime.1
+  have hlt : fp.inv p a < p := by unfold fp.inv; exact mod_lt.nat (a ^ (p - 2)) p (by omega)
+  have hpos : 1 ≤ fp.inv p a
+    by_contra h0; have hz : fp.inv p a = 0 := by omega
+    have hm := fp.mul_inv_mod p a hprime hnd
+    rw [hz] at hm
+    have ha0 : a * 0 = 0 := by ring
+    rw [ha0, (div_mod_of_lt.nat 0 p (by omega)).2] at hm; omega
+  exact ⟨hpos, hlt⟩
+
++ fp.cancel_left (p a x y : ℕ) (hprime : is_prime_nat p) (hnd : ¬ (p ∣ a))
+    (heq : (a * x) % p = (a * y) % p) : x % p = y % p
+  have hinv := fp.mul_inv_mod p a hprime hnd
+  have hstep : ∀ z : ℕ, (fp.inv p a * (a * z)) % p = z % p
+    intro z
+    have hre : fp.inv p a * (a * z) = (a * fp.inv p a) * z := by ring
+    rw [hre, mul_mod.nat (a * fp.inv p a) z p, hinv, one_mul.nat, zmod.mod_mod z p]
+  have h1 : (fp.inv p a * (a * x)) % p = (fp.inv p a * (a * y)) % p
+    rw [mul_mod.nat (fp.inv p a) (a * x) p, heq, ← mul_mod.nat (fp.inv p a) (a * y) p]
+  rw [hstep x, hstep y] at h1; exact h1
+
++ fp.sq_eq_one_iff (p a : ℕ) (hprime : is_prime_nat p) (ha1 : 1 ≤ a) (hap : a < p) :
+    (a * a) % p = 1 ↔ a = 1 ∨ a = p - 1
+  have hp : 2 ≤ p := hprime.1
+  constructor
+  · intro hsq
+    have h1m : 1 % p = 1 := (div_mod_of_lt.nat 1 p (by omega)).2
+    have h1le : 1 ≤ a * a := by have h := mul_pos.nat a a (by omega) (by omega); omega
+    have hdvd : p ∣ (a * a - 1) := (mod_eq_iff_dvd_sub p (a * a) 1 (by omega) h1le).mp (by rw [h1m]; exact hsq)
+    have hfac : a * a - 1 = (a - 1) * (a + 1)
+      have ha : (a - 1) + 1 = a := by omega
+      have h1 : a * a = ((a - 1) + 1) * ((a - 1) + 1) := by rw [ha]
+      have h2 : ((a - 1) + 1) * ((a - 1) + 1) = (a - 1) * ((a - 1) + 2) + 1 := by ring
+      have h3 : (a - 1) + 2 = a + 1 := by omega
+      rw [h3] at h2; omega
+    rw [hfac] at hdvd
+    obtain h1 | h2 := hprime.2 (a - 1) (a + 1) hdvd
+    · left
+      by_cases ha_eq : a = 1
+      · exact ha_eq
+      · exfalso; exact not_dvd_of_pos_lt p (a - 1) (by omega) (by omega) h1
+    · right
+      obtain ⟨q, hq⟩ := (dvd.iff_exists p (a + 1) (by omega)).mp h2
+      by_cases hq0 : q = 0
+      · rw [hq0] at hq; omega
+      · by_cases hq1 : q = 1
+        · rw [hq1] at hq; omega
+        · have hge := mul_le_mul_of_nonneg_left.nat 2 q p (by omega) (by omega); omega
+  · intro hor; obtain h1 | h2 := hor
+    · rw [h1]; exact (div_mod_of_lt.nat 1 p (by omega)).2
+    · rw [h2]
+      have hfac : (p - 1) * (p - 1) = 1 + p * (p - 2)
+        set t := p - 2 with ht_def
+        have hp1 : p - 1 = t + 1 := by omega
+        have hp2 : p = t + 2 := by omega
+        rw [hp1, hp2]; ring
+      rw [hfac, add_mul_mod.nat]; exact (div_mod_of_lt.nat 1 p (by omega)).2
+
+-- ====================================================================================
+-- 3. Finite Fiber Counting, Pigeonhole, Bijection Invariance, & Wilson's Theorem
+-- ====================================================================================
+
++ sum_swap.nat (F : ℕ → ℕ → ℕ) (m n : ℕ) :
+    (∑ i < m, ∑ j < n, F i j) = ∑ j < n, ∑ i < m, F i j
+  induction m with r ihr
+  · rw [sum_below_zero]
+    have hz : ∀ t : ℕ, (∑ j < t, (0 : ℕ)) = 0
+      intro t; induction t with s ihs
+      · rw [sum_below_zero]
+      · rw [succ_eq_add_one.nat, sum_below_succ, ihs]; omega
+    have hcon : (∑ j < n, ∑ i < 0, F i j) = ∑ j < n, (0 : ℕ)
+      apply sum_congr.nat; intro j hj; rw [sum_below_zero]
+    rw [hcon, hz n]
+  · rw [succ_eq_add_one.nat, sum_below_succ, ihr]
+    have h1 : (∑ j < n, ∑ i < r + 1, F i j) = ∑ j < n, ((∑ i < r, F i j) + F r j)
+      apply sum_congr.nat; intro j hj; rw [sum_below_succ]
+    rw [h1, sum_add.nat]
+
+-> fiber_count (L : ℕ) (f : ℕ → ℕ) (v : ℕ) : ℕ :=
+  ∑ u < L, if f u = v then 1 else 0
+
++ fiber_count.sum_eq (K L : ℕ) (f : ℕ → ℕ) (hf : ∀ u < L, f u < K) :
+    (∑ v < K, fiber_count L f v) = L
+  unfold fiber_count
+  rw [sum_swap.nat (fun v u => if f u = v then 1 else 0) K L]
+  have h1 : ∀ u < L, (∑ v < K, if f u = v then (1 : ℕ) else 0) = 1
+    intro u hu
+    have hgen : ∀ M a : ℕ, a < M → (∑ v < M, if a = v then (1 : ℕ) else 0) = 1
+      intro M a ha; induction M with ha r ihr ha
+      · omega
+      · rw [succ_eq_add_one.nat] at ha ⊢; rw [sum_below_succ]
+        by_cases har : a = r
+        · have hz : ∀ t : ℕ, (∀ v < t, a ≠ v) → (∑ v < t, if a = v then (1 : ℕ) else 0) = 0
+            intro t ht; induction t with ht s ihs ht
+            · rw [sum_below_zero]
+            · rw [succ_eq_add_one.nat] at ht ⊢
+              rw [sum_below_succ, ihs (by intro v hv; exact ht v (by omega)), if_neg (ht s (by omega))]; omega
+          rw [hz r (by intro v hv; omega), if_pos har]; omega
+        · rw [if_neg har, ihr (by omega)]; omega
+    exact hgen K (f u) (hf u hu)
+  have hcon : (∑ u < L, (∑ v < K, if f u = v then (1 : ℕ) else 0)) = ∑ u < L, (1 : ℕ)
+    apply sum_below.congr; exact h1
+  rw [hcon]
+  have hones : ∀ t : ℕ, (∑ u < t, (1 : ℕ)) = t
+    intro t; induction t with r ihr
+    · rw [sum_below_zero]
+    · rw [succ_eq_add_one.nat, sum_below_succ, ihr]
+  exact hones L
+
++ fiber_count.exists_pair_of_ge_two (L : ℕ) (f : ℕ → ℕ) (v : ℕ) (h : 2 ≤ fiber_count L f v) :
+    ∃ u1 u2 : ℕ, u1 < u2 ∧ u2 < L ∧ f u1 = v ∧ f u2 = v
+  unfold fiber_count at h
+  have hex1 : ∀ M : ℕ, 1 ≤ (∑ u < M, if f u = v then (1 : ℕ) else 0) → ∃ u1 < M, f u1 = v
+    intro M h1; induction M with h1 r ihr h1
+    · rw [sum_below_zero] at h1; omega
+    · rw [succ_eq_add_one.nat] at h1 ⊢; rw [sum_below_succ] at h1
+      by_cases hfr : f r = v
+      · exact ⟨r, by omega, hfr⟩
+      · rw [if_neg hfr] at h1
+        obtain ⟨u1, hu1, hf1⟩ := ihr (by omega)
+        exact ⟨u1, by omega, hf1⟩
+  induction L with h r ihr h
+  · rw [sum_below_zero] at h; omega
+  · rw [succ_eq_add_one.nat] at h ⊢; rw [sum_below_succ] at h
+    by_cases hfr : f r = v
+    · rw [if_pos hfr] at h
+      obtain ⟨u1, hu1, hf1⟩ := hex1 r (by omega)
+      exact ⟨u1, r, hu1, by omega, hf1, hfr⟩
+    · rw [if_neg hfr] at h
+      obtain ⟨u1, u2, h12, h2r, hf1, hf2⟩ := ihr (by omega)
+      exact ⟨u1, u2, h12, by omega, hf1, hf2⟩
+
++ pigeonhole.nat_map (K L : ℕ) (hKL : K < L) (f : ℕ → ℕ) (hf : ∀ u < L, f u < K) :
+    ∃ u1 u2 : ℕ, u1 < u2 ∧ u2 < L ∧ f u1 = f u2
+  have hsum := fiber_count.sum_eq K L f hf
+  have hex_v : ∃ v < K, 2 ≤ fiber_count L f v
+    by_contra hnone
+    have hall_le1 : ∀ v < K, fiber_count L f v ≤ 1
+      intro v hv; by_contra hgt; exact hnone ⟨v, hv, by omega⟩
+    have hsum_le : ∀ t ≤ K, (∑ v < t, fiber_count L f v) ≤ t
+      intro t ht; induction t with ht r ihr ht
+      · rw [sum_below_zero]; omega
+      · rw [succ_eq_add_one.nat] at ht ⊢
+        rw [sum_below_succ]; have hr := hall_le1 r (by omega); have hp := ihr (by omega); omega
+    have hle := hsum_le K (by omega); omega
+  obtain ⟨v, hv, hge2⟩ := hex_v
+  obtain ⟨u1, u2, h12, h2L, hf1, hf2⟩ := fiber_count.exists_pair_of_ge_two L f v hge2
+  exact ⟨u1, u2, h12, h2L, by rw [hf1, hf2]⟩
+
++ nat_prod.congr (n : ℕ) (f g : ℕ → ℕ) (h : ∀ i < n, f i = g i) :
+    nat_prod n f = nat_prod n g
+  induction n with h r ihr h
+  · rw [nat_prod.zero, nat_prod.zero]
+  · rw [succ_eq_add_one.nat] at h ⊢
+    rw [nat_prod.succ, nat_prod.succ, ihr (by intro i hi; exact h i (by omega)), h r (by omega)]
+
++ nat_prod.congr_mod (p n : ℕ) (f g : ℕ → ℕ) (h : ∀ i < n, f i % p = g i % p) :
+    nat_prod n f % p = nat_prod n g % p
+  induction n with h r ihr h
+  · rw [nat_prod.zero, nat_prod.zero]
+  · rw [succ_eq_add_one.nat] at h ⊢
+    rw [nat_prod.succ, nat_prod.succ, mul_mod.nat (nat_prod r f) (f r) p, mul_mod.nat (nat_prod r g) (g r) p, ihr (by intro i hi; exact h i (by omega)), h r (by omega)]
+
++ nat_prod.mul (n : ℕ) (f g : ℕ → ℕ) :
+    nat_prod n (fun i => f i * g i) = nat_prod n f * nat_prod n g
+  induction n with r ihr
+  · rw [nat_prod.zero, nat_prod.zero, nat_prod.zero]; ring
+  · rw [succ_eq_add_one.nat, nat_prod.succ, nat_prod.succ, nat_prod.succ, ihr]; ring
+
++ nat_prod.const (n c : ℕ) : nat_prod n (fun _ => c) = c ^ n
+  induction n with r ihr
+  · rw [nat_prod.zero, pow_zero.nat]
+  · rw [succ_eq_add_one.nat, nat_prod.succ, pow_succ.nat, ihr]
+
++ nat_prod.swap_top (r idx : ℕ) (hidx : idx < r + 1) (g : ℕ → ℕ) :
+    nat_prod (r + 1) g = nat_prod r (fun i => g (if i = idx then r else i)) * g idx
+  have hpeel : ∀ (N k : ℕ), k < N → ∀ (h : ℕ → ℕ), nat_prod N h = nat_prod (N - 1) (fun i => h (if i < k then i else i + 1)) * h k
+    intro N; induction N with k hk h M ihM k hk h
+    · omega
+    · rw [succ_eq_add_one.nat] at hk ⊢
+      have hsub : (M + 1) - 1 = M := by omega
+      rw [hsub]
+      by_cases hkm : k = M
+      · rw [hkm, nat_prod.succ]
+        have hc : nat_prod M h = nat_prod M (fun i => h (if i < M then i else i + 1))
+          apply nat_prod.congr; intro i hi; rw [if_pos hi]
+        rw [hc]
+      · have hklt : k < M := by omega
+        rw [nat_prod.succ, ihM k hklt h]
+        have hM1 : M = (M - 1) + 1 := by omega
+        have hstep : nat_prod M (fun i => h (if i < k then i else i + 1)) = nat_prod (M - 1) (fun i => h (if i < k then i else i + 1)) * h M
+          rw [hM1, nat_prod.succ]
+          have hnl : ¬ (M - 1 < k) := by omega
+          have he : (M - 1) + 1 = M := by omega
+          rw [if_neg hnl, he]
+        rw [hstep]; ring
+  by_cases htop : idx = r
+  · rw [htop, nat_prod.succ]
+    have hc : nat_prod r g = nat_prod r (fun i => g (if i = r then r else i))
+      apply nat_prod.congr; intro i hi; have hne : i ≠ r := by omega; rw [if_neg hne]
+    rw [hc]
+  · have hlt : idx < r := by omega
+    have hL := hpeel r idx hlt g
+    have hR := hpeel r idx hlt (fun i => g (if i = idx then r else i))
+    have hmid : nat_prod (r - 1) (fun i => g (if (if i < idx then i else i + 1) = idx then r else (if i < idx then i else i + 1))) = nat_prod (r - 1) (fun i => g (if i < idx then i else i + 1))
+      apply nat_prod.congr; intro i hi
+      have hne : (if i < idx then i else i + 1) ≠ idx
+        by_cases hil : i < idx
+        · rw [if_pos hil]; omega
+        · rw [if_neg hil]; omega
+      rw [if_neg hne]
+    have hbeta : (fun i => g (if i = idx then r else i)) idx = g r := by simp
+    rw [hmid, hbeta] at hR
+    rw [nat_prod.succ, hL, hR]; ring
+
++ fin_sum.swap_top (r idx : ℕ) (hidx : idx < r + 1) (g : ℕ → ℕ) :
+    (∑ i < r + 1, g i) = (∑ i < r, g (if i = idx then r else i)) + g idx
+  have hpeel : ∀ (N k : ℕ), k < N → ∀ (h : ℕ → ℕ), (∑ i < N, h i) = (∑ i < N - 1, h (if i < k then i else i + 1)) + h k
+    intro N; induction N with k hk h M ihM k hk h
+    · omega
+    · rw [succ_eq_add_one.nat] at hk ⊢
+      have hsub : (M + 1) - 1 = M := by omega
+      rw [hsub]
+      by_cases hkm : k = M
+      · rw [hkm, sum_below_succ]
+        have hc : (∑ i < M, h i) = ∑ i < M, h (if i < M then i else i + 1)
+          apply sum_congr.nat; intro i hi; rw [if_pos hi]
+        rw [hc]
+      · have hklt : k < M := by omega
+        rw [sum_below_succ, ihM k hklt h]
+        have hM1 : M = (M - 1) + 1 := by omega
+        have hstep : (∑ i < M, h (if i < k then i else i + 1)) = (∑ i < M - 1, h (if i < k then i else i + 1)) + h M
+          rw [hM1, sum_below_succ]
+          have hnl : ¬ (M - 1 < k) := by omega
+          have he : (M - 1) + 1 = M := by omega
+          rw [if_neg hnl, he]
+        rw [hstep]; omega
+  by_cases htop : idx = r
+  · rw [htop, sum_below_succ]
+    have hc : (∑ i < r, g i) = ∑ i < r, g (if i = r then r else i)
+      apply sum_congr.nat; intro i hi; have hne : i ≠ r := by omega; rw [if_neg hne]
+    rw [hc]
+  · have hlt : idx < r := by omega
+    have hL := hpeel r idx hlt g
+    have hR := hpeel r idx hlt (fun i => g (if i = idx then r else i))
+    have hmid : (∑ i < r - 1, g (if (if i < idx then i else i + 1) = idx then r else (if i < idx then i else i + 1))) = ∑ i < r - 1, g (if i < idx then i else i + 1)
+      apply sum_congr.nat; intro i hi
+      have hne : (if i < idx then i else i + 1) ≠ idx
+        by_cases hil : i < idx
+        · rw [if_pos hil]; omega
+        · rw [if_neg hil]; omega
+      rw [if_neg hne]
+    have hbeta : (fun i => g (if i = idx then r else i)) idx = g r := by simp
+    rw [hmid, hbeta] at hR
+    rw [sum_below_succ, hL, hR]; omega
+
++ fin_inj.surj (n : ℕ) :
+    ∀ (f : ℕ → ℕ), (∀ i < n, f i < n) → (∀ i < n, ∀ j < n, f i = f j → i = j) →
+    ∀ y < n, ∃ i < n, f i = y
+  intro f hlt hinj y hy
+  by_contra hnone
+  set c : ℕ → ℕ := fun i => if f i < y then f i else f i - 1 with hc_def
+  have hc_lt : ∀ i < n, c i < n - 1
+    intro i hi; rw [hc_def]
+    have hfi := hlt i hi
+    have hne : f i ≠ y := by intro he; exact hnone ⟨i, hi, he⟩
+    omega
+  obtain ⟨u1, u2, h12, h2n, hceq⟩ := pigeonhole.nat_map (n - 1) n (by omega) c hc_lt
+  rw [hc_def] at hceq
+  have hne1 : f u1 ≠ y := by intro he; exact hnone ⟨u1, by omega, he⟩
+  have hne2 : f u2 ≠ y := by intro he; exact hnone ⟨u2, h2n, he⟩
+  have hfeq : f u1 = f u2
+    by_cases h1 : f u1 < y
+    · by_cases h2 : f u2 < y
+      · rw [if_pos h1, if_pos h2] at hceq; exact hceq
+      · rw [if_pos h1, if_neg h2] at hceq; omega
+    · by_cases h2 : f u2 < y
+      · rw [if_neg h1, if_pos h2] at hceq; omega
+      · rw [if_neg h1, if_neg h2] at hceq; omega
+  have hu := hinj u1 (by omega) u2 h2n hfeq
+  omega
+
++ fin_prod.bij (n : ℕ) :
+    ∀ (f g : ℕ → ℕ), (∀ i < n, f i < n) → (∀ i < n, ∀ j < n, f i = f j → i = j) →
+    nat_prod n (fun i => g (f i)) = nat_prod n g
+  induction n with f g hlt hinj r ihr f g hlt hinj
+  · rw [nat_prod.zero, nat_prod.zero]
+  · rw [succ_eq_add_one.nat] at hlt hinj ⊢
+    obtain ⟨idx, hidx, hfidx⟩ := fin_inj.surj (r + 1) f hlt hinj r (by omega)
+    rw [nat_prod.swap_top r idx hidx (fun i => g (f i)), hfidx, nat_prod.succ]
+    set f' : ℕ → ℕ := fun i => f (if i = idx then r else i) with hf'_def
+    have hf'_lt : ∀ i < r, f' i < r
+      intro i hi; rw [hf'_def]
+      by_cases hii : i = idx
+      · rw [if_pos hii]
+        have hlt_r := hlt r (by omega)
+        have hne : f r ≠ r := by intro he; have heq := hinj r (by omega) idx hidx (by rw [he, hfidx]); omega
+        omega
+      · rw [if_neg hii]
+        have hlt_i := hlt i (by omega)
+        have hne : f i ≠ r := by intro he; have heq := hinj i (by omega) idx hidx (by rw [he, hfidx]); omega
+        omega
+    have hf'_inj : ∀ i < r, ∀ j < r, f' i = f' j → i = j
+      intro i hi j hj heq; rw [hf'_def] at heq
+      have harg_lt : ∀ k < r, (if k = idx then r else k) < r + 1
+        intro k hk; by_cases hk0 : k = idx
+        · rw [if_pos hk0]; omega
+        · rw [if_neg hk0]; omega
+      have harg_eq := hinj (if i = idx then r else i) (harg_lt i hi) (if j = idx then r else j) (harg_lt j hj) heq
+      by_cases hi0 : i = idx
+      · by_cases hj0 : j = idx
+        · omega
+        · rw [if_pos hi0, if_neg hj0] at harg_eq; omega
+      · by_cases hj0 : j = idx
+        · rw [if_neg hi0, if_pos hj0] at harg_eq; omega
+        · rw [if_neg hi0, if_neg hj0] at harg_eq; exact harg_eq
+    have hcon : nat_prod r (fun i => g (f (if i = idx then r else i))) = nat_prod r (fun i => g (f' i))
+      apply nat_prod.congr; intro i hi; rw [hf'_def]
+    rw [hcon, ihr f' g hf'_lt hf'_inj]
+
++ fin_sum.bij (n : ℕ) :
+    ∀ (f g : ℕ → ℕ), (∀ i < n, f i < n) → (∀ i < n, ∀ j < n, f i = f j → i = j) →
+    (∑ i < n, g (f i)) = ∑ i < n, g i
+  induction n with f g hlt hinj r ihr f g hlt hinj
+  · rw [sum_below_zero, sum_below_zero]
+  · rw [succ_eq_add_one.nat] at hlt hinj ⊢
+    obtain ⟨idx, hidx, hfidx⟩ := fin_inj.surj (r + 1) f hlt hinj r (by omega)
+    rw [fin_sum.swap_top r idx hidx (fun i => g (f i)), hfidx, sum_below_succ]
+    set f' : ℕ → ℕ := fun i => f (if i = idx then r else i) with hf'_def
+    have hf'_lt : ∀ i < r, f' i < r
+      intro i hi; rw [hf'_def]
+      by_cases hii : i = idx
+      · rw [if_pos hii]
+        have hlt_r := hlt r (by omega)
+        have hne : f r ≠ r := by intro he; have heq := hinj r (by omega) idx hidx (by rw [he, hfidx]); omega
+        omega
+      · rw [if_neg hii]
+        have hlt_i := hlt i (by omega)
+        have hne : f i ≠ r := by intro he; have heq := hinj i (by omega) idx hidx (by rw [he, hfidx]); omega
+        omega
+    have hf'_inj : ∀ i < r, ∀ j < r, f' i = f' j → i = j
+      intro i hi j hj heq; rw [hf'_def] at heq
+      have harg_lt : ∀ k < r, (if k = idx then r else k) < r + 1
+        intro k hk; by_cases hk0 : k = idx
+        · rw [if_pos hk0]; omega
+        · rw [if_neg hk0]; omega
+      have harg_eq := hinj (if i = idx then r else i) (harg_lt i hi) (if j = idx then r else j) (harg_lt j hj) heq
+      by_cases hi0 : i = idx
+      · by_cases hj0 : j = idx
+        · omega
+        · rw [if_pos hi0, if_neg hj0] at harg_eq; omega
+      · by_cases hj0 : j = idx
+        · rw [if_neg hi0, if_pos hj0] at harg_eq; omega
+        · rw [if_neg hi0, if_neg hj0] at harg_eq; exact harg_eq
+    have hcon : (∑ i < r, g (f (if i = idx then r else i))) = ∑ i < r, g (f' i)
+      apply sum_congr.nat; intro i hi; rw [hf'_def]
+    rw [hcon, ihr f' g hf'_lt hf'_inj]
+
++ fin_involution.prod_mod_one (p : ℕ) (hp : 2 ≤ p) :
+    ∀ (n : ℕ) (inv g : ℕ → ℕ),
+      (∀ i < n, inv i < n) →
+      (∀ i < n, inv (inv i) = i) →
+      (∀ i < n, inv i ≠ i) →
+      (∀ i < n, (g i * g (inv i)) % p = 1) →
+      nat_prod n g % p = 1
+  have hstrong : ∀ N n : ℕ, n ≤ N → ∀ (inv g : ℕ → ℕ),
+      (∀ i < n, inv i < n) → (∀ i < n, inv (inv i) = i) → (∀ i < n, inv i ≠ i) →
+      (∀ i < n, (g i * g (inv i)) % p = 1) → nat_prod n g % p = 1
+    intro N; induction N with n hn inv g hlt hinv hne hpair M ihM n hn inv g hlt hinv hne hpair
+    · have hn0 : n = 0 := by omega
+      rw [hn0, nat_prod.zero]; exact (div_mod_of_lt.nat 1 p (by omega)).2
+    · rw [succ_eq_add_one.nat] at hn
+      by_cases hn0 : n = 0
+      · rw [hn0, nat_prod.zero]; exact (div_mod_of_lt.nat 1 p (by omega)).2
+      · by_cases hn1 : n = 1
+        · exfalso; have h0 := hlt 0 (by omega); have hn_0 := hne 0 (by omega); omega
+        · set r := n - 1 with hr_def
+          set j := inv r with hj_def
+          have hn_eq : n = r + 1 := by rw [hr_def]; omega
+          have hj_lt : j < r
+            have h1 := hlt r (by omega); have h2 := hne r (by omega); rw [hj_def]; omega
+          have hinv_j : inv j = r := by rw [hj_def]; exact hinv r (by omega)
+          have hpair_rj : (g r * g j) % p = 1 := by rw [hj_def]; exact hpair r (by omega)
+          rw [hn_eq, nat_prod.succ]
+          have hr_eq : r = (r - 1) + 1 := by omega
+          have hswap := nat_prod.swap_top (r - 1) j (by omega) g
+          rw [← hr_eq] at hswap; rw [hswap]
+          set phi : ℕ → ℕ := fun i => if i = j then r - 1 else i with hphi_def
+          set psi : ℕ → ℕ := fun x => if x = r - 1 then j else x with hpsi_def
+          set inv' : ℕ → ℕ := fun i => psi (inv (phi i)) with hinv'_def
+          set g' : ℕ → ℕ := fun i => g (phi i) with hg'_def
+          have hphi_lt : ∀ i < r - 1, phi i < r ∧ phi i ≠ j
+            intro i hi; rw [hphi_def]
+            by_cases hij : i = j
+            · rw [if_pos hij]; omega
+            · rw [if_neg hij]; omega
+          have hpsi_phi : ∀ i < r - 1, psi (phi i) = i
+            intro i hi; rw [hpsi_def, hphi_def]
+            by_cases hij : i = j
+            · have hrr : r - 1 = r - 1 := rfl
+              rw [if_pos hij, if_pos hrr]; omega
+            · have hne_r : i ≠ r - 1 := by omega
+              rw [if_neg hij, if_neg hne_r]
+          have hphi_psi : ∀ x < r, x ≠ j → phi (psi x) = x
+            intro x hx hxj; rw [hphi_def, hpsi_def]
+            by_cases hxr : x = r - 1
+            · have hjj : j = j := rfl
+              rw [if_pos hxr, if_pos hjj]; omega
+            · rw [if_neg hxr, if_neg hxj]
+          have hinv_phi_ok : ∀ i < r - 1, inv (phi i) < r ∧ inv (phi i) ≠ j
+            intro i hi
+            have hp_ok := hphi_lt i hi
+            have h1 := hlt (phi i) (by omega)
+            have hne_r : inv (phi i) ≠ r
+              intro he; have h2 := hinv (phi i) (by omega); rw [he, ← hj_def] at h2; exact hp_ok.2 h2.symm
+            have hne_j : inv (phi i) ≠ j
+              intro he; have h2 := hinv (phi i) (by omega); rw [he, hinv_j] at h2; omega
+            exact ⟨by omega, hne_j⟩
+          have hinv'_lt : ∀ i < r - 1, inv' i < r - 1
+            intro i hi; rw [hinv'_def, hpsi_def]
+            have hok := hinv_phi_ok i hi
+            by_cases her : inv (phi i) = r - 1
+            · rw [if_pos her]
+              by_cases hjr : j = r - 1
+              · exfalso; rw [← hjr] at her; exact hok.2 her
+              · omega
+            · rw [if_neg her]; omega
+          have hinv'_inv : ∀ i < r - 1, inv' (inv' i) = i
+            intro i hi; rw [hinv'_def]
+            have hok := hinv_phi_ok i hi
+            rw [hphi_psi (inv (phi i)) hok.1 hok.2, hinv (phi i) (by have h := hphi_lt i hi; omega), hpsi_phi i hi]
+          have hinv'_ne : ∀ i < r - 1, inv' i ≠ i
+            intro i hi heq; rw [hinv'_def] at heq
+            have hok := hinv_phi_ok i hi
+            have hphi_eq : phi (psi (inv (phi i))) = phi i := by rw [heq]
+            rw [hphi_psi (inv (phi i)) hok.1 hok.2] at hphi_eq
+            exact hne (phi i) (by have h := hphi_lt i hi; omega) hphi_eq
+          have hpair' : ∀ i < r - 1, (g' i * g' (inv' i)) % p = 1
+            intro i hi; rw [hg'_def, hinv'_def]
+            have hok := hinv_phi_ok i hi
+            rw [hphi_psi (inv (phi i)) hok.1 hok.2]
+            exact hpair (phi i) (by have h := hphi_lt i hi; omega)
+          have hrec := ihM (r - 1) (by omega) inv' g' hinv'_lt hinv'_inv hinv'_ne hpair'
+          have hcon : nat_prod (r - 1) (fun i => g (if i = j then r - 1 else i)) = nat_prod (r - 1) g'
+            apply nat_prod.congr; intro i hi; rw [hg'_def, hphi_def]
+          rw [hcon]
+          have hre : nat_prod (r - 1) g' * g j * g r = nat_prod (r - 1) g' * (g r * g j) := by ring
+          rw [hre, mul_mod.nat (nat_prod (r - 1) g') (g r * g j) p, hrec, hpair_rj]
+          exact (div_mod_of_lt.nat 1 p (by omega)).2
+  intro n; exact hstrong n n (by omega)
+
+-- WILSON'S THEOREM: (p - 1)! % p = p - 1 for EVERY prime p!
++ wilson.theorem (p : ℕ) (hprime : is_prime_nat p) : fact (p - 1) % p = p - 1
+  have hp : 2 ≤ p := hprime.1
+  by_cases hp2 : p = 2
+  · rw [hp2]; decide
+  · have hp3 : 3 ≤ p := by omega
+    have hprod_fact : ∀ m : ℕ, nat_prod m (fun i => i + 1) = fact m
+      intro m; induction m with r ihr
+      · rw [nat_prod.zero, fact_zero]
+      · rw [succ_eq_add_one.nat, nat_prod.succ, fact_succ, ihr]; ring
+    have hsplit : fact (p - 1) = nat_prod (p - 3) (fun i => i + 2) * (p - 1)
+      have hp1 : p - 1 = (p - 2) + 1 := by omega
+      have hp2' : p - 2 = (p - 3) + 1 := by omega
+      rw [← hprod_fact (p - 1), hp1, nat_prod.succ]
+      have hshift : ∀ m : ℕ, nat_prod (m + 1) (fun i => i + 1) = nat_prod m (fun i => i + 2)
+        intro m; induction m with r ihr
+        · rw [nat_prod.succ, nat_prod.zero, nat_prod.zero]; decide
+        · rw [succ_eq_add_one.nat, nat_prod.succ (r + 1) (fun i => i + 1), nat_prod.succ r (fun i => i + 2), ihr]; ring
+      rw [hp2', hshift (p - 3)]
+    set inv : ℕ → ℕ := fun i => fp.inv p (i + 2) - 2 with hinv_def
+    set g : ℕ → ℕ := fun i => i + 2 with hg_def
+    have hnd : ∀ i < p - 3, ¬ (p ∣ (i + 2)) := by intro i hi; exact not_dvd_of_pos_lt p (i + 2) (by omega) (by omega)
+    have hinv_bounds : ∀ i < p - 3, 2 ≤ fp.inv p (i + 2) ∧ fp.inv p (i + 2) ≤ p - 2
+      intro i hi
+      have hbd := fp.inv_pos_lt p (i + 2) hprime (hnd i hi)
+      have hmul := fp.mul_inv_mod p (i + 2) hprime (hnd i hi)
+      have hne1 : fp.inv p (i + 2) ≠ 1
+        intro h1; rw [h1, mul_one.nat, (div_mod_of_lt.nat (i + 2) p (by omega)).2] at hmul; omega
+      have hne_pm1 : fp.inv p (i + 2) ≠ p - 1
+        intro h1; rw [h1] at hmul
+        have hsq : ((p - 1) * (p - 1)) % p = 1 := (fp.sq_eq_one_iff p (p - 1) hprime (by omega) (by omega)).mpr (by right; rfl)
+        have hcand : ((p - 1) * (i + 2)) % p = ((p - 1) * (p - 1)) % p
+          have hc : (p - 1) * (i + 2) = (i + 2) * (p - 1) := by ring
+          rw [hc, hmul, hsq]
+        have heq := fp.cancel_left p (p - 1) (i + 2) (p - 1) hprime (not_dvd_of_pos_lt p (p - 1) (by omega) (by omega)) hcand
+        rw [(div_mod_of_lt.nat (i + 2) p (by omega)).2, (div_mod_of_lt.nat (p - 1) p (by omega)).2] at heq; omega
+      have hbd1 := hbd.1; have hbd2 := hbd.2; omega
+    have hinv_eq : ∀ k, inv k = fp.inv p (k + 2) - 2 := by intro k; rw [hinv_def]
+    have hg_eq : ∀ k, g k = k + 2 := by intro k; rw [hg_def]
+    have hinv_lt : ∀ i < p - 3, inv i < p - 3
+      intro i hi; rw [hinv_eq i]
+      obtain ⟨hb1, hb2⟩ := hinv_bounds i hi
+      have hp4 : 4 ≤ p := by omega
+      have hsub : (p - 3) + 1 = p - 2 := by omega
+      omega
+    have hinv_inv : ∀ i < p - 3, inv (inv i) = i
+      intro i hi; rw [hinv_eq (inv i), hinv_eq i]
+      obtain ⟨hb1, hb2⟩ := hinv_bounds i hi
+      have hadd : (fp.inv p (i + 2) - 2) + 2 = fp.inv p (i + 2) := by omega
+      rw [hadd]
+      have hnd2 := not_dvd_of_pos_lt p (fp.inv p (i + 2)) (by omega) (by omega)
+      have hm1 := fp.mul_inv_mod p (i + 2) hprime (hnd i hi)
+      have hm2 := fp.mul_inv_mod p (fp.inv p (i + 2)) hprime hnd2
+      have hcomm : fp.inv p (i + 2) * (i + 2) = (i + 2) * fp.inv p (i + 2) := by ring
+      have heq := fp.cancel_left p (fp.inv p (i + 2)) (fp.inv p (fp.inv p (i + 2))) (i + 2) hprime hnd2 (by rw [hm2, hcomm, hm1])
+      have hbd2 := fp.inv_pos_lt p (fp.inv p (i + 2)) hprime hnd2
+      rw [(div_mod_of_lt.nat (fp.inv p (fp.inv p (i + 2))) p hbd2.2).2, (div_mod_of_lt.nat (i + 2) p (by omega)).2] at heq
+      omega
+    have hinv_ne : ∀ i < p - 3, inv i ≠ i
+      intro i hi heq; rw [hinv_eq i] at heq
+      obtain ⟨hb1, hb2⟩ := hinv_bounds i hi
+      have hfix : fp.inv p (i + 2) = i + 2 := by omega
+      have hsq := fp.mul_inv_mod p (i + 2) hprime (hnd i hi)
+      rw [hfix] at hsq
+      have hor := (fp.sq_eq_one_iff p (i + 2) hprime (by omega) (by omega)).mp hsq
+      omega
+    have hpair : ∀ i < p - 3, (g i * g (inv i)) % p = 1
+      intro i hi; rw [hg_eq i, hg_eq (inv i), hinv_eq i]
+      obtain ⟨hb1, hb2⟩ := hinv_bounds i hi
+      have hadd : (fp.inv p (i + 2) - 2) + 2 = fp.inv p (i + 2) := by omega
+      rw [hadd]; exact fp.mul_inv_mod p (i + 2) hprime (hnd i hi)
+    have hmid := fin_involution.prod_mod_one p hp (p - 3) inv g hinv_lt hinv_inv hinv_ne hpair
+    rw [hsplit, mul_mod.nat (nat_prod (p - 3) g) (p - 1) p, hmid]
+    have hpm : (p - 1) % p = p - 1 := (div_mod_of_lt.nat (p - 1) p (by omega)).2
+    rw [hpm, one_mul.nat, hpm]
+
+-- ====================================================================================
+-- 4. Lagrange's Polynomial Root Bound over F_p
+-- ====================================================================================
+
+-> zpoly.eval (d : ℕ) (c : ℕ → ℤ) (x : ℤ) : ℤ :=
+  ∑ k < d + 1, c k * x ^ k
+
+-> int_dvd (p : ℕ) (z : ℤ) : Prop := ∃ q : ℤ, z = (p : ℤ) * q
+
++ int_dvd.of_nat_mod (p a b : ℕ) (hp : 0 < p) (h : a % p = b % p) :
+    int_dvd p ((a : ℤ) - (b : ℤ))
+  unfold int_dvd
+  have hda := div_add_mod.nat a p
+  have hdb := div_add_mod.nat b p
+  use ((a / p : ℕ) : ℤ) - ((b / p : ℕ) : ℤ)
+  have hca : ((p * (a / p) + a % p : ℕ) : ℤ) = (a : ℤ) := by rw [hda]
+  have hcb : ((p * (b / p) + b % p : ℕ) : ℤ) = (b : ℤ) := by rw [hdb]
+  rw [cast_add.int, cast_mul.int] at hca hcb
+  rw [h] at hca; linarith
+
++ int_dvd.prime_mul (p : ℕ) (hprime : is_prime_nat p) (a b : ℤ) (h : int_dvd p (a * b)) :
+    int_dvd p a ∨ int_dvd p b
+  have hp : 2 ≤ p := hprime.1
+  obtain ⟨q, hq⟩ := h
+  set Ka := nat_of_int (-a) with hKa_def
+  set Kb := nat_of_int (-b) with hKb_def
+  have ha_nn : 0 ≤ a + (Ka : ℤ) * (p : ℤ)
+    have h1 := self_le_nat_of_int (-a); rw [← hKa_def] at h1
+    nlinarith [(cast_le.int 1 p).mpr (by omega), (cast_le.int 0 Ka).mpr (by omega)]
+  have hb_nn : 0 ≤ b + (Kb : ℤ) * (p : ℤ)
+    have h1 := self_le_nat_of_int (-b); rw [← hKb_def] at h1
+    nlinarith [(cast_le.int 1 p).mpr (by omega), (cast_le.int 0 Kb).mpr (by omega)]
+  set na := nat_of_int (a + (Ka : ℤ) * (p : ℤ)) with hna_def
+  set nb := nat_of_int (b + (Kb : ℤ) * (p : ℤ)) with hnb_def
+  have hna : (na : ℤ) = a + (Ka : ℤ) * (p : ℤ) := by rw [hna_def]; exact int_of_nat_of_int (a + (Ka : ℤ) * (p : ℤ)) ha_nn
+  have hnb : (nb : ℤ) = b + (Kb : ℤ) * (p : ℤ) := by rw [hnb_def]; exact int_of_nat_of_int (b + (Kb : ℤ) * (p : ℤ)) hb_nn
+  set R : ℤ := q + a * (Kb : ℤ) + b * (Ka : ℤ) + (Ka : ℤ) * (Kb : ℤ) * (p : ℤ) with hR_def
+  have hprod : ((na * nb : ℕ) : ℤ) = (p : ℤ) * R
+    rw [cast_mul.int, hna, hnb, hR_def]; linear_combination hq
+  have hR_nn : 0 ≤ R
+    nlinarith [(cast_le.int 0 (na * nb)).mpr (by omega), (cast_pos.int p).mpr (by omega)]
+  set rn := nat_of_int R with hrn_def
+  have hrn : (rn : ℤ) = R := by rw [hrn_def]; exact int_of_nat_of_int R hR_nn
+  have hnat_eq : na * nb = p * rn := (cast_inj.int (na * nb) (p * rn)).mp (by rw [cast_mul.int p rn, hrn]; exact hprod)
+  obtain h1 | h2 := hprime.2 na nb ((dvd.iff_exists p (na * nb) (by omega)).mpr ⟨rn, hnat_eq⟩)
+  · left
+    obtain ⟨qa, hqa⟩ := (dvd.iff_exists p na (by omega)).mp h1
+    use (qa : ℤ) - (Ka : ℤ)
+    have hc : (na : ℤ) = (p : ℤ) * (qa : ℤ) := by rw [hqa, cast_mul.int]
+    linarith
+  · right
+    obtain ⟨qb, hqb⟩ := (dvd.iff_exists p nb (by omega)).mp h2
+    use (qb : ℤ) - (Kb : ℤ)
+    have hc : (nb : ℤ) = (p : ℤ) * (qb : ℤ) := by rw [hqb, cast_mul.int]
+    linarith
+
++ zpoly.sub_eval_factor (d : ℕ) (hd : 1 ≤ d) (c : ℕ → ℤ) (r : ℤ) :
+    ∃ q : ℕ → ℤ, q (d - 1) = c d ∧
+      ∀ x : ℤ, zpoly.eval d c x - zpoly.eval d c r = (x - r) * zpoly.eval (d - 1) q x
+  have hgen : ∀ m : ℕ, ∃ q : ℕ → ℤ, q m = c (m + 1) ∧
+      ∀ x : ℤ, zpoly.eval (m + 1) c x - zpoly.eval (m + 1) c r = (x - r) * zpoly.eval m q x
+    intro m; induction m with k ihk
+    · use (fun _ => c 1)
+      constructor; rfl
+      intro x; unfold zpoly.eval
+      have h01 : (0 + 1 : ℕ) = 1 := by decide
+      have h12 : (1 + 1 : ℕ) = 2 := by decide
+      rw [← h12, sum_below_succ 1, sum_below_succ 1]
+      rw [← h01, sum_below_succ 0, sum_below_zero, sum_below_succ 0, sum_below_zero, sum_below_succ 0, sum_below_zero]
+      rw [h01, pow_zero.int x, pow_one.int x, pow_zero.int r, pow_one.int r]; ring
+    · rw [succ_eq_add_one.nat]
+      obtain ⟨q0, hq0_lead, hq0_eq⟩ := ihk
+      have hpow_fac : ∀ (t : ℕ) (x : ℤ), x ^ (t + 1) - r ^ (t + 1) = (x - r) * ∑ j < t + 1, r ^ (t - j) * x ^ j
+        intro t x; induction t with s ihs
+        · rw [sum_below_succ 0, sum_below_zero]
+          have h0 : 0 - 0 = 0 := by decide
+          have h01 : (0 + 1 : ℕ) = 1 := by decide
+          rw [h0, h01, pow_zero.int r, pow_zero.int x, pow_one.int x, pow_one.int r]; ring
+        · rw [succ_eq_add_one.nat, sum_below_succ (s + 1)]
+          have htop : (s + 1) - (s + 1) = 0 := by omega
+          rw [htop, pow_zero.int]
+          have hshift : (∑ j < s + 1, r ^ ((s + 1) - j) * x ^ j) = r * ∑ j < s + 1, r ^ (s - j) * x ^ j
+            rw [← sum_const_mul.int]
+            apply sum_below.congr; intro j hj
+            have hsj : (s + 1) - j = (s - j) + 1 := by omega
+            rw [hsj, pow_succ.int]; ring
+          have hdist : (x - r) * (r * (∑ j < s + 1, r ^ (s - j) * x ^ j) + 1 * x ^ (s + 1)) = r * ((x - r) * (∑ j < s + 1, r ^ (s - j) * x ^ j)) + (x - r) * x ^ (s + 1) := by ring
+          rw [hshift, hdist, ← ihs, pow_succ.int x (s + 1), pow_succ.int r (s + 1)]; ring
+      set q1 : ℕ → ℤ := fun j => (if j < k + 1 then q0 j else 0) + c (k + 2) * r ^ ((k + 1) - j) with hq1_def
+      use q1
+      constructor
+      · rw [hq1_def]
+        have hnl : ¬ (k + 1 < k + 1) := by omega
+        have hsub : (k + 1) - (k + 1) = 0 := by omega
+        have hk2 : (k + 1) + 1 = k + 2 := by omega
+        rw [if_neg hnl, hsub, pow_zero.int, hk2]; ring
+      · intro x; unfold zpoly.eval
+        have hk2 : (k + 1) + 1 = k + 2 := by omega
+        rw [hk2, sum_below_succ (k + 2) (fun j => c j * x ^ j), sum_below_succ (k + 2) (fun j => c j * r ^ j)]
+        have hprev := hq0_eq x; unfold zpoly.eval at hprev
+        have hpf := hpow_fac (k + 1) x
+        have hq1_eval : (∑ j < (k + 1) + 1, q1 j * x ^ j) = (∑ j < k + 1, q0 j * x ^ j) + c (k + 2) * (∑ j < (k + 1) + 1, r ^ ((k + 1) - j) * x ^ j)
+          have hsp : (∑ j < (k + 1) + 1, q1 j * x ^ j) = (∑ j < (k + 1) + 1, (if j < k + 1 then q0 j else 0) * x ^ j) + (∑ j < (k + 1) + 1, c (k + 2) * (r ^ ((k + 1) - j) * x ^ j))
+            rw [← sum_add.int]; apply sum_below.congr; intro j hj; rw [hq1_def]; ring
+          rw [hsp, sum_const_mul.int, sum_below_succ (k + 1) (fun j => (if j < k + 1 then q0 j else 0) * x ^ j)]
+          have hnl : ¬ (k + 1 < k + 1) := by omega
+          rw [if_neg hnl]
+          have hcon : (∑ j < k + 1, (if j < k + 1 then q0 j else 0) * x ^ j) = ∑ j < k + 1, q0 j * x ^ j
+            apply sum_below.congr; intro j hj; rw [if_pos hj]
+          rw [hcon]; ring
+        rw [hk2] at hprev hq1_eval hpf; rw [hq1_eval]
+        linear_combination hprev + c (k + 2) * hpf
+  have hd1 : d = (d - 1) + 1 := by omega
+  obtain ⟨q, hq_lead, hq_eq⟩ := hgen (d - 1)
+  rw [← hd1] at hq_lead hq_eq
+  exact ⟨q, hq_lead, hq_eq⟩
+
++ fp_poly.roots_le_deg (p : ℕ) (hprime : is_prime_nat p) :
+    ∀ (d : ℕ) (c : ℕ → ℤ), ¬ int_dvd p (c d) →
+    (∑ x < p, if int_dvd p (zpoly.eval d c (x : ℤ)) then (1 : ℕ) else 0) ≤ d
+  have hp : 2 ≤ p := hprime.1
+  intro d; induction d with c hlead m ihm c hlead
+  · have hz : ∀ t : ℕ, (∑ x < t, if int_dvd p (zpoly.eval 0 c (x : ℤ)) then (1 : ℕ) else 0) = 0
+      intro t; induction t with r ihr
+      · rw [sum_below_zero]
+      · rw [succ_eq_add_one.nat, sum_below_succ, ihr]
+        have hev : zpoly.eval 0 c (r : ℤ) = c 0
+          unfold zpoly.eval; have h01 : (0 + 1 : ℕ) = 1 := by decide
+          rw [← h01, sum_below_succ 0, sum_below_zero, pow_zero.int]; ring
+        have hnd : ¬ int_dvd p (zpoly.eval 0 c (r : ℤ)) := by rw [hev]; exact hlead
+        rw [if_neg hnd]; omega
+    rw [hz p]; omega
+  · rw [succ_eq_add_one.nat] at hlead ⊢
+    by_cases hex : ∃ r < p, int_dvd p (zpoly.eval (m + 1) c (r : ℤ))
+    · obtain ⟨r, hrp, hroot_r⟩ := hex
+      obtain ⟨q, hq_lead, hq_eq⟩ := zpoly.sub_eval_factor (m + 1) (by omega) c (r : ℤ)
+      have hsub : (m + 1) - 1 = m := by omega
+      rw [hsub] at hq_lead hq_eq
+      have hq_nd : ¬ int_dvd p (q m) := by rw [hq_lead]; exact hlead
+      have hrec := ihm q hq_nd
+      have hpoint : ∀ x < p, (if int_dvd p (zpoly.eval (m + 1) c (x : ℤ)) then (1 : ℕ) else 0) ≤ (if int_dvd p (zpoly.eval m q (x : ℤ)) then (1 : ℕ) else 0) + (if x = r then (1 : ℕ) else 0)
+        intro x hx
+        by_cases hxr : x = r
+        · rw [if_pos hxr]
+          by_cases hc : int_dvd p (zpoly.eval (m + 1) c (x : ℤ))
+          · rw [if_pos hc]; omega
+          · rw [if_neg hc]; omega
+        · rw [if_neg hxr]
+          by_cases hc : int_dvd p (zpoly.eval (m + 1) c (x : ℤ))
+          · have hdiff_dvd : int_dvd p (((x : ℤ) - (r : ℤ)) * zpoly.eval m q (x : ℤ))
+              rw [← hq_eq (x : ℤ)]
+              obtain ⟨q1, hq1⟩ := hc; obtain ⟨q2, hq2⟩ := hroot_r
+              exact ⟨q1 - q2, by linear_combination hq1 - hq2⟩
+            have hnd_xr : ¬ int_dvd p ((x : ℤ) - (r : ℤ))
+              intro hdxr; obtain ⟨qt, hqt⟩ := hdxr
+              have hx_lt : (x : ℤ) < (p : ℤ) := (cast_lt.int x p).mpr hx
+              have hr_lt : (r : ℤ) < (p : ℤ) := (cast_lt.int r p).mpr hrp
+              have hx_nn : (0 : ℤ) ≤ (x : ℤ) := (cast_le.int 0 x).mpr (by omega)
+              have hr_nn : (0 : ℤ) ≤ (r : ℤ) := (cast_le.int 0 r).mpr (by omega)
+              by_cases hqt0 : qt = 0
+              · rw [hqt0] at hqt; exact hxr ((cast_inj.int x r).mp (by linarith))
+              · by_cases hqt_pos : 0 < qt
+                · have h1 : (1 : ℤ) ≤ qt := by omega
+                  nlinarith [(cast_le.int 0 p).mpr (by omega)]
+                · have h1 : qt ≤ -1 := by omega
+                  nlinarith [(cast_le.int 0 p).mpr (by omega)]
+            obtain h1 | h2 := int_dvd.prime_mul p hprime ((x : ℤ) - (r : ℤ)) (zpoly.eval m q (x : ℤ)) hdiff_dvd
+            · exfalso; exact hnd_xr h1
+            · rw [if_pos hc, if_pos h2]; omega
+          · rw [if_neg hc]; omega
+      have hsum_le : ∀ t ≤ p, (∑ x < t, if int_dvd p (zpoly.eval (m + 1) c (x : ℤ)) then (1 : ℕ) else 0) ≤ (∑ x < t, if int_dvd p (zpoly.eval m q (x : ℤ)) then (1 : ℕ) else 0) + (∑ x < t, if x = r then (1 : ℕ) else 0)
+        intro t ht; induction t with ht s ihs ht
+        · rw [sum_below_zero, sum_below_zero, sum_below_zero]; omega
+        · rw [succ_eq_add_one.nat] at ht ⊢; rw [sum_below_succ, sum_below_succ, sum_below_succ]
+          have h1 := ihs (by omega); have h2 := hpoint s (by omega); omega
+      have hsing : ∀ t : ℕ, (∑ x < t, if x = r then (1 : ℕ) else 0) ≤ 1
+        intro t; induction t with s ihs
+        · rw [sum_below_zero]; omega
+        · rw [succ_eq_add_one.nat, sum_below_succ]
+          by_cases hsr : s = r
+          · have hz : ∀ k ≤ s, (∑ x < k, if x = r then (1 : ℕ) else 0) = 0
+              intro k hk; induction k with hk u ihu hk
+              · rw [sum_below_zero]
+              · rw [succ_eq_add_one.nat] at hk ⊢; rw [sum_below_succ, ihu (by omega)]
+                have hne : u ≠ r := by omega; rw [if_neg hne]; omega
+            rw [hz s (by omega), if_pos hsr]; omega
+          · rw [if_neg hsr]; omega
+      have hA := hsum_le p (by omega); have hB := hsing p; omega
+    · have h0 : ∀ t ≤ p, (∑ x < t, if int_dvd p (zpoly.eval (m + 1) c (x : ℤ)) then (1 : ℕ) else 0) = 0
+        intro t ht; induction t with ht s ihs ht
+        · rw [sum_below_zero]
+        · rw [succ_eq_add_one.nat] at ht ⊢; rw [sum_below_succ, ihs (by omega)]
+          have hnr : ¬ int_dvd p (zpoly.eval (m + 1) c (s : ℤ)) := by intro hr; exact hex ⟨s, by omega, hr⟩
+          rw [if_neg hnr]; omega
+      rw [h0 p (by omega)]; omega
+
+-- ====================================================================================
+-- 5. Coprime Chinese Remainder Theorem & Euler's Totient Multiplicativity
+-- ====================================================================================
+
+-> zmod.coprime (m n : ℕ) : Prop :=
+  ∃ u v : ℤ, u * (m : ℤ) + v * (n : ℤ) = 1
+
++ zmod.coprime_comm (m n : ℕ) (h : zmod.coprime m n) : zmod.coprime n m
+  obtain ⟨u, v, heq⟩ := h
+  exact ⟨v, u, by linarith⟩
+
++ zmod.coprime_inv_mod (m n : ℕ) (hn : 0 < n) (hcop : zmod.coprime m n) :
+    ∃ um : ℕ, (um * m) % n = 1 % n
+  by_cases hn1_eq : n = 1
+  · use 0
+    have h0 : (0 * m) % 1 < 1 := mod_lt.nat (0 * m) 1 (by decide)
+    have h1 : 1 % 1 < 1 := mod_lt.nat 1 1 (by decide)
+    rw [hn1_eq]; omega
+  · obtain ⟨u, v, hbez⟩ := hcop
+    set K := nat_of_int (-u) with hK_def
+    have hu_nn : 0 ≤ u + (K : ℤ) * (n : ℤ)
+      have h1 := self_le_nat_of_int (-u); rw [← hK_def] at h1
+      nlinarith [(cast_le.int 1 n).mpr (by omega), (cast_le.int 0 K).mpr (by omega)]
+    set um := nat_of_int (u + (K : ℤ) * (n : ℤ)) with hum_def
+    have hum : (um : ℤ) = u + (K : ℤ) * (n : ℤ) := by rw [hum_def]; exact int_of_nat_of_int _ hu_nn
+    set Q := (K : ℤ) * (m : ℤ) - v with hQ_def
+    have heq_int : ((um * m : ℕ) : ℤ) = 1 + (n : ℤ) * Q
+      rw [cast_mul.int, hum, hQ_def]; linear_combination hbez
+    have hQ_nn : 0 ≤ Q
+      by_contra hneg
+      have hQ1 : Q ≤ -1 := by omega
+      have hle := mul_le_mul_of_nonneg_left.int Q (-1) (n : ℤ) hQ1 ((cast_le.int 0 n).mpr (by omega))
+      have hneg_n : (n : ℤ) * (-1) = -(n : ℤ) := by ring
+      rw [hneg_n] at hle
+      have hpos : (0 : ℤ) ≤ ((um * m : ℕ) : ℤ) := (cast_le.int 0 (um * m)).mpr (by omega)
+      have hn2 : (2 : ℤ) ≤ (n : ℤ) := (cast_le.int 2 n).mpr (by omega)
+      linarith
+    set qn := nat_of_int Q with hqn_def
+    have hqn : (qn : ℤ) = Q := by rw [hqn_def]; exact int_of_nat_of_int Q hQ_nn
+    have heq_nat : um * m = 1 + n * qn :=
+      (cast_inj.int (um * m) (1 + n * qn)).mp (by rw [cast_add.int 1 (n * qn), cast_one.int, cast_mul.int n qn, hqn]; exact heq_int)
+    use um
+    rw [heq_nat, add_mul_mod.nat]
+
+-- CHINESE REMAINDER THEOREM FOR COPRIME MODULI (EXISTENCE & UNIQUENESS):
++ zmod.crt_coprime (m n : ℕ) (hm : 0 < m) (hn : 0 < n) (hcop : zmod.coprime m n) :
+    (∀ a b : ℕ, ∃ x < m * n, x % m = a % m ∧ x % n = b % n) ∧
+    (∀ x y : ℕ, x < m * n → y < m * n → x % m = y % m → x % n = y % n → x = y)
+  have hmn_pos : 0 < m * n := mul_pos.nat m n hm hn
+  obtain ⟨um, hum⟩ := zmod.coprime_inv_mod m n hn hcop
+  obtain ⟨vn, hvn⟩ := zmod.coprime_inv_mod n m hm (zmod.coprime_comm m n hcop)
+  constructor
+  · intro a b
+    set x0 := b * (um * m) + a * (vn * n) with hx0_def
+    use x0 % (m * n)
+    constructor
+    · exact mod_lt.nat x0 (m * n) hmn_pos
+    · constructor
+      · have h1 := mod_of_factor.nat x0 (m * n) m n (x0 % (m * n)) rfl rfl
+        rw [← h1, hx0_def]
+        have hre : b * (um * m) + a * (vn * n) = a * (vn * n) + m * (b * um) := by ring
+        rw [hre, add_mul_mod.nat, mul_mod.nat a (vn * n) m, hvn, ← mul_mod.nat a 1 m, mul_one.nat]
+      · have h1 := mod_of_factor.nat x0 (m * n) n m (x0 % (m * n)) (by ring) rfl
+        rw [← h1, hx0_def]
+        have hre : b * (um * m) + a * (vn * n) = b * (um * m) + n * (a * vn) := by ring
+        rw [hre, add_mul_mod.nat, mul_mod.nat b (um * m) n, hum, ← mul_mod.nat b 1 n, mul_one.nat]
+  · intro x y hx hy hxm hyn
+    have hdiff_zero : ∀ u v : ℕ, v ≤ u → u < m * n → u % m = v % m → u % n = v % n → u = v
+      intro u v hvu hu hum_eq hun_eq
+      set d := u - v with hd_def
+      obtain ⟨qm, hqm⟩ := (dvd.iff_exists m d hm).mp (by rw [hd_def]; exact (mod_eq_iff_dvd_sub m u v hm hvu).mp hum_eq)
+      obtain ⟨qn, hqn⟩ := (dvd.iff_exists n d hn).mp (by rw [hd_def]; exact (mod_eq_iff_dvd_sub n u v hn hvu).mp hun_eq)
+      have hqm_mod : qm % n = 0
+        have h1 : (qm * (um * m)) % n = qm % n
+          rw [mul_mod.nat qm (um * m) n, hum, ← mul_mod.nat qm 1 n, mul_one.nat]
+        have h2 : qm * (um * m) = 0 + n * (um * qn)
+          calc qm * (um * m) = um * (m * qm) := by ring
+            _ = um * d := by rw [← hqm]
+            _ = um * (n * qn) := by rw [hqn]
+            _ = 0 + n * (um * qn) := by ring
+        rw [h2, add_mul_mod.nat, (div_mod_of_lt.nat 0 n hn).2] at h1
+        exact h1.symm
+      obtain ⟨r, hr⟩ := (dvd.iff_exists n qm hn).mp hqm_mod
+      have hd_eq : d = (m * n) * r := by rw [hqm, hr]; ring
+      by_cases hr0 : r = 0
+      · rw [hr0] at hd_eq; omega
+      · have hge := mul_le_mul_of_nonneg_left.nat 1 r (m * n) (by omega) (by omega); omega
+    by_cases hle : y ≤ x
+    · exact hdiff_zero x y hle hx hxm hyn
+    · exact (hdiff_zero y x (by omega) hy hxm.symm hyn.symm).symm
+
++ zmod.crt_is_unit_iff (m n x : ℕ) (hm : 0 < m) (hn : 0 < n) (hcop : zmod.coprime m n) :
+    zmod.is_unit (m * n) x ↔ zmod.is_unit m x ∧ zmod.is_unit n x
+  have hcrt := zmod.crt_coprime m n hm hn hcop
+  have hmn_pos : 0 < m * n := mul_pos.nat m n hm hn
+  constructor
+  · intro hu; obtain ⟨b, hb, heq⟩ := hu
+    constructor
+    · use b % m; constructor; exact mod_lt.nat b m hm
+      rw [mul_mod.nat x (b % m) m, zmod.mod_mod, ← mul_mod.nat x b m]
+      have hL := mod_of_factor.nat (x * b) (m * n) m n ((x * b) % (m * n)) rfl rfl
+      have hR := mod_of_factor.nat 1 (m * n) m n (1 % (m * n)) rfl rfl
+      rw [heq] at hL; rw [hL, ← hR]
+    · use b % n; constructor; exact mod_lt.nat b n hn
+      rw [mul_mod.nat x (b % n) n, zmod.mod_mod, ← mul_mod.nat x b n]
+      have hL := mod_of_factor.nat (x * b) (m * n) n m ((x * b) % (m * n)) (by ring) rfl
+      have hR := mod_of_factor.nat 1 (m * n) n m (1 % (m * n)) (by ring) rfl
+      rw [heq] at hL; rw [hL, ← hR]
+  · intro hpair; obtain ⟨⟨bm, _, hbm⟩, ⟨bn, _, hbn⟩⟩ := hpair
+    obtain ⟨b, hb_lt, hbm_eq, hbn_eq⟩ := hcrt.1 bm bn
+    use b; constructor; exact hb_lt
+    apply hcrt.2 ((x * b) % (m * n)) (1 % (m * n)) (mod_lt.nat _ _ hmn_pos) (mod_lt.nat _ _ hmn_pos)
+    · have hL := mod_of_factor.nat (x * b) (m * n) m n ((x * b) % (m * n)) rfl rfl
+      have hR := mod_of_factor.nat 1 (m * n) m n (1 % (m * n)) rfl rfl
+      rw [← hL, ← hR]
+      rw [mul_mod.nat x b m, hbm_eq, ← mul_mod.nat x bm m, hbm]
+    · have hL := mod_of_factor.nat (x * b) (m * n) n m ((x * b) % (m * n)) (by ring) rfl
+      have hR := mod_of_factor.nat 1 (m * n) n m (1 % (m * n)) (by ring) rfl
+      rw [← hL, ← hR]
+      rw [mul_mod.nat x b n, hbn_eq, ← mul_mod.nat x bn n, hbn]
+
+-> euler_totient (n : ℕ) : ℕ :=
+  ∑ a < n, if zmod.is_unit n a then 1 else 0
+
++ euler_totient.prime (p : ℕ) (hprime : is_prime_nat p) :
+    euler_totient p = p - 1
+  have hp : 2 ≤ p := hprime.1
+  unfold euler_totient
+  have hp1 : p = (p - 1) + 1 := by omega
+  have hunit_iff : ∀ a < p, zmod.is_unit p a ↔ 1 ≤ a
+    intro a ha; constructor
+    · intro hu; obtain ⟨b, _, hab⟩ := hu
+      by_contra h0; have ha0 : a = 0 := by omega
+      rw [ha0, zero_mul.nat, (div_mod_of_lt.nat 0 p (by omega)).2, (div_mod_of_lt.nat 1 p (by omega)).2] at hab
+      omega
+    · intro ha1
+      have hnd := not_dvd_of_pos_lt p a (by omega) ha
+      use fp.inv p a
+      exact ⟨(fp.inv_pos_lt p a hprime hnd).2, by rw [fp.mul_inv_mod p a hprime hnd, (div_mod_of_lt.nat 1 p (by omega)).2]⟩
+  have hgen : ∀ t ≤ p, (∑ a < t, if zmod.is_unit p a then (1 : ℕ) else 0) = t - 1
+    intro t ht; induction t with ht r ihr ht
+    · rw [sum_below_zero]; omega
+    · rw [succ_eq_add_one.nat] at ht ⊢; rw [sum_below_succ]
+      by_cases hr0 : r = 0
+      · rw [hr0, sum_below_zero]
+        have hnu : ¬ zmod.is_unit p 0 := by intro hu; have h := (hunit_iff 0 (by omega)).mp hu; omega
+        rw [if_neg hnu]; omega
+      · have hu : zmod.is_unit p r := (hunit_iff r (by omega)).mpr (by omega)
+        rw [ihr (by omega), if_pos hu]; omega
+  exact hgen p (by omega)
+
+-- EULER'S TOTIENT MULTIPLICATIVITY: phi(m * n) = phi(m) * phi(n) for coprime m, n!
++ euler_totient.mul_coprime (m n : ℕ) (hm : 0 < m) (hn : 0 < n) (hcop : zmod.coprime m n) :
+    euler_totient (m * n) = euler_totient m * euler_totient n
+  have hcrt := zmod.crt_coprime m n hm hn hcop
+  have hmn_pos : 0 < m * n := mul_pos.nat m n hm hn
+  obtain ⟨um, hum⟩ := zmod.coprime_inv_mod m n hn hcop
+  obtain ⟨vn, hvn⟩ := zmod.coprime_inv_mod n m hm (zmod.coprime_comm m n hcop)
+  set lift : ℕ → ℕ := fun u => ((u % n) * (um * m) + (u / n) * (vn * n)) % (m * n) with hlift_def
+  have hlift_mod : ∀ u < m * n, lift u < m * n ∧ (lift u) % m = u / n ∧ (lift u) % n = u % n
+    intro u hu; rw [hlift_def]
+    set x0 := (u % n) * (um * m) + (u / n) * (vn * n) with hx0_def
+    have hun_lt : u % n < n := mod_lt.nat u n hn
+    have hud_lt : u / n < m
+      by_contra hge
+      have hdm := div_add_mod.nat u n
+      have h1 := mul_le_mul_of_nonneg_left.nat m (u / n) n (by omega) (by omega)
+      have hnm : n * m = m * n := by ring
+      omega
+    constructor; exact mod_lt.nat x0 (m * n) hmn_pos
+    constructor
+    · have h1 := mod_of_factor.nat x0 (m * n) m n (x0 % (m * n)) rfl rfl
+      rw [← h1]
+      have hre : x0 = (u / n) * (vn * n) + m * ((u % n) * um) := by rw [hx0_def]; ring
+      rw [hre, add_mul_mod.nat, mul_mod.nat (u / n) (vn * n) m, hvn, ← mul_mod.nat (u / n) 1 m, mul_one.nat, (div_mod_of_lt.nat (u / n) m hud_lt).2]
+    · have h1 := mod_of_factor.nat x0 (m * n) n m (x0 % (m * n)) (by ring) rfl
+      rw [← h1]
+      have hre : x0 = (u % n) * (um * m) + n * ((u / n) * vn) := by rw [hx0_def]; ring
+      rw [hre, add_mul_mod.nat, mul_mod.nat (u % n) (um * m) n, hum, ← mul_mod.nat (u % n) 1 n, mul_one.nat, (div_mod_of_lt.nat (u % n) n hun_lt).2]
+  have hlift_inj : ∀ u1 < m * n, ∀ u2 < m * n, lift u1 = lift u2 → u1 = u2
+    intro u1 hu1 u2 hu2 heq
+    have hm1 := hlift_mod u1 hu1; have hm2 := hlift_mod u2 hu2
+    have hq_eq : u1 / n = u2 / n := by rw [← hm1.2.1, heq, hm2.2.1]
+    have hr_eq : u1 % n = u2 % n := by rw [← hm1.2.2, heq, hm2.2.2]
+    have hd1 := div_add_mod.nat u1 n; have hd2 := div_add_mod.nat u2 n
+    rw [hq_eq, hr_eq] at hd1; omega
+  unfold euler_totient
+  rw [← fin_sum.bij (m * n) lift (fun a => if zmod.is_unit (m * n) a then 1 else 0) (by intro u hu; exact (hlift_mod u hu).1) hlift_inj]
+  have hunit_mod : ∀ N x : ℕ, zmod.is_unit N (x % N) ↔ zmod.is_unit N x
+    intro N x; unfold zmod.is_unit; constructor
+    · intro hu; obtain ⟨b, hb, he⟩ := hu; exact ⟨b, hb, by rw [mul_mod.nat x b N, ← zmod.mod_mod x N, ← mul_mod.nat (x % N) b N]; exact he⟩
+    · intro hu; obtain ⟨b, hb, he⟩ := hu; exact ⟨b, hb, by rw [mul_mod.nat (x % N) b N, zmod.mod_mod x N, ← mul_mod.nat x b N]; exact he⟩
+  have hcon : (∑ u < m * n, if zmod.is_unit (m * n) (lift u) then (1 : ℕ) else 0) =
+      ∑ u < m * n, (if zmod.is_unit m (u / n) then 1 else 0) * (if zmod.is_unit n (u % n) then 1 else 0)
+    apply sum_congr.nat; intro u hu
+    have hlm := hlift_mod u hu
+    have hiff := zmod.crt_is_unit_iff m n (lift u) hm hn hcop
+    have hm_u : zmod.is_unit m (lift u) ↔ zmod.is_unit m (u / n)
+      have h := hunit_mod m (lift u); rw [hlm.2.1] at h; exact h.symm
+    have hn_u : zmod.is_unit n (lift u) ↔ zmod.is_unit n (u % n)
+      have h := hunit_mod n (lift u); rw [hlm.2.2] at h; exact h.symm
+    by_cases h1 : zmod.is_unit m (u / n)
+    · by_cases h2 : zmod.is_unit n (u % n)
+      · have hboth : zmod.is_unit (m * n) (lift u) := hiff.mpr ⟨hm_u.mpr h1, hn_u.mpr h2⟩
+        rw [if_pos hboth, if_pos h1, if_pos h2]; ring
+      · have hnb : ¬ zmod.is_unit (m * n) (lift u) := by intro hb; exact h2 (hn_u.mp (hiff.mp hb).2)
+        rw [if_neg hnb, if_pos h1, if_neg h2]; ring
+    · have hnb : ¬ zmod.is_unit (m * n) (lift u) := by intro hb; exact h1 (hm_u.mp (hiff.mp hb).1)
+      rw [if_neg hnb, if_neg h1]; ring
+  rw [hcon]
+  -- Collapse ∑ u < k * n, F (u / n) * G (u % n) = (∑ i < k, F i) * (∑ j < n, G j) by induction on k!
+  have hgrid : ∀ (k : ℕ) (F G : ℕ → ℕ), (∑ u < k * n, F (u / n) * G (u % n)) = (∑ i < k, F i) * (∑ j < n, G j)
+    intro k F G; induction k with r ihr
+    · have h0 : 0 * n = 0 := by ring
+      rw [h0, sum_below_zero, sum_below_zero]; ring
+    · rw [succ_eq_add_one.nat, sum_below_succ]
+      have hsplit_block : ∀ t ≤ n, (∑ u < r * n + t, F (u / n) * G (u % n)) = (∑ u < r * n, F (u / n) * G (u % n)) + F r * (∑ j < t, G j)
+        intro t ht; induction t with ht s ihs ht
+        · have h0 : r * n + 0 = r * n := by omega
+          rw [h0, sum_below_zero]; ring
+        · rw [succ_eq_add_one.nat] at ht ⊢
+          have hadd : r * n + (s + 1) = (r * n + s) + 1 := by omega
+          rw [hadd, sum_below_succ, ihs (by omega), sum_below_succ]
+          have hdm := div_mod_unique.nat (r * n + s) n r s (by ring) (by omega)
+          rw [← hdm.1, ← hdm.2]; ring
+      have hrn : (r + 1) * n = r * n + n := by ring
+      rw [hrn, hsplit_block n (by omega), ihr]; ring
+  exact hgrid m (fun a => if zmod.is_unit m a then 1 else 0) (fun b => if zmod.is_unit n b then 1 else 0)

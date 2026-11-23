@@ -1,0 +1,215 @@
+-- Gaussian integers ℤ[i] in Satori HOL (`tungsten/core/algebra/gaussian_integer.w`).
+-- Bundled `CommRing` and `IntegralDomain` instances (with `+`, `-`, `*`, `-x` dispatch),
+-- conjugation, multiplicative norm `N(z w) = N(z) N(w)`, Euclidean division, and Bézout GCD.
+
+import arith
+import algebra
+
+structure GaussInt :=
+  (re : ℤ)
+  (im : ℤ)
+
+-> gi.zero : GaussInt := GaussInt.mk 0 0
+-> gi.one  : GaussInt := GaussInt.mk 1 0
+-> gi.I    : GaussInt := GaussInt.mk 0 1
+-> gi.of_int (n : ℤ) : GaussInt := GaussInt.mk n 0
+
+-> gi.neg  (z : GaussInt) : GaussInt := GaussInt.mk (-z.re) (-z.im)
+-> gi.conj (z : GaussInt) : GaussInt := GaussInt.mk z.re (-z.im)
+-> gi.add  (a b : GaussInt) : GaussInt := GaussInt.mk (a.re + b.re) (a.im + b.im)
+-> gi.sub  (a b : GaussInt) : GaussInt := GaussInt.mk (a.re - b.re) (a.im - b.im)
+-> gi.mul  (a b : GaussInt) : GaussInt :=
+  GaussInt.mk (a.re * b.re - a.im * b.im) (a.re * b.im + a.im * b.re)
+
+-> gi.norm (z : GaussInt) : ℤ := z.re * z.re + z.im * z.im
+-> gi.dvd  (d z : GaussInt) : Prop := ∃ q : GaussInt, z = gi.mul d q
+
++ gi.ext (a b : GaussInt) (hr : a.re = b.re) (hi : a.im = b.im) : a = b
+  ext
+  · exact hr
+  · exact hi
+
+@[auto] + gi.add_assoc (a b c : GaussInt) : gi.add (gi.add a b) c = gi.add a (gi.add b c)
+  ext <;> (unfold gi.add; simp; ring)
+
+@[auto] + gi.add_comm (a b : GaussInt) : gi.add a b = gi.add b a
+  ext <;> (unfold gi.add; simp; ring)
+
+@[auto] + gi.zero_add (a : GaussInt) : gi.add gi.zero a = a
+  ext <;> (unfold gi.add gi.zero; simp)
+
++ gi.add_zero_r (a : GaussInt) : gi.add a gi.zero = a
+  ext <;> (unfold gi.add gi.zero; simp)
+
+@[auto] + gi.add_right_neg (a : GaussInt) : gi.add a (gi.neg a) = gi.zero
+  ext <;> (unfold gi.add gi.neg gi.zero; simp; ring)
+
+@[auto] + gi.mul_assoc (a b c : GaussInt) : gi.mul (gi.mul a b) c = gi.mul a (gi.mul b c)
+  ext <;> (unfold gi.mul; simp; ring)
+
+@[auto] + gi.mul_comm (a b : GaussInt) : gi.mul a b = gi.mul b a
+  ext <;> (unfold gi.mul; simp; ring)
+
+@[auto] + gi.one_mul (a : GaussInt) : gi.mul gi.one a = a
+  apply gi.ext
+  · unfold gi.mul gi.one; simp; ring
+  · unfold gi.mul gi.one; simp
+
++ gi.mul_one_r (a : GaussInt) : gi.mul a gi.one = a
+  apply gi.ext
+  · unfold gi.mul gi.one; simp; ring
+  · unfold gi.mul gi.one; simp
+
++ gi.mul_zero_r (a : GaussInt) : gi.mul a gi.zero = gi.zero
+  ext <;> (unfold gi.mul gi.zero; simp)
+
+@[auto] + gi.mul_add_l (a b c : GaussInt) : gi.mul a (gi.add b c) = gi.add (gi.mul a b) (gi.mul a c)
+  ext <;> (unfold gi.mul gi.add; simp; ring)
+
+@[auto] + gi.mul_add_r (a b c : GaussInt) : gi.mul (gi.add a b) c = gi.add (gi.mul a c) (gi.mul b c)
+  ext <;> (unfold gi.mul gi.add; simp; ring)
+
+@[auto] + gi.one_ne_zero : gi.one ≠ gi.zero
+  intro h
+  have hr : gi.one.re = gi.zero.re := by rw [h]
+  unfold gi.one gi.zero at hr; simp at hr
+
++ gauss_int.norm_nonneg (z : GaussInt) : 0 ≤ gi.norm z
+  unfold gi.norm; nlinarith
+
++ gauss_int.norm_mul (a b : GaussInt) : gi.norm (gi.mul a b) = gi.norm a * gi.norm b
+  unfold gi.norm gi.mul; simp; ring
+
++ gauss_int.norm_eq_zero_iff (z : GaussInt) : gi.norm z = 0 ↔ z = gi.zero
+  constructor
+  · intro hz; unfold gi.norm at hz
+    ext
+    · unfold gi.zero; simp; nlinarith
+    · unfold gi.zero; simp; nlinarith
+  · intro hz; rw [hz]; unfold gi.norm gi.zero; simp
+
++ gauss_int.norm_pos_of_ne_zero (z : GaussInt) (hz : z ≠ gi.zero) : 0 < gi.norm z
+  have hnn := gauss_int.norm_nonneg z
+  by_contra hle
+  exact hz ((gauss_int.norm_eq_zero_iff z).mp (by omega))
+
+@[auto] + gi.mul_ne_zero (a b : GaussInt) (ha : a ≠ gi.zero) (hb : b ≠ gi.zero) : gi.mul a b ≠ gi.zero
+  intro h0
+  have hn0 : gi.norm (gi.mul a b) = 0 := (gauss_int.norm_eq_zero_iff (gi.mul a b)).mpr h0
+  rw [gauss_int.norm_mul] at hn0
+  have hpa := gauss_int.norm_pos_of_ne_zero a ha
+  have hpb := gauss_int.norm_pos_of_ne_zero b hb
+  have hpm := mul_pos.int (gi.norm a) (gi.norm b) hpa hpb
+  omega
+
+-- ---- bundled algebraic typeclass instances for `GaussInt` --------------------------
+
+instance gi_zero_inst   : Zero           GaussInt := Zero.mk gi.zero
+instance gi_one_inst    : One            GaussInt := One.mk  gi.one
+instance gi_add_inst    : Add            GaussInt := Add.mk  gi.add
+instance gi_sub_inst    : Sub            GaussInt := Sub.mk  gi.sub
+instance gi_neg_inst    : Neg            GaussInt := Neg.mk  gi.neg
+instance gi_mul_inst    : Mul            GaussInt := Mul.mk  gi.mul
+instance gi_add_group   : AddCommGroup   GaussInt := AddCommGroup.mk gi.zero gi.add gi.neg
+instance gi_ring        : Ring           GaussInt := Ring.mk gi.zero gi.one gi.add gi.neg gi.mul
+instance gi_comm_ring   : CommRing       GaussInt := CommRing.mk gi.zero gi.one gi.add gi.neg gi.mul
+instance gi_domain      : IntegralDomain GaussInt := IntegralDomain.mk gi.zero gi.one gi.add gi.neg gi.mul
+
+-- ---- nearest-integer rounding, Euclidean division, and Bézout GCD ------------------
+
++ int.nearest_quot (u d : ℤ) (hd : 0 < d) :
+    ∃ q : ℤ, 2 * (u - q * d) ≤ d ∧ -d ≤ 2 * (u - q * d)
+  set K := nat_of_int (-u) with hK_def
+  have hu_nn : 0 ≤ u + (K : ℤ) * d
+    have h1 := self_le_nat_of_int (-u); rw [← hK_def] at h1
+    have hK_nn : (0 : ℤ) ≤ (K : ℤ) := (cast_le.int 0 K).mpr (by omega)
+    have hKd := mul_le_mul_of_nonneg_left.int 1 d (K : ℤ) (by omega) hK_nn
+    linarith
+  set dn := nat_of_int d with hdn_def
+  have hdn : (dn : ℤ) = d := by rw [hdn_def]; exact int_of_nat_of_int d (by omega)
+  have hdn_pos : 0 < dn
+    by_contra h0; have hz : dn = 0 := by omega; rw [hz, cast_zero.int] at hdn; omega
+  set un := nat_of_int (u + (K : ℤ) * d) with hun_def
+  have hun : (un : ℤ) = u + (K : ℤ) * d := by rw [hun_def]; exact int_of_nat_of_int (u + (K : ℤ) * d) hu_nn
+  have hdm := div_add_mod.nat un dn
+  have hrem := mod_lt.nat un dn hdn_pos
+  have hcast : ((dn * (un / dn) + un % dn : ℕ) : ℤ) = (un : ℤ) := by rw [hdm]
+  rw [cast_add.int, cast_mul.int, hdn, hun] at hcast
+  by_cases hhalf : 2 * (un % dn) ≤ dn
+  · use ((un / dn : ℕ) : ℤ) - (K : ℤ)
+    have hr_nn : (0 : ℤ) ≤ ((un % dn : ℕ) : ℤ) := (cast_le.int 0 (un % dn)).mpr (by omega)
+    have hc : ((2 * (un % dn) : ℕ) : ℤ) ≤ (dn : ℤ) := (cast_le.int (2 * (un % dn)) dn).mpr hhalf
+    rw [cast_mul.int, hdn] at hc
+    have h2 : ((2 : ℕ) : ℤ) = 2 := by decide
+    rw [h2] at hc
+    constructor <;> linarith
+  · use ((un / dn : ℕ) : ℤ) + 1 - (K : ℤ)
+    have hr_lt : ((un % dn : ℕ) : ℤ) < d := by rw [← hdn]; exact (cast_lt.int (un % dn) dn).mpr hrem
+    have hc : (dn : ℤ) < ((2 * (un % dn) : ℕ) : ℤ) := (cast_lt.int dn (2 * (un % dn))).mpr (by omega)
+    rw [cast_mul.int, hdn] at hc
+    have h2 : ((2 : ℕ) : ℤ) = 2 := by decide
+    rw [h2] at hc
+    constructor <;> linarith
+
++ gauss_int.euclidean_div (a b : GaussInt) (hb : b ≠ gi.zero) :
+    ∃ q r : GaussInt, a = gi.add (gi.mul b q) r ∧ gi.norm r < gi.norm b
+  have hnb_pos : 0 < gi.norm b := gauss_int.norm_pos_of_ne_zero b hb
+  set prod := gi.mul a (gi.conj b) with hprod_def
+  obtain ⟨qre, hre_hi, hre_lo⟩ := int.nearest_quot prod.re (gi.norm b) hnb_pos
+  obtain ⟨qim, him_hi, him_lo⟩ := int.nearest_quot prod.im (gi.norm b) hnb_pos
+  set q := GaussInt.mk qre qim with hq_def
+  set r := gi.sub a (gi.mul b q) with hr_def
+  use q, r
+  constructor
+  · ext <;> (rw [hr_def]; unfold gi.add gi.sub; simp; ring)
+  · have hrc : gi.mul r (gi.conj b) = GaussInt.mk (prod.re - qre * gi.norm b) (prod.im - qim * gi.norm b)
+      ext <;> (rw [hr_def, hprod_def, hq_def]; unfold gi.mul gi.sub gi.conj gi.norm; simp; ring)
+    have hnorm_conj : gi.norm (gi.conj b) = gi.norm b := by unfold gi.norm gi.conj; simp; ring
+    have hmul_n := gauss_int.norm_mul r (gi.conj b)
+    rw [hnorm_conj, hrc] at hmul_n
+    have hnorm_mk : gi.norm (GaussInt.mk (prod.re - qre * gi.norm b) (prod.im - qim * gi.norm b)) =
+        (prod.re - qre * gi.norm b) * (prod.re - qre * gi.norm b) + (prod.im - qim * gi.norm b) * (prod.im - qim * gi.norm b)
+      unfold gi.norm; simp
+    rw [hnorm_mk] at hmul_n
+    have hsq1 : (2 * (prod.re - qre * gi.norm b)) * (2 * (prod.re - qre * gi.norm b)) ≤ gi.norm b * gi.norm b := by nlinarith
+    have hsq2 : (2 * (prod.im - qim * gi.norm b)) * (2 * (prod.im - qim * gi.norm b)) ≤ gi.norm b * gi.norm b := by nlinarith
+    have h4_eq : 4 * (gi.norm r * gi.norm b) = (2 * (prod.re - qre * gi.norm b)) * (2 * (prod.re - qre * gi.norm b)) + (2 * (prod.im - qim * gi.norm b)) * (2 * (prod.im - qim * gi.norm b))
+      rw [← hmul_n]; ring
+    have h4 : 4 * (gi.norm r * gi.norm b) ≤ 2 * (gi.norm b * gi.norm b) := by linarith
+    by_contra hge
+    have h1 : gi.norm b ≤ gi.norm r := by omega
+    have h2 := mul_le_mul_of_nonneg_right.int (gi.norm b) (gi.norm r) (gi.norm b) h1 (by omega)
+    have h3 := mul_pos.int (gi.norm b) (gi.norm b) hnb_pos hnb_pos
+    linarith
+
++ gauss_int.bezout_gcd (a b : GaussInt) :
+    ∃ g u v : GaussInt, gi.dvd g a ∧ gi.dvd g b ∧ g = gi.add (gi.mul u a) (gi.mul v b)
+  have hstrong : ∀ N : ℕ, ∀ x y : GaussInt, gi.norm y ≤ (N : ℤ) →
+      ∃ g u v : GaussInt, gi.dvd g x ∧ gi.dvd g y ∧ g = gi.add (gi.mul u x) (gi.mul v y)
+    intro N; induction N with x y hny M ihM x y hny
+    · have hy0 : y = gi.zero := (gauss_int.norm_eq_zero_iff y).mp (by linarith [gauss_int.norm_nonneg y])
+      use x, gi.one, gi.zero
+      exact ⟨⟨gi.one, (gi.mul_one_r x).symm⟩, ⟨gi.zero, by rw [hy0]; exact (gi.mul_zero_r x).symm⟩, by rw [hy0, gi.one_mul, gi.mul_zero_r, gi.add_zero_r]⟩
+    · rw [succ_eq_add_one.nat] at hny
+      by_cases hy0 : y = gi.zero
+      · use x, gi.one, gi.zero
+        exact ⟨⟨gi.one, (gi.mul_one_r x).symm⟩, ⟨gi.zero, by rw [hy0]; exact (gi.mul_zero_r x).symm⟩, by rw [hy0, gi.one_mul, gi.mul_zero_r, gi.add_zero_r]⟩
+      · obtain ⟨q, r, heq, hrlt⟩ := gauss_int.euclidean_div x y hy0
+        have hr_le : gi.norm r ≤ (M : ℤ) := by rw [cast_add.int M 1, cast_one.int] at hny; omega
+        obtain ⟨g, u1, v1, hd_gy, hd_gr, hbez⟩ := ihM y r hr_le
+        obtain ⟨ky, hky⟩ := hd_gy
+        obtain ⟨kr, hkr⟩ := hd_gr
+        use g, v1, gi.sub u1 (gi.mul v1 q)
+        constructor
+        · exact ⟨gi.add (gi.mul ky q) kr, by rw [heq, hky, hkr, gi.mul_add_l, gi.mul_assoc]⟩
+        · constructor
+          · exact ⟨ky, hky⟩
+          · rw [hbez]
+            apply gi.ext
+            · have hr_re : r.re = x.re - (gi.mul y q).re := by rw [heq]; unfold gi.add; simp; ring
+              have hr_im : r.im = x.im - (gi.mul y q).im := by rw [heq]; unfold gi.add; simp; ring
+              unfold gi.add gi.sub gi.mul; simp; rw [hr_re, hr_im]; unfold gi.mul; simp; ring
+            · have hr_re : r.re = x.re - (gi.mul y q).re := by rw [heq]; unfold gi.add; simp; ring
+              have hr_im : r.im = x.im - (gi.mul y q).im := by rw [heq]; unfold gi.add; simp; ring
+              unfold gi.add gi.sub gi.mul; simp; rw [hr_re, hr_im]; unfold gi.mul; simp; ring
+  exact hstrong (nat_of_int (gi.norm b)) a b (by rw [int_of_nat_of_int (gi.norm b) (gauss_int.norm_nonneg b)]; linarith)

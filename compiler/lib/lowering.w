@@ -305,7 +305,9 @@ use lowering/definitions
   while ei < n_exprs
     expr = expressions[ei]
     expr_kind = ast_kind(expr)
-    expr_name = expr.name
+    expr_name = nil
+    if expr_kind in (:call :trait_def :method_def :fn_def :class_def :module_def)
+      expr_name = expr.name
     # `constant_alias "WC"` — the parser stamped the declaring file's `in`
     # namespace as a second string arg (parser.w), so registration needs no
     # file context. Collected in this prepass so aliases resolve in every
@@ -1187,8 +1189,9 @@ use lowering/definitions
   if core_expressions != nil && mod[:core_reuse_contract] == :stable && mod[:incremental_core_cache_key] != nil
     if mod[:incremental_core_cache_hit] != true
       mark_stackable_typed_arrays(core_expressions, false, nil)
+    incremental_core_cache_begin_core_partition(mod, main_fn)
     lower_program(ctx, core_expressions)
-    incremental_core_cache_finish_core_partition(mod)
+    incremental_core_cache_finish_core_partition(mod, main_fn)
     incremental_library_cache_begin(mod)
     skip_lib_paths = mod[:incremental_library_cache_hit] == true ? mod[:incremental_library_cache_paths] : nil
     mark_stackable_typed_arrays(user_expressions, true, skip_lib_paths)

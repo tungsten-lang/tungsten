@@ -149,4 +149,28 @@ if ! grep -E 'core cache: hit .+\(.*disk\)' "$TMP/cvar/warm.log" >/dev/null; the
   exit 1
 fi
 
+# Core top-level startup (such as core/env.w's ENV_FETCH_MISSING = EnvFetchMissing.new)
+# must never collide with cached Core @.ic slots on a warm hit and must emit
+# byte-identical LLVM IR between the cold miss and warm hit.
+mkdir -p "$TMP/startup"
+cat >"$TMP/startup/env_use.w" <<'W'
+v = Env.get("TUNGSTEN_NONEXISTENT_TEST_VAR", "fallback")
+<< v
+W
+for run in cold warm; do
+  TUNGSTEN_CACHE_DIR="$TMP/startup-cache" TUNGSTEN_LL_PATH="$TMP/startup/$run.ll" \
+    "$TUNGSTEN" compile "$TMP/startup/env_use.w" --out "$TMP/startup/$run" -v \
+    >"$TMP/startup/$run.log" 2>&1 || { cat "$TMP/startup/$run.log" >&2; echo "FAIL: $run Core-startup compile failed" >&2; exit 1; }
+  if [[ "$("$TMP/startup/$run")" != "fallback" ]]; then
+    echo "FAIL: $run Core-startup executable returned unexpected output" >&2
+    exit 1
+  fi
+done
+if ! grep -E 'core cache: hit .+\(.*disk\)' "$TMP/startup/warm.log" >/dev/null; then
+  echo "FAIL: the Core-startup recompile did not hit the persistent Core cache" >&2
+  cat "$TMP/startup/warm.log" >&2
+  exit 1
+fi
+cmp "$TMP/startup/cold.ll" "$TMP/startup/warm.ll"
+
 echo "incremental Core cache contract: ok"

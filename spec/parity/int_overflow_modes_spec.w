@@ -1,4 +1,3 @@
-## parity xfail the compiled engine cannot compile a statement-level `Math.promote/wrap/trap ->` block (compiler error "undefined method 'name' for Object (object/hash ...)", pre-existing); with the blocks compiled inside `begin` the engines still differ on i64.neg.minus, i64.shl.63 and i64.shl.chain (compiled promotes a top-level `## i64` shift and `-t - 1`)
 # Integer overflow modes at the i64 boundary: `Math.promote / trap / wrap ->`
 # blocks and `## i64` / `## u64` fixed-width locals — add, sub, mul, shift,
 # negate, compound assignment. The compiled engine lowers these to guarded,

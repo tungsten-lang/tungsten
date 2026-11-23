@@ -184,7 +184,7 @@
     # String methods are also Symbol#to_s/#empty?/#size/#length. The tree walker
     # ordinarily distinguishes host Symbols from Strings; route these shared
     # methods through String instead of the legacy Symbol scaffold.
-    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length" "ord" "starts_with?" "ends_with?" "ascii?" "blank?" "byte_at" "bytes" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "nfc" "nfd" "nfkc" "nfkd" "normalize" "graphemes" "each_grapheme" "scan" "to_regex" "constantize")
+    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length" "ord" "starts_with?" "ends_with?" "ascii?" "blank?" "byte_at" "bytes" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "count" "levenshtein" "nfc" "nfd" "nfkc" "nfkd" "normalize" "graphemes" "each_grapheme" "scan" "to_regex" "constantize")
       try_autoload_class("String")
       primitive_class = @classes["String"]
     else

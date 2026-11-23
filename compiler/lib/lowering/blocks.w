@@ -248,6 +248,9 @@
       captures.push("__self")
     find_captured_params_in_list(ast_get(node, :body), captures, fn_params)
     return nil
+  when :fastmath_block, :strictmath_block, :overflow_block
+    find_captured_params_in_list(node[:body], captures, fn_params)
+    return nil
   else
     nil
 
@@ -763,7 +766,9 @@
     is_class_method: ctx[:is_class_method],
     is_block: true,
     block_return_frame: nil,
-    yield_block_name: inherited_yield_block_name
+    yield_block_name: inherited_yield_block_name,
+    overflow_mode: ctx[:overflow_mode],
+    math_mode_override: ctx[:math_mode_override]
   }
 
   if uses_block_return && captures.include?("__block_return_frame")

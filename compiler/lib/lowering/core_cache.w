@@ -449,19 +449,7 @@ incremental_core_cache_state = {
     string_texts: string_texts
   }
 
-# Core top-level startup is deliberately relowered into each fresh main.
-# Apply the cached boundary only after that startup has consumed its ordinary
-# ids; user lowering then begins after every id embedded in cached functions.
--> incremental_core_cache_finish_core_partition(mod)
-  if mod[:incremental_core_cache_key] == nil
-    return nil
-  entry = mod[:incremental_core_cache_entry]
-  if entry == nil
-    mod[:incremental_core_cache_counter_prefix] = incremental_core_cache_capture_boundary(mod)
-    return nil
-  prefix = entry[:counter_prefix]
-  if prefix == nil
-    raise "incremental Core cache entry has no counter prefix"
+-> incremental_core_cache_apply_counter_prefix(mod, prefix)
   fields = incremental_core_cache_counter_fields()
   i = 0
   while i < fields.size()
@@ -490,6 +478,61 @@ incremental_core_cache_state = {
     used[keys[i]] = prefix[:used_memo_tables][keys[i]]
     i += 1
   mod[:incremental_core_cache_counter_prefix] = prefix
+  nil
+
+# Core top-level startup is deliberately relowered into each fresh main.
+# On a warm hit, apply the cached Core counter boundary BEFORE lowering Core
+# startup so main's IC/call-site ids start after every id embedded in cached
+# Core functions (preventing @.ic[0] collisions). On a cold miss, record where
+# Core startup begins in main so finish_core_partition can rebase main's Core
+# startup ids past the cached Core boundary for byte-identical cold/warm IR.
+-> incremental_core_cache_begin_core_partition(mod, main_fn)
+  if mod[:incremental_core_cache_key] == nil
+    return nil
+  entry = mod[:incremental_core_cache_entry]
+  if entry != nil
+    prefix = entry[:counter_prefix]
+    if prefix == nil
+      raise "incremental Core cache entry has no counter prefix"
+    incremental_core_cache_apply_counter_prefix(mod, prefix)
+    return nil
+  if main_fn != nil && main_fn[:blocks] != nil && main_fn[:blocks].size() > 0
+    bidx = main_fn[:blocks].size() - 1
+    iidx = main_fn[:blocks][bidx][:instructions].size()
+    mod[:incremental_core_startup_mark] = {block_idx: bidx, inst_idx: iidx}
+  nil
+
+-> incremental_core_cache_finish_core_partition(mod, main_fn = nil)
+  if mod[:incremental_core_cache_key] == nil
+    return nil
+  entry = mod[:incremental_core_cache_entry]
+  if entry != nil
+    prefix = entry[:counter_prefix]
+    if prefix == nil
+      raise "incremental Core cache entry has no counter prefix"
+    if mod[:incremental_core_cache_counter_prefix] == nil
+      incremental_core_cache_apply_counter_prefix(mod, prefix)
+    return nil
+  mod[:incremental_core_cache_counter_prefix] = incremental_core_cache_capture_boundary(mod)
+  mark = mod[:incremental_core_startup_mark]
+  if mark != nil && main_fn != nil && main_fn[:blocks] != nil
+    bi = mark[:block_idx]
+    while bi < main_fn[:blocks].size()
+      instrs = main_fn[:blocks][bi][:instructions]
+      ii = bi == mark[:block_idx] ? mark[:inst_idx] : 0
+      while ii < instrs.size()
+        inst = instrs[ii]
+        if wire_get(inst, :ic_id) != nil
+          new_ic = mod[:next_ic]
+          wire_set(inst, :ic_id, new_ic)
+          mod[:next_ic] = new_ic + 1
+        if wire_get(inst, :loc_site_id) != nil
+          new_cs = mod[:next_call_site]
+          wire_set(inst, :loc_site_id, new_cs)
+          mod[:next_call_site] = new_cs + 1
+        ii += 1
+      bi += 1
+    mod[:incremental_core_startup_mark] = nil
   nil
 
 -> incremental_core_cache_function?(func)

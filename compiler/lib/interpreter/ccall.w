@@ -500,6 +500,8 @@
       if args.size() != 4
         raise "w_string_from_codes expects codes, start, and length"
       return ccall("w_string_from_codes", args[1], args[2], args[3])
+    when "w_string_count"
+      return ccall("w_string_count", args[1], args[2])
     when "w_int_to_str_boxed"
       return ccall("w_int_to_str_boxed", args[1])
     when "w_int_to_str_base_boxed"

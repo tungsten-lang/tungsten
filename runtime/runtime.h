@@ -1450,6 +1450,7 @@ WValue w_fast_idx_get(WValue recv, WValue key, WInlineCache *cache);
 WValue w_fast_idx_set(WValue recv, WValue key, WValue val, WInlineCache *cache);
 WValue w_fast_size(WValue recv, WInlineCache *cache);
 WValue w_fast_push(WValue recv, WValue val, WInlineCache *cache);
+WValue w_fast_to_s(WValue recv, WInlineCache *cache);
 WValue w_string_chars(WValue r);
 WValue w_value_is_a(WValue recv, WValue target);
 

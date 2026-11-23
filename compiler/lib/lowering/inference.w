@@ -414,7 +414,8 @@
       if infer_maps[:typed_def] == true && lt == :i64 && rt != :int && infer_maps[:boxed_mode] != true && (is_machine_int64_type(rt) || is_small_int_type(rt) || rt in (:raw_int :raw_i64 :raw_u64))
         return :i64
       return nil
-    if node.op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 62)
+    lhs_machine_shift64 = !(node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int) && lt != nil && lt != :int && is_machine_int64_type(lt)
+    if node.op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > (lhs_machine_shift64 ? 63 : 62))
       return nil
     if is_integer_like_type(lt) && is_integer_like_type(rt)
       int_ops = infer_maps[:int_op_map]
@@ -461,7 +462,7 @@
       # A float operand stays a float, so `-~1.0 / ~0.0` takes the same
       # IEEE fdiv as `~1.0 / ~0.0`. An int operand keeps its own type.
       ot = infer_type(node.operand, var_types, fn_return_types, infer_maps)
-      if ot == :float || ot == :f64 || ast_kind(node.operand) == :int
+      if ot == :float || ot == :f64 || ast_kind(node.operand) == :int || (ot != nil && is_machine_int_type(ot))
         return ot
   # The value of a two-way conditional (`c ? a : b`, or an if/else whose arms
   # are single expressions) is one of its arms (closed-form). When both arms
@@ -500,9 +501,10 @@
   # A machine-int `## hint` on the tail expression is authoritative — the
   # general inferencer does not track hints, which loses u64-ness and later
   # boxes the raw return through the signed int fast path.
-  if is_ast_node?(last) && last.type_hint != nil
-    if last.type_hint in ("i64" "u64" "i128" "u128")
-      return normalize_type_symbol(last.type_hint)
+  last_hint = is_ast_node?(last) ? ast_get(last, :type_hint) : nil
+  if last_hint != nil
+    if last_hint in ("i64" "u64" "i128" "u128")
+      return normalize_type_symbol(last_hint)
   infer_type(last, {}, {}, infer_maps)
 
 # TUNGSTEN_INFER=boxed — the reference oracle described in the header.

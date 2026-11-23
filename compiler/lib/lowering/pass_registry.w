@@ -135,7 +135,7 @@
     return lower_next(ctx)
   when :recase
     return lower_recase(ctx, node)
-  when :with
+  when :with, :parallel_with
     materialize_bindings(ctx)
     return lower_with(ctx, node)
   when :yield

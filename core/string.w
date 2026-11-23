@@ -692,6 +692,10 @@
   -> contains?(sub)
     include?(sub)
 
+  # Non-overlapping substring occurrence count.
+  -> count(sub)
+    ccall("w_string_count", self, sub)
+
   # Levenshtein edit distance between self and other, by code point.
   -> levenshtein(other)
     ccall("w_string_from_codes", self, other, -3)

@@ -26,6 +26,8 @@ failures = 0
   -> push(v)
     @pushed.push(v)
     self
+  -> to_s
+    "CustomBox(" + @data.to_s() + ")"
 
 # Polymorphic helpers force dynamic call_method_i64 sites (receiver type erased).
 -> poly_get(x, k)
@@ -39,6 +41,9 @@ failures = 0
 
 -> poly_push(x, v)
   x.push(v)
+
+-> poly_to_s(x)
+  x.to_s()
 
 # 1. Dynamic [] (w_fast_idx_get)
 arr = [10, 20, 30]
@@ -145,6 +150,23 @@ check(poly_get(tpush, 19) == 29, "i64[] push last elem")
 
 check(poly_push(box, "x") == box, "custom class push fallback")
 check(box.pushed().size() == 1 && box.pushed()[0] == "x", "custom class push stored")
+
+# 5. Dynamic .to_s (w_fast_to_s)
+check(poly_to_s("hello") == "hello", "string to_s identity")
+check(poly_to_s("") == "", "empty string to_s")
+check(poly_to_s(0) == "0", "zero int to_s")
+check(poly_to_s(-42) == "-42", "neg int to_s")
+check(poly_to_s(:sym_key) == "sym_key", "symbol to_s")
+sb = StringBuffer(16)
+sb << "buf" << "!"
+check(poly_to_s(sb) == "buf!", "strbuf to_s")
+check(poly_to_s(rope) == rope, "rope to_s")
+check(poly_to_s(nil) == "", "nil to_s")
+check(poly_to_s(true) == "true", "true to_s")
+check(poly_to_s(false) == "false", "false to_s")
+big = 10 ** 30
+check(poly_to_s(big) == "1000000000000000000000000000000", "bigint to_s")
+check(poly_to_s(box) == "CustomBox(k=v)", "custom class to_s fallback")
 
 if failures > 0
   exit(1)

@@ -1,4 +1,3 @@
-## parity xfail `x += 1` inside a Math.wrap block promotes compiled (lower_compound_assign has no :wrap arm) but wraps interpreted, while `x = x + 1` wraps on both (and the compiled engine currently cannot compile a statement-level `Math.wrap ->` block at all: "undefined method 'name' for Object (object/hash ...)", pre-existing)
 # Integer overflow modes: compound assignment on a boxed local inside
 # `Math.wrap ->`. The interpreter treats `w += 1` as `w = w + 1` and wraps to
 # i64; the compiled engine's compound-assign lowering routes a boxed `:int`

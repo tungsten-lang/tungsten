@@ -570,6 +570,8 @@
       call_keyword = "notail call"
     if fast_size_call?(inst)
       parts << dv_temp + " = " + call_keyword + " i64 @w_fast_size(i64 " + wire_get(inst, :receiver) + ic_arg + ")"
+    elsif fast_to_s_call?(inst)
+      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_to_s(i64 " + wire_get(inst, :receiver) + ic_arg + ")"
     elsif argc == 0
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ic_arg + ")"
     elsif sym_idx_get_call?(inst)

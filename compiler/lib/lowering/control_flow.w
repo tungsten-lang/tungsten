@@ -361,7 +361,7 @@
   last_t = ast_kind(last)
   # If last is a statement (return, puts, while, etc.), lower as statement — no result to store
   # (:begin left OFF this list 2026-07-22: begin/rescue is a value expression)
-  if last_t in (:return :break :next :recase :puts :print :raise :while :method_def :fn_def :class_def :multi_assign :on_guard :go :with)
+  if last_t in (:return :break :next :recase :puts :print :raise :while :method_def :fn_def :class_def :multi_assign :on_guard :go :with :parallel_with)
     lower_statement(ctx, last)
   elsif result_machine_type != nil
     # Lower under the destination type from the outset. Calling the generic
@@ -2337,7 +2337,7 @@
   last = body[body.size() - 1]
   last_t = ast_kind(last)
   # (:begin left OFF this list 2026-07-22: begin/rescue is a value expression)
-  if last_t in (:return :break :next :recase :puts :print :raise :while :method_def :fn_def :class_def :multi_assign :on_guard :go :with)
+  if last_t in (:return :break :next :recase :puts :print :raise :while :method_def :fn_def :class_def :multi_assign :on_guard :go :with :parallel_with)
     lower_statement(ctx, last)
     return typed_value(:i64, w_nil.to_s())
   lower_expression(ctx, last)

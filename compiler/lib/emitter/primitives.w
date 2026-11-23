@@ -370,8 +370,8 @@
   out << declare_fn("w_to_s", wv, wv)
   out << declare_fn("w_str_concat", wv, wv2)
   out << declare_fn("w_str_concat_own", wv, wv3)
-  out << declare_fn("w_str_concat_i64", wv, wv3)
-  out << declare_fn("w_i64_concat_str", wv, wv3)
+  out << declare_fn("w_str_concat_i64", wv, join_arg_types3(wv, "i64", wv))
+  out << declare_fn("w_i64_concat_str", wv, join_arg_types3("i64", wv, wv))
   out << declare_fn("w_str_concat_int_wv", wv, wv3)
   out << declare_fn("w_int_wv_concat_str", wv, wv3)
   out << declare_fn("w_str_append", wv, wv2)
@@ -503,6 +503,7 @@
   out << declare_fn("w_fast_idx_set", wv, join_arg_types4(wv, wv, wv, "ptr"))
   out << declare_fn("w_fast_size", wv, join_arg_types2(wv, "ptr"))
   out << declare_fn("w_fast_push", wv, join_arg_types3(wv, wv, "ptr"))
+  out << declare_fn("w_fast_to_s", wv, join_arg_types2(wv, "ptr"))
   out << declare_fn_attrs("w_value_is_a", wv, wv2, "nounwind willreturn memory(read)")
 
   # Classes / objects
@@ -629,7 +630,7 @@
   out << declare_fn("w_thread_spawn", wv, wv)
   out << declare_fn("w_thread_spawn_slots", wv, wv)
   out << declare_fn("w_thread_join", wv, wv)
-  out << declare_fn("w_thread_join_timeout", wv, wv2)
+  out << declare_fn("w_thread_join_timeout", wv, join_arg_types2(wv, "i64"))
   out << declare_fn("w_thread_alive", wv, wv)
   out << declare_fn("w_thread_kill", wv, wv)
   out << declare_fn("w_ctx_local_alloc", wv, wv)

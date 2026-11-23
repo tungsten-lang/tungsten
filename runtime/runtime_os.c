@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -29,8 +30,10 @@ extern char **environ;
 #define w_bytes_ascii_p w_rt_bytes_ascii_p
 #define as_mmap w_rt_as_mmap
 #define w_sandbox_on w_rt_sandbox_on
-#define w_child_own_group w_rt_child_own_group
+#define w_string_take w_rt_string_take
 #endif
+
+static int w_child_own_group(void);
 
 /* ---- Process API (spawn / wait / kill) ------------------------------------
  * Real child-process control for portfolio solvers and worker pools, where
@@ -1776,5 +1779,497 @@ WValue __w_file_id(WValue path_val) {
     snprintf(identity, sizeof identity, "%llu:%llu",
              (unsigned long long)st.st_dev, (unsigned long long)st.st_ino);
     return w_string(identity);
+}
+
+
+/* ---- Dynamic loading (foundation for --jit / --hot eval backends) ----
+ * Load freshly-compiled native code into the running process and call into it.
+ * Handles and function pointers are passed as boxed ints; user pointers fit in
+ * the low 48 bits on the platforms we target, so they round-trip through w_int.
+ */
+
+/* dlopen a shared library; returns an opaque handle (int) or nil on failure. */
+WValue w_dlopen(WValue path_val) {
+    const char *path = as_str(path_val);
+    void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!h) return W_NIL;
+    return w_int((int64_t)(intptr_t)h);
+}
+
+/* Resolve a symbol in a handle; returns its address (int) or nil if absent. */
+WValue w_dlsym(WValue handle_val, WValue name_val) {
+    void *h = (void *)(intptr_t)w_to_i64(handle_val);
+    const char *name = as_str(name_val);
+    void *sym = dlsym(h, name);
+    if (!sym) return W_NIL;
+    return w_int((int64_t)(intptr_t)sym);
+}
+
+/* Close a previously-opened handle. */
+WValue w_dlclose(WValue handle_val) {
+    void *h = (void *)(intptr_t)w_to_i64(handle_val);
+    if (h) dlclose(h);
+    return W_NIL;
+}
+
+/* Call a resolved no-arg function returning int64 (used by the C-level test and
+ * for snippets that don't need a boxed result). */
+WValue w_dlcall_i64(WValue fn_val) {
+    void *sym = (void *)(intptr_t)w_to_i64(fn_val);
+    int64_t (*fn)(void) = (int64_t (*)(void))sym;
+    return w_int(fn());
+}
+
+/* Call a resolved no-arg function that itself returns a WValue (a compiled
+ * Tungsten snippet linked against this runtime). */
+WValue w_dlcall(WValue fn_val) {
+    void *sym = (void *)(intptr_t)w_to_i64(fn_val);
+    WValue (*fn)(void) = (WValue (*)(void))sym;
+    return fn();
+}
+
+/* Persistent native REPL bindings. A session executes snippets on one host
+ * thread; separately loaded objects resolve these symbols from that host, so
+ * values survive object unload/reload without replaying their initializers. */
+static __thread WValue w_repl_state = W_NIL;
+
+WValue w_repl_state_get(WValue name) {
+    if (w_repl_state == W_NIL) return W_NIL;
+    return w_hash_get(w_repl_state, name);
+}
+
+WValue w_repl_state_set(WValue name, WValue value) {
+    if (w_repl_state == W_NIL) w_repl_state = w_hash_new();
+    w_hash_set(w_repl_state, name, value);
+    return value;
+}
+
+/* Resolve a Tungsten fn by its SOURCE name inside a loaded snippet dylib.
+ * Tungsten fns get internal linkage + a hashed symbol (@__wy_…), so they can't
+ * be dlsym'd directly — but the compiler emits __w_fn_meta (kept by llvm.used,
+ * external linkage) mapping each fn pointer to its source name for backtraces.
+ * We dlsym that table and scan it. Returns the fn address (boxed int) or nil. */
+WValue w_dlfind_fn(WValue handle_val, WValue name_val) {
+    void *h = (void *)(intptr_t)w_to_i64(handle_val);
+    const char *want = as_str(name_val);
+    WFnMeta *meta = (WFnMeta *)dlsym(h, "__w_fn_meta");
+    int32_t *count = (int32_t *)dlsym(h, "__w_fn_meta_count");
+    if (meta && count) {
+        for (int i = 0; i < *count; i++) {
+            if (meta[i].name && strcmp(meta[i].name, want) == 0) {
+                return w_int((int64_t)(intptr_t)meta[i].fn_addr);
+            }
+        }
+    }
+    WFnMeta *smeta = (WFnMeta *)dlsym(h, "__w_fn_sym_meta");
+    int32_t *scount = (int32_t *)dlsym(h, "__w_fn_sym_meta_count");
+    if (smeta && scount) {
+        for (int i = 0; i < *scount; i++) {
+            if (smeta[i].name && strcmp(smeta[i].name, want) == 0 && smeta[i].fn_addr) {
+                void *fn = dlsym(h, (const char *)smeta[i].fn_addr);
+                if (fn) return w_int((int64_t)(intptr_t)fn);
+            }
+        }
+    }
+    return W_NIL;
+}
+
+/* ---- In-memory JIT object loader (macOS / arm64) ----
+ * Load a relocatable Mach-O object (`clang -c snippet.ll -o snippet.o`) straight
+ * into executable memory and call into it, WITHOUT dlopen. dlopen on macOS pays a
+ * ~120ms dyld closure-build per fresh dylib; this path skips it entirely (~3ms).
+ *
+ * TWO regions, because W^X + writable data: executable sections (__text) go in an
+ * R-X region, everything else (__const, __cstring, __bss — crucially the inline
+ * caches `_.ic`, which w_method_call_cached WRITES on a miss) goes in an R-W
+ * region. A per-section base map (sect_base[]) lets relocations resolve across the
+ * split. We handle every arm64 relocation a Tungsten snippet emits:
+ *   BRANCH26  — BL calls to runtime fns, routed through a 16-byte far-call stub
+ *               (host runtime is usually >128MB past BL's ±128MB reach)
+ *   UNSIGNED  — 64-bit absolute pointers (the __w_fn_meta table, vtables)
+ *   PAGE21    — ADRP page-address (e.g. the address of an inline cache)
+ *   PAGEOFF12 — the paired ADD/LDR/STR low-12-bits (size-scaled for loads/stores)
+ *   ADDEND    — a pair entry supplying a symbol+offset addend for the adjacent reloc
+ * then mprotect the code region R-X and scan __w_fn_meta for the wanted fn. Any
+ * other reloc type / failure returns nil so the caller falls back to w_dlopen. */
+#if defined(__APPLE__) && defined(__aarch64__)
+#include <mach-o/loader.h>
+#include <mach-o/nlist.h>
+#include <mach-o/reloc.h>
+#include <mach-o/arm64/reloc.h>
+#include <libkern/OSCacheControl.h>
+
+WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
+    const char *path = as_str(path_val);
+    const char *want = as_str(fn_name_val);
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return W_NIL;
+    fseek(f, 0, SEEK_END);
+    long fsz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (fsz <= (long)sizeof(struct mach_header_64)) { fclose(f); return W_NIL; }
+    uint8_t *fb = (uint8_t *)malloc((size_t)fsz);
+    if (!fb) { fclose(f); return W_NIL; }
+    if (fread(fb, 1, (size_t)fsz, f) != (size_t)fsz) { free(fb); fclose(f); return W_NIL; }
+    fclose(f);
+
+    struct mach_header_64 *mh = (struct mach_header_64 *)fb;
+    if (mh->magic != MH_MAGIC_64) { free(fb); return W_NIL; }
+
+    /* pass 1: collect sections + symtab */
+    struct section_64 *sects[128];
+    int nsect = 0;
+    struct symtab_command *st = NULL;
+    uint8_t *lc = fb + sizeof(*mh);
+    for (uint32_t i = 0; i < mh->ncmds; i++) {
+        struct load_command *c = (struct load_command *)lc;
+        if (c->cmd == LC_SEGMENT_64) {
+            struct segment_command_64 *sg = (struct segment_command_64 *)lc;
+            struct section_64 *s = (struct section_64 *)(lc + sizeof(*sg));
+            for (uint32_t k = 0; k < sg->nsects && nsect < 128; k++) sects[nsect++] = &s[k];
+        } else if (c->cmd == LC_SYMTAB) {
+            st = (struct symtab_command *)lc;
+        }
+        lc += c->cmdsize;
+    }
+    if (!st) { free(fb); return W_NIL; }
+    struct nlist_64 *syms = (struct nlist_64 *)(fb + st->symoff);
+    char *strs = (char *)(fb + st->stroff);
+
+    /* lay out each section into the code (executable) or data (writable) region,
+     * honoring its alignment; reserve far-call stub space at the end of code. */
+    const size_t MAX_STUBS = 4096;
+    size_t sect_off[128];
+    int    sect_code[128];
+    size_t code_sz = 0, data_sz = 0;
+    for (int i = 0; i < nsect; i++) {
+        struct section_64 *s = sects[i];
+        size_t al = (size_t)1 << s->align;
+        if (al == 0) al = 1;
+        int is_code = (s->flags & S_ATTR_PURE_INSTRUCTIONS) || (s->flags & S_ATTR_SOME_INSTRUCTIONS);
+        sect_code[i] = is_code;
+        size_t *cur = is_code ? &code_sz : &data_sz;
+        *cur = (*cur + al - 1) & ~(al - 1);
+        sect_off[i] = *cur;
+        *cur += s->size;
+    }
+    code_sz = (code_sz + 15) & ~(size_t)15;
+    size_t stub_region = code_sz;
+    code_sz += MAX_STUBS * 16;
+
+    size_t code_pages = (code_sz + 0x3fff) & ~(size_t)0x3fff; if (!code_pages) code_pages = 0x4000;
+    size_t data_pages = (data_sz + 0x3fff) & ~(size_t)0x3fff; if (!data_pages) data_pages = 0x4000;
+    /* Keep code and data adjacent in one mapping so ADRP (±4GB) always reaches data. */
+    size_t total_pages = code_pages + data_pages;
+    uint8_t *code = (uint8_t *)mmap(NULL, total_pages, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (code == MAP_FAILED) { free(fb); return W_NIL; }
+    uint8_t *data = code + code_pages;
+
+    uint8_t *sect_base[128];
+    for (int i = 0; i < nsect; i++)
+        sect_base[i] = (sect_code[i] ? code : data) + sect_off[i];
+
+    /* copy section data (skip zerofill — ANON mmap already zeroed, e.g. __bss) */
+    for (int i = 0; i < nsect; i++) {
+        struct section_64 *s = sects[i];
+        uint8_t styp = s->flags & SECTION_TYPE;
+        if (styp == S_ZEROFILL || styp == S_GB_ZEROFILL) continue;
+        memcpy(sect_base[i], fb + s->offset, s->size);
+    }
+
+    uint8_t *stub_base = code + stub_region;
+    size_t stub_n = 0;
+    int ok = 1;
+    /* one stub per distinct far target (a big object calls the same runtime function
+     * from thousands of sites): open-addressed target -> stub index */
+    enum { STUB_TAB = 8192 };
+    uint64_t *stub_key = (uint64_t *)calloc(STUB_TAB, sizeof(uint64_t));
+    uint32_t *stub_idx = (uint32_t *)calloc(STUB_TAB, sizeof(uint32_t));
+    if (!stub_key || !stub_idx) { free(stub_key); free(stub_idx); munmap(code, total_pages); free(fb); return W_NIL; }
+
+    /* loaded address of symbol index `idx`: undefined → host (dlsym), else the
+     * split base of its defining section + the symbol's offset within it. */
+    #define JIT_RESOLVE(idx, outp) do { \
+        struct nlist_64 *ns_ = &syms[idx]; \
+        const char *nm_ = strs + ns_->n_un.n_strx; \
+        if ((ns_->n_type & N_TYPE) == N_UNDF) { \
+            void *h_ = dlsym(RTLD_DEFAULT, nm_ + 1); \
+            if (!h_) ok = 0; else *(outp) = (uint64_t)(uintptr_t)h_; \
+        } else if (ns_->n_sect >= 1 && ns_->n_sect <= nsect) { \
+            int si_ = ns_->n_sect - 1; \
+            *(outp) = (uint64_t)(uintptr_t)(sect_base[si_] + (ns_->n_value - sects[si_]->addr)); \
+        } else ok = 0; \
+    } while (0)
+
+    for (int i = 0; i < nsect && ok; i++) {
+        struct section_64 *s = sects[i];
+        /* unwind and debug tables are never read in a loaded object (Tungsten raises
+         * through setjmp/longjmp, not unwinding), so their relocations are left alone */
+        if (strncmp(s->segname, "__LD", 16) == 0 || strncmp(s->segname, "__DWARF", 16) == 0 ||
+            strncmp(s->sectname, "__eh_frame", 16) == 0) continue;
+        struct relocation_info *r = (struct relocation_info *)(fb + s->reloff);
+        for (uint32_t k = 0; k < s->nreloc && ok; k++) {
+            struct relocation_info ri = r[k];
+            if (ri.r_type == ARM64_RELOC_ADDEND) continue;  /* handled via neighbor below */
+            if (!ri.r_extern) { ok = 0; break; }            /* section-based reloc: unsupported */
+
+            /* an ADDEND pair entry shares this reloc's r_address and sits adjacent
+             * (either side, depending on toolchain ordering); fold it in. */
+            int64_t addend = 0;
+            if (k > 0 && r[k - 1].r_type == ARM64_RELOC_ADDEND && r[k - 1].r_address == ri.r_address)
+                addend = (int64_t)((int32_t)(r[k - 1].r_symbolnum << 8) >> 8);
+            else if (k + 1 < s->nreloc && r[k + 1].r_type == ARM64_RELOC_ADDEND && r[k + 1].r_address == ri.r_address)
+                addend = (int64_t)((int32_t)(r[k + 1].r_symbolnum << 8) >> 8);
+
+            uint8_t *loc = sect_base[i] + ri.r_address;
+            uint64_t target = 0;
+            JIT_RESOLVE(ri.r_symbolnum, &target);
+            if (!ok) break;
+            uint64_t tgt = target + (uint64_t)addend;
+
+            switch (ri.r_type) {
+            case ARM64_RELOC_UNSIGNED: {
+                uint64_t inl = *(uint64_t *)loc;            /* inline addend */
+                *(uint64_t *)loc = tgt + inl;
+                break;
+            }
+            case ARM64_RELOC_BRANCH26: {
+                int64_t disp = (int64_t)tgt - (int64_t)(uintptr_t)loc;
+                if (disp > (1 << 27) - 1 || disp < -(1 << 27)) {  /* out of BL ±128MB → stub */
+                    uint64_t h = (tgt >> 2) * 0x9E3779B97F4A7C15ull;
+                    size_t slot = (size_t)(h >> 51) & (STUB_TAB - 1);
+                    while (stub_key[slot] != 0 && stub_key[slot] != tgt) slot = (slot + 1) & (STUB_TAB - 1);
+                    uint8_t *stub;
+                    if (stub_key[slot] == tgt) {
+                        stub = stub_base + (size_t)stub_idx[slot] * 16;
+                    } else {
+                        if (stub_n >= MAX_STUBS) { ok = 0; break; }
+                        stub = stub_base + stub_n * 16;
+                        stub_key[slot] = tgt;
+                        stub_idx[slot] = (uint32_t)stub_n;
+                        stub_n++;
+                        ((uint32_t *)stub)[0] = 0x58000050;   /* ldr x16, [pc, #8] */
+                        ((uint32_t *)stub)[1] = 0xd61f0200;   /* br  x16          */
+                        *(uint64_t *)(stub + 8) = tgt;
+                    }
+                    disp = (int64_t)(uintptr_t)stub - (int64_t)(uintptr_t)loc;
+                }
+                uint32_t ins = *(uint32_t *)loc;
+                ins = (ins & 0xFC000000u) | (((uint32_t)(disp >> 2)) & 0x03FFFFFFu);
+                *(uint32_t *)loc = ins;
+                break;
+            }
+            case ARM64_RELOC_PAGE21: {                    /* ADRP */
+                int64_t pd = (int64_t)(tgt & ~0xFFFULL) - (int64_t)((uintptr_t)loc & ~0xFFFULL);
+                int64_t imm = pd >> 12;
+                if (imm < -(1 << 20) || imm >= (1 << 20)) { ok = 0; break; }  /* ADRP ±4GB */
+                uint32_t ins = *(uint32_t *)loc;
+                ins = (ins & 0x9F00001Fu) | ((uint32_t)(imm & 0x3) << 29) | ((uint32_t)((imm >> 2) & 0x7FFFF) << 5);
+                *(uint32_t *)loc = ins;
+                break;
+            }
+            case ARM64_RELOC_PAGEOFF12: {                 /* ADD / LDR / STR low 12 bits */
+                uint32_t off = (uint32_t)(tgt & 0xFFF);
+                uint32_t ins = *(uint32_t *)loc;
+                if ((ins & 0x3B000000u) == 0x39000000u) { /* LDR/STR unsigned-imm: scale by size */
+                    uint32_t scale = ins >> 30;
+                    off >>= scale;
+                }
+                ins = (ins & ~(0xFFFu << 10)) | ((off & 0xFFFu) << 10);
+                *(uint32_t *)loc = ins;
+                break;
+            }
+            default:
+                ok = 0;  /* GOT/TLV/etc. — fall back to dlopen */
+                break;
+            }
+        }
+    }
+    #undef JIT_RESOLVE
+    free(stub_key);
+    free(stub_idx);
+    /* NB: keep `fb` alive — the symbol/string tables scanned below live in it,
+     * not in the loaded regions (only section *data* was copied). */
+    if (!ok) { munmap(code, total_pages); free(fb); return W_NIL; }
+
+    if (mprotect(code, code_pages, PROT_READ | PROT_EXEC) != 0) {
+        munmap(code, total_pages); free(fb); return W_NIL;
+    }
+    sys_icache_invalidate(code, code_pages);  /* data region stays R-W (inline caches) */
+
+    /* locate __w_fn_meta / __w_fn_meta_count (or __w_fn_sym_meta), scan for `want` */
+    uint64_t meta_a = 0, cnt_a = 0, smeta_a = 0, scnt_a = 0;
+    for (uint32_t i = 0; i < st->nsyms; i++) {
+        struct nlist_64 *ns = &syms[i];
+        if ((ns->n_type & N_TYPE) == N_UNDF || ns->n_sect < 1 || ns->n_sect > nsect) continue;
+        const char *nm = strs + ns->n_un.n_strx;
+        uint64_t a = (uint64_t)(uintptr_t)(sect_base[ns->n_sect - 1] + (ns->n_value - sects[ns->n_sect - 1]->addr));
+        if (!meta_a && strcmp(nm, "___w_fn_meta") == 0) meta_a = a;
+        else if (!cnt_a && strcmp(nm, "___w_fn_meta_count") == 0) cnt_a = a;
+        else if (!smeta_a && strcmp(nm, "___w_fn_sym_meta") == 0) smeta_a = a;
+        else if (!scnt_a && strcmp(nm, "___w_fn_sym_meta_count") == 0) scnt_a = a;
+    }
+    WValue result = W_NIL;  /* regions intentionally leaked on success: code stays live */
+    if (meta_a && cnt_a) {
+        int cnt = *(int32_t *)(uintptr_t)cnt_a;
+        WFnMeta *m = (WFnMeta *)(uintptr_t)meta_a;
+        for (int i = 0; i < cnt; i++) {
+            if (m[i].name && strcmp(m[i].name, want) == 0) {
+                result = w_int((int64_t)(intptr_t)m[i].fn_addr);
+                break;
+            }
+        }
+    }
+    if (result == W_NIL && smeta_a && scnt_a) {
+        int cnt = *(int32_t *)(uintptr_t)scnt_a;
+        WFnMeta *m = (WFnMeta *)(uintptr_t)smeta_a;
+        for (int i = 0; i < cnt && result == W_NIL; i++) {
+            if (m[i].name && strcmp(m[i].name, want) == 0 && m[i].fn_addr) {
+                const char *want_sym = (const char *)m[i].fn_addr;
+                for (uint32_t k = 0; k < st->nsyms; k++) {
+                    struct nlist_64 *ns = &syms[k];
+                    if ((ns->n_type & N_TYPE) == N_UNDF || ns->n_sect < 1 || ns->n_sect > nsect) continue;
+                    const char *nm = strs + ns->n_un.n_strx;
+                    if (strcmp(nm, want_sym) == 0 || (nm[0] == '_' && strcmp(nm + 1, want_sym) == 0)) {
+                        uint64_t a = (uint64_t)(uintptr_t)(sect_base[ns->n_sect - 1] + (ns->n_value - sects[ns->n_sect - 1]->addr));
+                        result = w_int((int64_t)(intptr_t)a);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if (result == W_NIL) {
+        /* no metadata row: the function's profiler alias `w:<name>` (a hidden external
+         * symbol in the object; a compiled JavaScript unit's jsu_init is found this way) */
+        size_t wl = strlen(want);
+        for (uint32_t k = 0; k < st->nsyms && result == W_NIL; k++) {
+            struct nlist_64 *ns = &syms[k];
+            if ((ns->n_type & N_TYPE) == N_UNDF || ns->n_sect < 1 || ns->n_sect > nsect) continue;
+            const char *nm = strs + ns->n_un.n_strx;
+            if (strncmp(nm, "_w:", 3) == 0 && strlen(nm + 3) == wl && memcmp(nm + 3, want, wl) == 0) {
+                uint64_t a = (uint64_t)(uintptr_t)(sect_base[ns->n_sect - 1] + (ns->n_value - sects[ns->n_sect - 1]->addr));
+                result = w_int((int64_t)(intptr_t)a);
+            }
+        }
+    }
+    free(fb);  /* now safe: meta scan done, loaded regions are independent */
+    return result;
+}
+#else
+WValue w_jit_load_object(WValue path_val, WValue fn_name_val) {
+    (void)path_val; (void)fn_name_val;
+    return W_NIL;  /* non-Apple/non-arm64: caller falls back to w_dlopen */
+}
+#endif
+
+WValue w_read_bytes(WValue count_val) {
+    int64_t count = w_as_int(count_val);
+    /* Cap guards against a bogus/huge Content-Length; 64 MiB is generous for
+     * any real stdin payload (e.g. an LSP didOpen document). */
+    if (count <= 0 || count > (64 * 1024 * 1024)) return w_string("");
+    char *buf = malloc(count + 1);
+    if (!buf) return w_string("");
+    /* Read via the buffered FILE* stdin — NOT a raw read(STDIN_FILENO). A raw
+     * syscall bypasses stdin's buffer, so it desyncs with w_read_line_stdin
+     * (getline), which buffers ahead: callers that read framed headers by line
+     * then a fixed-size body (LSP) would get garbage. fread shares the buffer.
+     * Loop to read exactly `count` bytes (fread may return short). */
+    size_t total = 0;
+    while (total < (size_t)count) {
+        size_t n = fread(buf + total, 1, (size_t)count - total, stdin);
+        if (n == 0) break; /* EOF or error */
+        total += n;
+    }
+    buf[total] = '\0';
+    if (total == 0) { free(buf); return w_string(""); }
+    return w_string_take(buf, total);
+}
+
+
+typedef struct {
+    pid_t pid;
+    int own_group;
+} WSystemChild;
+
+/* A cancelled Thread must not strand the process it was waiting for.  Spawn
+ * each shell as a process-group leader, then terminate and reap that whole
+ * group from pthread cancellation cleanup.  GPU epoch commands often grow a
+ * shell -> flipfleet child tree, so killing only the shell is insufficient. */
+static void w_system_child_cleanup(void *arg) {
+    WSystemChild *child = (WSystemChild *)arg;
+    if (child->pid <= 0) return;
+
+    int old_cancel_state;
+    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state);
+
+    pid_t pid = child->pid;
+    int status;
+    kill(child->own_group ? -pid : pid, SIGTERM);
+    for (int attempt = 0; attempt < 10; attempt++) {
+        pid_t waited = waitpid(pid, &status, WNOHANG);
+        if (waited == pid || (waited == -1 && errno == ECHILD)) {
+            child->pid = -1;
+            pthread_setcancelstate(old_cancel_state, NULL);
+            return;
+        }
+        struct timespec grace = { .tv_sec = 0, .tv_nsec = 10000000 };
+        nanosleep(&grace, NULL);
+    }
+
+    kill(child->own_group ? -pid : pid, SIGKILL);
+    while (waitpid(pid, &status, 0) == -1 && errno == EINTR) {}
+    child->pid = -1;
+    pthread_setcancelstate(old_cancel_state, NULL);
+}
+
+/* An outer stage supervisor can own one group across Tungsten worker pools.
+ * Default Process.spawn/system semantics retain a separate child group. */
+static int w_child_own_group(void) {
+    const char *inherit = getenv("TUNGSTEN_INHERIT_PROCESS_GROUP");
+    return !(inherit && !strcmp(inherit, "1"));
+}
+
+/* posix_spawn instead of system(3): system() sets SIGINT/SIGQUIT to SIG_IGN
+ * in THIS process for the child's whole lifetime, so a program with
+ * long-running children (flipfleet GPU epochs, clang links) becomes
+ * uninterruptible from the keyboard whenever any thread is inside system(). */
+WValue __w_system(WValue cmd_val) {
+    const char *cmd = as_str(cmd_val);
+    w_sandbox_gate("system", cmd);
+    char *spawn_argv[] = { "sh", "-c", (char *)cmd, NULL };
+    posix_spawnattr_t attr;
+    if (posix_spawnattr_init(&attr) != 0) return W_FALSE;
+    int own_group = w_child_own_group();
+    short flags = own_group ? POSIX_SPAWN_SETPGROUP : 0;
+    if (posix_spawnattr_setflags(&attr, flags) != 0 ||
+        (own_group && posix_spawnattr_setpgroup(&attr, 0) != 0)) {
+        posix_spawnattr_destroy(&attr);
+        return W_FALSE;
+    }
+
+    WSystemChild child = { .pid = -1, .own_group = own_group };
+    int spawn_error = posix_spawn(&child.pid, "/bin/sh", NULL, &attr,
+                                  spawn_argv, environ);
+    posix_spawnattr_destroy(&attr);
+    if (spawn_error != 0) return W_FALSE;
+
+    int status;
+    int wait_ok = 0;
+    pthread_cleanup_push(w_system_child_cleanup, &child);
+    for (;;) {
+        pid_t waited = waitpid(child.pid, &status, 0);
+        if (waited == child.pid) {
+            child.pid = -1;
+            wait_ok = 1;
+            break;
+        }
+        if (waited == -1 && errno != EINTR) break;
+    }
+    pthread_cleanup_pop(wait_ok ? 0 : 1);
+
+    if (wait_ok && WIFEXITED(status) && WEXITSTATUS(status) == 0) return W_TRUE;
+    return W_FALSE;
 }
 

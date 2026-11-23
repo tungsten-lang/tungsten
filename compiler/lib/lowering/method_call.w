@@ -3317,6 +3317,8 @@
         wire_set(call_inst, :fast_builtin, :size)
       elsif method_name == "push" && arg_regs.size() == 1 && core_operator_untouched?(ctx[:mod], "Array", "push")
         wire_set(call_inst, :fast_builtin, :push)
+      elsif method_name == "to_s" && arg_regs.size() == 0 && core_operator_untouched?(ctx[:mod], "Object", "to_s") && core_operator_untouched?(ctx[:mod], "String", "to_s") && core_operator_untouched?(ctx[:mod], "Int", "to_s") && core_operator_untouched?(ctx[:mod], "Integer", "to_s") && core_operator_untouched?(ctx[:mod], "Symbol", "to_s") && core_operator_untouched?(ctx[:mod], "StringBuffer", "to_s") && core_operator_untouched?(ctx[:mod], "Nil", "to_s") && core_operator_untouched?(ctx[:mod], "Boolean", "to_s") && core_operator_untouched?(ctx[:mod], "True", "to_s") && core_operator_untouched?(ctx[:mod], "False", "to_s") && core_operator_untouched?(ctx[:mod], "BigInt", "to_s")
+        wire_set(call_inst, :fast_builtin, :to_s)
   current_block(wfn)[:instructions].push(call_inst)
   # A generated `- data` array accessor has a representation-preserving
   # contract. The send remains overridable, so verify the returned storage

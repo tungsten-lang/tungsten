@@ -224,7 +224,7 @@ RUNTIME_CLASS_CONTRACTS = {
       between? bidi_direction bidi_safe? blank? byte_at bytes camelize
       canonicalize canonically_equivalent? capitalize casecmp casecmp? casefold
       caseless_equal? center characters chars chomp clamp codepoints compat_equivalent?
-      confusable? confusable_skeleton constantize contains? dasherize
+      confusable? confusable_skeleton constantize contains? count dasherize
       dedent delete delete_prefix delete_suffix display_width downcase
       each_byte each_character each_codepoint each_grapheme each_line empty?
       encode encoding ends_with? graphemes humanize includes? indent
@@ -257,11 +257,11 @@ RUNTIME_CLASS_CONTRACTS = {
     ],
     dual_dispatch: %w[each sort stable_sort],
     autoload_guard: "array_source_method_unresolved",
-    autoload_methods: %w[clear compact copy delete_at drop dup flatten join minmax reverse take uniq],
+    autoload_methods: %w[clear compact copy delete_at drop dup flatten insert join minmax reverse take uniq],
     source_fallback: %w[
       __enumerable_append_to __enumerable_iteration_mode __flatten_into __mergesort_copy
-      __replace_elements cap chunk_while clear compact concat copy cross csort data delete_at drop
-      dup each empty? fill first flatten ipnsort join last matmul_i8 matvec_i8 mean median mergesort! minmax
+      __replace_elements cap chunk_while clear compact concat copy cross csort data delete delete_at drop
+      dup each each_index empty? fill first flatten insert ipnsort join last map! matmul_i8 matvec_i8 mean median mergesort! minmax
       norm normalize pythagorean raw_ptr reverse rotate rotate! scale scale! shuffle shuffle! size
       skasort slice_view sort sort! stable_sort stdev take to_a to_f32 to_f64 transpose
       tsort uniq variance wolfsort

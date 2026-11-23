@@ -102,11 +102,31 @@ class EmitterContracts
     @lines = File.readlines(path, chomp: true)
     @source_path = path.delete_prefix(ROOT + "/")
     @env = {}
+    @narrow_params = parse_narrow_param_types
     @contracts = {}
     parse
   end
 
   private
+
+  def parse_narrow_param_types
+    table = {}
+    start = @lines.index { |line| line.start_with?("-> narrow_runtime_param_types(") }
+    return table unless start
+    current_names = []
+    @lines[(start + 1)..].each do |line|
+      break if line.start_with?("-> ")
+      stripped = line.strip
+      if stripped =~ /\Awhen\s+(.+)\z/
+        current_names = split_top_level(Regexp.last_match(1)).filter_map { |s| parse_string(s) }
+      elsif stripped =~ /\Areturn\s+\[(.*)\]\z/ && !current_names.empty?
+        types = split_top_level(Regexp.last_match(1)).filter_map { |s| parse_string(s) }
+        current_names.each { |n| table[n] = types }
+        current_names = []
+      end
+    end
+    table
+  end
 
   def parse
     start = @lines.index { |line| line.start_with?("-> declare_runtime") }
@@ -166,6 +186,11 @@ class EmitterContracts
       value = parse_string(expression)
       return nil unless value
       return llvm_raw_types(value)
+    end
+    if expression =~ /\Anarrow_runtime_param_types\((.*)\)\.join\(", "\)\z/
+      target = parse_string(Regexp.last_match(1))
+      types = target && @narrow_params[target]
+      return types ? types.map { |t| Type.new(llvm: t, abi: "raw") } : nil
     end
     if expression =~ /\Ajoin_arg_types\d+\((.*)\)\z/
       return split_top_level(Regexp.last_match(1)).flat_map { |part| evaluate(part) || [] }
@@ -263,7 +288,7 @@ end
 def tracked_files(*pathspecs)
   stdout, status = Open3.capture2("git", "ls-files", "-z", *pathspecs, chdir: ROOT)
   raise "git ls-files failed" unless status.success?
-  stdout.split("\0").reject(&:empty?).map { |path| File.join(ROOT, path) }
+  stdout.split("\0").reject(&:empty?).map { |path| File.join(ROOT, path) }.select { |path| File.file?(path) }
 end
 
 def ascii_space?(byte)
@@ -429,9 +454,13 @@ end
 
 emitter = EmitterContracts.new(EMITTER).contracts
 actual = parse_actual_emitter
-# runtime.h is the public ABI authority. runtime.c is used only to fill
+# runtime.h is the public ABI authority. runtime*.c files are used only to fill
 # internal helpers that intentionally are not exported in that header.
-runtime = parse_c_contracts(RUNTIME_C).merge(parse_c_contracts(RUNTIME_H))
+runtime = {}
+Dir.glob(File.join(ROOT, "runtime/runtime*.c")).sort.each do |path|
+  runtime.merge!(parse_c_contracts(path))
+end
+runtime.merge!(parse_c_contracts(RUNTIME_H))
 errors = []
 
 emitter.each do |symbol, declared|
@@ -477,11 +506,12 @@ end
 # doubles and benchmark reference implementations deliberately reuse runtime
 # names with smaller signatures and are not part of the shipped ABI.
 native_contracts = {}
-native_files = tracked_files(
+native_files = (tracked_files(
   "runtime/*.h", "runtime/*.c", "runtime/*.m", "runtime/*.mm",
   "bits/*/lib/*.h", "bits/*/lib/*.c", "bits/*/lib/*.m", "bits/*/lib/*.mm",
+  "bits/*/native/*.h", "bits/*/native/*.c", "bits/*/native/*.m", "bits/*/native/*.mm",
   "bits/*/runtime/*.h", "bits/*/runtime/*.c", "bits/*/runtime/*.m", "bits/*/runtime/*.mm"
-).reject do |path|
+) + Dir.glob(File.join(ROOT, "runtime/runtime*.c"))).uniq.reject do |path|
   relative = path.delete_prefix(ROOT + "/")
   relative.start_with?("runtime/test", "runtime/bench_")
 end
@@ -512,7 +542,9 @@ production_w_files = tracked_files("*.w").select do |path|
   relative.start_with?("bin/", "compiler/", "core/", "services/") ||
     relative.match?(%r{\Abits/[^/]+/lib/})
 end.reject { |path| path.include?("/compiler/test/") }
-call_sites = production_w_files.flat_map { |path| scan_ccalls(path) }
+call_sites = production_w_files.flat_map { |path| scan_ccalls(path) }.select do |call|
+  call.symbol.start_with?("w_", "__w_", "bigint_")
+end
 call_sites.each do |call|
   contract = native_contracts[call.symbol]
   unless contract

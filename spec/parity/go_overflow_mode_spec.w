@@ -1,4 +1,3 @@
-## parity xfail the compiled engine cannot compile a statement-level `Math.wrap ->` block (compiler error "undefined method 'name' for Object (object/hash ...)", pre-existing); the interpreter wraps the goroutine's add
 # `go` under `Math.wrap ->`: the lexical overflow mode reaches the
 # goroutine's body, which runs after the block has been left (the
 # interpreter captures the mode at the spawn, see interpreter/runtime.w

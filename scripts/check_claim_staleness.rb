@@ -17,7 +17,7 @@ ROOT = File.expand_path("..", __dir__)
 # claim (regex) that must NOT appear while the fact holds.
 CHECKS = [
   {
-    file: "runtime/runtime.c",
+    file: "runtime/runtime_bigint_fft.c",
     fact: /^static void ssa_shl_half\(/,
     stale: /no (?:√2|sqrt\(?2\)?) trick/,
     message: "ssa_shl_half ships the sqrt(2) trick; the SSA header must not claim it is missing"

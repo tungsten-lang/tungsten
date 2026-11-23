@@ -338,12 +338,87 @@ W_RT_INTERNAL uint64_t *w_rt_bn_ws_get(size_t limbs);
 W_RT_INTERNAL uint64_t w_rt_bn_gcd_u64_nonzero(uint64_t a, uint64_t b);
 W_RT_INTERNAL WMmap *w_rt_as_mmap(WValue v);
 W_RT_INTERNAL int w_rt_sandbox_on(void);
-W_RT_INTERNAL int w_rt_child_own_group(void);
 void w_sandbox_gate(const char *op, const char *detail);
 int w_sandbox_stub(const char *op, const char *detail);
 int64_t __w_clock_ns_raw(void);
 int64_t __w_clock_ticks_raw(void);
 int64_t __w_deadline_ticks_after_ms(int64_t ms);
+
+
+/* Shared unwind, metadata, FFT, and scheduler internal bridges */
+#include <setjmp.h>
+
+typedef struct WBlockReturnFrame {
+    jmp_buf buf;
+    struct WBlockReturnFrame *prev;
+    WExceptionFrame *exception_stack;
+    int cleanup_depth;
+    WValue value;
+    int active;
+    uint32_t gen;
+} WBlockReturnFrame;
+
+typedef struct { WValue value; WRecycleFn fn; } WCleanupEntry;
+
+typedef struct {
+    void *fn_addr;
+    const char *file;
+    const char *name;
+    int32_t line;
+    int32_t kind;
+} WFnMeta;
+
+#ifndef BN_TOOM_POOL_SPIN
+#define BN_TOOM_POOL_SPIN 32768
+#endif
+#ifndef BN_SSA_PAR_THRESHOLD
+#define BN_SSA_PAR_THRESHOLD 8192
+#endif
+#ifndef BN_SSA_PAR_THREADS
+#if defined(__APPLE__) && defined(__aarch64__)
+#define BN_SSA_PAR_THREADS 8
+#else
+#define BN_SSA_PAR_THREADS 4
+#endif
+#endif
+#ifndef BN_PAR_TOOM_LIMIT
+#define BN_PAR_TOOM_LIMIT 16384
+#endif
+#ifndef BN_NTT_THRESHOLD
+#define BN_NTT_THRESHOLD 2048
+#endif
+#ifndef BN_SSA_THRESHOLD
+#define BN_SSA_THRESHOLD 2048
+#endif
+
+enum {
+    BN_TOP_TOOM = 0,
+    BN_TOP_SSA = 1,
+    BN_TOP_NTT = 2
+};
+
+W_RT_INTERNAL WValue w_rt_string_take(char *s, size_t len);
+W_RT_INTERNAL const char *w_rt_slab_read(uint32_t index, size_t *len);
+W_RT_INTERNAL WValue w_rt_string_ascii_case(WValue recv, int mode);
+W_RT_INTERNAL WHash *w_rt_as_hash(WValue v);
+W_RT_INTERNAL void w_rt_release_thread_tls(void);
+W_RT_INTERNAL void w_rt_bigint_fft_release_thread(void);
+W_RT_INTERNAL int w_rt_bn_pool_env_int(const char *name, int fallback);
+W_RT_INTERNAL void w_rt_bn_ws_release_thread(void);
+W_RT_INTERNAL WBigint *w_rt_bigint_alloc_raw_hot_sub1_exact_one(void);
+W_RT_INTERNAL WValue w_rt_bigint_add_word_into(const uint64_t *al, int32_t alen, int a_neg, uint64_t w, WBigint *r);
+W_RT_INTERNAL WValue w_rt_bigint_sub_word_into(WBigint *r, const uint64_t *al, int32_t alen, int a_neg, uint64_t w);
+W_RT_INTERNAL void w_rt_bn_ntt_mul(uint64_t *out, const uint64_t *a, const uint64_t *b, int32_t n);
+W_RT_INTERNAL void w_rt_bn_ntt_sqr(uint64_t *out, const uint64_t *a, int32_t n);
+W_RT_INTERNAL void w_rt_bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na, const uint64_t *b, int32_t nb);
+W_RT_INTERNAL int w_rt_bn_top_choice(int32_t na, int32_t nb, int square);
+
+#ifndef W_RUNTIME_UNITY_INCLUDE
+W_RT_INTERNAL extern int g_slab_needs_lock;
+W_RT_INTERNAL extern __thread WBlockReturnFrame *w_block_return_stack;
+W_RT_INTERNAL extern __thread WCleanupEntry *g_cleanup_stack;
+W_RT_INTERNAL extern __thread int g_cleanup_top;
+#endif
 
 #endif /* TUNGSTEN_RUNTIME_INTERNAL_H */
 

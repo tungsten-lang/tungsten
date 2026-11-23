@@ -1064,6 +1064,43 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   lt = ctx[:var_types][name]
   vt = infer_type(node.value, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
 
+  # Inside `Math.wrap -> ...` / `Math.trap -> ...`, compound assignment on a
+  # boxed integer target must honor the lexical overflow mode just like an
+  # explicit `x = x op val` binary op does.
+  ovf_ca_mode = ctx[:overflow_mode]
+  if ovf_ca_mode == :wrap && op in (:PLUS :MINUS :STAR) && int_op != nil && is_integer_like_type(lt) && is_integer_like_type(vt)
+    cur_raw = ensure_raw_i64(wfn, typed_value(:i64, cur))
+    rhs_raw = ensure_raw_i64(wfn, rhs)
+    result_raw = next_temp(wfn)
+    emit_wire_dynamic_3(wfn, int_op, :lhs, cur_raw, :rhs, rhs_raw, :temp, result_raw)
+    result_tv = typed_value(:raw_i64, result_raw)
+    boxed_reg = ensure_i64_value(wfn, result_tv)
+    if ptr != nil
+      emit_wire_store_i64(wfn, ptr, boxed_reg)
+    else
+      ctx[:bindings][name] = boxed_reg
+    return result_tv
+  if ovf_ca_mode == :trap && op in (:PLUS :MINUS :STAR) && is_integer_like_type(lt) && is_integer_like_type(vt)
+    guarded_ca_op = op == :PLUS ? :add_i48_guarded : (op == :MINUS ? :sub_i48_guarded : :mul_i48_guarded)
+    rt_ca_fn = op == :PLUS ? "w_add" : (op == :MINUS ? "w_sub" : "w_mul")
+    ca_block_id = lowering_next_block_id(ctx, 4)
+    result_temp = next_temp(wfn)
+    ca_guarded = wire_make_dynamic_6(
+      guarded_ca_op,
+      :block_id, ca_block_id,
+      :lhs, cur,
+      :rhs, rhs_reg,
+      :rt_fallback, rt_ca_fn,
+      :temp, result_temp,
+      :trap, true
+    )
+    emit_instruction(wfn, ca_guarded)
+    if ptr != nil
+      emit_wire_store_i64(wfn, ptr, result_temp)
+    else
+      ctx[:bindings][name] = result_temp
+    return typed_value(:i64, result_temp)
+
   # For boxed integer compound assignment, use runtime calls because the
   # accumulator may already be a bigint and raw i48 operations would consume
   # pointer bits. Machine-declared i64/u64 variables take the earlier typed
@@ -2287,7 +2324,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # machine shift, as infer_type's LSHIFT arm types it.
   if shl_literal_base && lowering_infer_maps[:typed_def] == true && node.left.format != :dec_big && !(node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int) && rt != :int && (is_machine_int64_type(rt) || is_small_int_type(rt) || rt in (:raw_int :raw_i64 :raw_u64))
     shl_literal_base = false
-  if op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 62)
+  lhs_machine_shift64 = !(node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int) && lt != nil && lt != :int && is_machine_int64_type(lt)
+  if op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > (lhs_machine_shift64 ? 63 : 62))
     shl_literal_base = true
   if node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
     lv = node.left.value

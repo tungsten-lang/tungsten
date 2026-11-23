@@ -669,8 +669,11 @@ function_emit_cache_state = {
 -> fast_push_call?(inst)
   wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_sequence_size(wire_get(inst, :args)) == 1 && wire_get(inst, :fast_builtin) == :push
 
+-> fast_to_s_call?(inst)
+  wire_kind(inst) == :call_method_i64 && (wire_get(inst, :args) == nil || wire_sequence_size(wire_get(inst, :args)) == 0) && wire_get(inst, :fast_builtin) == :to_s
+
 -> fast_builtin_call?(inst)
-  wire_get(inst, :fast_builtin) != nil && (fast_idx_get_call?(inst) || fast_idx_set_call?(inst) || fast_size_call?(inst) || fast_push_call?(inst))
+  wire_get(inst, :fast_builtin) != nil && (fast_idx_get_call?(inst) || fast_idx_set_call?(inst) || fast_size_call?(inst) || fast_push_call?(inst) || fast_to_s_call?(inst))
 
 # Return the runtime function names that an instruction will reference when rendered.
 -> runtime_fns_for_inst(inst, string_wvs = nil)
@@ -810,6 +813,8 @@ function_emit_cache_state = {
       argc = wire_sequence_size(wire_get(inst, :args))
     if fast_size_call?(inst)
       runtime_fns.push("w_fast_size")
+    elsif fast_to_s_call?(inst)
+      runtime_fns.push("w_fast_to_s")
     elsif argc == 0
       runtime_fns.push("w_method_call_cached_0")
     elsif sym_idx_get_call?(inst)

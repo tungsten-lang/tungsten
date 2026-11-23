@@ -21,8 +21,18 @@
 
 JSU_ABI = 1
 
+use ../runtime/unit_id
+
 # Position of the inline-cache word index in each runtime entry that takes one.
 JSU_IC_ARG = {"js_getp" => 2, "js_setp" => 3, "js_call_method" => 2, "js_new" => 1}
+
+# Entries every context has at these indices: the slow paths of the prelude's fast forms.
+JSU_FIXED = ["js_add/2", "js_sub/2", "js_mul/2", "js_lt/2", "js_gt/2", "js_le/2", "js_ge/2", "js_seq/2", "js_truthy/1", "js_getp_t/4", "js_setp_t/5", "js_call/8", "js_gget/1"]
+
+# Runtime calls that go through the prelude's fast form jsu_<name> (inline lanes for
+# numbers, booleans, cached properties, plain globals, and calls of compiled functions,
+# which go straight to their entries).
+JSU_FAST = {"js_add" => 2, "js_sub" => 2, "js_mul" => 2, "js_lt" => 2, "js_gt" => 2, "js_le" => 2, "js_ge" => 2, "js_seq" => 2, "js_truthy" => 1, "js_call" => 8, "js_gget" => 1}
 
 # Names translated code reads as host values.
 JSU_CONSTS = {"JSR" => true, "JS_HOLE" => true, "JS_NULL" => true, "JS_NO_ARGS" => true, "JS_ITER_DONE" => true}
@@ -37,6 +47,8 @@ JSU_CONSTS = {"JSR" => true, "JS_HOLE" => true, "JS_NULL" => true, "JS_NO_ARGS" 
     @slot_list = []
     @entries = []
     @ic_slot = slot("ic", "", 0)
+    slot("epoch", "", nil)
+    JSU_FIXED.each ->(k) rt_index(k.slice(0, k.index("/")), k.slice(k.index("/") + 1, k.size - k.index("/") - 1).to_i)
 
   # The slot for a host value (kind: str, gcell, lcell, code, shape, tmpl, const, ic).
   -> slot(kind, key, data)
@@ -74,6 +86,12 @@ JSU_CONSTS = {"JSR" => true, "JS_HOLE" => true, "JS_NULL" => true, "JS_NO_ARGS" 
   -> call(name, args)
     if name.starts_with?("jsd_") || name.starts_with?("jsf_")
       return Tungsten:AST:Call.new(nil, name, [Tungsten:AST:Var.new("ctx")] + args)
+    if JSU_FAST[name] == args.size
+      return Tungsten:AST:Call.new(nil, "jsu_" + name.slice(3, name.size - 3), [Tungsten:AST:Var.new("ctx")] + args)
+    if (name == "js_getp" && args.size == 3) || (name == "js_setp" && args.size == 4)
+      # fast forms with the unit's cache table: jsu_getp(ctx, o, key, table, k) / jsu_setp
+      xs = [Tungsten:AST:Var.new("ctx")] + args.slice(0, args.size - 1) + [slot_value(@ic_slot), args[args.size - 1]]
+      return Tungsten:AST:Call.new(nil, name == "js_getp" ? "jsu_getp" : "jsu_setp", xs)
     p = JSU_IC_ARG[name]
     if p != nil
       # the _t form takes (… table, k …) where the call had (… k …)
@@ -146,7 +164,7 @@ JSU_CONSTS = {"JSR" => true, "JS_HOLE" => true, "JS_NULL" => true, "JS_NO_ARGS" 
 
   # The manifest (JSON) runtime/units.w reads to fill the context.
   -> manifest(ic_words, nfuncs)
-    out = ["{\"abi\": " + JSU_ABI.to_s + ", \"funcs\": " + nfuncs.to_s + ", \"ic\": " + ic_words.to_s + ",\n\"rt\": \["]
+    out = ["{\"abi\": " + JSU_ABI.to_s + ", \"engine\": \"" + JSU_ENGINE_ID + "\", \"funcs\": " + nfuncs.to_s + ", \"ic\": " + ic_words.to_s + ",\n\"rt\": \["]
     i = 0
     while i < @rt_list.size
       out.push((i > 0 ? "," : "") + jsu_json_str(@rt_list[i]))

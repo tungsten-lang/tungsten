@@ -17,6 +17,8 @@ in JS
 
 JSU_ABI = 1
 
+use unit_id
+
 # Everything a loaded unit's context points at stays reachable from here.
 JSU_UNITS = []
 
@@ -153,6 +155,7 @@ fn jsu_cl_caps(cb) (i64) i64
   man = js_json_parse(manifest_text, nil)
   return "manifest is not an object" if !js_object?(man)
   return "unit ABI " + js_to_string(jget(man, "abi")) + ", host " + JSU_ABI.to_s if jget(man, "abi") != JSU_ABI.to_f
+  return "unit from engine " + js_to_string(jget(man, "engine")) + ", host " + JSU_ENGINE_ID if jget(man, "engine") != JSU_ENGINE_ID
   rt = jget(man, "rt")
   slots = jget(man, "slots")
   entries = jget(man, "entries")
@@ -172,9 +175,13 @@ fn jsu_cl_caps(cb) (i64) i64
     k += 1
   j = 0
   while j < slots.size
-    v = js_unit_slot_value(slots[j], codes)
-    u.keep.push(v)
-    ctx[1024 + j] = wvalue_bits(v) ## i64
+    if slots[j][0] == "epoch"
+      # the address of the prototype epoch (inline caches in the unit compare it)
+      ctx[1024 + j] = jsu_raw(JS_EPOCH)
+    else
+      v = js_unit_slot_value(slots[j], codes)
+      u.keep.push(v)
+      ctx[1024 + j] = wvalue_bits(v) ## i64
     j += 1
   fp = ccall("w_jit_load_object", obj_path, "jsu_init")
   return "cannot load " + obj_path if fp == nil

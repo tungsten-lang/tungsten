@@ -1095,7 +1095,7 @@ use frontend/parser
       # one captured binding that never changes after its initializer: stored by value
       if f.free.size == 1 && !inner_captures?(f) && !f.dynamic
         fb = f.free.values[0]
-        if single_ok?(fb)
+        if single_ok?(fb) && single_init_ok?(f, fb)
           f.single = fb
       i += 1
     # environment slots: captured bindings that some non-single function needs
@@ -1176,6 +1176,14 @@ use frontend/parser
       return true if f.inner[i].free.size > 0
       i += 1
     false
+
+  # A let, const or class binding is stored by value only in a function made after the
+  # binding was initialized: not a hoisted declaration (made at its scope's entry), and
+  # one that starts after the declaration ends.
+  -> single_init_ok?(f, b)
+    return true if !(b.kind == :let || b.kind == :const || b.kind == :class)
+    return false if f.node.kind == :function_decl
+    f.node.pos > b.decl_pos
 
   -> single_ok?(b)
     return false if b.kind == :param && b.scope.func.mapped_args

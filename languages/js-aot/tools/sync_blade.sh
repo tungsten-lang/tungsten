@@ -8,10 +8,11 @@ D="$(cd "$(dirname "$0")/.." && pwd)"
 B="${1:-$HOME/studio/apps/blade}"
 J="$B/lib/blade/jsn"
 mkdir -p "$J"
+"$D/tools/engine_id.sh" > /dev/null
 # drop engine files that no longer exist upstream (Blade's own engine.w/compat.w stay)
 for f in "$J"/*.w; do
   b=$(basename "$f")
-  case "$b" in engine.w|compat.w|lexer.w|parser.w|analyze.w|walk.w) continue ;; esac
+  case "$b" in engine.w|compat.w|unitcache.w|lexer.w|parser.w|analyze.w|walk.w) continue ;; esac
   [ -f "$D/runtime/$b" ] || rm -f "$f"
 done
 cp "$D/frontend/lexer.w" "$D/frontend/parser.w" "$J/"

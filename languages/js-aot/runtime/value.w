@@ -31,7 +31,12 @@ in JS
   -> to_s
     message()
 
+# JS_THROW_LOG (JSRUN_THROWS=1 / BLADE_JS_THROWS=1): every throw is printed with its
+# stack, caught or not (finding the exception a page swallows).
+JS_THROW_LOG = [Env.get("JSRUN_THROWS", "") == "1" || Env.get("BLADE_JS_THROWS", "") == "1"]
+
 -> js_throw(v)
+  ccall("w_eputs", "\[js throw] " + js_inspect(v, 1)) if JS_THROW_LOG[0]
   raise JS:Throw.new(v)
 
 # The JS value of anything raised: a JS throw, or a runtime error turned into a JS error.

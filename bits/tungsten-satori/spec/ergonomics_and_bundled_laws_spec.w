@@ -22,4 +22,17 @@ s.run_source(unit_src + "instance bad_unit : NonTrivial (ℕ × ℕ) := NonTrivi
 if s.failures != 2
   raise "trivial NonTrivial instance should have failed law check"
 
+# Soundness gate 3: kernel ring_norm must reject division by zero and false ground-cast equalities.
+s.run_source("+ bad_div_zero (x : ℝ) : x / (2 - 2) = 0 := by ring\n")
+if s.failures != 3
+  raise "ring must reject division by zero constant"
+s.run_source("+ bad_ground_cast : ((2 : ℕ) : ℝ) = ((3 : ℕ) : ℝ) := by ring\n")
+if s.failures != 4
+  raise "ring must reject false ground-cast equality"
+lb = 91.chr
+rb = 93.chr
+s.run_source("+ bad_rw_if_by (n : ℕ) : (if n = 0 then (1 : ℕ) else 2) = 2 := by rw " + lb + "if_neg (by omega)" + rb + "\n")
+if s.failures != 5
+  raise "rw if_neg (by omega) must fail when condition is unprovable"
+
 << "Ergonomics and bundled law soundness spec passed"

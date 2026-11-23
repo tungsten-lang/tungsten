@@ -849,6 +849,66 @@
     else
       fail("unknown projection ." + field)
 
+  -> project_rule_thm(th, field)
+    if !["1", "2", "left", "right", "mp", "mpr", "symm"].include?(field)
+      return nil
+    begin
+      used = {}
+      tm_free_names_into(th.concl, used)
+      th.hyps.each -> (h)
+        tm_free_names_into(h, used)
+      vars = []
+      t = @d.beta_norm_thm(th)
+      while true
+        q = dest_unop(t.concl, "∀")
+        if q == nil || q.tag != :lam
+          break
+        nm = q.name
+        if nm == nil || nm == ""
+          nm = "x"
+        v = mk_var(fresh_name_from_set(nm, used), q.ty)
+        vars.push(v)
+        t = @k.spec(v, t)
+      c = t.concl
+      conds = []
+      while dest_binop(c, "⇒") != nil
+        pq = dest_binop(c, "⇒")
+        conds.push(pq[0])
+        c = pq[1]
+      u = t
+      conds.each -> (p)
+        u = @k.mp(u, @k.assume(p))
+      u = project_proof(u, field)
+      i = conds.size - 1
+      while i >= 0
+        u = @k.disch(conds[i], u)
+        i -= 1
+      return @d.gen_all(vars, u)
+    rescue _e
+      return nil
+
+  -> extract_projected_thm(goal, node)
+    while node.kind == :paren
+      node = node.kids[0]
+    if node.kind == :id
+      if node.s == "rfl" || node.s == "trivial"
+        return nil
+      if (goal.hyp(node.s) == nil && goal.fixes.any?(->(f) f[0] == node.s)) || term_def?(goal, node.s)
+        return nil
+      th = lookup_proof(goal, node.s)
+      return th == nil ? nil : [th, [], false]
+    if node.kind == :app
+      sp = @session.elab.ast_spine(node)
+      base = extract_projected_thm(goal, sp[0])
+      return base == nil ? nil : [base[0], base[1] + sp[1], base[2]]
+    if node.kind == :proj && ["1", "2", "left", "right", "mp", "mpr", "symm"].include?(node.s)
+      base = extract_projected_thm(goal, node.kids[0])
+      if base == nil
+        return nil
+      pth = project_rule_thm(base[0], node.s)
+      return pth == nil ? nil : [pth, base[1], true]
+    nil
+
   -> proof_name?(goal, e)
     if e.kind == :proj || e.kind == :anon || e.kind == :by
       return true
@@ -892,6 +952,9 @@
             return lth
         rescue _e
           0
+      proj_sp = extract_projected_thm(goal, e)
+      if proj_sp != nil && proj_sp[2]
+        return instantiate_to(goal, proj_sp[0], proj_sp[1], expected, false)[0]
       return project_proof(proof_ast(goal, e.kids[0], nil), e.s)
     if e.kind == :id && e.s == "rfl" && expected != nil
       eq = dest_binop(expected, "=")
@@ -923,6 +986,9 @@
           fail("unknown hypothesis or theorem '" + head.s + "'")
         r = instantiate_to(goal, th, sp[1], expected, false)
         return r[0]
+      proj_sp = extract_projected_thm(goal, e)
+      if proj_sp != nil && proj_sp[2]
+        return instantiate_to(goal, proj_sp[0], proj_sp[1], expected, false)[0]
       # `(thm a b).mpr h`: any other head is itself a proof expression
       if head.kind == :proj || head.kind == :paren || head.kind == :app
         r = instantiate_to(goal, proof_ast(goal, head, nil), sp[1], expected, false)
@@ -1062,7 +1128,7 @@
   # Instantiate theorem th with explicit args; match its conclusion against
   # `target` (if given). Returns [thm, remaining premise props].
   # With allow_open, unproved premises are returned instead of failing.
-  -> instantiate_to(goal, th, args, target, allow_open, hints = [], match_result = false)
+  -> instantiate_to(goal, th, args, target, allow_open, hints = [], match_result = false, deferred_rw_by = nil)
     k = @k
     # rename type variables to fresh pattern type vars
     tyvars = tm_tyvars(th.concl)
@@ -1122,6 +1188,7 @@
           break
     mt = Matcher.new(pvars, tvs)
     proofs = {}
+    deferred_by = {}
     ai = 0
     si = 0
     # ∀-steps filled out of order: Satori hoists every ∀ binder to the front of a statement, so in
@@ -1145,7 +1212,7 @@
       while si < steps.size
         if filled.has_key?(si) || (steps[si][0] == :all && isproof)
           si += 1
-        elsif isproof && steps[si][0] == :imp && !proofs.has_key?(si)
+        elsif isproof && steps[si][0] == :imp && !proofs.has_key?(si) && !deferred_by.has_key?(si)
           prem_auto = closed_or_nil(tm_subst(steps[si][1], mt.tm), pvars)
           if prem_auto != nil
             prem_auto = tm_inst_types(prem_auto, mt.ty)
@@ -1195,7 +1262,7 @@
           # conversion. Each retry consumes at least one source argument.
           prefix = instantiate_to(goal, th, arr_sub(args, 0, ai), nil, false)
           resumed = @d.beta_norm_thm(prefix[0])
-          return instantiate_to(goal, resumed, arr_sub(args, ai, args.size - ai), target, allow_open, hints)
+          return instantiate_to(goal, resumed, arr_sub(args, ai, args.size - ai), target, allow_open, hints, match_result, deferred_rw_by)
         fail("too many arguments")
       if steps[tstep][0] == :all
         if a_is_hole
@@ -1230,28 +1297,34 @@
             maxused = si
           si += 1
         else
-          if si > maxused
-            maxused = si
           prem = steps[si][1]
           prem_i = closed_or_nil(tm_subst(prem, mt.tm), pvars)
           if prem_i != nil
             prem_i = tm_inst_types(prem_i, mt.ty)
-          pth = proof_ast(goal, a, prem_i)
-          matched = match_application(mt, prem, pth.concl)
-          if matched == nil && prem_i != nil
-            # A hypothesis or projection can prove a definitionally equal alias.
-            # Convert the supplied proof before matching the known premise; the
-            # conversion preserves its assumptions and is replayed by the kernel.
-            converted = try_defeq(pth, prem_i)
-            if converted != nil
-              matched = match_application(mt, prem, converted.concl)
-              if matched != nil
-                pth = converted
-          if matched == nil
-            fail("argument proves " + tm_show(pth.concl) + " but the premise is " + tm_show(prem))
-          mt = matched
-          proofs[si] = pth
-          si += 1
+          if a.kind == :by && prem_i == nil && (target != nil || deferred_rw_by != nil)
+            deferred_by[si] = a
+            if si > maxused
+              maxused = si
+            si += 1
+          else
+            if si > maxused
+              maxused = si
+            pth = proof_ast(goal, a, prem_i)
+            matched = match_application(mt, prem, pth.concl)
+            if matched == nil && prem_i != nil
+              # A hypothesis or projection can prove a definitionally equal alias.
+              # Convert the supplied proof before matching the known premise; the
+              # conversion preserves its assumptions and is replayed by the kernel.
+              converted = try_defeq(pth, prem_i)
+              if converted != nil
+                matched = match_application(mt, prem, converted.concl)
+                if matched != nil
+                  pth = converted
+            if matched == nil
+              fail("argument proves " + tm_show(pth.concl) + " but the premise is " + tm_show(prem))
+            mt = matched
+            proofs[si] = pth
+            si += 1
       ai += 1
     if target != nil
       # Match the visible conclusions before expanding aliases in the target.
@@ -1271,7 +1344,7 @@
             found = j
             mt = trial
           j += 1
-      if found < 0 && args.size > 0
+      if found < 0 && args.size > 0 && deferred_by.size == 0
         # Expose a supplied predicate's telescope before definitional fitting
         # can erase a premise such as True. `apply` still opens that premise.
         prefix = instantiate_to(goal, th, args, nil, false)
@@ -1292,9 +1365,9 @@
       if found < 0
         fail("cannot match " + tm_show(cur) + " with goal " + tm_show(target))
       steps = arr_sub(steps, 0, found)
-      if (allow_open || has_hole) && mt.tm.size < pvars.size && (goal.hyps.size > 0 || hints.size > 0)
+      if (allow_open || has_hole || deferred_by.size > 0) && mt.tm.size < pvars.size && (goal.hyps.size > 0 || hints.size > 0)
         mt = infer_from_premises(goal, steps, mt, hints)
-    elsif has_hole && mt.tm.size < pvars.size && (goal.hyps.size > 0 || hints.size > 0)
+    elsif (has_hole || deferred_by.size > 0) && mt.tm.size < pvars.size && (goal.hyps.size > 0 || hints.size > 0)
       mt = infer_from_premises(goal, steps, mt, hints)
     # Auto-synthesize leading typeclass dictionaries and bundled .Valid guards
     steps.each -> (st)
@@ -1306,7 +1379,7 @@
             mt.m(st[1], dict, 0)
     vsi = 0
     while vsi < steps.size
-      if steps[vsi][0] == :imp && !proofs.has_key?(vsi)
+      if steps[vsi][0] == :imp && !proofs.has_key?(vsi) && !deferred_by.has_key?(vsi)
         prem_v = closed_or_nil(tm_subst(steps[vsi][1], mt.tm), pvars)
         if prem_v != nil
           prem_v = tm_inst_types(prem_v, mt.ty)
@@ -1317,10 +1390,49 @@
               if vsi > maxused
                 maxused = vsi
       vsi += 1
+    if deferred_by.size > 0 && (target != nil || deferred_rw_by == nil)
+      dsi = 0
+      while dsi < steps.size
+        if deferred_by.has_key?(dsi) && !proofs.has_key?(dsi)
+          dprem = closed_or_nil(tm_subst(steps[dsi][1], mt.tm), pvars)
+          if dprem == nil
+            fail("(by …) needs a known statement here")
+          dprem = tm_inst_types(dprem, mt.ty)
+          proofs[dsi] = proof_ast(goal, deferred_by[dsi], dprem)
+        dsi += 1
     # build the theorem
     thx = t
     if mt.ty.size > 0
       thx = k.inst_type(thx, mt.ty)
+    if target == nil && deferred_rw_by != nil && deferred_by.size > 0
+      gens_rw = []
+      rem_conds = []
+      si = 0
+      while si < steps.size
+        st = steps[si]
+        if st[0] == :all
+          v = st[1]
+          kk = var_key(v)
+          if mt.tm.has_key?(kk)
+            thx = k.spec(mt.tm[kk], thx)
+          else
+            fv = mk_var(fresh_name_from_set(v.name.slice(1, v.name.size - 1), used_names), ty_subst(v.ty, mt.ty))
+            gens_rw.push(fv)
+            thx = k.spec(fv, thx)
+        elsif st[0] == :imp
+          prem = dest_binop(thx.concl, "⇒")[0]
+          if proofs.has_key?(si)
+            thx = k.mp(thx, fit_concl(proofs[si], prem))
+          else
+            rem_conds.push(prem)
+            deferred_rw_by.push(deferred_by[si])
+            thx = @d.undisch(thx)
+        si += 1
+      ri = rem_conds.size - 1
+      while ri >= 0
+        thx = k.disch(rem_conds[ri], thx)
+        ri -= 1
+      return [regen(thx, gens_rw), []]
     open = []
     gens = []
     si = 0
@@ -1688,14 +1800,19 @@
     if args.size == 0
       fail("apply needs a theorem")
     e = parse_expr_toks(args)
-    sp = @session.elab.ast_spine(e)
-    head = sp[0]
-    if head.kind != :id
-      fail("apply: expected a theorem name")
-    th = lookup_proof(g.goal, head.s)
-    if th == nil
-      fail("unknown theorem '" + head.s + "'")
-    r = instantiate_to(g.goal, th, sp[1], g.goal.concl, true)
+    proj_sp = extract_projected_thm(g.goal, e)
+    r = nil
+    if proj_sp != nil && proj_sp[2]
+      r = instantiate_to(g.goal, proj_sp[0], proj_sp[1], g.goal.concl, true)
+    else
+      sp = @session.elab.ast_spine(e)
+      head = sp[0]
+      if head.kind != :id
+        fail("apply: expected a theorem name")
+      th = lookup_proof(g.goal, head.s)
+      if th == nil
+        fail("unknown theorem '" + head.s + "'")
+      r = instantiate_to(g.goal, th, sp[1], g.goal.concl, true)
     thx = r[0]
     prems = r[1]
     subs = []
@@ -2534,28 +2651,67 @@
       bi += 1
     0
 
-  # rw [h1, ← h2, foo a] (at h)?
+  # rw [h1, ← h2, foo a] (at h | at *)?
   -> tac_rw(g, args)
     at = find_top(args, "at", 0)
     targets = [nil]
+    everywhere = false
     rs = args
     if at >= 0
-      # `rw [...] at h1 h2 ⊢` rewrites every listed hypothesis (and the goal for ⊢)
+      # `rw [...] at h1 h2 ⊢` rewrites every listed hypothesis (and the goal for ⊢); `at *` rewrites all
       targets = []
-      k = at + 1
-      while k < args.size
-        if args[k].text == "⊢"
-          targets.push(nil)
-        else
-          targets.push(args[k].text)
-        k += 1
+      if at + 2 == args.size && args[at + 1].text == "*"
+        everywhere = true
+      else
+        k = at + 1
+        while k < args.size
+          if args[k].text == "⊢"
+            targets.push(nil)
+          else
+            targets.push(args[k].text)
+          k += 1
       rs = arr_sub(args, 0, at)
     if rs.size > 0 && rs[0].text == "\["
       rs = arr_sub(rs, 1, rs.size - 2)
     cur = g
-    targets.each -> (target_h)
+    if everywhere
       split_top(rs, ",").each -> (r)
-        cur = rw_one(cur, r, target_h)
+        rtoks = r
+        rev = false
+        if rtoks.size > 0 && (rtoks[0].text == "←" || rtoks[0].text == "<-")
+          rev = true
+          rtoks = arr_sub(rtoks, 1, rtoks.size - 1)
+        self_hyp = (rtoks.size == 1 && cur.goal.hyp(rtoks[0].text) != nil) ? rtoks[0].text : nil
+        by_asts = []
+        base_goal = cur.goal
+        th = rule_theorem(base_goal, rtoks, by_asts)
+        if rev
+          th = sym_rule(th)
+        rule = make_rule(@d, th, "rw")
+        any_hit = false
+        hs = []
+        cur.goal.hyps.each -> (h)
+          if h[0] != self_hyp
+            hs.push(h[0])
+        hs.push(nil)
+        hs.each -> (th_name)
+          term = th_name == nil ? cur.goal.concl : hyp_or_fail(cur.goal, th_name)
+          eqth = rewrite_once(rule, term, cur.goal, by_asts)
+          if eqth != nil
+            any_hit = true
+            rhs = dest_binop(eqth.concl, "=")[1]
+            if th_name == nil
+              cur = refine(cur, [cur.goal.with_concl(rhs)], ->(ts) @k.eq_mp(@k.sym(eqth), ts[0]))[0]
+            else
+              old = hyp_or_fail(cur.goal, th_name)
+              ng = cur.goal.without_hyp(th_name).add_hyp(th_name, rhs)
+              cur = refine(cur, [ng], ->(ts) @d.prove_hyp(@k.eq_mp(eqth, @k.assume(old)), ts[0]))[0]
+        if !any_hit
+          fail("rw: pattern " + tm_show(rule.lhs) + " not found")
+    else
+      targets.each -> (target_h)
+        split_top(rs, ",").each -> (r)
+          cur = rw_one(cur, r, target_h)
     # close goals of the form a = a or True
     begin
       c = cur.goal.concl
@@ -2576,14 +2732,15 @@
     if rtoks[0].text == "←" || rtoks[0].text == "<-"
       rev = true
       rtoks = arr_sub(rtoks, 1, rtoks.size - 1)
-    th = rule_theorem(goal, rtoks)
+    by_asts = []
+    th = rule_theorem(goal, rtoks, by_asts)
     if rev
       th = sym_rule(th)
     rule = make_rule(@d, th, "rw")
     term = goal.concl
     if target_h != nil
       term = hyp_or_fail(goal, target_h)
-    eqth = rewrite_once(rule, term, goal)
+    eqth = rewrite_once(rule, term, goal, by_asts)
     if eqth == nil
       fail("rw: pattern " + tm_show(rule.lhs) + " not found")
     rhs = dest_binop(eqth.concl, "=")[1]
@@ -2594,20 +2751,23 @@
       ng = goal.without_hyp(target_h).add_hyp(target_h, rhs)
       refine(g, [ng], ->(ts) @d.prove_hyp(@k.eq_mp(eqth, @k.assume(old)), ts[0]))[0]
 
-  -> rule_theorem(goal, toks)
+  -> rule_theorem(goal, toks, deferred_rw_by = nil)
     e = parse_expr_toks(toks)
     if e.kind == :id
       th = lookup_proof(goal, e.s)
       if th == nil
         fail("unknown rule '" + e.s + "'")
       return th
+    proj_sp = extract_projected_thm(goal, e)
+    if proj_sp != nil && proj_sp[2]
+      return instantiate_to(goal, proj_sp[0], proj_sp[1], nil, true, [], false, deferred_rw_by)[0]
     hd = @session.elab.ast_spine(e)[0]
     if hd.kind != :id
       return proof_ast(goal, e, nil)
     base = lookup_proof(goal, hd.s)
     if base == nil
       fail("unknown rule '" + hd.s + "'")
-    r = instantiate_to(goal, base, @session.elab.ast_spine(e)[1], nil, true)
+    r = instantiate_to(goal, base, @session.elab.ast_spine(e)[1], nil, true, [], false, deferred_rw_by)
     r[0]
 
   -> sym_rule(th)
@@ -2652,19 +2812,73 @@
       i -= 1
     out
 
-  # Rewrites all occurrences of the first instance of the rule found in term.
-  -> rewrite_once(rule, term, goal)
+  -> attach_rw_by_tactics(rule, goal, by_asts)
+    if by_asts == nil || by_asts.size == 0
+      rule.cond_tactics = nil
+      return
+    prover = self
+    tacs = Array.new(by_asts.size)
+    i = 0
+    while i < by_asts.size
+      ba = by_asts[i]
+      if ba != nil
+        tacs[i] = ->(cond_tm)
+          res_th = nil
+          begin
+            res_th = prover.proof_ast(goal, ba, cond_tm)
+          rescue _e
+            res_th = nil
+          res_th
+      i += 1
+    rule.cond_tactics = tacs
+
+  # Rewrites all occurrences of the first instance of the rule found in term
+  # (including beneath λ/∀/∃/∑ binders using @k.abs_rule).
+  -> rewrite_once(rule, term, goal, by_asts = nil)
     s = Simp.new(@d, [rule])
     s.hyp_rules = hyp_thms(goal)
     s.infer_conditions = true
+    attach_rw_by_tactics(rule, goal, by_asts)
     inst = find_instance_with_simp(s, rule, term)
-    if inst == nil
-      return nil
-    lhs = dest_binop(inst.concl, "=")[0]
-    conv = replace_conv_opt(term, lhs, inst)
-    if conv == nil
-      return @k.refl(term)
-    conv
+    if inst != nil
+      lhs = dest_binop(inst.concl, "=")[0]
+      conv = replace_conv_opt(term, lhs, inst)
+      if conv == nil
+        return @k.refl(term)
+      return conv
+    if (term.search_ops & TERM_LAMBDA) != 0
+      avoid = [term, rule.th.concl] + rule.th.hyps + goal.all_terms
+      return rewrite_under_binders_opt(rule, term, goal, by_asts, avoid)
+    nil
+
+  -> rewrite_under_binders_opt(rule, t, goal, by_asts, avoid)
+    case t.tag
+    when :app
+      if (t.a.search_ops & TERM_LAMBDA) != 0
+        a = rewrite_under_binders_opt(rule, t.a, goal, by_asts, avoid)
+        if a != nil
+          return @k.mk_comb(a, @k.refl(t.b))
+      if (t.b.search_ops & TERM_LAMBDA) != 0
+        b = rewrite_under_binders_opt(rule, t.b, goal, by_asts, avoid)
+        if b != nil
+          return @k.mk_comb(@k.refl(t.a), b)
+      nil
+    when :lam
+      p = dest_lam_fresh(t, avoid)
+      v = p[0]
+      body = p[1]
+      sub_goal = goal.add_fix(v.name, v)
+      inner = rewrite_once(rule, body, sub_goal, by_asts)
+      if inner == nil
+        return nil
+      bad = false
+      inner.hyps.each -> (h)
+        if tm_free_in?(v, h)
+          bad = true
+      if bad
+        return nil
+      return @k.abs_rule(v, inner)
+    nil
 
   -> find_instance_with_simp(s, rule, t)
     # Search beneath binders too, but never instantiate a rule with a loose
@@ -2751,10 +2965,13 @@
               @session.eqns_of(nm).each -> (eqth)
                 rules.push(named_equation(eqth, nm))
             else
-              th = rule_theorem(goal, r)
+              by_asts = []
+              th = rule_theorem(goal, r, by_asts)
               if rev
                 th = sym_rule(th)
-              rules.push(make_rule(@d, th, nm))
+              rl = make_rule(@d, th, nm)
+              attach_rw_by_tactics(rl, goal, by_asts)
+              rules.push(rl)
     rules
 
   -> goal_simplifier(goal, rs, all = false)
@@ -2896,10 +3113,14 @@
     if at >= 0 && args.size - at - 1 == 1 && args[at + 1].text == "⊢"
       return tac_unfold(g, arr_sub(args, 0, at))
     target_h = nil
+    everywhere = false
     names = args
     if at >= 0
-      # `unfold f at h1 h2` unfolds in each listed hypothesis
-      if args.size - at - 1 > 1
+      if args.size - at - 1 == 1 && args[at + 1].text == "*"
+        everywhere = true
+        names = arr_sub(args, 0, at)
+      elsif args.size - at - 1 > 1
+        # `unfold f at h1 h2` unfolds in each listed hypothesis
         cur = g
         k = at + 1
         while k < args.size
@@ -2909,8 +3130,9 @@
             cur = tac_unfold(cur, arr_sub(args, 0, at + 1) + [args[k]])[0]
           k += 1
         return [cur]
-      target_h = args[at + 1].text
-      names = arr_sub(args, 0, at)
+      else
+        target_h = args[at + 1].text
+        names = arr_sub(args, 0, at)
     rules = []
     names.each -> (t)
       nm = t.text
@@ -2925,6 +3147,22 @@
       elsif eqs.size == 0
         fail("unfold: " + nm + " is not a definition")
     s = Simp.new(@d, rules)
+    if everywhere
+      cur = g
+      hs = []
+      cur.goal.hyps.each -> (h) hs.push(h[0])
+      hs.each -> (hn)
+        old = hyp_or_fail(cur.goal, hn)
+        eqth = s.simp_conv_opt(old, 0)
+        if eqth != nil
+          newp = dest_binop(eqth.concl, "=")[1]
+          ng = cur.goal.without_hyp(hn).add_hyp(hn, newp)
+          cur = refine(cur, [ng], ->(ts) @d.prove_hyp(@k.eq_mp(eqth, @k.assume(old)), ts[0]))[0]
+      eqth = s.simp_conv_opt(cur.goal.concl, 0)
+      if eqth != nil
+        rhs = dest_binop(eqth.concl, "=")[1]
+        cur = refine(cur, [cur.goal.with_concl(rhs)], ->(ts) @k.eq_mp(@k.sym(eqth), ts[0]))[0]
+      return [cur]
     goal = g.goal
     if target_h != nil
       old = hyp_or_fail(goal, target_h)

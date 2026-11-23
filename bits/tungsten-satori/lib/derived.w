@@ -425,7 +425,7 @@
 
 + RewriteRule
   ro :th, :lhs, :rhs, :conds, :pvars, :tvs, :name, :head_name, :is_eq, :rewrite_head
-  rw :literal_patterns
+  rw :literal_patterns, :cond_tactics
   # th: spec'd theorem (free pattern vars) with conclusion `conds → l = r`
   -> new(@th, @lhs, @rhs, @conds, @pvars, @tvs, @name, @head_name, @is_eq, @rewrite_head)
 

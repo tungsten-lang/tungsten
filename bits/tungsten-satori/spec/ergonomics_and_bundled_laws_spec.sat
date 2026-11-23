@@ -202,6 +202,36 @@ instance int_acg_test : AddCommGroupTest ℤ :=
     R 5 ∧ (((1 : ℕ), ((2 : ℕ), (3 : ℕ))).2.1 = 2)
   exact ⟨(h 5).2.2.1, rfl⟩
 
+-- 10. HOL Kernel cast/div polynomial normalizer, binder-aware `rw`, deferred `(by ...)` in `rw`/`exact`, & `at *`
++ kernel_ring_ground_cast_and_div (x y : ℝ) :
+    x / ((2 : ℕ) : ℝ) + x / (2 * 2) + ((3 : ℕ) : ℝ) * y - x * (3 / 4) = ((3 : ℤ) : ℝ) * y ∧
+    ((0 : ℕ) : ℝ) + x / (-2) + x / 2 = 0
+  ring
+
++ rw_if_by_omega_and_selective (n k : ℕ) (f g : ℕ → ℝ) :
+    (if n = 0 then (0 : ℝ) else f n) + (if k + 1 = 0 then (99 : ℝ) else g k) =
+    (if n = 0 then (0 : ℝ) else f n) + g k
+  rw [if_neg (by omega)]
+
++ rw_under_lambda_and_sum (M : ℕ) (x : ℝ) (hx : 0 < x) :
+    (∑ k < M, (if k + 1 = 0 then (99 : ℝ) else exp (log x) * (k : ℝ))) = ∑ k < M, x * (k : ℝ)
+  rw [if_neg (by omega), exp_log _ (by linarith)]
+
++ deferred_by_in_exact (a b c : ℝ) (hc : 0 < c) (h : a < b * c) : a / c < b :=
+  (div_lt_iff.real _ _ _ (by linarith)).mpr (by linarith)
+
++ apply_projected_iff (a b c : ℝ) (hc : 0 < c) (h : a < b * c) : a / c < b
+  apply (div_lt_iff.real _ _ _ (by linarith)).mpr
+  linarith
+
+-> box_double_test (x : ℝ) : ℝ := 2 * x
+
++ unfold_and_rw_at_star (x y : ℝ) (hx : box_double_test x = y) (hy : y = 6) :
+    box_double_test x + y = 12
+  unfold box_double_test at *
+  rw [hy] at *
+  linarith
+
 #axioms have_semi_chain
 #axioms hole_application
 #axioms poly_ite_rewrite
@@ -225,3 +255,9 @@ instance int_acg_test : AddCommGroupTest ℤ :=
 #axioms continuity_inner_complex_def
 #axioms push_cast_nat_int_real
 #axioms chained_paren_proj
+#axioms kernel_ring_ground_cast_and_div
+#axioms rw_if_by_omega_and_selective
+#axioms rw_under_lambda_and_sum
+#axioms deferred_by_in_exact
+#axioms apply_projected_iff
+#axioms unfold_and_rw_at_star

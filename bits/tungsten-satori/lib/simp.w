@@ -125,7 +125,11 @@
       cond = @d.beta_norm_term(pq[0])
       if tm_unmatched_pattern?(r.conds[i], r.pvars, mt.tm)
         return nil
-      pc = discharge(cond, depth)
+      pc = nil
+      if r.cond_tactics != nil && i < r.cond_tactics.size && r.cond_tactics[i] != nil
+        pc = r.cond_tactics[i].call(cond)
+      if pc == nil
+        pc = discharge(cond, depth)
       if pc == nil
         return nil
       if !tm_eq(pc.concl, pq[0])

@@ -254,6 +254,17 @@
   else
     [t.val, 1]
 
+-> ring_ground_const_q(t)
+  if t.tag == :lit
+    if type(t.val) == "Array"
+      return t.val
+    return [t.val, 1]
+  if t.tag == :app && t.a.tag == :const
+    uop = t.a.op
+    if uop == OP_INT_OF_NAT || uop == OP_RAT_OF_INT || uop == OP_REAL_OF_RAT
+      return ring_ground_const_q(t.b)
+  nil
+
 -> ring_norm(t, kind, ctx)
   if t.tag == :lit
     return poly_const(ring_lit_q(t, kind))
@@ -288,10 +299,17 @@
           if e > 0
             cur = poly_mul(cur, cur, ctx)
         return res
-      if op == OP_DIV && (kind == "rat" || kind == "real") && rhs.tag == :lit && rhs.val[0] != 0
-        return poly_scale(ring_norm(lhs, kind, ctx), q_div(Q_ONE, rhs.val))
-    elsif ta.tag == :const && ta.op == OP_NEG && kind != "nat"
-      return poly_scale(ring_norm(t.b, kind, ctx), Q_NEG_ONE)
+      if op == OP_DIV && (kind == "rat" || kind == "real")
+        pr = ring_norm(rhs, kind, ctx)
+        if pr.size == 1 && pr.has_key?(0) && pr[0][0] != 0
+          return poly_scale(ring_norm(lhs, kind, ctx), q_div(Q_ONE, pr[0]))
+    elsif ta.tag == :const
+      if ta.op == OP_NEG && kind != "nat"
+        return poly_scale(ring_norm(t.b, kind, ctx), Q_NEG_ONE)
+      if ta.op == OP_INT_OF_NAT || ta.op == OP_RAT_OF_INT || ta.op == OP_REAL_OF_RAT
+        cq = ring_ground_const_q(t.b)
+        if cq != nil
+          return poly_const(cq)
   p = {}
   p[ctx.atom_mono(t)] = Q_ONE
   p

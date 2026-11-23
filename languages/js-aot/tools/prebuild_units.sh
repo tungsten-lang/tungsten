@@ -25,12 +25,14 @@ for js in "$dir"/*.js; do
       if ! "$CC" -O2 -fno-asynchronous-unwind-tables -c "$tmp.ll" -o "$tmp.o" 2>> "$tmp.log"; then
         echo "FAILED clang $sha window $k"; break
       fi
-      mv "$tmp.o" "$base.o"; mv "$tmp.json" "$base.json"; rm -f "$tmp.ll" "$tmp.bin"* "$tmp.ll.done"
-      echo "built $sha window $k"
+      t=$(sed -n 's/.*translated=\([0-9]*\).*/\1/p' "$tmp.log" | tail -1)
+      echo "${t:-0}" > "$base.count"
+      mv "$tmp.o" "$base.o"; mv "$tmp.json" "$base.json"; rm -f "$tmp.ll" "$tmp.bin"* "$tmp.ll.done" "$tmp.log"
+      echo "built $sha window $k ($t functions)"
     fi
-    # the last window compiles no function but the script's own body (an entry for 0)
-    n=$(sed -n 's/.*"entries": \[\([0-9,]*\)\].*/\1/p' "$base.json" | tr ',' '\n' | grep -c .)
-    [ "$n" -gt 1 ] || break
+    # a window short of 2,000 functions (plus the script's own body) is the last
+    t=$(cat "$base.count" 2>/dev/null || echo 2001)
+    [ "$t" -ge 2000 ] || break
     k=$((k + 1))
   done
 done

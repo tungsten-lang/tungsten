@@ -232,6 +232,10 @@ instance int_acg_test : AddCommGroupTest ℤ :=
   rw [hy] at *
   linarith
 
++ field_simp_div_pow (x y : ℝ) (hx : 0 < x) (hy : 0 < y) (k : ℕ) :
+    (1 / x) ^ 3 * x ^ 3 + (x / y) ^ k * (y ^ k / x ^ k) = 2
+  field_simp
+
 #axioms have_semi_chain
 #axioms hole_application
 #axioms poly_ite_rewrite

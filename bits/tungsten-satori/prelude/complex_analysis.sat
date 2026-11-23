@@ -190,6 +190,21 @@ import power
   · rw [csum.zero]; simp
   · rw [succ_eq_add_one.nat, csum.succ]; simp [ih]
 
++ continuous_at.cpow_nat_re_im (g : ℝ → ℂ) (k : ℕ) (x : ℝ)
+    (hre : continuous_at (fun t => complex.re (g t)) x)
+    (him : continuous_at (fun t => complex.im (g t)) x) :
+    continuous_at (fun t => complex.re (cpow_nat (g t) k)) x ∧
+    continuous_at (fun t => complex.im (cpow_nat (g t) k)) x
+  induction k with j ih
+  · have hr0 : (fun t => complex.re (cpow_nat (g t) 0)) = (fun _ => (1 : ℝ)) := by funext t; simp [cpow_nat]
+    have hi0 : (fun t => complex.im (cpow_nat (g t) 0)) = (fun _ => (0 : ℝ)) := by funext t; simp [cpow_nat]
+    rw [hr0, hi0]; exact ⟨continuous_at.const 1 x, continuous_at.const 0 x⟩
+  · rw [succ_eq_add_one.nat]
+    have hr1 : (fun t => complex.re (cpow_nat (g t) (j + 1))) = (fun t => complex.re (cpow_nat (g t) j) * complex.re (g t) - complex.im (cpow_nat (g t) j) * complex.im (g t)) := by funext t; simp [cpow_nat]
+    have hi1 : (fun t => complex.im (cpow_nat (g t) (j + 1))) = (fun t => complex.re (cpow_nat (g t) j) * complex.im (g t) + complex.im (cpow_nat (g t) j) * complex.re (g t)) := by funext t; simp [cpow_nat]
+    rw [hr1, hi1]
+    exact ⟨continuous_at.sub _ _ x (continuous_at.mul _ _ x ih.1 hre) (continuous_at.mul _ _ x ih.2 him), continuous_at.add _ _ x (continuous_at.mul _ _ x ih.1 him) (continuous_at.mul _ _ x ih.2 hre)⟩
+
 + ctends_to.iff_re_im (a : ℕ → ℂ) (L : ℂ) : ctends_to a L ↔ tends_to (fun n => complex.re (a n)) (complex.re L) ∧ tends_to (fun n => complex.im (a n)) (complex.im L)
   constructor
   · intro h

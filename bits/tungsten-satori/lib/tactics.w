@@ -3310,6 +3310,8 @@
         return true
       if op == OP_ADD || op == OP_SUB || op == OP_MUL
         return field_has_div?(tm.a.b, ty) || field_has_div?(tm.b, ty)
+      if op == OP_POW && ty_eq(type_of(tm.b), TY_NAT_SINGLETON)
+        return field_has_div?(tm.a.b, ty)
     false
 
   -> field_extract_nat_cast(tm)
@@ -3543,6 +3545,22 @@
       comb = combination_binop("*", ty, r1[2], r2[2])
       ne12 = @k.mp(@k.mp(@k.spec(r2[1], @k.spec(r1[1], mul_ne_zero)), r1[3]), r2[3])
       return [mk_apps(mul_c, [r1[0], r2[0]]), mk_apps(mul_c, [r1[1], r2[1]]), @k.trans(comb, @k.spec(r2[1], @k.spec(r2[0], @k.spec(r1[1], @k.spec(r1[0], dmd))))), ne12]
+    if op == OP_POW && ty_eq(type_of(b), TY_NAT_SINGLETON)
+      dp = @session.theorem("div_pow" + sfx)
+      pez = @session.theorem("pow_eq_zero" + sfx)
+      if dp == nil || pez == nil
+        iff = @k.mp(@k.spec(one, @k.spec(tm, @k.spec(tm, eq_div_iff))), ne1)
+        eq_th = @k.eq_mp(@k.sym(iff), @k.ring_eq(mk_apps(mul_c, [tm, one]), tm))
+        return [tm, one, eq_th, ne1]
+      r1 = field_norm(goal, hints, a, ty, sfx)
+      pow_c = tm.a.a
+      num = mk_apps(pow_c, [r1[0], b])
+      den = mk_apps(pow_c, [r1[1], b])
+      d_zero = @k.eq_tm(den, zero)
+      ne_den = @k.not_intro(d_zero, @k.not_elim(r1[3], @k.mp(@k.spec(b, @k.spec(r1[1], pez)), @k.assume(d_zero))))
+      step1 = @d.ap_thm(@d.ap_term(pow_c, r1[2]), b)
+      step2 = @k.spec(b, @k.spec(r1[1], @k.spec(r1[0], dp)))
+      return [num, den, @k.trans(step1, step2), ne_den]
     # op == OP_DIV
     hb_ne = field_prove_nonzero(goal, hints, b, ty, sfx)
     if !field_has_div?(a, ty) && !field_has_div?(b, ty)
@@ -4015,6 +4033,35 @@
             if pa != nil
               comp_inst = @d.beta_norm_thm(@k.spec(x, @k.spec(mk_lam(v, sp[1][0]), @k.spec(sp[0], comp_th))))
               return @d.beta_norm_thm(@k.mp(@k.mp(comp_inst, @k.mp(@k.spec(arg_x, log_th), pos_arg)), pa))
+      elsif (sp[0].name == "complex.re" || sp[0].name == "complex.im") && sp[1].size == 1
+        isp = strip_app(sp[1][0])
+        if isp[0].tag == :const && isp[0].name == "csum" && isp[1].size == 2 && !tm_free_in?(v, isp[1][0])
+          cs_th = @session.theorem(sp[0].name == "complex.re" ? "csum.re_eq" : "csum.im_eq")
+          if cs_th != nil
+            eq_cs = @k.spec(isp[1][1], @k.spec(isp[1][0], cs_th))
+            rhs_cs = @d.beta_norm_term(dest_binop(eq_cs.concl, "=")[1])
+            ba_cs = @d.beta_norm_conv(dest_binop(eq_cs.concl, "=")[1])
+            p_cs = cont_prove_norm(goal, hints, extra_rules, v, rhs_cs, x, depth + 1)
+            if p_cs != nil
+              return cont_congr(mk_lam(v, rhs_cs), mk_lam(v, body), x, p_cs, v, @k.trans(eq_cs, ba_cs))
+        elsif isp[0].tag == :const && isp[0].name == "cpow_nat" && isp[1].size == 2 && !tm_free_in?(v, isp[1][1])
+          cpn_th = @session.theorem("continuous_at.cpow_nat_re_im")
+          if cpn_th != nil
+            ty_c = ty_con("complex", [])
+            re_c = @k.mk_const("complex.re", ty_fun(ty_c, ty_real))
+            im_c = @k.mk_const("complex.im", ty_fun(ty_c, ty_real))
+            g_arg = isp[1][0]
+            k_exp = isp[1][1]
+            p_re = cont_prove(goal, hints, extra_rules, v, mk_app(re_c, g_arg), x, depth + 1)
+            if p_re != nil
+              p_im = cont_prove(goal, hints, extra_rules, v, mk_app(im_c, g_arg), x, depth + 1)
+              if p_im != nil
+                g_fn = mk_lam(v, g_arg)
+                inst0 = @d.beta_norm_thm(@k.spec(x, @k.spec(k_exp, @k.spec(g_fn, cpn_th))))
+                inst = @d.beta_norm_thm(@k.mp(@k.mp(inst0, p_re), p_im))
+                part = sp[0].name == "complex.re" ? @k.conj1(inst) : @k.conj2(inst)
+                part_fn = strip_app(part.concl)[1][0]
+                return tm_eq(part_fn, mk_lam(v, body)) ? part : cont_congr(part_fn, mk_lam(v, body), x, part, v, @k.refl(body))
     if body.tag == :app && ty_eq(type_of(body.b), ty_real) && !tm_free_in?(v, body.a) && tm_free_in?(v, body.b)
       comp_th = @session.theorem("continuous_at.comp")
       if comp_th != nil
@@ -4629,26 +4676,11 @@
         if cp_th != nil
           c_base = sp[1][0]
           w_exp = sp[1][1]
-          csmul_c = @k.mk_const("complex.smul", ty_funs([ty_real, ty_c], ty_c))
-          cadd_c = @k.mk_const("complex.add", ty_funs([ty_c, ty_c], ty_c))
-          czero = @k.mk_const("complex.zero", ty_c)
-          a_sc = nil
-          b_off = nil
-          wsp = strip_app(w_exp)
-          if tm_eq(w_exp, v)
-            a_sc = mk_lit(Q_ONE, ty_real)
-            b_off = czero
-          elsif wsp[0].tag == :const && wsp[0].name == "complex.neg" && wsp[1].size == 1 && tm_eq(wsp[1][0], v)
-            a_sc = mk_app(@k.mk_const("neg", ty_fun(ty_real, ty_real)), mk_lit(Q_ONE, ty_real))
-            b_off = czero
-          elsif wsp[0].tag == :const && wsp[0].name == "complex.sub" && wsp[1].size == 2 && !tm_free_in?(v, wsp[1][0]) && tm_eq(wsp[1][1], v)
-            a_sc = mk_app(@k.mk_const("neg", ty_fun(ty_real, ty_real)), mk_lit(Q_ONE, ty_real))
-            b_off = wsp[1][0]
-          elsif wsp[0].tag == :const && wsp[0].name == "complex.smul" && wsp[1].size == 2 && !tm_free_in?(v, wsp[1][0]) && tm_eq(wsp[1][1], v)
-            a_sc = wsp[1][0]
-            b_off = czero
-          if a_sc != nil
-            aff = mk_apps(cadd_c, [mk_apps(csmul_c, [a_sc, v]), b_off])
+          aff_pair = cana_extract_real_affine(v, w_exp)
+          if aff_pair != nil
+            csmul_c = @k.mk_const("complex.smul", ty_funs([ty_real, ty_c], ty_c))
+            cadd_c = @k.mk_const("complex.add", ty_funs([ty_c, ty_c], ty_c))
+            aff = mk_apps(cadd_c, [mk_apps(csmul_c, [aff_pair[0], v]), aff_pair[1]])
             weq = cana_ring_eq(goal, w_exp, aff)
             if weq != nil
               alt = mk_apps(sp[0], [c_base, aff])
@@ -4656,24 +4688,39 @@
               p_alt = cana_from_hyps_and_lib(goal, hints, extra_rules, v, alt, z0, depth + 1)
               if p_alt != nil
                 return cana_congr(mk_lam(v, alt), mk_lam(v, body), z0, p_alt, v, beq)
-    # Positive affine pullback: f(a_sc • v + b_off)
-    if body.tag == :app && !tm_free_in?(v, body.a) && tm_free_in?(v, body.b)
-      asp = strip_app(body.b)
-      if asp[0].tag == :const && asp[0].name == "complex.add" && asp[1].size == 2 && !tm_free_in?(v, asp[1][1])
-        smsp = strip_app(asp[1][0])
-        if smsp[0].tag == :const && smsp[0].name == "complex.smul" && smsp[1].size == 2 && !tm_free_in?(v, smsp[1][0]) && tm_eq(smsp[1][1], v)
-          aff_th = @session.theorem("is_canalytic_at.comp_pos_affine")
-          if aff_th != nil
-            a_sc = smsp[1][0]
-            b_off = asp[1][1]
+    # Real-affine pullback: f(a_sc • v + b_off), including f(1 - v), f(-v), f((v + b)/2), etc.
+    if body.tag == :app && !tm_free_in?(v, body.a) && tm_free_in?(v, body.b) && !tm_eq(body.b, v)
+      aff_pair = cana_extract_real_affine(v, body.b)
+      if aff_pair != nil
+        a_sc = aff_pair[0]
+        b_off = aff_pair[1]
+        csmul_c = @k.mk_const("complex.smul", ty_funs([ty_real, ty_c], ty_c))
+        cadd_c = @k.mk_const("complex.add", ty_funs([ty_c, ty_c], ty_c))
+        aff = mk_apps(cadd_c, [mk_apps(csmul_c, [a_sc, v]), b_off])
+        weq = cana_ring_eq(goal, body.b, aff)
+        if weq != nil
+          gen_aff_th = @session.theorem("is_canalytic_at.comp_affine")
+          pos_aff_th = @session.theorem("is_canalytic_at.comp_pos_affine")
+          pt_img = mk_apps(cadd_c, [mk_apps(csmul_c, [a_sc, z0]), b_off])
+          if gen_aff_th != nil
+            pa_nz = cana_discharge_cond(goal, hints, extra_rules, @k.neg_tm(@k.eq_tm(a_sc, mk_lit(Q_ZERO, ty_real))), depth + 1)
+            if pa_nz != nil
+              pf_out = cana_prove_fn(goal, hints, extra_rules, body.a, pt_img, depth + 1)
+              if pf_out != nil
+                inst_aff = @d.beta_norm_thm(@k.spec(z0, @k.spec(b_off, @k.spec(a_sc, @k.spec(body.a, gen_aff_th)))))
+                p_aff = @k.mp(@k.mp(inst_aff, pa_nz), pf_out)
+                aff_fn = strip_app(p_aff.concl)[1][0]
+                return tm_eq(aff, body.b) && tm_eq(aff_fn, mk_lam(v, body)) ? p_aff : cana_congr(aff_fn, mk_lam(v, body), z0, p_aff, v, @d.ap_term(body.a, weq))
+          if pos_aff_th != nil
             lt_r = @k.mk_const("<", ty_funs([ty_real, ty_real], ty_bool))
             pa_pos = cana_discharge_cond(goal, hints, extra_rules, mk_apps(lt_r, [mk_lit(Q_ZERO, ty_real), a_sc]), depth + 1)
             if pa_pos != nil
-              pt_img = @d.beta_norm_term(tm_subst(body.b, {v.vkey => z0}))
               pf_out = cana_prove_fn(goal, hints, extra_rules, body.a, pt_img, depth + 1)
               if pf_out != nil
-                inst_aff = @d.beta_norm_thm(@k.spec(z0, @k.spec(b_off, @k.spec(a_sc, @k.spec(body.a, aff_th)))))
-                return @k.mp(@k.mp(inst_aff, pa_pos), pf_out)
+                inst_aff = @d.beta_norm_thm(@k.spec(z0, @k.spec(b_off, @k.spec(a_sc, @k.spec(body.a, pos_aff_th)))))
+                p_aff = @k.mp(@k.mp(inst_aff, pa_pos), pf_out)
+                aff_fn = strip_app(p_aff.concl)[1][0]
+                return tm_eq(aff, body.b) && tm_eq(aff_fn, mk_lam(v, body)) ? p_aff : cana_congr(aff_fn, mk_lam(v, body), z0, p_aff, v, @d.ap_term(body.a, weq))
     # Fallback: simplify via extra_rules + local set equations + if_pos/if_neg
     set_rules = [] + extra_rules
     if @session.theorem("if_pos") != nil
@@ -4724,6 +4771,42 @@
     if sp[0].tag == :const && sp[0].name == "is_canalytic_at" && sp[1].size == 2 && ty_eq(type_of(sp[1][1]), ty_con("complex", []))
       res = cana_prove_fn(goal, hints, extra_rules, sp[1][0], sp[1][1], 0)
       return res == nil ? nil : @k.eq_mp(@k.sym(bc), res)
+    nil
+
+  -> cana_extract_real_affine(v, w)
+    ty_c = ty_con("complex", [])
+    czero = @k.mk_const("complex.zero", ty_c)
+    if !tm_free_in?(v, w)
+      return [mk_lit(Q_ZERO, ty_real), w]
+    if tm_eq(w, v)
+      return [mk_lit(Q_ONE, ty_real), czero]
+    add_r = @k.mk_const("+", ty_funs([ty_real, ty_real], ty_real))
+    sub_r = @k.mk_const("-", ty_funs([ty_real, ty_real], ty_real))
+    mul_r = @k.mk_const("*", ty_funs([ty_real, ty_real], ty_real))
+    neg_r = @k.mk_const("neg", ty_fun(ty_real, ty_real))
+    cadd_c = @k.mk_const("complex.add", ty_funs([ty_c, ty_c], ty_c))
+    csub_c = @k.mk_const("complex.sub", ty_funs([ty_c, ty_c], ty_c))
+    cneg_c = @k.mk_const("complex.neg", ty_fun(ty_c, ty_c))
+    csmul_c = @k.mk_const("complex.smul", ty_funs([ty_real, ty_c], ty_c))
+    sp = strip_app(w)
+    if sp[0].tag == :const
+      nm = sp[0].name
+      if nm == "complex.neg" && sp[1].size == 1
+        ru = cana_extract_real_affine(v, sp[1][0])
+        return ru == nil ? nil : [mk_app(neg_r, ru[0]), mk_app(cneg_c, ru[1])]
+      if (nm == "complex.add" || nm == "complex.sub") && sp[1].size == 2
+        r1 = cana_extract_real_affine(v, sp[1][0])
+        if r1 == nil
+          return nil
+        r2 = cana_extract_real_affine(v, sp[1][1])
+        if r2 == nil
+          return nil
+        if nm == "complex.add"
+          return [mk_apps(add_r, [r1[0], r2[0]]), mk_apps(cadd_c, [r1[1], r2[1]])]
+        return [mk_apps(sub_r, [r1[0], r2[0]]), mk_apps(csub_c, [r1[1], r2[1]])]
+      if nm == "complex.smul" && sp[1].size == 2 && !tm_free_in?(v, sp[1][0])
+        ru = cana_extract_real_affine(v, sp[1][1])
+        return ru == nil ? nil : [mk_apps(mul_r, [sp[1][0], ru[0]]), mk_apps(csmul_c, [sp[1][0], ru[1]])]
     nil
 
   -> tac_canalytic(g, args)

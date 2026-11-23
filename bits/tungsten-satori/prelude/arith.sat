@@ -1088,6 +1088,10 @@ import finite_sum
   have e := one_div_mul_one_div.real b d
   rw [div_def.real a b, div_def.real c d, div_def.real (a * c) (b * d), ← e]
   ring
++ div_pow.real (a b : ℝ) (n : ℕ) : (a / b) ^ n = a ^ n / b ^ n
+  induction n with k ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, pow_succ.real, ih, div_mul_div.real]
 + div_add_div.real (a b c d : ℝ) (hb : b ≠ 0) (hd : d ≠ 0) : a / b + c / d = (a * d + b * c) / (b * d)
   have e := one_div_mul_one_div.real b d
   rw [div_def.real a b, div_def.real c d, div_def.real (a * d + b * c) (b * d), ← e]
@@ -1313,6 +1317,10 @@ import finite_sum
   have e := one_div_mul_one_div.rat b d
   rw [div_def.rat a b, div_def.rat c d, div_def.rat (a * c) (b * d), ← e]
   ring
++ div_pow.rat (a b : ℚ) (n : ℕ) : (a / b) ^ n = a ^ n / b ^ n
+  induction n with k ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.rat, pow_succ.rat, pow_succ.rat, ih, div_mul_div.rat]
 + div_add_div.rat (a b c d : ℚ) (hb : b ≠ 0) (hd : d ≠ 0) : a / b + c / d = (a * d + b * c) / (b * d)
   have e := one_div_mul_one_div.rat b d
   rw [div_def.rat a b, div_def.rat c d, div_def.rat (a * d + b * c) (b * d), ← e]

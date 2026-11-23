@@ -1,6 +1,6 @@
 # Amazon return labels for Rollo
 
-`print-label FILE.pdf` extracts the mailing label from the Amazon Online Return Center PDF and submits it to the `Rollo_X1040` CUPS queue on 4×6 stock. This queue was added for the Wi-Fi Rollo using IPP Everywhere. The default printer is not changed.
+`print-label FILE.pdf` extracts the mailing label from an Amazon Online Return Center or UPS CampusShip PDF and submits it to the `Rollo_X1040` CUPS queue on 4×6 stock. This queue was added for the Wi-Fi Rollo using IPP Everywhere. The default printer is not changed.
 
 To inspect before printing:
 
@@ -13,7 +13,7 @@ The output must not already exist. The output is a one-page 4×6 PDF, rotated up
 
 Override the destination with `--printer CUPS_QUEUE` or `ROLLO_PRINTER=CUPS_QUEUE`. Find queues using `lpstat -p`. The printer must have 4×6 labels loaded. Inspect the first physical print for complete text, unclipped bars and quiet zones; confirm the carrier can scan it before relying on it.
 
-This supports the observed Amazon layout, where the mailing label is a single embedded, landscape 3:2 image of at least 900×600 pixels. It refuses PDFs with zero or multiple matching images. Amazon and carriers can use other layouts; those will need additional detection work. It does not print or extract the separate authorization slip, and does not guarantee that a different PDF's matching image is a mailing label. Check unfamiliar layouts with `--output` first.
+This supports two observed layouts. In Amazon's, the mailing label is a single embedded, landscape 3:2 image of at least 900×600 pixels, printed as is. In UPS CampusShip's (View/Print Label, letter page with instructions and a FOLD HERE line), it is a 1400×800 image whose label occupies the left 1200×800 and whose right edge is blank white; a large landscape image that is not 3:2 is trimmed to the area darker than paper white, and accepted when that area is 3:2 and at least 900×600. The trimmed label keeps its full resolution. It refuses PDFs with zero or multiple matching images. Amazon and carriers can use other layouts; those will need additional detection work. It does not print or extract the separate authorization slip, and does not guarantee that a different PDF's matching image is a mailing label. Check unfamiliar layouts with `--output` first.
 
 Requirements: macOS, Tungsten, Apple clang, and Poppler `pdfimages` at `/opt/homebrew/bin/pdfimages` (`brew install poppler`). Rebuild after editing:
 

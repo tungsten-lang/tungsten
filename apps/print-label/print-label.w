@@ -1,12 +1,44 @@
-# Amazon return-label extraction, image selection, thresholding, and printing.
+# Mailing-label extraction (Amazon returns, UPS CampusShip), image selection,
+# thresholding, and printing.
 # image-native exposes only image decoding and CoreGraphics PDF output.
 -> error(message)
   ccall("w_eputs", "print-label: " + message)
   exit(1)
 
+# A 4x6 mailing label is a landscape 3:2 image at least 900x600 pixels.
+-> label_shape(w, h)
+  w >= 900 && h >= 600 && w * 10 > h * 14 && w * 10 < h * 16
+
+# The smallest rectangle [x, y, w, h] holding every pixel darker than paper
+# white, or nil for a blank image. pixels is 8-bit gray, rows top to bottom.
+-> ink_box(pixels, w, h)
+  left = w
+  right = -1
+  top = h
+  bottom = -1
+  y = 0
+  while y < h
+    row = y * w
+    x = 0
+    while x < w
+      if pixels[row + x] < 200
+        if x < left
+          left = x
+        if x > right
+          right = x
+        if y < top
+          top = y
+        bottom = y
+      x = x + 1
+    y = y + 1
+  box = nil
+  if right >= 0
+    box = [left, top, right - left + 1, bottom - top + 1]
+  box
+
 -> usage
   << "Usage: print-label FILE.pdf \[--output LABEL.pdf] \[--printer NAME]"
-  << "Extract the Amazon mailing label. --output saves a PDF without printing."
+  << "Extract an Amazon return or UPS CampusShip label. --output saves a PDF without printing."
   << "Prints to Rollo_X1040; override with ROLLO_PRINTER or --printer."
   exit(0)
 
@@ -58,6 +90,7 @@ begin
     native = root + "/image-native"
     metadata = tmp + "/images.txt"
     candidate = nil
+    crop = nil
     width = 0
     height = 0
     count = 0
@@ -70,11 +103,24 @@ begin
           if parts.size == 2
             w = parts[0].to_i
             h = parts[1].to_i
-            if w >= 900 && h >= 600 && w * 10 > h * 14 && w * 10 < h * 16
+            if label_shape(w, h)
               candidate = image_path
               width = w
               height = h
+              crop = nil
               count = count + 1
+            elsif w >= 900 && h >= 600 && w > h
+              # UPS CampusShip pads its 3:2 label with blank white columns
+              # (1400x800 around a 1200x800 label): trim to the inked area.
+              trim_path = tmp + "/trim.gray"
+              if Process.spawn([native, "gray", image_path, trim_path]).wait == 0
+                box = ink_box(File.read_bytes(trim_path), w, h)
+                if box != nil && label_shape(box[2], box[3])
+                  candidate = image_path
+                  width = w
+                  height = h
+                  crop = box
+                  count = count + 1
     if result == 0
       if count != 1
         ccall("w_eputs", "print-label: expected one large 3:2 landscape label image; found " + count.to_s + ". This PDF layout needs review; no job was printed.")
@@ -98,15 +144,21 @@ begin
                   j = j + 1
                 File.write_bytes(raw, pixels)
         if result == 0
-          scale = ~278.0 / height
-          vertical_scale = ~422.0 / width
+          label_w = crop == nil ? width : crop[2]
+          label_h = crop == nil ? height : crop[3]
+          scale = ~278.0 / label_h
+          vertical_scale = ~422.0 / label_w
           if vertical_scale < scale
             scale = vertical_scale
-          draw_w = width * scale
-          draw_h = height * scale
+          draw_w = label_w * scale
+          draw_h = label_h * scale
           tx = (~288.0 - draw_h) / ~2.0
           ty = (~432.0 + draw_w) / ~2.0
-          result = Process.spawn([native, "pdf", candidate, raw, target, "288", "432", draw_w.to_s, draw_h.to_s, tx.to_s, ty.to_s]).wait
+          pdf_args = [native, "pdf", candidate, raw, target, "288", "432", draw_w.to_s, draw_h.to_s, tx.to_s, ty.to_s]
+          if crop != nil
+            crop.each ->(edge)
+              pdf_args.push(edge.to_s)
+          result = Process.spawn(pdf_args).wait
     if result == 0
       if output == nil
         print_args = ["/usr/bin/lp", "-d", printer, "-o", "media=4x6", "-o", "fit-to-page"]

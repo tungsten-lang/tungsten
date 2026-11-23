@@ -37,8 +37,9 @@ static int gray(const char *path, const char *raw) {
   CGContextRelease(ctx); CGImageRelease(image); return ok ? 0 : 1;
 }
 static int pdf(int argc, char **argv) {
-  // pdf IMAGE RAW_OR_DASH OUTPUT PAGE_W PAGE_H DRAW_W DRAW_H TX TY
-  if (argc != 11) return 1;
+  // pdf IMAGE RAW_OR_DASH OUTPUT PAGE_W PAGE_H DRAW_W DRAW_H TX TY [CROP_X CROP_Y CROP_W CROP_H]
+  // The crop rectangle is in image pixels from the top-left corner.
+  if (argc != 11 && argc != 15) return 1;
   CGImageRef image = image_at(argv[2]); if (!image) return 1;
   if (strcmp(argv[3], "-")) {
     size_t w = CGImageGetWidth(image), h = CGImageGetHeight(image);
@@ -52,6 +53,12 @@ static int pdf(int argc, char **argv) {
     fclose(f);
     CGImageRef replacement = ok ? CGBitmapContextCreateImage(bitmap) : NULL;
     CGContextRelease(bitmap); CGImageRelease(image); image = replacement;
+    if (!image) return 1;
+  }
+  if (argc == 15) {
+    CGRect rect = CGRectMake(atof(argv[11]), atof(argv[12]), atof(argv[13]), atof(argv[14]));
+    CGImageRef cropped = CGImageCreateWithImageInRect(image, rect);
+    CGImageRelease(image); image = cropped;
     if (!image) return 1;
   }
   CGRect page = CGRectMake(0, 0, atof(argv[5]), atof(argv[6]));

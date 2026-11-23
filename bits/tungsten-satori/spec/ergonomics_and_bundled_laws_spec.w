@@ -46,4 +46,15 @@ s.run_source("+ bad_change (x : ℝ) : x = 0 := by change True; trivial\n")
 if s.failures != 8
   raise "change must reject non-definitionally-equal propositions"
 
+# Soundness gate 5: Chvátal-Gomory integer cuts must NEVER fire on ℝ or ℚ, nor prove false integer bounds.
+s.run_source("+ bad_real_parity (x : ℝ) : 2 * x ≠ 1 := by omega\n")
+if s.failures != 9
+  raise "omega must reject 2 * x != 1 over ℝ"
+s.run_source("+ bad_rat_cut (x : ℚ) : ¬ (1 ≤ 3 * x ∧ 3 * x ≤ 2) := by omega\n")
+if s.failures != 10
+  raise "omega must reject integer rounding over ℚ"
+s.run_source("+ bad_int_cut (x : ℤ) : ¬ (1 ≤ 3 * x ∧ 3 * x ≤ 3) := by omega\n")
+if s.failures != 11
+  raise "omega must not refute satisfiable 3 * x = 3 over ℤ"
+
 << "Ergonomics and bundled law soundness spec passed"

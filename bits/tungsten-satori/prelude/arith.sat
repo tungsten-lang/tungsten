@@ -77,6 +77,10 @@ import finite_sum
   · intro h
     rw [h]
     decide
+@[simp] + abs_zero.real : |(0 : ℝ)| = 0 := by decide
+@[simp] + abs_zero.rat : |(0 : ℚ)| = 0 := by decide
+@[simp] + abs_zero.int : |(0 : ℤ)| = 0 := by decide
+@[simp] + abs_zero.nat : |(0 : ℕ)| = 0 := by decide
 + sq_le_sq.real (a b : ℝ) : a ^ 2 ≤ b ^ 2 ↔ |a| ≤ |b|
   have e := sq_abs.real a
   have f := sq_abs.real b

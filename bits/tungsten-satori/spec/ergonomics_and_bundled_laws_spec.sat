@@ -262,6 +262,32 @@ instance int_acg_test : AddCommGroupTest ℤ :=
     (if P 5 then (42 : ℕ) else 0) = 42
   rw [if_pos ((hab 5).mpr hb)]
 
+-- 12. HOL Kernel Chvátal-Gomory `int_farkas` cuts (`ℕ`/`ℤ`), `nlinarith` widening `ℕ`-casts, `rw` beta-norm, & multi-line pattern defs
++ omega_chvatal_gomory_parity_and_cuts (qP rP qS M : ℕ) (x y : ℤ)
+    (heq : 4 * qP + 2 * rP + 4 * qS = 4 * M) (hr : rP < 2) :
+    rP = 0 ∧ (2 * x + 1 ≠ 2 * y) ∧ ¬ (1 ≤ 3 * x ∧ 3 * x ≤ 2)
+  exact ⟨by omega, by omega, by omega⟩
+
++ nlinarith_nat_cast_mul_pos (k : ℕ) (a b : ℝ) (hp : 0 < pi) (hab : a < b) :
+    0 < 2 * pi * ((k + 1 : ℕ) : ℝ) ∧ a * ((k + 1 : ℕ) : ℝ) < b * ((k + 1 : ℕ) : ℝ)
+  constructor <;> nlinarith
+
++ rw_beta_norm_after_fun_eq (K k : ℝ → ℝ) (t : ℝ) (hK : K = fun y : ℝ => 2 * k y + 1) (hk : k t = 3) :
+    K t = 7
+  rw [hK, hk]
+  ring
+
+-> multiline_pat_test : ℕ → ℕ → ℕ → ℕ → ℕ
+  | 0, a, b, c =>
+      a + b + c
+  | m + 1, a, b, c =>
+      multiline_pat_test m (a + 1) b c + 1
+
++ multiline_pat_test_check : multiline_pat_test 2 10 20 30 = 64 ∧ |(0 : ℝ)| = 0
+  constructor
+  · decide
+  · simp
+
 #axioms have_semi_chain
 #axioms hole_application
 #axioms poly_ite_rewrite

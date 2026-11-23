@@ -2761,6 +2761,11 @@
           if eqth != nil
             any_hit = true
             rhs = dest_binop(eqth.concl, "=")[1]
+            if (rhs.search_ops & TERM_LAMBDA) != 0
+              bconv = @d.beta_norm_opt(rhs)
+              if bconv != nil
+                eqth = @k.trans(eqth, bconv)
+                rhs = dest_binop(eqth.concl, "=")[1]
             if th_name == nil
               cur = refine(cur, [cur.goal.with_concl(rhs)], ->(ts) @k.eq_mp(@k.sym(eqth), ts[0]))[0]
             else
@@ -2805,6 +2810,11 @@
     if eqth == nil
       fail("rw: pattern " + tm_show(rule.lhs) + " not found")
     rhs = dest_binop(eqth.concl, "=")[1]
+    if (rhs.search_ops & TERM_LAMBDA) != 0
+      bconv = @d.beta_norm_opt(rhs)
+      if bconv != nil
+        eqth = @k.trans(eqth, bconv)
+        rhs = dest_binop(eqth.concl, "=")[1]
     if target_h == nil
       refine(g, [goal.with_concl(rhs)], ->(ts) @k.eq_mp(@k.sym(eqth), ts[0]))[0]
     else
@@ -5931,13 +5941,10 @@
       arr.push(t)
     by_type.each -> (_tid, ts)
       ty = type_of(first_side(ts[0]))
-      ts2 = ts
-      if ty == TY_NAT_SINGLETON
-        ts2 = ts + nat_nonneg(ts)
-      else
-        ts2 = ts + cast_nat_nonneg(ts, ty)
+      cast_nn = ty == TY_NAT_SINGLETON ? [] : cast_nat_nonneg(ts, ty)
+      ts2 = ty == TY_NAT_SINGLETON ? (ts + nat_nonneg(ts)) : (ts + cast_nn)
       if @nl_mode && ty != TY_NAT_SINGLETON
-        ts2 = ts2 + nl_products(ts, ty)
+        ts2 = ts2 + nl_products(ts + cast_nn, ty)
       if @nl_mode && ty == TY_NAT_SINGLETON
         # Products need the derived 0 ≤ n facts too, including factors that
         # occur only in the goal. Otherwise a ≤ b cannot be scaled by n.
@@ -5950,6 +5957,7 @@
         cross_input = unified
         if with_squares
           unified = unified + nl_square_facts(unified, ty)
+        unified = unified + cast_nn
         ts3 = unified + nl_products(unified, ty) + nl_products(unified, ty, true)
         coeffs = fm_certificate(ts3, ty.name)
         if coeffs == nil && with_squares
@@ -5962,6 +5970,13 @@
         if neg == nil
           return f
         return classical_by_contra(c, f)
+      if ty == TY_NAT_SINGLETON || ty == TY_INT_SINGLETON
+        int_steps = int_fm_certificate(ts2, ty.name)
+        if int_steps != nil
+          f = @k.int_farkas(ts2, int_steps)
+          if neg == nil
+            return f
+          return classical_by_contra(c, f)
     fail("linarith failed")
 
   # Check the goal given to the tactic. A failed speculative refinement may
@@ -6103,7 +6118,7 @@
     saved = @nl_mode
     @nl_mode = false
     ts.each -> (t)
-      if terms.size < 24
+      if terms.size < 32
         d = dest_binop(t.concl, "≤")
         strict = false
         if d == nil

@@ -84,6 +84,26 @@ import padic
   · rw [real_prod.zero]
   · rw [succ_eq_add_one.nat, real_prod.succ, ih]; ring
 
++ nat_prod.congr (n : ℕ) (f g : ℕ → ℕ) (h : ∀ i < n, f i = g i) :
+    nat_prod n f = nat_prod n g
+  induction n with h r ihr h
+  · rw [nat_prod.zero, nat_prod.zero]
+  · rw [succ_eq_add_one.nat] at h ⊢
+    rw [nat_prod.succ, nat_prod.succ, ihr (by intro i hi; exact h i (by omega)), h r (by omega)]
+
++ nat_prod.mul (n : ℕ) (f g : ℕ → ℕ) :
+    nat_prod n (fun i => f i * g i) = nat_prod n f * nat_prod n g
+  induction n with r ihr
+  · rw [nat_prod.zero, nat_prod.zero, nat_prod.zero]; ring
+  · rw [succ_eq_add_one.nat, nat_prod.succ, nat_prod.succ, nat_prod.succ, ihr]; ring
+
++ real_prod.congr (n : ℕ) (f g : ℕ → ℝ) (h : ∀ i < n, f i = g i) :
+    real_prod n f = real_prod n g
+  induction n with h r ihr h
+  · rw [real_prod.zero, real_prod.zero]
+  · rw [succ_eq_add_one.nat] at h ⊢
+    rw [real_prod.succ, real_prod.succ, ihr (by intro i hi; exact h i (by omega)), h r (by omega)]
+
 -- ====================================================================================
 -- 2. Coprime Prime-Power Divisibility & Multi-Prime Product Theorem
 -- ====================================================================================

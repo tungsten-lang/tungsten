@@ -726,7 +726,9 @@
       pats = []
       lhs.each -> (pt)
         pats.push(parse_expr_toks(pt))
-      rhs = parse_expr_toks(arr_sub(bt, k + 1, bt.size - k - 1))
+      rtoks = arr_sub(bt, k + 1, bt.size - k - 1)
+      flatten_block(b.block, rtoks)
+      rhs = parse_expr_toks(rtoks)
       c.eqns.push([pats, rhs])
   c
 

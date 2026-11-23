@@ -706,6 +706,132 @@
       raise "farkas: combination is not contradictory"
     thm(hs, false_tm, tags)
 
+  # Chvátal-Gomory cutting-plane certificate over ℕ or ℤ ONLY.
+  # Initial rows 0..nth-1 are (b_i - a_i) R_i 0 from `thms`. Each step is either:
+  #   [:comb, [[row_idx, q], ...]]  -- rational combination (q >= 0 on inequalities)
+  #   [:div, row_idx]               -- exact integer GCD division + floor rounding
+  # Since every atom of type `nat` or `int` evaluates to an integer in every model,
+  # if Σ_{m!=0} c_m M_m + c_0 >= 0 (or > 0) has integer c_m with gcd g > 0, dividing
+  # by g yields Σ (c_m/g) M_m + floor(c_0/g) >= 0 (or floor((c_0 - 1/d)/g) for > 0),
+  # and for `= 0` refutes immediately when c_0 is non-integral or not divisible by g.
+  -> int_farkas(thms, steps)
+    nth = thms.size
+    if nth == 0 || steps == nil || steps.size == 0
+      raise "int_farkas: bad certificate shape"
+    kind = nil
+    ctx = RingCtx.new("int")
+    rows = Array.new(nth)
+    i = 0
+    while i < nth
+      th = thms[i]
+      cmp = dest_cmp_rel(th.concl)
+      if cmp == nil
+        raise "int_farkas: not a comparison: " + tm_show(th.concl)
+      ty = type_of(cmp[1])
+      tn = ty.name
+      if !(tn == "nat" || tn == "int")
+        raise "int_farkas: requires nat or int, got " + tn
+      if kind == nil
+        kind = tn
+      elsif kind != tn
+        raise "int_farkas: mixed numeric types"
+      pa = ring_norm(cmp[1], kind, ctx)
+      pb = ring_norm(cmp[2], kind, ctx)
+      diff = poly_add(pb, poly_scale(pa, Q_NEG_ONE))
+      r_rel = cmp[0] == "<" ? :gt : (cmp[0] == "=" ? :eq : :ge)
+      rows[i] = [diff, r_rel, th.hyps, th.tags]
+      i += 1
+    si = 0
+    ns = steps.size
+    while si < ns
+      st = steps[si]
+      op = st[0]
+      if op == :comb
+        pairs = st[1]
+        if pairs == nil || pairs.size == 0
+          raise "int_farkas: empty combination"
+        acc = {}
+        all_eq = true
+        strict_used = false
+        hs = []
+        tgs = []
+        pi = 0
+        while pi < pairs.size
+          pr = pairs[pi]
+          ridx = pr[0]
+          q = pr[1]
+          if ridx < 0 || ridx >= rows.size
+            raise "int_farkas: row index out of range"
+          if q[1] <= 0 || q[0] == 0
+            raise "int_farkas: invalid weight"
+          row_e = rows[ridx]
+          if row_e[1] != :eq
+            if q[0] < 0
+              raise "int_farkas: negative weight on inequality"
+            all_eq = false
+            if row_e[1] == :gt && q[0] > 0
+              strict_used = true
+          poly_add_scaled!(acc, row_e[0], q)
+          hs = hyps_union(hs, row_e[2])
+          tgs = tags_union(tgs, row_e[3])
+          pi += 1
+        out_rel = all_eq ? :eq : (strict_used ? :gt : :ge)
+        rows.push([acc, out_rel, hs, tgs])
+      elsif op == :div
+        ridx = st[1]
+        if ridx < 0 || ridx >= rows.size
+          raise "int_farkas: row index out of range"
+        row_e = rows[ridx]
+        poly = row_e[0]
+        r_rel = row_e[1]
+        g = 0
+        poly.each -> (m, qv)
+          if m != 0
+            if qv[1] != 1
+              raise "int_farkas: non-integer coefficient in div"
+            av = qv[0] < 0 ? zsub(0, qv[0]) : qv[0]
+            g = g == 0 ? av : int_gcd(g, av)
+        c0 = poly[0] == nil ? Q_ZERO : poly[0]
+        if r_rel == :eq
+          if g == 0
+            if c0[0] != 0
+              rows.push([poly_const(Q_NEG_ONE), :ge, row_e[2], row_e[3]])
+            else
+              rows.push([{}, :eq, row_e[2], row_e[3]])
+          elsif c0[1] != 1 || int_fmod(c0[0], g) != 0
+            rows.push([poly_const(Q_NEG_ONE), :ge, row_e[2], row_e[3]])
+          else
+            npoly = {}
+            poly.each -> (m, qv)
+              npoly[m] = [int_fdiv(qv[0], g), 1]
+            rows.push([npoly, :eq, row_e[2], row_e[3]])
+        else
+          if g == 0
+            rows.push([poly, r_rel, row_e[2], row_e[3]])
+          else
+            denom = zmul(c0[1], g)
+            num_adj = r_rel == :gt ? zsub(c0[0], 1) : c0[0]
+            fc = int_fdiv(num_adj, denom)
+            npoly = {}
+            poly.each -> (m, qv)
+              if m != 0
+                npoly[m] = [int_fdiv(qv[0], g), 1]
+            if fc != 0
+              npoly[0] = [fc, 1]
+            rows.push([npoly, :ge, row_e[2], row_e[3]])
+      else
+        raise "int_farkas: unknown step"
+      si += 1
+    last = rows[rows.size - 1]
+    last[0].each -> (m, _qv)
+      if m != 0
+        raise "int_farkas: final row is not constant"
+    c = last[0][0] == nil ? Q_ZERO : last[0][0]
+    ok = (last[1] == :eq && c[0] != 0) || (last[1] == :gt && c[0] <= 0) || (last[1] == :ge && c[0] < 0)
+    if !ok
+      raise "int_farkas: combination is not contradictory"
+    thm(last[2], false_tm, tags_union(["oracle:arith"], last[3]))
+
 
 -> ty_mentions_con(t, name)
   if t.tag == :v

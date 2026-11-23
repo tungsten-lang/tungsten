@@ -493,3 +493,229 @@
       w[idx] = q_sub(w[idx], y[j])
     j += 1
   w
+
+# ---------------------------------------------------------------------------
+# Integer Chvátal-Gomory cutting-plane search for ℕ and ℤ.
+# Emits a DAG of [:comb, ...] and [:div, ...] steps checked by KKernel.int_farkas.
+
++ IntCon
+  ro :coef, :c0, :rel, :row_id
+  -> new(@coef, @c0, @rel, @row_id)
+
+-> int_con_contradiction?(c)
+  if c.coef.size > 0
+    return false
+  if c.rel == :eq
+    return c.c0[0] != 0
+  if c.rel == :gt
+    return c.c0[0] <= 0
+  c.c0[0] < 0
+
+-> int_con_tighten(c, nth, steps)
+  if c.coef.size == 0
+    return c
+  lcm_d = 1
+  c.coef.each -> (_v, qv)
+    if qv[1] > 1
+      lcm_d = zmul(int_fdiv(lcm_d, int_gcd(lcm_d, qv[1])), qv[1])
+  cur = c
+  if lcm_d > 1
+    q_sc = [lcm_d, 1]
+    ncoef = {}
+    cur.coef.each -> (v, qv)
+      ncoef[v] = q_mul(qv, q_sc)
+    nc0 = q_mul(cur.c0, q_sc)
+    steps.push([:comb, [[cur.row_id, q_sc]]])
+    cur = IntCon.new(ncoef, nc0, cur.rel, nth + steps.size - 1)
+  g = 0
+  cur.coef.each -> (_v, qv)
+    av = qv[0] < 0 ? zsub(0, qv[0]) : qv[0]
+    g = g == 0 ? av : int_gcd(g, av)
+  if cur.rel == :eq
+    if cur.c0[1] != 1 || int_fmod(cur.c0[0], g) != 0
+      steps.push([:div, cur.row_id])
+      return IntCon.new({}, Q_NEG_ONE, :ge, nth + steps.size - 1)
+    if g > 1
+      steps.push([:div, cur.row_id])
+      dcoef = {}
+      cur.coef.each -> (v, qv)
+        dcoef[v] = [int_fdiv(qv[0], g), 1]
+      dc0 = cur.c0[0] == 0 ? Q_ZERO : [int_fdiv(cur.c0[0], g), 1]
+      return IntCon.new(dcoef, dc0, :eq, nth + steps.size - 1)
+    return cur
+  if g > 1 || cur.c0[1] > 1 || cur.rel == :gt
+    steps.push([:div, cur.row_id])
+    denom = zmul(cur.c0[1], g)
+    num_adj = cur.rel == :gt ? zsub(cur.c0[0], 1) : cur.c0[0]
+    fc = int_fdiv(num_adj, denom)
+    dcoef = {}
+    cur.coef.each -> (v, qv)
+      dcoef[v] = [int_fdiv(qv[0], g), 1]
+    dc0 = fc == 0 ? Q_ZERO : [fc, 1]
+    return IntCon.new(dcoef, dc0, :ge, nth + steps.size - 1)
+  cur
+
+-> int_con_combine(a, qa, b, qb, nth, steps)
+  coef = {}
+  a.coef.each -> (v, cv)
+    x = q_mul(cv, qa)
+    if x[0] != 0
+      coef[v] = x
+  b.coef.each -> (v, cv)
+    x = q_mul(cv, qb)
+    prev = coef[v]
+    if prev != nil
+      s = q_add(prev, x)
+      if s[0] == 0
+        coef.delete(v)
+      else
+        coef[v] = s
+    elsif x[0] != 0
+      coef[v] = x
+  c0 = q_add(q_mul(a.c0, qa), q_mul(b.c0, qb))
+  rel = :ge
+  if (a.rel == :gt && qa[0] > 0) || (b.rel == :gt && qb[0] > 0)
+    rel = :gt
+  if a.rel == :eq && b.rel == :eq
+    rel = :eq
+  steps.push([:comb, [[a.row_id, qa], [b.row_id, qb]]])
+  raw = IntCon.new(coef, c0, rel, nth + steps.size - 1)
+  int_con_tighten(raw, nth, steps)
+
+-> int_fm_solve(cons, rounds, nth, steps)
+  nc = cons.size
+  ci = 0
+  while ci < nc
+    if int_con_contradiction?(cons[ci])
+      return cons[ci]
+    ci += 1
+  if rounds > 12 || nc > 400
+    return nil
+  pos_cnt = {}
+  neg_cnt = {}
+  eq_vars = {}
+  vars = {}
+  ci = 0
+  while ci < nc
+    c = cons[ci]
+    is_eq = c.rel == :eq
+    c.coef.each -> (v, qv)
+      vars[v] = true
+      if is_eq && (eq_vars[v] == nil || qv[0].abs < eq_vars[v])
+        eq_vars[v] = qv[0].abs
+      if qv[0] > 0
+        p = pos_cnt[v]
+        pos_cnt[v] = p == nil ? 1 : p + 1
+      else
+        ng = neg_cnt[v]
+        neg_cnt[v] = ng == nil ? 1 : ng + 1
+    ci += 1
+  if vars.size == 0
+    return nil
+  best = nil
+  best_cost = 0
+  vkeys = vars.keys.sort
+  vi = 0
+  while vi < vkeys.size
+    v = vkeys[vi]
+    cost = eq_vars.has_key?(v) ? (0 - 1000000 + eq_vars[v]) : ((pos_cnt[v] || 0) * (neg_cnt[v] || 0))
+    if best == nil || cost < best_cost
+      best = v
+      best_cost = cost
+    vi += 1
+  v = best
+  if eq_vars.has_key?(v)
+    eqc = nil
+    ci = 0
+    while ci < nc
+      c = cons[ci]
+      if c.rel == :eq && c.coef.has_key?(v) && (eqc == nil || c.coef[v][0].abs < eqc.coef[v][0].abs)
+        eqc = c
+      ci += 1
+    a = eqc.coef[v]
+    out = []
+    ci = 0
+    while ci < nc
+      c = cons[ci]
+      if !(c == eqc)
+        cv = c.coef[v]
+        if cv != nil
+          q = q_neg(q_div(cv, a))
+          comb = int_con_combine(c, Q_ONE, eqc, q, nth, steps)
+          if int_con_contradiction?(comb)
+            return comb
+          out.push(comb)
+        else
+          out.push(c)
+      ci += 1
+    return int_fm_solve(out, rounds + 1, nth, steps)
+  pos = []
+  neg = []
+  out = []
+  ci = 0
+  while ci < nc
+    c = cons[ci]
+    cv = c.coef[v]
+    if cv != nil
+      if cv[0] > 0
+        pos.push(c)
+      else
+        neg.push(c)
+    else
+      out.push(c)
+    ci += 1
+  pi = 0
+  while pi < pos.size
+    p = pos[pi]
+    pv = p.coef[v]
+    ni = 0
+    while ni < neg.size
+      n = neg[ni]
+      comb = int_con_combine(p, q_neg(n.coef[v]), n, pv, nth, steps)
+      if int_con_contradiction?(comb)
+        return comb
+      out.push(comb)
+      ni += 1
+    pi += 1
+  int_fm_solve(out, rounds + 1, nth, steps)
+
+-> int_fm_certificate(thms, kind)
+  if !(kind == "nat" || kind == "int")
+    return nil
+  ctx = RingCtx.new("int")
+  nth = thms.size
+  steps = []
+  cons = Array.new(nth)
+  i = 0
+  while i < nth
+    th = thms[i]
+    cmp = dest_cmp_rel(th.concl)
+    pa = ring_norm(cmp[1], kind, ctx)
+    pb = ring_norm(cmp[2], kind, ctx)
+    diff = poly_add(pb, poly_scale(pa, Q_NEG_ONE))
+    coef = {}
+    c0 = Q_ZERO
+    diff.each -> (m, qv)
+      if m == 0
+        c0 = qv
+      else
+        coef[m] = qv
+    r = cmp[0] == "<" ? :gt : (cmp[0] == "=" ? :eq : :ge)
+    raw = IntCon.new(coef, c0, r, i)
+    cons[i] = int_con_tighten(raw, nth, steps)
+    if int_con_contradiction?(cons[i])
+      res0 = cons[i]
+      if res0.row_id < nth
+        w0 = (res0.rel == :eq && res0.c0[0] > 0) ? Q_NEG_ONE : Q_ONE
+        steps.push([:comb, [[res0.row_id, w0]]])
+      return steps
+    i += 1
+  res = int_fm_solve(cons, 0, nth, steps)
+  if res == nil
+    return nil
+  if res.row_id < nth
+    w = (res.rel == :eq && res.c0[0] > 0) ? Q_NEG_ONE : Q_ONE
+    steps.push([:comb, [[res.row_id, w]]])
+  elsif res.row_id != nth + steps.size - 1
+    steps.push([:comb, [[res.row_id, Q_ONE]]])
+  steps

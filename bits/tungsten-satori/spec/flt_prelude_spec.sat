@@ -1,8 +1,9 @@
--- End-to-end regression spec for the 5-module 0-axiom FLT / Hurwitz-Tate-Khare prelude suite:
---   fermat_descent, hurwitz_quaternion, eisenstein, dirichlet_five, frey_elliptic.
+-- End-to-end regression spec for the 9-module 0-axiom FLT / Hurwitz-Tate-Khare / Shell prelude suite:
+--   fermat_descent, hurwitz_quaternion, eisenstein, dirichlet_five, frey_elliptic,
+--   coupled_shells, kubert_torsion, shell_seven, shell_thirteen.
 -- Every theorem below must check with ZERO custom `axiom:` tags (only `[oracle:arith, oracle:ring]`).
 
-import frey_elliptic
+import shell_thirteen
 
 -- 1. fermat_descent: arbitrary-k coprime power factorization, Fermat n = 4, and prime reduction
 + spec_coprime_mul_pow (k a b c : ℕ) (hk : 1 ≤ k) (ha : 0 < a) (hb : 0 < b)
@@ -93,6 +94,141 @@ import frey_elliptic
     False
   exact kummer.shell_case1_contradiction p r1 r2 x y z c1 c2 hp hp5 hx hy hz hsum hxy hxz
 
++ spec_frey_shell_A2_bridge (A B C u v : ℤ)
+    (hsum : A + B + C = 0) (hA : A = 4 * u + 1) (hC : C = 16 * v) :
+    eis.norm (eis.shell_proj A B C) = 3 * wc.c4 (frey.curve u v A) ∧
+    2304 * wc.disc (frey.curve u v A) = (A ^ 3 + B ^ 3 + C ^ 3) ^ 2
+  exact frey.shell_A2_invariants_bridge A B C u v hsum hA hC
+
++ spec_frey_nonsplit_tamagawa (p ell : ℕ) (hp : is_prime_nat p) (hp5 : 5 ≤ p)
+    (hcase : ell = 2 ∨ (3 ≤ ell ∧ ell % 2 = 1 ∧ ell ≤ 2 * p - 3)) :
+    ¬ (p ∣ (2 * (ell + 1)))
+  exact frey.nonsplit_odd_or_two_kills_p p ell hp hp5 hcase
+
+-- 5. coupled_shells: auto Hellegouarch-Frey normalization, Case-II p^2 | z, Case-I p <= 109, Hensel barrier
++ spec_primitive_frey_auto_semistable (p : ℕ) (hp : is_prime_nat p) (hp5 : 5 ≤ p)
+    (x y z : ℤ) (hsum : x ^ p + y ^ p + z ^ p = 0)
+    (hcxy : nat.coprime_primes (nat_of_int (|x|)) (nat_of_int (|y|)))
+    (hcxz : nat.coprime_primes (nat_of_int (|x|)) (nat_of_int (|z|)))
+    (hcyz : nat.coprime_primes (nat_of_int (|y|)) (nat_of_int (|z|))) :
+    ∃ a b c u v : ℤ,
+      a ^ p + b ^ p + c ^ p = 0 ∧ a ^ p = 4 * u + 1 ∧ c ^ p = 16 * v ∧ v % 2 = 0 ∧
+      nat.coprime_primes (nat_of_int (|a|)) (nat_of_int (|b|)) ∧
+      nat.coprime_primes (nat_of_int (|a|)) (nat_of_int (|c|)) ∧
+      nat.coprime_primes (nat_of_int (|b|)) (nat_of_int (|c|)) ∧
+      nat.coprime_primes (nat_of_int (|wc.c4 (frey.curve u v (a ^ p))|)) (nat_of_int (|wc.disc (frey.curve u v (a ^ p))|))
+  exact cshell.primitive_frey_normalization p hp hp5 x y z hsum hcxy hcxz hcyz
+
++ spec_coupled_shell_case2_p_sq (p : ℕ) (hp : is_prime_nat p) (hp3 : 3 ≤ p)
+    (x y z : ℤ) (hx : x ≠ 0) (hy : y ≠ 0) (hz : z ≠ 0) (heq : x ^ p + y ^ p + z ^ p = 0)
+    (hcxy : nat.coprime_primes (nat_of_int (|x|)) (nat_of_int (|y|)))
+    (hcxz : nat.coprime_primes (nat_of_int (|x|)) (nat_of_int (|z|)))
+    (hcyz : nat.coprime_primes (nat_of_int (|y|)) (nat_of_int (|z|)))
+    (hpz : int_dvd p z) :
+    int_dvd (p * p) z ∧ int_dvd (p * p) (x + y)
+  exact cshell.case2_coupled_p_sq_dvd p hp hp3 x y z hx hy hz heq hcxy hcxz hcyz hpz
+
++ spec_coupled_shell_case1_le_109 (p : ℕ) (hp : is_prime_nat p) (hp3 : 3 ≤ p) (hle : p ≤ 109)
+    (x y z : ℤ) (heq : x ^ p + y ^ p + z ^ p = 0)
+    (hcxy : nat.coprime_primes (nat_of_int (|x|)) (nat_of_int (|y|)))
+    (hcxz : nat.coprime_primes (nat_of_int (|x|)) (nat_of_int (|z|)))
+    (hcyz : nat.coprime_primes (nat_of_int (|y|)) (nat_of_int (|z|)))
+    (hnx : ¬ int_dvd p x) (hny : ¬ int_dvd p y) (hnz : ¬ int_dvd p z) : False
+  exact cshell.first_case_all_primes_le_109 p hp hp3 hle x y z heq hcxy hcxz hcyz hnx hny hnz
+
++ spec_coupled_shell_hensel_barrier (t w : ℤ) :
+    cshell.coupled_poly7 t (-t) 0 = 0 ∧
+    cshell.coupled_poly7 t (-t) w = 896 * t ^ 6 * w + w ^ 3 * (1120 * t ^ 4 + 168 * t ^ 2 * w ^ 2 + w ^ 4)
+  exact cshell.case2_coupled_hensel_barrier t w
+
+-- 6. kubert_torsion: Z[(1+sqrt(-7))/2] 11/16-Euclidean division & X_1(14)(Q) all-cusps classification
++ spec_klein7_euclid (x y : KleinianInt) (hy : y ≠ klein7.zero) :
+    ∃ q r : KleinianInt, x = klein7.add (klein7.mul y q) r ∧ 16 * klein7.norm r ≤ 11 * klein7.norm y ∧ klein7.norm r < klein7.norm y
+  exact klein7.euclidean_div x y hy
+
++ spec_kubert_x1_14_cusps (nx ny : ℤ) (dx dy : ℕ)
+    (hdx : 0 < dx) (hdy : 0 < dy) (hcop : nat.coprime_primes (nat_of_int (|nx|)) dx)
+    (hcurve : (dx : ℤ) ^ 3 * ny ^ 2 + (dx : ℤ) ^ 2 * nx * ny * (dy : ℤ) + (dx : ℤ) ^ 3 * ny * (dy : ℤ) =
+              (dy : ℤ) ^ 2 * (nx ^ 3 - nx * (dx : ℤ) ^ 2)) :
+    dx = 1 ∧ (nx = -1 ∨ nx = 0 ∨ nx = 1)
+  exact kubert.x1_14_affine_points_all_cusps nx ny dx dy hdx hdy hcop hcurve
+
+-- 7. shell_seven: pure-Z coupled 7-sided shell -> E_49 infinite descent (0-axiom FLT(7) & all-n >= 11),
+--    single-shell p=7 Gram-eigenvalue Mordell curve & semistability, coupled deg-11 S_11, genus-1 wall, deficit law
++ spec_flt_exp_seven (x y z : ℕ) (hx : 0 < x) (hy : 0 < y) : x ^ 7 + y ^ 7 ≠ z ^ 7
+  exact flt.exp_seven x y z hx hy
+
++ spec_flt_reduce_ge_11 (hp11 : ∀ p : ℕ, is_prime_nat p → 11 ≤ p → flt_at p) (n : ℕ) (hn : 3 ≤ n) :
+    flt_at n
+  exact flt.reduce_to_primes_ge_11 hp11 n hn
+
++ spec_coupled_deg3_case1 (x y z a0 b0 c0 : ℤ) (ha : a0 ≠ 0) (hb : b0 ≠ 0) (hc : c0 ≠ 0)
+    (heq : x ^ 3 + y ^ 3 + z ^ 3 = 0) (hu : y + z = a0 ^ 3) (hv : z + x = b0 ^ 3) (hw : x + y = c0 ^ 3) :
+    False
+  exact shell7.coupled_deg3_case1 x y z a0 b0 c0 ha hb hc heq hu hv hw
+
++ spec_gram_mordell_p7 (R L : ℤ) :
+    28 * (shell7.gram_f4 R L) ^ 3 - (shell7.gram_p6 R L) ^ 2 = 27 * (shell7.Q7 R L) ^ 2 ∧
+    (112 * shell7.gram_f4 R L) ^ 3 - (224 * shell7.gram_p6 R L) ^ 2 = 1728 * (784 * (shell7.Q7 R L) ^ 2)
+  exact shell7.gram_eigenvalue_mordell_identity R L
+
++ spec_gram_coprime_away_7 (ell : ℕ) (hell : is_prime_nat ell) (hne7 : ell ≠ 7)
+    (R L : ℤ) (hf4 : int_dvd ell (shell7.gram_f4 R L)) (hQ7 : int_dvd ell (shell7.Q7 R L)) :
+    int_dvd ell R ∧ int_dvd ell L
+  exact shell7.gram_f4_coprime_Q7_away_from_7 ell hell hne7 R L hf4 hQ7
+
++ spec_genus_Sp_unique_p7 (p : ℕ) (hp5 : 5 ≤ p) :
+    ((p - 1) * (p - 5) = 12) ↔ p = 7
+  exact shell7.genus_Sp_eq_one_iff_seven p hp5
+
++ spec_lower_power_deficit (n m L B R : ℕ) (hL : 0 < L) (hB : 0 < B)
+    (heq : L ^ n + B ^ n = R ^ n) (hmn : m < n) :
+    R ^ m < L ^ m + B ^ m
+  exact shell7.lower_power_deficit n m L B R hL hB heq hmn
+
+-- 8. shell_thirteen: universal all-a cyclic-shell identity, H_4 -> Q_13 all-case FLT(13) reduction,
+--    closed-form E^+_{R,L} & D=-4 twist semistability, Frey split-reduction character law & mod-8 zero-Mazur
++ spec_cyclic_shell_identity (a : ℕ) (ha : 1 ≤ a) (x y z : ℤ) :
+    (x * y ^ a) ^ a * (y * z ^ a) + (y * z ^ a) ^ a * (z * x ^ a) + (z * x ^ a) ^ a * (x * y ^ a) =
+    (x * y * z) ^ a * (x ^ (a * a - a + 1) + y ^ (a * a - a + 1) + z ^ (a * a - a + 1))
+  exact shell13.cyclic_shell_identity a ha x y z
+
++ spec_flt13_to_Q13 (x y z : ℕ) (hx : 0 < x) (hy : 0 < y) (heq : x ^ 13 + y ^ 13 = z ^ 13) :
+    ∃ p_s q_s Y : ℤ,
+      p_s ≠ 0 ∧ 0 < q_s ∧
+      nat.coprime_primes (nat_of_int (|p_s|)) (nat_of_int q_s) ∧
+      Y ^ 2 = q_s * shell13.Q13_poly p_s q_s
+  exact shell13.flt13_implies_Q13_nonzero_s x y z hx hy heq
+
++ spec_Q13_no_weierstrass (p_s q_s : ℤ) (hq : 0 < q_s)
+    (hcop : nat.coprime_primes (nat_of_int (|p_s|)) (nat_of_int q_s)) :
+    shell13.Q13_poly p_s q_s ≠ 0
+  exact shell13.Q13_no_rational_weierstrass_root p_s q_s hq hcop
+
++ spec_Q13_mod2_disks (p_s q_s Y : ℤ) (hcurve : Y ^ 2 = q_s * shell13.Q13_poly p_s q_s) :
+    int_dvd 2 p_s ∨ int_dvd 2 q_s
+  exact shell13.Q13_mod2_only_even_or_infty p_s q_s Y hcurve
+
++ spec_gram_curve_p7_semistable (ell : ℕ) (hell : is_prime_nat ell)
+    (hne2 : ell ≠ 2) (hne7 : ell ≠ 7) (R L : ℤ)
+    (hcop : nat.coprime_primes (nat_of_int (|R|)) (nat_of_int (|L|)))
+    (hc4 : int_dvd ell (wc.c4 (shell13.gram_curve_p7 R L)))
+    (hdisc : int_dvd ell (wc.disc (shell13.gram_curve_p7 R L))) : False
+  exact shell13.gram_curve_p7_semistable_away_14 ell hell hne2 hne7 R L hcop hc4 hdisc
+
++ spec_frey_split_char (ell : ℕ) (hell : is_prime_nat ell) (hell3 : 3 ≤ ell)
+    (A B C u v : ℤ) (hsum : A + B + C = 0) (hA : A = 4 * u + 1) (hC : C = 16 * v) :
+    (int_dvd ell C → int_dvd ell (-wc.c6 (frey.curve u v A) - A * wc.c4 (frey.curve u v A))) ∧
+    (int_dvd ell A → int_dvd ell (-wc.c6 (frey.curve u v A) - B * wc.c4 (frey.curve u v A))) ∧
+    (int_dvd ell B → int_dvd ell (-wc.c6 (frey.curve u v A) + A * wc.c4 (frey.curve u v A)))
+  exact shell13.frey_split_char_mod_odd_prime ell hell hell3 A B C u v hsum hA hC
+
++ spec_frey_mod8_split_pm1 (p : ℕ) (hp : is_prime_nat p) (hp5 : 5 ≤ p)
+    (a b c u v : ℤ) (hsum : a ^ p + b ^ p + c ^ p = 0)
+    (hA : a ^ p = 4 * u + 1) (hC : c ^ p = 16 * v) (hu_ev : u % 2 = 0) :
+    (a % 8 = 1) ∧ (b % 8 = 7)
+  exact shell13.split_at_2_forces_odd_pm1_mod8 p hp hp5 a b c u v hsum hA hC hu_ev
+
 #axioms spec_coprime_mul_pow
 #axioms spec_flt_exp_four
 #axioms spec_hurwitz_euclid
@@ -108,3 +244,25 @@ import frey_elliptic
 #axioms spec_frey_case1_zero_mazur
 #axioms spec_mod2_no_s3
 #axioms spec_kummer_shell_case1
+#axioms spec_frey_shell_A2_bridge
+#axioms spec_frey_nonsplit_tamagawa
+#axioms spec_primitive_frey_auto_semistable
+#axioms spec_coupled_shell_case2_p_sq
+#axioms spec_coupled_shell_case1_le_109
+#axioms spec_coupled_shell_hensel_barrier
+#axioms spec_klein7_euclid
+#axioms spec_kubert_x1_14_cusps
+#axioms spec_flt_exp_seven
+#axioms spec_flt_reduce_ge_11
+#axioms spec_coupled_deg3_case1
+#axioms spec_gram_mordell_p7
+#axioms spec_gram_coprime_away_7
+#axioms spec_genus_Sp_unique_p7
+#axioms spec_lower_power_deficit
+#axioms spec_cyclic_shell_identity
+#axioms spec_flt13_to_Q13
+#axioms spec_Q13_no_weierstrass
+#axioms spec_Q13_mod2_disks
+#axioms spec_gram_curve_p7_semistable
+#axioms spec_frey_split_char
+#axioms spec_frey_mod8_split_pm1

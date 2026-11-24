@@ -1,0 +1,1776 @@
+-- Coupled 7-Sided Shell Proof of Fermat's Last Theorem for n = 7 (0 Custom Axioms!),
+-- All-n Reduction to Primes p >= 11, Single-Shell Gram-Eigenvalue Curve E^+_{R,L},
+-- Coupled Degree-11 Shell Quotient S_11 = F_11 / S_3, & Stratum Deficit Laws.
+--
+-- Proves ALL-CASE FLT(7) (`flt.exp_seven`) completely elementarily over Z directly from the
+-- coupled 7-sided shell identity `cshell.lame_lebesgue_deg7` via pure-Z 2-isogeny infinite
+-- descent on the coupled shell quotient S_7 = F_7 / S_3 ~= X_0(49) (`49a1`):
+--     v^2 = u * (u^2 - 147 * u + 5488)
+-- with ZERO cyclotomic rings, ZERO number fields, ZERO Mazur, ZERO modularity, and ZERO axioms!
+--
+-- Every theorem in this file is checked on Satori's untouched 869-line HOL kernel (0 custom axioms).
+
+import kubert_torsion
+
+-- ====================================================================================
+-- 1. Elementary Helpers: int_dvd Bridges, Coprime Ratio Reduction & 343*B^4 Splitting
+-- ====================================================================================
+
++ shell7.int_mul_eq_zero (a b : ℤ) (h : a * b = 0) : a = 0 ∨ b = 0
+  by_cases ha : a = 0
+  · left; exact ha
+  · right
+    by_contra hb
+    obtain ha_lt | ha_gt := lt_or_gt_of_ne.int a 0 ha
+    · obtain hb_lt | hb_gt := lt_or_gt_of_ne.int b 0 hb
+      · have hm := mul_pos.int (-a) (-b) (by linarith) (by linarith); linarith
+      · have hm := mul_pos.int (-a) b (by linarith) hb_gt; linarith
+    · obtain hb_lt | hb_gt := lt_or_gt_of_ne.int b 0 hb
+      · have hm := mul_pos.int a (-b) ha_gt (by linarith); linarith
+      · have hm := mul_pos.int a b ha_gt hb_gt; linarith
+
++ shell7.dvd_mul_l (l : ℕ) (a b : ℤ) (hb : int_dvd l b) : int_dvd l (a * b)
+  obtain ⟨q, hq⟩ := hb
+  exact ⟨a * q, by rw [hq]; ring⟩
+
++ shell7.int_dvd_of_nat_dvd (p n : ℕ) (hp : 0 < p) (hd : p ∣ n) : int_dvd p (n : ℤ)
+  obtain ⟨q, hq⟩ := (dvd.iff_exists p n hp).mp hd
+  exact ⟨(q : ℤ), by rw [hq, cast_mul.int]⟩
+
++ shell7.nat_dvd_of_int_dvd (p n : ℕ) (hp : 0 < p) (hd : int_dvd p (n : ℤ)) : p ∣ n
+  have h1 := (cshell.dvd_iff_nat_abs p hp (n : ℤ)).mp hd
+  have habs : nat_of_int (|(n : ℤ)|) = n
+    have hnn : (0 : ℤ) ≤ (n : ℤ) := (cast_le.int 0 n).mpr (by omega)
+    have ha : |(n : ℤ)| = (n : ℤ) := by obtain ⟨e, _⟩ | ⟨_, h⟩ := abs_cases.int (n : ℤ) <;> linarith
+    exact (cast_inj.int (nat_of_int (|(n : ℤ)|)) n).mp (by rw [int_of_nat_of_int (|(n : ℤ)|) (abs_nonneg.int (n : ℤ)), ha])
+  rw [habs] at h1; exact h1
+
++ shell7.nat_dvd_of_mod_zero (p n : ℕ) (hp : 0 < p) (h : n % p = 0) : p ∣ n
+  unfold dvd; exact h
+
++ shell7.nat_mod_zero_of_dvd (p n : ℕ) (h : p ∣ n) : n % p = 0
+  unfold dvd at h; exact h
+
++ shell7.odd_succ_mod2 (k : ℕ) (hk : k % 2 ≠ 0) : (k + 1) % 2 = 0
+  have hlt := mod_lt.nat k 2 (by decide)
+  have hd := div_add_mod.nat k 2
+  have he : k + 1 = 0 + 2 * (k / 2 + 1) := by omega
+  rw [he, add_mul_mod.nat]; decide
+
+-> shell7.ratio_denom (a b rd : ℕ) : Prop :=
+  0 < rd ∧ ∃ rn k : ℕ, 0 < rn ∧ 0 < k ∧ a = k * rn ∧ b = k * rd
+
++ shell7.reduce_ratio_coprime (a b : ℕ) (ha : 0 < a) (hb : 0 < b) :
+    ∃ rn rd k : ℕ, 0 < rn ∧ 0 < rd ∧ 0 < k ∧ nat.coprime_primes rn rd ∧ a = k * rn ∧ b = k * rd
+  have hex : ∃ d : ℕ, shell7.ratio_denom a b d := ⟨b, ⟨hb, ⟨a, 1, ha, by decide, by ring, by ring⟩⟩⟩
+  obtain ⟨rd, hrdP, hrd_min⟩ := nat.exists_least (shell7.ratio_denom a b) hex
+  unfold shell7.ratio_denom at hrdP
+  obtain ⟨hrd_pos, ⟨rn, k, hrn_pos, hk_pos, ha_eq, hb_eq⟩⟩ := hrdP
+  have hcop : nat.coprime_primes rn rd
+    unfold nat.coprime_primes
+    intro p hp ⟨hprn, hprd⟩
+    have hp2 : 2 ≤ p := hp.1
+    obtain ⟨rn1, hrn1⟩ := (dvd.iff_exists p rn (by omega)).mp hprn
+    obtain ⟨rd1, hrd1⟩ := (dvd.iff_exists p rd (by omega)).mp hprd
+    have hrn1_pos : 0 < rn1 := by by_contra h0; have hz : rn1 = 0 := by omega; rw [hz] at hrn1; omega
+    have hrd1_pos : 0 < rd1 := by by_contra h0; have hz : rd1 = 0 := by omega; rw [hz] at hrd1; omega
+    have hrd1_lt : rd1 < rd
+      have hm := mul_le_mul_of_nonneg_right.nat 2 p rd1 hp2 (by omega)
+      rw [← hrd1] at hm; omega
+    apply hrd_min rd1 hrd1_lt
+    unfold shell7.ratio_denom
+    exact ⟨hrd1_pos, ⟨rn1, k * p, hrn1_pos, mul_pos.nat k p hk_pos (by omega),
+      by rw [ha_eq, hrn1]; ring, by rw [hb_eq, hrd1]; ring⟩⟩
+  exact ⟨rn, rd, k, hrn_pos, hrd_pos, hk_pos, hcop, ha_eq, hb_eq⟩
+
++ shell7.split_two_seven (n : ℕ) :
+    0 < n → ∃ a b M : ℕ, 0 < M ∧ M % 2 ≠ 0 ∧ M % 7 ≠ 0 ∧ n = 2 ^ a * 7 ^ b * M
+  apply nat.strong_induct (fun n => 0 < n → ∃ a b M : ℕ, 0 < M ∧ M % 2 ≠ 0 ∧ M % 7 ≠ 0 ∧ n = 2 ^ a * 7 ^ b * M)
+  intro n ih hn
+  by_cases h2 : n % 2 = 0
+  · obtain ⟨n1, hn1⟩ := (dvd.iff_exists 2 n (by decide)).mp h2
+    have hn1_pos : 0 < n1 := by by_contra h0; have hz : n1 = 0 := by omega; rw [hz] at hn1; omega
+    obtain ⟨a, b, M, hMp, hM2, hM7, hMeq⟩ := ih n1 (by omega) hn1_pos
+    exact ⟨a + 1, b, M, hMp, hM2, hM7, by rw [hn1, hMeq, pow_succ.nat 2 a]; ring⟩
+  · by_cases h7 : n % 7 = 0
+    · obtain ⟨n1, hn1⟩ := (dvd.iff_exists 7 n (by decide)).mp h7
+      have hn1_pos : 0 < n1 := by by_contra h0; have hz : n1 = 0 := by omega; rw [hz] at hn1; omega
+      obtain ⟨a, b, M, hMp, hM2, hM7, hMeq⟩ := ih n1 (by omega) hn1_pos
+      exact ⟨a, b + 1, M, hMp, hM2, hM7, by rw [hn1, hMeq, pow_succ.nat 7 b]; ring⟩
+    · have h20 : 2 ^ 0 = 1 := by decide
+      have h70 : 7 ^ 0 = 1 := by decide
+      exact ⟨0, 0, n, hn, h2, h7, by rw [h20, h70]; ring⟩
+
++ shell7.pow_parity_decomp (b k : ℕ) :
+    ∃ r q : ℕ, (r = 1 ∨ r = b) ∧ b ^ k = r * q ^ 2
+  have hdk := div_add_mod.nat k 2
+  set qk := k / 2
+  have hpow : b ^ (2 * qk) = (b ^ qk) ^ 2
+    have hcomm : 2 * qk = qk * 2 := by ring
+    rw [hcomm, nat.pow_mul_swap 2 qk b]
+  by_cases hpar : k % 2 = 0
+  · have hke : k = 2 * qk := by omega
+    exact ⟨1, b ^ qk, by left; rfl, by rw [hke, hpow]; ring⟩
+  · have hlt := mod_lt.nat k 2 (by decide)
+    have hke : k = (2 * qk) + 1 := by omega
+    exact ⟨b, b ^ qk, by right; rfl, by rw [hke, pow_succ.nat b (2 * qk), hpow]; ring⟩
+
+-- Coprime splitting of `U * V = 343 * B ^ 4` into `{U, V} = {343 * R^4, S^4}` with `R * S = B`:
++ shell7.coprime_split_343_pow4 (U V B : ℕ)
+    (hU : 0 < U) (hV : 0 < V) (hB : 0 < B)
+    (hcop : nat.coprime_primes U V)
+    (heq : U * V = 343 * B ^ 4) :
+    ∃ R S : ℕ, 0 < R ∧ 0 < S ∧ nat.coprime_primes R S ∧ R * S = B ∧
+      ((U = 343 * R ^ 4 ∧ V = S ^ 4) ∨ (U = R ^ 4 ∧ V = 343 * S ^ 4))
+  have hd7 : 7 ∣ (U * V) := nat.dvd_of_mul_eq 7 (49 * B ^ 4) (U * V) (by decide) (by rw [heq]; ring)
+  obtain h7U | h7V := is_prime_nat_seven.2 U V hd7
+  · have hn7V : ¬ (7 ∣ V) := by intro h; unfold nat.coprime_primes at hcop; exact hcop 7 is_prime_nat_seven ⟨h7U, h⟩
+    have hd343 : 343 ∣ U
+      obtain ⟨U1, hU1⟩ := (dvd.iff_exists 7 U (by decide)).mp h7U
+      have he1 : U1 * V = 49 * B ^ 4
+        apply nat.mul_cancel_left_pos 7 (U1 * V) (49 * B ^ 4) (by decide)
+        calc 7 * (U1 * V) = (7 * U1) * V := by ring
+          _ = U * V := by rw [← hU1]
+          _ = 7 * (49 * B ^ 4) := by rw [heq]; ring
+      have hd7_1 : 7 ∣ (U1 * V) := nat.dvd_of_mul_eq 7 (7 * B ^ 4) (U1 * V) (by decide) (by rw [he1]; ring)
+      have h7U1 : 7 ∣ U1 := by obtain h | h := is_prime_nat_seven.2 U1 V hd7_1; exact h; exfalso; exact hn7V h
+      obtain ⟨U2, hU2⟩ := (dvd.iff_exists 7 U1 (by decide)).mp h7U1
+      have he2 : U2 * V = 7 * B ^ 4
+        apply nat.mul_cancel_left_pos 7 (U2 * V) (7 * B ^ 4) (by decide)
+        calc 7 * (U2 * V) = (7 * U2) * V := by ring
+          _ = U1 * V := by rw [← hU2]
+          _ = 7 * (7 * B ^ 4) := by rw [he1]; ring
+      have hd7_2 : 7 ∣ (U2 * V) := nat.dvd_of_mul_eq 7 (B ^ 4) (U2 * V) (by decide) he2
+      have h7U2 : 7 ∣ U2 := by obtain h | h := is_prime_nat_seven.2 U2 V hd7_2; exact h; exfalso; exact hn7V h
+      obtain ⟨U3, hU3⟩ := (dvd.iff_exists 7 U2 (by decide)).mp h7U2
+      exact nat.dvd_of_mul_eq 343 U3 U (by decide) (by rw [hU1, hU2, hU3]; ring)
+    obtain ⟨U0, hU0⟩ := (dvd.iff_exists 343 U (by decide)).mp hd343
+    have hU0_pos : 0 < U0 := by by_contra h0; have hz : U0 = 0 := by omega; rw [hz] at hU0; omega
+    have hcop0 : nat.coprime_primes U0 V
+      unfold nat.coprime_primes at hcop ⊢
+      intro p hp ⟨hp0, hpV⟩
+      obtain ⟨q0, hq0⟩ := (dvd.iff_exists p U0 (by linarith [hp.1])).mp hp0
+      exact hcop p hp ⟨nat.dvd_of_mul_eq p (343 * q0) U (by linarith [hp.1]) (by rw [hU0, hq0]; ring), hpV⟩
+    have heq0 : U0 * V = B ^ 4
+      apply nat.mul_cancel_left_pos 343 (U0 * V) (B ^ 4) (by decide)
+      calc 343 * (U0 * V) = (343 * U0) * V := by ring
+        _ = U * V := by rw [← hU0]
+        _ = 343 * B ^ 4 := heq
+    obtain ⟨R, S, hR, hS⟩ := nat.coprime_mul_eq_pow 4 (by decide) U0 hU0_pos V B hV hcop0 heq0
+    have hR_pos : 0 < R := by by_contra h0; have hz : R = 0 := by omega; rw [hz] at hR; have h04 : 0 ^ 4 = 0 := by decide; rw [h04] at hR; omega
+    have hS_pos : 0 < S := by by_contra h0; have hz : S = 0 := by omega; rw [hz] at hS; have h04 : 0 ^ 4 = 0 := by decide; rw [h04] at hS; omega
+    have hRS_B : R * S = B
+      apply kubert.pow4_inj (R * S) B
+      calc (R * S) ^ 4 = R ^ 4 * S ^ 4 := by ring
+        _ = U0 * V := by rw [← hR, ← hS]
+        _ = B ^ 4 := heq0
+    have hcop_RS : nat.coprime_primes R S
+      unfold nat.coprime_primes at hcop0 ⊢
+      intro p hp ⟨hpR, hpS⟩
+      obtain ⟨qR, hqR⟩ := (dvd.iff_exists p R (by linarith [hp.1])).mp hpR
+      obtain ⟨qS, hqS⟩ := (dvd.iff_exists p S (by linarith [hp.1])).mp hpS
+      exact hcop0 p hp ⟨nat.dvd_of_mul_eq p (p ^ 3 * qR ^ 4) U0 (by linarith [hp.1]) (by rw [hR, hqR]; ring),
+                        nat.dvd_of_mul_eq p (p ^ 3 * qS ^ 4) V (by linarith [hp.1]) (by rw [hS, hqS]; ring)⟩
+    exact ⟨R, S, hR_pos, hS_pos, hcop_RS, hRS_B, by left; exact ⟨by rw [hU0, hR], hS⟩⟩
+  · have hn7U : ¬ (7 ∣ U) := by intro h; unfold nat.coprime_primes at hcop; exact hcop 7 is_prime_nat_seven ⟨h, h7V⟩
+    have hd343 : 343 ∣ V
+      obtain ⟨V1, hV1⟩ := (dvd.iff_exists 7 V (by decide)).mp h7V
+      have he1 : U * V1 = 49 * B ^ 4
+        apply nat.mul_cancel_left_pos 7 (U * V1) (49 * B ^ 4) (by decide)
+        calc 7 * (U * V1) = U * (7 * V1) := by ring
+          _ = U * V := by rw [← hV1]
+          _ = 7 * (49 * B ^ 4) := by rw [heq]; ring
+      have hd7_1 : 7 ∣ (U * V1) := nat.dvd_of_mul_eq 7 (7 * B ^ 4) (U * V1) (by decide) (by rw [he1]; ring)
+      have h7V1 : 7 ∣ V1 := by obtain h | h := is_prime_nat_seven.2 U V1 hd7_1; exfalso; exact hn7U h; exact h
+      obtain ⟨V2, hV2⟩ := (dvd.iff_exists 7 V1 (by decide)).mp h7V1
+      have he2 : U * V2 = 7 * B ^ 4
+        apply nat.mul_cancel_left_pos 7 (U * V2) (7 * B ^ 4) (by decide)
+        calc 7 * (U * V2) = U * (7 * V2) := by ring
+          _ = U * V1 := by rw [← hV2]
+          _ = 7 * (7 * B ^ 4) := by rw [he1]; ring
+      have hd7_2 : 7 ∣ (U * V2) := nat.dvd_of_mul_eq 7 (B ^ 4) (U * V2) (by decide) he2
+      have h7V2 : 7 ∣ V2 := by obtain h | h := is_prime_nat_seven.2 U V2 hd7_2; exfalso; exact hn7U h; exact h
+      obtain ⟨V3, hV3⟩ := (dvd.iff_exists 7 V2 (by decide)).mp h7V2
+      exact nat.dvd_of_mul_eq 343 V3 V (by decide) (by rw [hV1, hV2, hV3]; ring)
+    obtain ⟨V0, hV0⟩ := (dvd.iff_exists 343 V (by decide)).mp hd343
+    have hV0_pos : 0 < V0 := by by_contra h0; have hz : V0 = 0 := by omega; rw [hz] at hV0; omega
+    have hcop0 : nat.coprime_primes U V0
+      unfold nat.coprime_primes at hcop ⊢
+      intro p hp ⟨hpU, hp0⟩
+      obtain ⟨q0, hq0⟩ := (dvd.iff_exists p V0 (by linarith [hp.1])).mp hp0
+      exact hcop p hp ⟨hpU, nat.dvd_of_mul_eq p (343 * q0) V (by linarith [hp.1]) (by rw [hV0, hq0]; ring)⟩
+    have heq0 : U * V0 = B ^ 4
+      apply nat.mul_cancel_left_pos 343 (U * V0) (B ^ 4) (by decide)
+      calc 343 * (U * V0) = U * (343 * V0) := by ring
+        _ = U * V := by rw [← hV0]
+        _ = 343 * B ^ 4 := heq
+    obtain ⟨R, S, hR, hS⟩ := nat.coprime_mul_eq_pow 4 (by decide) U hU V0 B hV0_pos hcop0 heq0
+    have hR_pos : 0 < R := by by_contra h0; have hz : R = 0 := by omega; rw [hz] at hR; have h04 : 0 ^ 4 = 0 := by decide; rw [h04] at hR; omega
+    have hS_pos : 0 < S := by by_contra h0; have hz : S = 0 := by omega; rw [hz] at hS; have h04 : 0 ^ 4 = 0 := by decide; rw [h04] at hS; omega
+    have hRS_B : R * S = B
+      apply kubert.pow4_inj (R * S) B
+      calc (R * S) ^ 4 = R ^ 4 * S ^ 4 := by ring
+        _ = U * V0 := by rw [← hR, ← hS]
+        _ = B ^ 4 := heq0
+    have hcop_RS : nat.coprime_primes R S
+      unfold nat.coprime_primes at hcop0 ⊢
+      intro p hp ⟨hpR, hpS⟩
+      obtain ⟨qR, hqR⟩ := (dvd.iff_exists p R (by linarith [hp.1])).mp hpR
+      obtain ⟨qS, hqS⟩ := (dvd.iff_exists p S (by linarith [hp.1])).mp hpS
+      exact hcop0 p hp ⟨nat.dvd_of_mul_eq p (p ^ 3 * qR ^ 4) U (by linarith [hp.1]) (by rw [hR, hqR]; ring),
+                        nat.dvd_of_mul_eq p (p ^ 3 * qS ^ 4) V0 (by linarith [hp.1]) (by rw [hS, hqS]; ring)⟩
+    exact ⟨R, S, hR_pos, hS_pos, hcop_RS, hRS_B, by right; exact ⟨hR, by rw [hV0, hS]⟩⟩
+
+
+-- ====================================================================================
+-- 2. Modular Refutations & Pure-Z 2-Step Infinite Descent on S_7 ~= X_0(49) (`49a1`)
+-- ====================================================================================
+
++ shell7.mod7_sum_sq_pow4_zero (a b : ℕ) (h : (a ^ 4 + b ^ 2) % 7 = 0) :
+    a % 7 = 0 ∧ b % 7 = 0
+  have hcheck : ∀ x < 7, ∀ y < 7, (x ^ 4 + y ^ 2) % 7 = 0 → x = 0 ∧ y = 0 := by decide
+  have ha := div_add_mod.nat a 7
+  have hb := div_add_mod.nat b 7
+  set qa := a / 7; set ra := a % 7
+  set qb := b / 7; set rb := b % 7
+  have hmod : (ra ^ 4 + rb ^ 2) % 7 = 0
+    have hpoly : a ^ 4 + b ^ 2 = (ra ^ 4 + rb ^ 2) + 7 * (
+        4 * ra ^ 3 * qa + 42 * ra ^ 2 * qa ^ 2 + 196 * ra * qa ^ 3 + 343 * qa ^ 4 +
+        2 * rb * qb + 7 * qb ^ 2)
+      rw [← ha, ← hb]; ring
+    rw [hpoly, add_mul_mod.nat] at h
+    exact h
+  have hra_lt : ra < 7 := by rw [ra_def]; exact mod_lt.nat a 7 (by decide)
+  have hrb_lt : rb < 7 := by rw [rb_def]; exact mod_lt.nat b 7 (by decide)
+  exact hcheck ra hra_lt rb hrb_lt hmod
+
+-- Local mod-16 refutation of `2 * w^4 - 147 * w^2 * z^2 + 2744 * z^4 = v^2` (d = 2 coset on E_49):
++ shell7.no_d2_quartic (w z v : ℕ) (hcop : nat.coprime_primes w z)
+    (heq : (2 : ℤ) * (w : ℤ) ^ 4 - 147 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 2744 * (z : ℤ) ^ 4 = (v : ℤ) ^ 2) : False
+  have hmod16 : ∀ a < 16, ∀ b < 16, ∀ c < 16, (a % 2 = 1 ∨ b % 2 = 1) →
+      (2 * a ^ 4 + 13 * a ^ 2 * b ^ 2 + 8 * b ^ 4) % 16 = (c ^ 2) % 16 → False := by decide
+  have hpar : w % 2 = 1 ∨ z % 2 = 1
+    by_contra hboth
+    have hw0 : w % 2 = 0 := by have hlt := mod_lt.nat w 2 (by decide); by_contra h1; apply hboth; left; omega
+    have hz0 : z % 2 = 0 := by have hlt := mod_lt.nat z 2 (by decide); by_contra h1; apply hboth; right; omega
+    unfold nat.coprime_primes at hcop
+    exact hcop 2 is_prime_nat_two ⟨shell7.nat_dvd_of_mod_zero 2 w (by decide) hw0, shell7.nat_dvd_of_mod_zero 2 z (by decide) hz0⟩
+  have hdw := div_add_mod.nat w 16
+  have hdz := div_add_mod.nat z 16
+  have hdv := div_add_mod.nat v 16
+  set rw_ := w % 16; set rz_ := z % 16; set rv_ := v % 16
+  have hpar_r : rw_ % 2 = 1 ∨ rz_ % 2 = 1
+    obtain hw1 | hz1 := hpar
+    · left
+      have he : w = rw_ + 2 * (8 * (w / 16)) := by omega
+      rw [he, add_mul_mod.nat] at hw1; exact hw1
+    · right
+      have he : z = rz_ + 2 * (8 * (z / 16)) := by omega
+      rw [he, add_mul_mod.nat] at hz1; exact hz1
+  have hdiff : int_dvd 16 (((2 * rw_ ^ 4 + 13 * rw_ ^ 2 * rz_ ^ 2 + 8 * rz_ ^ 4 : ℕ) : ℤ) - ((rv_ ^ 2 : ℕ) : ℤ))
+    have hw_z : (w : ℤ) = (rw_ : ℤ) + 16 * ((w / 16 : ℕ) : ℤ)
+      have hc : ((16 * (w / 16) + rw_ : ℕ) : ℤ) = (w : ℤ) := by rw [hdw]
+      rw [cast_add.int, cast_mul.int] at hc; have h16 : ((16 : ℕ) : ℤ) = 16 := by decide; rw [h16] at hc; linarith
+    have hz_z : (z : ℤ) = (rz_ : ℤ) + 16 * ((z / 16 : ℕ) : ℤ)
+      have hc : ((16 * (z / 16) + rz_ : ℕ) : ℤ) = (z : ℤ) := by rw [hdz]
+      rw [cast_add.int, cast_mul.int] at hc; have h16 : ((16 : ℕ) : ℤ) = 16 := by decide; rw [h16] at hc; linarith
+    have hv_z : (v : ℤ) = (rv_ : ℤ) + 16 * ((v / 16 : ℕ) : ℤ)
+      have hc : ((16 * (v / 16) + rv_ : ℕ) : ℤ) = (v : ℤ) := by rw [hdv]
+      rw [cast_add.int, cast_mul.int] at hc; have h16 : ((16 : ℕ) : ℤ) = 16 := by decide; rw [h16] at hc; linarith
+    have hlhs_cast : ((2 * rw_ ^ 4 + 13 * rw_ ^ 2 * rz_ ^ 2 + 8 * rz_ ^ 4 : ℕ) : ℤ) =
+        2 * (rw_ : ℤ) ^ 4 + 13 * (rw_ : ℤ) ^ 2 * (rz_ : ℤ) ^ 2 + 8 * (rz_ : ℤ) ^ 4
+      simp [cast_add.int, cast_mul.int, cast_pow.int]
+    have hrhs_cast : ((rv_ ^ 2 : ℕ) : ℤ) = (rv_ : ℤ) ^ 2 := cast_pow.int rv_ 2
+    rw [hlhs_cast, hrhs_cast]
+    set qw := ((w / 16 : ℕ) : ℤ); set qz := ((z / 16 : ℕ) : ℤ); set qv := ((v / 16 : ℕ) : ℤ)
+    unfold int_dvd
+    set witness : ℤ := -(8 * (rw_ : ℤ) ^ 3 * qw + 192 * (rw_ : ℤ) ^ 2 * qw ^ 2 + 2048 * (rw_ : ℤ) * qw ^ 3 + 8192 * qw ^ 4) + 10 * (rw_ : ℤ) ^ 2 * (rz_ : ℤ) ^ 2 + 147 * (2 * (rw_ : ℤ) * qw + 16 * qw ^ 2) * ((rz_ : ℤ) + 16 * qz) ^ 2 + 147 * (rw_ : ℤ) ^ 2 * (2 * (rz_ : ℤ) * qz + 16 * qz ^ 2) - 171 * (rz_ : ℤ) ^ 4 - 2744 * (4 * (rz_ : ℤ) ^ 3 * qz + 96 * (rz_ : ℤ) ^ 2 * qz ^ 2 + 1024 * (rz_ : ℤ) * qz ^ 3 + 4096 * qz ^ 4) + (2 * (rv_ : ℤ) * qv + 16 * qv ^ 2)
+    use witness
+    have hzero : (2 * ((rw_ : ℤ) + 16 * qw) ^ 4 - 147 * ((rw_ : ℤ) + 16 * qw) ^ 2 * ((rz_ : ℤ) + 16 * qz) ^ 2 + 2744 * ((rz_ : ℤ) + 16 * qz) ^ 4) - ((rv_ : ℤ) + 16 * qv) ^ 2 = 0 := by rw [← hw_z, ← hz_z, ← hv_z]; linarith
+    have hid : (2 * (rw_ : ℤ) ^ 4 + 13 * (rw_ : ℤ) ^ 2 * (rz_ : ℤ) ^ 2 + 8 * (rz_ : ℤ) ^ 4 - (rv_ : ℤ) ^ 2) - ((2 * ((rw_ : ℤ) + 16 * qw) ^ 4 - 147 * ((rw_ : ℤ) + 16 * qw) ^ 2 * ((rz_ : ℤ) + 16 * qz) ^ 2 + 2744 * ((rz_ : ℤ) + 16 * qz) ^ 4) - ((rv_ : ℤ) + 16 * qv) ^ 2) = 16 * witness := by rw [witness_def]; ring
+    rw [hzero] at hid; linarith
+  have hmod_nat := cshell.nat_mod_eq_of_int_dvd 16 (2 * rw_ ^ 4 + 13 * rw_ ^ 2 * rz_ ^ 2 + 8 * rz_ ^ 4) (rv_ ^ 2) (by decide) hdiff
+  have hrw_lt : rw_ < 16 := by rw [rw__def]; exact mod_lt.nat w 16 (by decide)
+  have hrz_lt : rz_ < 16 := by rw [rz__def]; exact mod_lt.nat z 16 (by decide)
+  have hrv_lt : rv_ < 16 := by rw [rv__def]; exact mod_lt.nat v 16 (by decide)
+  exact hmod16 rw_ hrw_lt rz_ hrz_lt rv_ hrv_lt hpar_r hmod_nat
+
+-- Quartic Q_1 (on E_49): `w^4 - 147 * w^2 * z^2 + 5488 * z^4 = v^2` with `w > 0, z > 0, gcd(w, z) = 1`:
+-> shell7.Q1 (w z v : ℕ) : Prop :=
+  0 < w ∧ 0 < z ∧ nat.coprime_primes w z ∧
+  (w : ℤ) ^ 4 - 147 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4 = (v : ℤ) ^ 2
+
+-- Quartic Q_2 (on 2-isogenous E'_49): `p^4 + 294 * p^2 * q^2 - 343 * q^4 = r^2` with `p > 0, q > 0, gcd(p, q) = 1`:
+-> shell7.Q2 (p q r : ℕ) : Prop :=
+  0 < p ∧ 0 < q ∧ nat.coprime_primes p q ∧
+  (p : ℤ) ^ 4 + 294 * (p : ℤ) ^ 2 * (q : ℤ) ^ 2 - 343 * (q : ℤ) ^ 4 = (r : ℤ) ^ 2
+
++ shell7.Q1_not_dvd7_w (w z v : ℕ) (hQ : shell7.Q1 w z v) : ¬ (7 ∣ w)
+  obtain ⟨hw, hz, hcop, heq⟩ := hQ
+  intro h7w
+  obtain ⟨w1, hw1⟩ := (dvd.iff_exists 7 w (by decide)).mp h7w
+  have hw_z : (w : ℤ) = 7 * (w1 : ℤ) := by rw [hw1, cast_mul.int]; simp
+  have h7_v2 : 7 ∣ (v ^ 2)
+    apply shell7.nat_dvd_of_int_dvd 7 (v ^ 2) (by decide)
+    rw [cast_pow.int v 2]
+    exact ⟨343 * (w1 : ℤ) ^ 4 - 1029 * (w1 : ℤ) ^ 2 * (z : ℤ) ^ 2 + 784 * (z : ℤ) ^ 4, by rw [← heq, hw_z]; ring⟩
+  have h7v : 7 ∣ v := prime_dvd_of_dvd_pow.nat 7 v 2 (is_prime_nat.to_prime 7 is_prime_nat_seven) h7_v2
+  obtain ⟨v1, hv1⟩ := (dvd.iff_exists 7 v (by decide)).mp h7v
+  have hv_z : (v : ℤ) = 7 * (v1 : ℤ) := by rw [hv1, cast_mul.int]; simp
+  have heq1 : 49 * (w1 : ℤ) ^ 4 - 147 * (w1 : ℤ) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4 = (v1 : ℤ) ^ 2
+    rw [hw_z, hv_z] at heq; linarith
+  have h7_v12 : 7 ∣ (v1 ^ 2)
+    apply shell7.nat_dvd_of_int_dvd 7 (v1 ^ 2) (by decide)
+    rw [cast_pow.int v1 2]
+    exact ⟨7 * (w1 : ℤ) ^ 4 - 21 * (w1 : ℤ) ^ 2 * (z : ℤ) ^ 2 + 16 * (z : ℤ) ^ 4, by rw [← heq1]; ring⟩
+  have h7v1 : 7 ∣ v1 := prime_dvd_of_dvd_pow.nat 7 v1 2 (is_prime_nat.to_prime 7 is_prime_nat_seven) h7_v12
+  obtain ⟨v2, hv2⟩ := (dvd.iff_exists 7 v1 (by decide)).mp h7v1
+  have hv1_z : (v1 : ℤ) = 7 * (v2 : ℤ) := by rw [hv2, cast_mul.int]; simp
+  have h7_16z4 : 7 ∣ (16 * z ^ 4)
+    apply shell7.nat_dvd_of_int_dvd 7 (16 * z ^ 4) (by decide)
+    have hc : ((16 * z ^ 4 : ℕ) : ℤ) = 16 * (z : ℤ) ^ 4 := by simp [cast_mul.int, cast_pow.int]
+    rw [hc]
+    exact ⟨(v2 : ℤ) ^ 2 - (w1 : ℤ) ^ 4 + 3 * (w1 : ℤ) ^ 2 * (z : ℤ) ^ 2, by rw [hv1_z] at heq1; linarith⟩
+  obtain h716 | h7z4 := is_prime_nat_seven.2 16 (z ^ 4) h7_16z4
+  · have hn : ¬ (7 ∣ 16) := by decide; exact hn h716
+  · unfold nat.coprime_primes at hcop
+    exact hcop 7 is_prime_nat_seven ⟨h7w, prime_dvd_of_dvd_pow.nat 7 z 4 (is_prime_nat.to_prime 7 is_prime_nat_seven) h7z4⟩
+
++ shell7.Q2_not_dvd7_p (p q r : ℕ) (hQ : shell7.Q2 p q r) : ¬ (7 ∣ p)
+  obtain ⟨hp, hq, hcop, heq⟩ := hQ
+  intro h7p
+  obtain ⟨p1, hp1⟩ := (dvd.iff_exists 7 p (by decide)).mp h7p
+  have hp_z : (p : ℤ) = 7 * (p1 : ℤ) := by rw [hp1, cast_mul.int]; simp
+  have h7_r2 : 7 ∣ (r ^ 2)
+    apply shell7.nat_dvd_of_int_dvd 7 (r ^ 2) (by decide)
+    rw [cast_pow.int r 2]
+    exact ⟨343 * (p1 : ℤ) ^ 4 + 2058 * (p1 : ℤ) ^ 2 * (q : ℤ) ^ 2 - 49 * (q : ℤ) ^ 4, by rw [← heq, hp_z]; ring⟩
+  have h7r : 7 ∣ r := prime_dvd_of_dvd_pow.nat 7 r 2 (is_prime_nat.to_prime 7 is_prime_nat_seven) h7_r2
+  obtain ⟨r1, hr1⟩ := (dvd.iff_exists 7 r (by decide)).mp h7r
+  have hr_z : (r : ℤ) = 7 * (r1 : ℤ) := by rw [hr1, cast_mul.int]; simp
+  have heq1 : 49 * (p1 : ℤ) ^ 4 + 294 * (p1 : ℤ) ^ 2 * (q : ℤ) ^ 2 - 7 * (q : ℤ) ^ 4 = (r1 : ℤ) ^ 2
+    rw [hp_z, hr_z] at heq; linarith
+  have h7_r12 : 7 ∣ (r1 ^ 2)
+    apply shell7.nat_dvd_of_int_dvd 7 (r1 ^ 2) (by decide)
+    rw [cast_pow.int r1 2]
+    exact ⟨7 * (p1 : ℤ) ^ 4 + 42 * (p1 : ℤ) ^ 2 * (q : ℤ) ^ 2 - (q : ℤ) ^ 4, by rw [← heq1]; ring⟩
+  have h7r1 : 7 ∣ r1 := prime_dvd_of_dvd_pow.nat 7 r1 2 (is_prime_nat.to_prime 7 is_prime_nat_seven) h7_r12
+  obtain ⟨r2, hr2⟩ := (dvd.iff_exists 7 r1 (by decide)).mp h7r1
+  have hr1_z : (r1 : ℤ) = 7 * (r2 : ℤ) := by rw [hr2, cast_mul.int]; simp
+  have h7_q4 : 7 ∣ (q ^ 4)
+    apply shell7.nat_dvd_of_int_dvd 7 (q ^ 4) (by decide)
+    rw [cast_pow.int q 4]
+    exact ⟨(p1 : ℤ) ^ 4 + 6 * (p1 : ℤ) ^ 2 * (q : ℤ) ^ 2 - (r2 : ℤ) ^ 2, by rw [hr1_z] at heq1; linarith⟩
+  unfold nat.coprime_primes at hcop
+  exact hcop 7 is_prime_nat_seven ⟨h7p, prime_dvd_of_dvd_pow.nat 7 q 4 (is_prime_nat.to_prime 7 is_prime_nat_seven) h7_q4⟩
+
+-- STEP 1 OF PURE-Z DESCENT (`Q_1(w, z, v) -> Q_2(a, b, r)` with STRICTLY SMALLER `b < z`!):
++ shell7.Q1_to_Q2 (w z v : ℕ) (hQ : shell7.Q1 w z v) :
+    ∃ a b r : ℕ, shell7.Q2 a b r ∧ b < z
+  have hn7w := shell7.Q1_not_dvd7_w w z v hQ
+  obtain ⟨hw, hz, hcop, heq⟩ := hQ
+  have h4sq : (2 * (w : ℤ) ^ 2 - 147 * (z : ℤ) ^ 2) ^ 2 + 343 * (z : ℤ) ^ 4 = (2 * (v : ℤ)) ^ 2
+    have h4id : 4 * ((w : ℤ) ^ 4 - 147 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4) =
+                (2 * (w : ℤ) ^ 2 - 147 * (z : ℤ) ^ 2) ^ 2 + 343 * (z : ℤ) ^ 4 := by ring
+    linarith
+  have hz_pos_z : (0 : ℤ) < (z : ℤ) := (cast_pos.int z).mpr hz
+  have hz4_pos : (0 : ℤ) < (z : ℤ) ^ 4 := by nlinarith [mul_pos.int (z : ℤ) (z : ℤ) hz_pos_z hz_pos_z]
+  have hv_nn : (0 : ℤ) ≤ (v : ℤ) := (cast_le.int 0 v).mpr (by omega)
+  set Rz : ℤ := 2 * (v : ℤ) + (2 * (w : ℤ) ^ 2 - 147 * (z : ℤ) ^ 2)
+  set Sz : ℤ := 2 * (v : ℤ) - (2 * (w : ℤ) ^ 2 - 147 * (z : ℤ) ^ 2)
+  have hRS_z : Rz * Sz = 343 * (z : ℤ) ^ 4 := by
+    have hre : Rz * Sz = (2 * (v : ℤ)) ^ 2 - (2 * (w : ℤ) ^ 2 - 147 * (z : ℤ) ^ 2) ^ 2 := by rw [Rz_def, Sz_def]; ring
+    linarith
+  have hR_pos_z : (0 : ℤ) < Rz := by by_contra hle; have hS : 0 ≤ Sz := by linarith; nlinarith
+  have hS_pos_z : (0 : ℤ) < Sz := by by_contra hle; nlinarith
+  have hdiff_z : Rz - Sz = 4 * (w : ℤ) ^ 2 - 294 * (z : ℤ) ^ 2 := by rw [Rz_def, Sz_def]; ring
+  by_cases hz_odd : z % 2 = 1
+  · set R := nat_of_int Rz; set S := nat_of_int Sz
+    have hR_cast : (R : ℤ) = Rz := by rw [R_def]; exact int_of_nat_of_int Rz (by linarith)
+    have hS_cast : (S : ℤ) = Sz := by rw [S_def]; exact int_of_nat_of_int Sz (by linarith)
+    have hR_pos : 0 < R := (cast_pos.int R).mp (by rw [hR_cast]; exact hR_pos_z)
+    have hS_pos : 0 < S := (cast_pos.int S).mp (by rw [hS_cast]; exact hS_pos_z)
+    have hRS_nat : R * S = 343 * z ^ 4
+      apply (cast_inj.int (R * S) (343 * z ^ 4)).mp
+      have hc1 : ((R * S : ℕ) : ℤ) = Rz * Sz := by rw [cast_mul.int, hR_cast, hS_cast]
+      have hc2 : ((343 * z ^ 4 : ℕ) : ℤ) = 343 * (z : ℤ) ^ 4 := by simp [cast_mul.int, cast_pow.int]
+      rw [hc1, hc2, hRS_z]
+    have hR_odd : R % 2 = 1
+      by_contra h0
+      have h2R : 2 ∣ R := shell7.nat_dvd_of_mod_zero 2 R (by decide) (by have hlt := mod_lt.nat R 2 (by decide); omega)
+      have h2RS : 2 ∣ (343 * z ^ 4) := by rw [← hRS_nat]; exact dvd.mul_right_nat 2 R S (by decide) h2R
+      obtain h2_343 | h2_z4 := is_prime_nat_two.2 343 (z ^ 4) h2RS
+      · have hn : ¬ (2 ∣ 343) := by decide; exact hn h2_343
+      · have h2z := shell7.nat_mod_zero_of_dvd 2 z (prime_dvd_of_dvd_pow.nat 2 z 4 (is_prime_nat.to_prime 2 is_prime_nat_two) h2_z4)
+        omega
+    have hcop_RS : nat.coprime_primes R S
+      unfold nat.coprime_primes
+      intro p hp ⟨hpR, hpS⟩
+      have hp2 : 2 ≤ p := hp.1
+      have hp_dvd_diff : int_dvd p (4 * (w : ℤ) ^ 2 - 294 * (z : ℤ) ^ 2)
+        have hdR : int_dvd p Rz := by rw [← hR_cast]; exact shell7.int_dvd_of_nat_dvd p R (by omega) hpR
+        have hdS : int_dvd p Sz := by rw [← hS_cast]; exact shell7.int_dvd_of_nat_dvd p S (by omega) hpS
+        rw [← hdiff_z]; exact cshell.dvd_sub p Rz Sz hdR hdS
+      have hp_RS : p ∣ (343 * z ^ 4) := by rw [← hRS_nat]; exact dvd.mul_right_nat p R S (by omega) hpR
+      obtain hp343 | hpz4 := hp.2 343 (z ^ 4) hp_RS
+      · have hp7 : p = 7
+          have h343 : 343 = 7 ^ 3 := by decide; rw [h343] at hp343
+          have h7 := prime_dvd_of_dvd_pow.nat p 7 3 (is_prime_nat.to_prime p hp) hp343
+          obtain h1 | h2 := (is_prime_nat.to_full 7 is_prime_nat_seven).2 p h7 <;> omega
+        rw [hp7] at hp_dvd_diff
+        have h7_4w2 : int_dvd 7 (((4 * w ^ 2 : ℕ) : ℤ))
+          have hc : ((4 * w ^ 2 : ℕ) : ℤ) = 4 * (w : ℤ) ^ 2 := by simp [cast_mul.int, cast_pow.int]
+          rw [hc]
+          have h294 : int_dvd 7 (294 * (z : ℤ) ^ 2) := ⟨42 * (z : ℤ) ^ 2, by ring⟩
+          have hs := cshell.dvd_add 7 (4 * (w : ℤ) ^ 2 - 294 * (z : ℤ) ^ 2) (294 * (z : ℤ) ^ 2) hp_dvd_diff h294
+          have hre : 4 * (w : ℤ) ^ 2 - 294 * (z : ℤ) ^ 2 + 294 * (z : ℤ) ^ 2 = 4 * (w : ℤ) ^ 2 := by ring
+          rw [hre] at hs; exact hs
+        obtain h74 | h7w2 := is_prime_nat_seven.2 4 (w ^ 2) (shell7.nat_dvd_of_int_dvd 7 (4 * w ^ 2) (by decide) h7_4w2)
+        · have hn : ¬ (7 ∣ 4) := by decide; exact hn h74
+        · exact hn7w (prime_dvd_of_dvd_pow.nat 7 w 2 (is_prime_nat.to_prime 7 is_prime_nat_seven) h7w2)
+      · have hpz := prime_dvd_of_dvd_pow.nat p z 4 (is_prime_nat.to_prime p hp) hpz4
+        have hp_294z2 : int_dvd p (294 * (z : ℤ) ^ 2)
+          have hdz := shell7.int_dvd_of_nat_dvd p z (by omega) hpz
+          have hdz2 : int_dvd p ((z : ℤ) ^ 2) := by
+            have hsq : (z : ℤ) ^ 2 = (z : ℤ) * (z : ℤ) := by ring
+            rw [hsq]; exact cshell.dvd_mul_r p (z : ℤ) (z : ℤ) hdz
+          exact shell7.dvd_mul_l p 294 ((z : ℤ) ^ 2) hdz2
+        have hp_4w2 : int_dvd p (((4 * w ^ 2 : ℕ) : ℤ))
+          have hc : ((4 * w ^ 2 : ℕ) : ℤ) = 4 * (w : ℤ) ^ 2 := by simp [cast_mul.int, cast_pow.int]
+          rw [hc]
+          have hs := cshell.dvd_add p (4 * (w : ℤ) ^ 2 - 294 * (z : ℤ) ^ 2) (294 * (z : ℤ) ^ 2) hp_dvd_diff hp_294z2
+          have hre : 4 * (w : ℤ) ^ 2 - 294 * (z : ℤ) ^ 2 + 294 * (z : ℤ) ^ 2 = 4 * (w : ℤ) ^ 2 := by ring
+          rw [hre] at hs; exact hs
+        obtain hp4 | hpw2 := hp.2 4 (w ^ 2) (shell7.nat_dvd_of_int_dvd p (4 * w ^ 2) (by omega) hp_4w2)
+        · have h4 : 4 = 2 ^ 2 := by decide; rw [h4] at hp4
+          have hp2d := prime_dvd_of_dvd_pow.nat p 2 2 (is_prime_nat.to_prime p hp) hp4
+          obtain h1 | h2 := (is_prime_nat.to_full 2 is_prime_nat_two).2 p hp2d
+          · omega
+          · rw [h2] at hpR; have hm := shell7.nat_mod_zero_of_dvd 2 R hpR; omega
+        · unfold nat.coprime_primes at hcop
+          exact hcop p hp ⟨prime_dvd_of_dvd_pow.nat p w 2 (is_prime_nat.to_prime p hp) hpw2, hpz⟩
+    obtain ⟨A, B, hAp, hBp, hcop_AB, hAB_z, hsplit⟩ := shell7.coprime_split_343_pow4 R S z hR_pos hS_pos hz hcop_RS hRS_nat
+    obtain ⟨hR343, hS4⟩ | ⟨hR4, hS343⟩ := hsplit
+    · have hRz_eq : Rz = 343 * (A : ℤ) ^ 4 := by rw [← hR_cast, hR343]; simp [cast_mul.int, cast_pow.int]
+      have hSz_eq : Sz = (B : ℤ) ^ 4 := by rw [← hS_cast, hS4]; exact cast_pow.int B 4
+      have hzz_eq : (z : ℤ) = (A : ℤ) * (B : ℤ) := by rw [← hAB_z, cast_mul.int]
+      have hdm1 : int_dvd 7 (((B ^ 4 + (2 * w) ^ 2 : ℕ) : ℤ))
+        have hc : ((B ^ 4 + (2 * w) ^ 2 : ℕ) : ℤ) = (B : ℤ) ^ 4 + (2 * (w : ℤ)) ^ 2 := by simp [cast_add.int, cast_mul.int, cast_pow.int]
+        rw [hc]
+        exact ⟨42 * (A : ℤ) ^ 2 * (B : ℤ) ^ 2 + 49 * (A : ℤ) ^ 4, by rw [hRz_eq, hSz_eq, hzz_eq] at hdiff_z; linarith⟩
+      have hmod7 : (B ^ 4 + (2 * w) ^ 2) % 7 = 0 := shell7.nat_mod_zero_of_dvd 7 _ (shell7.nat_dvd_of_int_dvd 7 _ (by decide) hdm1)
+      have h7_2w : 7 ∣ (2 * w) := shell7.nat_dvd_of_mod_zero 7 (2 * w) (by decide) (shell7.mod7_sum_sq_pow4_zero B (2 * w) hmod7).2
+      obtain h72 | h7w := is_prime_nat_seven.2 2 w h7_2w
+      · exfalso
+        have hn : ¬ (7 ∣ 2) := by decide
+        exact hn h72
+      · exfalso; exact hn7w h7w
+    · have hRz_eq : Rz = (A : ℤ) ^ 4 := by rw [← hR_cast, hR4]; exact cast_pow.int A 4
+      have hSz_eq : Sz = 343 * (B : ℤ) ^ 4 := by rw [← hS_cast, hS343]; simp [cast_mul.int, cast_pow.int]
+      have hzz_eq : (z : ℤ) = (A : ℤ) * (B : ℤ) := by rw [← hAB_z, cast_mul.int]
+      have hQ2_eq : (A : ℤ) ^ 4 + 294 * (A : ℤ) ^ 2 * (B : ℤ) ^ 2 - 343 * (B : ℤ) ^ 4 = ((2 * w : ℕ) : ℤ) ^ 2
+        have h2w : ((2 * w : ℕ) : ℤ) = 2 * (w : ℤ) := by simp [cast_mul.int]
+        rw [h2w]; rw [hRz_eq, hSz_eq, hzz_eq] at hdiff_z; linarith
+      have hA_ge2 : 2 ≤ A
+        by_contra hlt2
+        have hA1 : A = 1 := by omega
+        rw [hA1] at hQ2_eq
+        have h1c : ((1 : ℕ) : ℤ) = 1 := by decide; rw [h1c] at hQ2_eq
+        have hBz : (1 : ℤ) ≤ (B : ℤ) := (cast_le.int 1 B).mpr (by omega)
+        have hB2 : (1 : ℤ) ≤ (B : ℤ) ^ 2 := by nlinarith
+        have hB4 : (B : ℤ) ^ 2 ≤ (B : ℤ) ^ 4 := by nlinarith
+        have hsq_nn : (0 : ℤ) ≤ ((2 * w : ℕ) : ℤ) ^ 2 := by nlinarith
+        nlinarith
+      have hB_lt : B < z := by have hm := mul_le_mul_of_nonneg_right.nat 2 A B hA_ge2 (by omega); rw [hAB_z] at hm; omega
+      exact ⟨A, B, 2 * w, ⟨hAp, hBp, hcop_AB, hQ2_eq⟩, hB_lt⟩
+  · have hz2 : 2 ∣ z := shell7.nat_dvd_of_mod_zero 2 z (by decide) (by have hlt := mod_lt.nat z 2 (by decide); omega)
+    obtain ⟨z0, hz0⟩ := (dvd.iff_exists 2 z (by decide)).mp hz2
+    have hz0_pos : 0 < z0 := by by_contra h0; have hz_ : z0 = 0 := by omega; rw [hz_] at hz0; omega
+    have hw_odd : w % 2 = 1
+      by_contra h0; unfold nat.coprime_primes at hcop
+      exact hcop 2 is_prime_nat_two ⟨shell7.nat_dvd_of_mod_zero 2 w (by decide) (by have hlt := mod_lt.nat w 2 (by decide); omega), hz2⟩
+    have hv_odd : v % 2 = 1
+      by_contra h0
+      have hv2 : 2 ∣ v := shell7.nat_dvd_of_mod_zero 2 v (by decide) (by have hlt := mod_lt.nat v 2 (by decide); omega)
+      obtain ⟨v0, hv0⟩ := (dvd.iff_exists 2 v (by decide)).mp hv2
+      have hvv : (v : ℤ) = 2 * (v0 : ℤ) := by rw [hv0, cast_mul.int]; simp
+      have hzz : (z : ℤ) = 2 * (z0 : ℤ) := by rw [hz0, cast_mul.int]; simp
+      have hdw := div_add_mod.nat w 2; rw [hw_odd] at hdw
+      have hww : (w : ℤ) = 2 * ((w / 2 : ℕ) : ℤ) + 1 := by
+        have hc : ((2 * (w / 2) + 1 : ℕ) : ℤ) = (w : ℤ) := by rw [hdw]
+        rw [cast_add.int, cast_mul.int, cast_one.int] at hc; have h2 : ((2 : ℕ) : ℤ) = 2 := by decide; rw [h2] at hc; linarith
+      have hd2_1 : int_dvd 2 ((1 : ℕ) : ℤ)
+        have h1c : ((1 : ℕ) : ℤ) = 1 := by decide; rw [h1c]
+        unfold int_dvd
+        use 2 * (v0 : ℤ) ^ 2 - (8 * ((w / 2 : ℕ) : ℤ) ^ 4 + 16 * ((w / 2 : ℕ) : ℤ) ^ 3 + 12 * ((w / 2 : ℕ) : ℤ) ^ 2 + 4 * ((w / 2 : ℕ) : ℤ)) + 294 * (w : ℤ) ^ 2 * (z0 : ℤ) ^ 2 - 43904 * (z0 : ℤ) ^ 4
+        have heq' := heq; rw [hvv, hzz] at heq'
+        have hlin : (w : ℤ) ^ 4 - 588 * (w : ℤ) ^ 2 * (z0 : ℤ) ^ 2 + 87808 * (z0 : ℤ) ^ 4 = 4 * (v0 : ℤ) ^ 2 := by
+          have h1 : (w : ℤ) ^ 4 - 588 * (w : ℤ) ^ 2 * (z0 : ℤ) ^ 2 + 87808 * (z0 : ℤ) ^ 4 - 4 * (v0 : ℤ) ^ 2 = ((w : ℤ) ^ 4 - 147 * (w : ℤ) ^ 2 * (2 * (z0 : ℤ)) ^ 2 + 5488 * (2 * (z0 : ℤ)) ^ 4) - (2 * (v0 : ℤ)) ^ 2 := by ring
+          linarith
+        have hpoww : (w : ℤ) ^ 4 = 1 + 2 * (8 * ((w / 2 : ℕ) : ℤ) ^ 4 + 16 * ((w / 2 : ℕ) : ℤ) ^ 3 + 12 * ((w / 2 : ℕ) : ℤ) ^ 2 + 4 * ((w / 2 : ℕ) : ℤ)) := by rw [hww]; ring
+        linarith
+      have h12 := shell7.nat_mod_zero_of_dvd 2 1 (shell7.nat_dvd_of_int_dvd 2 1 (by decide) hd2_1)
+      omega
+    have hdw := div_add_mod.nat w 2; rw [hw_odd] at hdw
+    have hdv := div_add_mod.nat v 2; rw [hv_odd] at hdv
+    set qw : ℤ := ((w / 2 : ℕ) : ℤ); set qv : ℤ := ((v / 2 : ℕ) : ℤ)
+    have hww : (w : ℤ) = 2 * qw + 1 := by
+      have hc : ((2 * (w / 2) + 1 : ℕ) : ℤ) = (w : ℤ) := by rw [hdw]
+      rw [cast_add.int, cast_mul.int, cast_one.int] at hc; have h2 : ((2 : ℕ) : ℤ) = 2 := by decide; rw [h2] at hc; linarith
+    have hvv : (v : ℤ) = 2 * qv + 1 := by
+      have hc : ((2 * (v / 2) + 1 : ℕ) : ℤ) = (v : ℤ) := by rw [hdv]
+      rw [cast_add.int, cast_mul.int, cast_one.int] at hc; have h2 : ((2 : ℕ) : ℤ) = 2 := by decide; rw [h2] at hc; linarith
+    have hzz : (z : ℤ) = 2 * (z0 : ℤ) := by rw [hz0, cast_mul.int]; simp
+    set R1z : ℤ := qv + 2 * qw ^ 2 + 2 * qw + 1 - 147 * (z0 : ℤ) ^ 2
+    set S1z : ℤ := qv - 2 * qw ^ 2 - 2 * qw + 147 * (z0 : ℤ) ^ 2
+    have hR4e : Rz = 4 * R1z := by rw [Rz_def, R1z_def, hww, hvv, hzz]; ring
+    have hS4e : Sz = 4 * S1z := by rw [Sz_def, S1z_def, hww, hvv, hzz]; ring
+    have hR1_pos_z : (0 : ℤ) < R1z := by linarith
+    have hS1_pos_z : (0 : ℤ) < S1z := by linarith
+    have hR1S1_z : R1z * S1z = 343 * (z0 : ℤ) ^ 4 := by
+      have h16 : 16 * (R1z * S1z) = Rz * Sz := by rw [hR4e, hS4e]; ring
+      rw [hRS_z, hzz] at h16; linarith
+    have hdiff1_z : R1z - S1z = (w : ℤ) ^ 2 - 294 * (z0 : ℤ) ^ 2 := by rw [R1z_def, S1z_def, hww]; ring
+    set R1 := nat_of_int R1z; set S1 := nat_of_int S1z
+    have hR1_cast : (R1 : ℤ) = R1z := by rw [R1_def]; exact int_of_nat_of_int R1z (by linarith)
+    have hS1_cast : (S1 : ℤ) = S1z := by rw [S1_def]; exact int_of_nat_of_int S1z (by linarith)
+    have hR1_pos : 0 < R1 := (cast_pos.int R1).mp (by rw [hR1_cast]; exact hR1_pos_z)
+    have hS1_pos : 0 < S1 := (cast_pos.int S1).mp (by rw [hS1_cast]; exact hS1_pos_z)
+    have hR1S1_nat : R1 * S1 = 343 * z0 ^ 4
+      apply (cast_inj.int (R1 * S1) (343 * z0 ^ 4)).mp
+      have hc1 : ((R1 * S1 : ℕ) : ℤ) = R1z * S1z := by rw [cast_mul.int, hR1_cast, hS1_cast]
+      have hc2 : ((343 * z0 ^ 4 : ℕ) : ℤ) = 343 * (z0 : ℤ) ^ 4 := by simp [cast_mul.int, cast_pow.int]
+      rw [hc1, hc2, hR1S1_z]
+    have hcop_R1S1 : nat.coprime_primes R1 S1
+      unfold nat.coprime_primes
+      intro p hp ⟨hpR, hpS⟩
+      have hp2 : 2 ≤ p := hp.1
+      have hp_dvd_diff : int_dvd p ((w : ℤ) ^ 2 - 294 * (z0 : ℤ) ^ 2)
+        have hdR : int_dvd p R1z := by rw [← hR1_cast]; exact shell7.int_dvd_of_nat_dvd p R1 (by omega) hpR
+        have hdS : int_dvd p S1z := by rw [← hS1_cast]; exact shell7.int_dvd_of_nat_dvd p S1 (by omega) hpS
+        rw [← hdiff1_z]; exact cshell.dvd_sub p R1z S1z hdR hdS
+      have hp_R1S1 : p ∣ (343 * z0 ^ 4) := by rw [← hR1S1_nat]; exact dvd.mul_right_nat p R1 S1 (by omega) hpR
+      obtain hp343 | hpz04 := hp.2 343 (z0 ^ 4) hp_R1S1
+      · have hp7 : p = 7
+          have h343 : 343 = 7 ^ 3 := by decide; rw [h343] at hp343
+          have h7 := prime_dvd_of_dvd_pow.nat p 7 3 (is_prime_nat.to_prime p hp) hp343
+          obtain h1 | h2 := (is_prime_nat.to_full 7 is_prime_nat_seven).2 p h7 <;> omega
+        rw [hp7] at hp_dvd_diff
+        have h7_w2 : int_dvd 7 (((w ^ 2 : ℕ) : ℤ))
+          rw [cast_pow.int w 2]
+          have h294 : int_dvd 7 (294 * (z0 : ℤ) ^ 2) := ⟨42 * (z0 : ℤ) ^ 2, by ring⟩
+          have hs := cshell.dvd_add 7 ((w : ℤ) ^ 2 - 294 * (z0 : ℤ) ^ 2) (294 * (z0 : ℤ) ^ 2) hp_dvd_diff h294
+          have hre : (w : ℤ) ^ 2 - 294 * (z0 : ℤ) ^ 2 + 294 * (z0 : ℤ) ^ 2 = (w : ℤ) ^ 2 := by ring
+          rw [hre] at hs; exact hs
+        exact hn7w (prime_dvd_of_dvd_pow.nat 7 w 2 (is_prime_nat.to_prime 7 is_prime_nat_seven) (shell7.nat_dvd_of_int_dvd 7 (w ^ 2) (by decide) h7_w2))
+      · have hpz0 := prime_dvd_of_dvd_pow.nat p z0 4 (is_prime_nat.to_prime p hp) hpz04
+        have hpz : p ∣ z := by rw [hz0]; exact dvd.mul_left_nat p 2 z0 (by omega) hpz0
+        have hp_294z02 : int_dvd p (294 * (z0 : ℤ) ^ 2)
+          have hdz := shell7.int_dvd_of_nat_dvd p z0 (by omega) hpz0
+          have hdz2 : int_dvd p ((z0 : ℤ) ^ 2) := by
+            have hsq : (z0 : ℤ) ^ 2 = (z0 : ℤ) * (z0 : ℤ) := by ring
+            rw [hsq]; exact cshell.dvd_mul_r p (z0 : ℤ) (z0 : ℤ) hdz
+          exact shell7.dvd_mul_l p 294 ((z0 : ℤ) ^ 2) hdz2
+        have hp_w2 : int_dvd p (((w ^ 2 : ℕ) : ℤ))
+          rw [cast_pow.int w 2]
+          have hs := cshell.dvd_add p ((w : ℤ) ^ 2 - 294 * (z0 : ℤ) ^ 2) (294 * (z0 : ℤ) ^ 2) hp_dvd_diff hp_294z02
+          have hre : (w : ℤ) ^ 2 - 294 * (z0 : ℤ) ^ 2 + 294 * (z0 : ℤ) ^ 2 = (w : ℤ) ^ 2 := by ring
+          rw [hre] at hs; exact hs
+        unfold nat.coprime_primes at hcop
+        exact hcop p hp ⟨prime_dvd_of_dvd_pow.nat p w 2 (is_prime_nat.to_prime p hp) (shell7.nat_dvd_of_int_dvd p (w ^ 2) (by omega) hp_w2), hpz⟩
+    obtain ⟨A, B, hAp, hBp, hcop_AB, hAB_z0, hsplit⟩ := shell7.coprime_split_343_pow4 R1 S1 z0 hR1_pos hS1_pos hz0_pos hcop_R1S1 hR1S1_nat
+    obtain ⟨hR343, hS4⟩ | ⟨hR4, hS343⟩ := hsplit
+    · have hR1z_eq : R1z = 343 * (A : ℤ) ^ 4 := by rw [← hR1_cast, hR343]; simp [cast_mul.int, cast_pow.int]
+      have hS1z_eq : S1z = (B : ℤ) ^ 4 := by rw [← hS1_cast, hS4]; exact cast_pow.int B 4
+      have hz0z_eq : (z0 : ℤ) = (A : ℤ) * (B : ℤ) := by rw [← hAB_z0, cast_mul.int]
+      have hdm1 : int_dvd 7 (((B ^ 4 + w ^ 2 : ℕ) : ℤ))
+        have hc : ((B ^ 4 + w ^ 2 : ℕ) : ℤ) = (B : ℤ) ^ 4 + (w : ℤ) ^ 2 := by simp [cast_add.int, cast_pow.int]
+        rw [hc]
+        exact ⟨42 * (A : ℤ) ^ 2 * (B : ℤ) ^ 2 + 49 * (A : ℤ) ^ 4, by rw [hR1z_eq, hS1z_eq, hz0z_eq] at hdiff1_z; linarith⟩
+      have hmod7 : (B ^ 4 + w ^ 2) % 7 = 0 := shell7.nat_mod_zero_of_dvd 7 _ (shell7.nat_dvd_of_int_dvd 7 _ (by decide) hdm1)
+      exfalso; exact hn7w (shell7.nat_dvd_of_mod_zero 7 w (by decide) (shell7.mod7_sum_sq_pow4_zero B w hmod7).2)
+    · have hR1z_eq : R1z = (A : ℤ) ^ 4 := by rw [← hR1_cast, hR4]; exact cast_pow.int A 4
+      have hS1z_eq : S1z = 343 * (B : ℤ) ^ 4 := by rw [← hS1_cast, hS343]; simp [cast_mul.int, cast_pow.int]
+      have hz0z_eq : (z0 : ℤ) = (A : ℤ) * (B : ℤ) := by rw [← hAB_z0, cast_mul.int]
+      have hQ2_eq : (A : ℤ) ^ 4 + 294 * (A : ℤ) ^ 2 * (B : ℤ) ^ 2 - 343 * (B : ℤ) ^ 4 = (w : ℤ) ^ 2
+        rw [hR1z_eq, hS1z_eq, hz0z_eq] at hdiff1_z; linarith
+      have hB_lt : B < z := by have hm := mul_le_mul_of_nonneg_right.nat 1 A B (by omega) (by omega); rw [hAB_z0] at hm; omega
+      exact ⟨A, B, w, ⟨hAp, hBp, hcop_AB, hQ2_eq⟩, hB_lt⟩
+
+-- Lemma: On Q_2, p and q CANNOT both be odd (mod-64 / mod-128 proof!):
++ shell7.Q2_not_both_odd (p q r : ℕ) (hQ : shell7.Q2 p q r) (hp_odd : p % 2 = 1) (hq_odd : q % 2 = 1) : False
+  obtain ⟨hp, hq, hcop, heq⟩ := hQ
+  have hodd_sq8 : ∀ n : ℕ, n % 2 = 1 → ∃ t : ℤ, (n : ℤ) ^ 2 = 1 + 8 * t
+    intro n hn
+    have hd := div_add_mod.nat n 2; rw [hn] at hd
+    set k : ℕ := n / 2
+    have hne : (n : ℤ) = 2 * (k : ℤ) + 1 := by
+      have hc : ((2 * k + 1 : ℕ) : ℤ) = (n : ℤ) := by rw [hd]
+      rw [cast_add.int, cast_mul.int, cast_one.int] at hc; have h2 : ((2 : ℕ) : ℤ) = 2 := by decide; rw [h2] at hc; linarith
+    have hk_ev : 2 ∣ (k * (k + 1))
+      by_cases hke : k % 2 = 0
+      · exact dvd.mul_right_nat 2 k (k + 1) (by decide) (shell7.nat_dvd_of_mod_zero 2 k (by decide) hke)
+      · exact dvd.mul_left_nat 2 k (k + 1) (by decide) (shell7.nat_dvd_of_mod_zero 2 (k + 1) (by decide) (shell7.odd_succ_mod2 k hke))
+    obtain ⟨t, ht⟩ := (dvd.iff_exists 2 (k * (k + 1)) (by decide)).mp hk_ev
+    have htz : (k : ℤ) * ((k : ℤ) + 1) = 2 * (t : ℤ) := by
+      have hc : ((2 * t : ℕ) : ℤ) = ((k * (k + 1) : ℕ) : ℤ) := by rw [ht]
+      rw [cast_mul.int, cast_mul.int, cast_add.int, cast_one.int] at hc
+      have h2 : ((2 : ℕ) : ℤ) = 2 := by decide; rw [h2] at hc; linarith
+    use (t : ℤ)
+    calc (n : ℤ) ^ 2 = 1 + 4 * ((k : ℤ) * ((k : ℤ) + 1)) := by rw [hne]; ring
+      _ = 1 + 8 * (t : ℤ) := by rw [htz]; ring
+  obtain ⟨tp, htp⟩ := hodd_sq8 p hp_odd
+  obtain ⟨tq, htq⟩ := hodd_sq8 q hq_odd
+  have hr2_mod64 : (r : ℤ) ^ 2 = 16 + 64 * (tp ^ 2 + 37 * tp - 49 * tq + 294 * tp * tq - 343 * tq ^ 2 - 1)
+    have hp4 : (p : ℤ) ^ 4 = (1 + 8 * tp) ^ 2
+      calc (p : ℤ) ^ 4 = ((p : ℤ) ^ 2) ^ 2 := by ring
+        _ = (1 + 8 * tp) ^ 2 := by rw [htp]
+    have hq4 : (q : ℤ) ^ 4 = (1 + 8 * tq) ^ 2
+      calc (q : ℤ) ^ 4 = ((q : ℤ) ^ 2) ^ 2 := by ring
+        _ = (1 + 8 * tq) ^ 2 := by rw [htq]
+    rw [← heq, hp4, hq4, htp, htq]; ring
+  have hr_mod8 : r % 8 = 4
+    have hcheck : ∀ x < 8, (x ^ 2) % 64 = 16 → x = 4 := by decide
+    have hdr := div_add_mod.nat r 8
+    set qr := r / 8; set rr := r % 8
+    have hr_z : (r : ℤ) = (rr : ℤ) + 8 * (qr : ℤ) := by
+      have hc : ((8 * qr + rr : ℕ) : ℤ) = (r : ℤ) := by rw [hdr]
+      rw [cast_add.int, cast_mul.int] at hc; have h8 : ((8 : ℕ) : ℤ) = 8 := by decide; rw [h8] at hc; linarith
+    -- Prove `r^2 ≡ 16 mod 64` => `rr^2 ≡ 16 mod 64` (wait: `(rr + 8*qr)^2 = rr^2 + 16*rr*qr + 64*qr^2`!
+    -- Wait: if `rr` is even (`2 | rr`), `16*rr*qr` is a multiple of 32, and if `4 | rr`, `16*rr*qr` is a multiple of 64!)
+    have h2r : 2 ∣ r
+      have h2r2 : 2 ∣ (r ^ 2)
+        apply shell7.nat_dvd_of_int_dvd 2 (r ^ 2) (by decide)
+        rw [cast_pow.int r 2, hr2_mod64]
+        exact ⟨8 + 32 * (tp ^ 2 + 37 * tp - 49 * tq + 294 * tp * tq - 343 * tq ^ 2 - 1), by ring⟩
+      exact prime_dvd_of_dvd_pow.nat 2 r 2 (is_prime_nat.to_prime 2 is_prime_nat_two) h2r2
+    obtain ⟨r0, hr0⟩ := (dvd.iff_exists 2 r (by decide)).mp h2r
+    have hr0z : (r : ℤ) = 2 * (r0 : ℤ) := by rw [hr0, cast_mul.int]; simp
+    have h2r0 : 2 ∣ r0
+      have h2r02 : 2 ∣ (r0 ^ 2)
+        apply shell7.nat_dvd_of_int_dvd 2 (r0 ^ 2) (by decide)
+        rw [cast_pow.int r0 2]
+        exact ⟨2 + 8 * (tp ^ 2 + 37 * tp - 49 * tq + 294 * tp * tq - 343 * tq ^ 2 - 1), by rw [hr0z] at hr2_mod64; linarith⟩
+      exact prime_dvd_of_dvd_pow.nat 2 r0 2 (is_prime_nat.to_prime 2 is_prime_nat_two) h2r02
+    obtain ⟨r1, hr1⟩ := (dvd.iff_exists 2 r0 (by decide)).mp h2r0
+    have hr1z : (r : ℤ) = 4 * (r1 : ℤ) := by rw [hr0, hr1, cast_mul.int, cast_mul.int]; simp; ring
+    have hr1_odd : r1 % 2 = 1
+      by_contra h0
+      have h2r1 : 2 ∣ r1 := shell7.nat_dvd_of_mod_zero 2 r1 (by decide) (by have hlt := mod_lt.nat r1 2 (by decide); omega)
+      obtain ⟨r2, hr2⟩ := (dvd.iff_exists 2 r1 (by decide)).mp h2r1
+      have hr2z : (r1 : ℤ) = 2 * (r2 : ℤ) := by rw [hr2, cast_mul.int]; simp
+      have hd4_1 : int_dvd 4 ((1 : ℕ) : ℤ)
+        have h1c : ((1 : ℕ) : ℤ) = 1 := by decide; rw [h1c]
+        exact ⟨(r2 : ℤ) ^ 2 - (tp ^ 2 + 37 * tp - 49 * tq + 294 * tp * tq - 343 * tq ^ 2 - 1), by rw [hr1z, hr2z] at hr2_mod64; linarith⟩
+      have hm := shell7.nat_mod_zero_of_dvd 4 1 (shell7.nat_dvd_of_int_dvd 4 1 (by decide) hd4_1); omega
+    have hdr1 := div_add_mod.nat r1 2; rw [hr1_odd] at hdr1
+    have hre : r = 4 + 8 * (r1 / 2) := by omega
+    have hrr_lt : rr < 8 := by rw [rr_def]; exact mod_lt.nat r 8 (by decide)
+    by_cases hlt : qr < r1 / 2
+    · omega
+    · by_cases hgt : r1 / 2 < qr
+      · omega
+      · have heq_q : qr = r1 / 2 := by omega
+        omega
+  have hdr := div_add_mod.nat r 8; rw [hr_mod8] at hdr
+  set m : ℤ := ((r / 8 : ℕ) : ℤ)
+  have hr_eq : (r : ℤ) = 4 + 8 * m := by
+    have hc : ((8 * (r / 8) + 4 : ℕ) : ℤ) = (r : ℤ) := by rw [hdr]
+    rw [cast_add.int, cast_mul.int] at hc
+    have h8 : ((8 : ℕ) : ℤ) = 8 := by decide; have h4 : ((4 : ℕ) : ℤ) = 4 := by decide; rw [h8, h4] at hc; linarith
+  set K : ℤ := 18 + tp + 147 * tq
+  have hpq_eq : (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 = 4 + 8 * K := by rw [htp, htq, K_def]; ring
+  have hprod_ev : (K + m + 1) * (K - m) = 343 * (q : ℤ) ^ 4
+    have h1 : ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) ^ 2 - (r : ℤ) ^ 2 = 64 * 343 * (q : ℤ) ^ 4 := by rw [← heq]; ring
+    have h64 : 64 * ((K + m + 1) * (K - m)) = ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) ^ 2 - (r : ℤ) ^ 2 := by rw [hpq_eq, hr_eq]; ring
+    linarith
+  have hd2_lhs : int_dvd 2 ((K + m + 1) * (K - m))
+    have hA := div_add_mod.int (K + m + 1) 2
+    have hB := div_add_mod.int (K - m) 2
+    have hltA := mod_lt.int (K + m + 1) 2 (by decide); have hnnA := mod_nonneg.int (K + m + 1) 2 (by decide)
+    have hltB := mod_lt.int (K - m) 2 (by decide); have hnnB := mod_nonneg.int (K - m) 2 (by decide)
+    set qA := (K + m + 1) / 2; set qB := (K - m) / 2
+    unfold int_dvd
+    by_cases hA0 : (K + m + 1) % 2 = 0
+    · use qA * (K - m)
+      have hAe : K + m + 1 = 2 * qA := by linarith
+      rw [hAe]; ring
+    · have hB0 : (K - m) % 2 = 0
+        by_contra hBn
+        have hA1 : (K + m + 1) % 2 = 1 := by omega
+        have hB1 : (K - m) % 2 = 1 := by omega
+        have heq_odd : (1 + 2 * m) % 2 = (0 + 2 * (qA - qB)) % 2 := by
+          have h1 : 1 + 2 * m = 0 + 2 * (qA - qB) := by linarith
+          rw [h1]
+        rw [add_mul_mod.int 1 m 2 (by decide), add_mul_mod.int 0 (qA - qB) 2 (by decide)] at heq_odd
+        omega
+      use (K + m + 1) * qB
+      have hBe : K - m = 2 * qB := by linarith
+      rw [hBe]; ring
+  rw [hprod_ev] at hd2_lhs
+  have h2_nat : 2 ∣ (343 * q ^ 4)
+    apply shell7.nat_dvd_of_int_dvd 2 (343 * q ^ 4) (by decide)
+    have hc : ((343 * q ^ 4 : ℕ) : ℤ) = 343 * (q : ℤ) ^ 4 := by simp [cast_mul.int, cast_pow.int]
+    rw [hc]; exact hd2_lhs
+  obtain h2_343 | h2_q4 := is_prime_nat_two.2 343 (q ^ 4) h2_nat
+  · have hn : ¬ (2 ∣ 343) := by decide; exact hn h2_343
+  · have h2q := shell7.nat_mod_zero_of_dvd 2 q (prime_dvd_of_dvd_pow.nat 2 q 4 (is_prime_nat.to_prime 2 is_prime_nat_two) h2_q4)
+    omega
+
+-- STEP 2 OF PURE-Z DESCENT (`Q_2(p, q, r) -> Q_1(w', z', v')` with `z' <= q`!):
++ shell7.Q2_to_Q1 (p q r : ℕ) (hQ : shell7.Q2 p q r) :
+    ∃ w' z' v' : ℕ, shell7.Q1 w' z' v' ∧ z' ≤ q
+  have hn7p := shell7.Q2_not_dvd7_p p q r hQ
+  obtain ⟨hp, hq, hcop, heq⟩ := hQ
+  have hopp : (p % 2 = 1 ∧ q % 2 = 0) ∨ (p % 2 = 0 ∧ q % 2 = 1)
+    by_cases hp1 : p % 2 = 1
+    · by_cases hq1 : q % 2 = 1
+      · exfalso; exact shell7.Q2_not_both_odd p q r ⟨hp, hq, hcop, heq⟩ hp1 hq1
+      · left; exact ⟨hp1, by have hlt := mod_lt.nat q 2 (by decide); omega⟩
+    · by_cases hq1 : q % 2 = 1
+      · right; exact ⟨by have hlt := mod_lt.nat p 2 (by decide); omega, hq1⟩
+      · exfalso; unfold nat.coprime_primes at hcop
+        exact hcop 2 is_prime_nat_two ⟨shell7.nat_dvd_of_mod_zero 2 p (by decide) (by have hlt := mod_lt.nat p 2 (by decide); omega),
+                                       shell7.nat_dvd_of_mod_zero 2 q (by decide) (by have hlt := mod_lt.nat q 2 (by decide); omega)⟩
+  have hpq_odd : ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) % 2 = 1
+    obtain ⟨hp1, hq0⟩ | ⟨hp0, hq1⟩ := hopp
+    · have hdp := div_add_mod.nat p 2; rw [hp1] at hdp
+      have hdq := div_add_mod.nat q 2; rw [hq0] at hdq
+      set kp : ℤ := ((p / 2 : ℕ) : ℤ); set kq : ℤ := ((q / 2 : ℕ) : ℤ)
+      have hpe : (p : ℤ) = 2 * kp + 1 := by
+        have hc : ((2 * (p / 2) + 1 : ℕ) : ℤ) = (p : ℤ) := by rw [hdp]
+        rw [cast_add.int, cast_mul.int, cast_one.int] at hc; have h2 : ((2 : ℕ) : ℤ) = 2 := by decide; rw [h2] at hc; linarith
+      have hqe : (q : ℤ) = 2 * kq := by
+        have hc : ((2 * (q / 2) + 0 : ℕ) : ℤ) = (q : ℤ) := by rw [hdq]
+        rw [cast_add.int, cast_mul.int] at hc; have h2 : ((2 : ℕ) : ℤ) = 2 := by decide; have h0 : ((0 : ℕ) : ℤ) = 0 := by decide; rw [h2, h0] at hc; linarith
+      have hre : (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 = 1 + 2 * (2 * kp ^ 2 + 2 * kp + 294 * kq ^ 2) := by rw [hpe, hqe]; ring
+      rw [hre, add_mul_mod.int 1 _ 2 (by decide)]; decide
+    · have hdp := div_add_mod.nat p 2; rw [hp0] at hdp
+      have hdq := div_add_mod.nat q 2; rw [hq1] at hdq
+      set kp : ℤ := ((p / 2 : ℕ) : ℤ); set kq : ℤ := ((q / 2 : ℕ) : ℤ)
+      have hpe : (p : ℤ) = 2 * kp := by
+        have hc : ((2 * (p / 2) + 0 : ℕ) : ℤ) = (p : ℤ) := by rw [hdp]
+        rw [cast_add.int, cast_mul.int] at hc; have h2 : ((2 : ℕ) : ℤ) = 2 := by decide; have h0 : ((0 : ℕ) : ℤ) = 0 := by decide; rw [h2, h0] at hc; linarith
+      have hqe : (q : ℤ) = 2 * kq + 1 := by
+        have hc : ((2 * (q / 2) + 1 : ℕ) : ℤ) = (q : ℤ) := by rw [hdq]
+        rw [cast_add.int, cast_mul.int, cast_one.int] at hc; have h2 : ((2 : ℕ) : ℤ) = 2 := by decide; rw [h2] at hc; linarith
+      have hre : (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 = 1 + 2 * (2 * kp ^ 2 + 294 * kq ^ 2 + 294 * kq + 73) := by rw [hpe, hqe]; ring
+      rw [hre, add_mul_mod.int 1 _ 2 (by decide)]; decide
+  have hr_odd : (r : ℤ) % 2 = 1
+    by_contra hn1
+    have hr0 : r % 2 = 0 := by by_contra h1; exact hn1 (kubert.odd_nat_to_int r (by have hlt := mod_lt.nat r 2 (by decide); omega))
+    obtain ⟨r0, hr0_eq⟩ := (dvd.iff_exists 2 r (by decide)).mp (shell7.nat_dvd_of_mod_zero 2 r (by decide) hr0)
+    have hre_z : (r : ℤ) = 2 * (r0 : ℤ) := by rw [hr0_eq, cast_mul.int]; simp
+    have hd := div_add_mod.int ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) 2; rw [hpq_odd] at hd
+    set kpq := ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) / 2
+    have hsq_odd : (((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) ^ 2) % 2 = 1
+      have hre : ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) ^ 2 = 1 + 2 * (2 * kpq ^ 2 + 2 * kpq) := by
+        have hx : (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 = 2 * kpq + 1 := by linarith
+        rw [hx]; ring
+      rw [hre, add_mul_mod.int 1 _ 2 (by decide)]; decide
+    have hsq_ev : (((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) ^ 2) % 2 = 0
+      have hre : ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) ^ 2 = 0 + 2 * (2 * (r0 : ℤ) ^ 2 + 10976 * (q : ℤ) ^ 4)
+        have h1 : ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) ^ 2 = (r : ℤ) ^ 2 + 21952 * (q : ℤ) ^ 4 := by rw [← heq]; ring
+        rw [h1, hre_z]; ring
+      rw [hre, add_mul_mod.int 0 _ 2 (by decide)]; decide
+    omega
+  have hdpq := div_add_mod.int ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) 2; rw [hpq_odd] at hdpq
+  have hdr := div_add_mod.int (r : ℤ) 2; rw [hr_odd] at hdr
+  set kpq := ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) / 2
+  set kr := (r : ℤ) / 2
+  set U1z : ℤ := kpq + kr + 1
+  set V1z : ℤ := kpq - kr
+  have hU1_2 : 2 * U1z = (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 + (r : ℤ) := by linarith
+  have hV1_2 : 2 * V1z = (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 - (r : ℤ) := by linarith
+  have hsum_z : U1z + V1z = (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 := by linarith
+  have hU1V1_z : U1z * V1z = 343 * (2 * (q : ℤ)) ^ 4
+    have h4 : 4 * (U1z * V1z) = ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) ^ 2 - (r : ℤ) ^ 2 := by
+      calc 4 * (U1z * V1z) = (2 * U1z) * (2 * V1z) := by ring
+        _ = ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 + (r : ℤ)) * ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 - (r : ℤ)) := by rw [hU1_2, hV1_2]
+        _ = ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) ^ 2 - (r : ℤ) ^ 2 := by ring
+    have hdiff : ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) ^ 2 - (r : ℤ) ^ 2 = 4 * (343 * (2 * (q : ℤ)) ^ 4) := by rw [← heq]; ring
+    linarith
+  have hq_pos_z : (0 : ℤ) < (q : ℤ) := (cast_pos.int q).mpr hq
+  have hq4_pos : (0 : ℤ) < (2 * (q : ℤ)) ^ 4 := by nlinarith [mul_pos.int (q : ℤ) (q : ℤ) hq_pos_z hq_pos_z]
+  have hr_nn : (0 : ℤ) ≤ (r : ℤ) := (cast_le.int 0 r).mpr (by omega)
+  have hU1_pos_z : (0 : ℤ) < U1z := by nlinarith
+  have hV1_pos_z : (0 : ℤ) < V1z := by nlinarith
+  set U1 := nat_of_int U1z; set V1 := nat_of_int V1z
+  have hU1_cast : (U1 : ℤ) = U1z := by rw [U1_def]; exact int_of_nat_of_int U1z (by linarith)
+  have hV1_cast : (V1 : ℤ) = V1z := by rw [V1_def]; exact int_of_nat_of_int V1z (by linarith)
+  have hU1_pos : 0 < U1 := (cast_pos.int U1).mp (by rw [hU1_cast]; exact hU1_pos_z)
+  have hV1_pos : 0 < V1 := (cast_pos.int V1).mp (by rw [hV1_cast]; exact hV1_pos_z)
+  have hU1V1_nat : U1 * V1 = 343 * (2 * q) ^ 4
+    apply (cast_inj.int (U1 * V1) (343 * (2 * q) ^ 4)).mp
+    have hc1 : ((U1 * V1 : ℕ) : ℤ) = U1z * V1z := by rw [cast_mul.int, hU1_cast, hV1_cast]
+    have hc2 : ((343 * (2 * q) ^ 4 : ℕ) : ℤ) = 343 * (2 * (q : ℤ)) ^ 4 := by simp [cast_mul.int, cast_pow.int]
+    rw [hc1, hc2, hU1V1_z]
+  have hcop_U1V1 : nat.coprime_primes U1 V1
+    unfold nat.coprime_primes
+    intro ell hell ⟨heU, heV⟩
+    have hell2 : 2 ≤ ell := hell.1
+    have hd_sum : int_dvd ell ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2)
+      have hdU : int_dvd ell U1z := by rw [← hU1_cast]; exact shell7.int_dvd_of_nat_dvd ell U1 (by omega) heU
+      have hdV : int_dvd ell V1z := by rw [← hV1_cast]; exact shell7.int_dvd_of_nat_dvd ell V1 (by omega) heV
+      rw [← hsum_z]; exact cshell.dvd_add ell U1z V1z hdU hdV
+    have hell_ne2 : ell ≠ 2
+      intro h2; rw [h2] at hd_sum
+      obtain ⟨k2, hk2⟩ := hd_sum
+      have h2c : ((2 : ℕ) : ℤ) = 2 := by decide; rw [h2c] at hk2
+      have hev : ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) % 2 = 0
+        have hre : (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 = 0 + 2 * k2 := by linarith
+        rw [hre, add_mul_mod.int 0 k2 2 (by decide)]; decide
+      omega
+    have hell_UV : ell ∣ (343 * (2 * q) ^ 4) := by rw [← hU1V1_nat]; exact dvd.mul_right_nat ell U1 V1 (by omega) heU
+    obtain h343 | h2q4 := hell.2 343 ((2 * q) ^ 4) hell_UV
+    · have he7 : ell = 7
+        have h343_ : 343 = 7 ^ 3 := by decide; rw [h343_] at h343
+        have h7 := prime_dvd_of_dvd_pow.nat ell 7 3 (is_prime_nat.to_prime ell hell) h343
+        obtain h1 | h2 := (is_prime_nat.to_full 7 is_prime_nat_seven).2 ell h7 <;> omega
+      rw [he7] at hd_sum
+      have h7_p2 : int_dvd 7 (((p ^ 2 : ℕ) : ℤ))
+        rw [cast_pow.int p 2]
+        have h147 : int_dvd 7 (147 * (q : ℤ) ^ 2) := ⟨21 * (q : ℤ) ^ 2, by ring⟩
+        have hs := cshell.dvd_sub 7 ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) (147 * (q : ℤ) ^ 2) hd_sum h147
+        have hre : (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 - 147 * (q : ℤ) ^ 2 = (p : ℤ) ^ 2 := by ring
+        rw [hre] at hs; exact hs
+      exact hn7p (prime_dvd_of_dvd_pow.nat 7 p 2 (is_prime_nat.to_prime 7 is_prime_nat_seven) (shell7.nat_dvd_of_int_dvd 7 (p ^ 2) (by decide) h7_p2))
+    · have h2q := prime_dvd_of_dvd_pow.nat ell (2 * q) 4 (is_prime_nat.to_prime ell hell) h2q4
+      have heq_q : ell ∣ q
+        obtain he2 | heq_ := hell.2 2 q h2q
+        · obtain h1 | h2 := (is_prime_nat.to_full 2 is_prime_nat_two).2 ell he2 <;> omega
+        · exact heq_
+      have he_147q2 : int_dvd ell (147 * (q : ℤ) ^ 2)
+        have hdq := shell7.int_dvd_of_nat_dvd ell q (by omega) heq_q
+        have hdq2 : int_dvd ell ((q : ℤ) ^ 2) := by
+          have hsq : (q : ℤ) ^ 2 = (q : ℤ) * (q : ℤ) := by ring
+          rw [hsq]; exact cshell.dvd_mul_r ell (q : ℤ) (q : ℤ) hdq
+        exact shell7.dvd_mul_l ell 147 ((q : ℤ) ^ 2) hdq2
+      have he_p2 : int_dvd ell (((p ^ 2 : ℕ) : ℤ))
+        rw [cast_pow.int p 2]
+        have hs := cshell.dvd_sub ell ((p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2) (147 * (q : ℤ) ^ 2) hd_sum he_147q2
+        have hre : (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2 - 147 * (q : ℤ) ^ 2 = (p : ℤ) ^ 2 := by ring
+        rw [hre] at hs; exact hs
+      unfold nat.coprime_primes at hcop
+      exact hcop ell hell ⟨prime_dvd_of_dvd_pow.nat ell p 2 (is_prime_nat.to_prime ell hell) (shell7.nat_dvd_of_int_dvd ell (p ^ 2) (by omega) he_p2), heq_q⟩
+  obtain ⟨R, S, hRp, hSp, hcop_RS, hRS_2q, hsplit⟩ := shell7.coprime_split_343_pow4 U1 V1 (2 * q) hU1_pos hV1_pos (by omega) hcop_U1V1 hU1V1_nat
+  have hsym : ∃ a b : ℕ, 0 < a ∧ 0 < b ∧ nat.coprime_primes a b ∧ a * b = 2 * q ∧
+      (a : ℤ) ^ 4 + 343 * (b : ℤ) ^ 4 = (p : ℤ) ^ 2 + 147 * (q : ℤ) ^ 2
+    obtain ⟨hU343, hV4⟩ | ⟨hU4, hV343⟩ := hsplit
+    · use S, R
+      have hUz : U1z = 343 * (R : ℤ) ^ 4 := by rw [← hU1_cast, hU343]; simp [cast_mul.int, cast_pow.int]
+      have hVz : V1z = (S : ℤ) ^ 4 := by rw [← hV1_cast, hV4]; exact cast_pow.int S 4
+      exact ⟨hSp, hRp, nat.coprime_primes_symm R S hcop_RS, by rw [← hRS_2q]; ring, by linarith⟩
+    · use R, S
+      have hUz : U1z = (R : ℤ) ^ 4 := by rw [← hU1_cast, hU4]; exact cast_pow.int R 4
+      have hVz : V1z = 343 * (S : ℤ) ^ 4 := by rw [← hV1_cast, hV343]; simp [cast_mul.int, cast_pow.int]
+      exact ⟨hRp, hSp, hcop_RS, hRS_2q, by linarith⟩
+  obtain ⟨a, b, hap, hbp, hcop_ab, hab_2q, hsum_ab⟩ := hsym
+  have hd2_ab : 2 ∣ (a * b) := nat.dvd_of_mul_eq 2 q (a * b) (by decide) hab_2q
+  obtain h2a | h2b := is_prime_nat_two.2 a b hd2_ab
+  · obtain ⟨a0, ha0⟩ := (dvd.iff_exists 2 a (by decide)).mp h2a
+    have ha0_pos : 0 < a0 := by by_contra h0; have hz : a0 = 0 := by omega; rw [hz] at ha0; omega
+    have ha0b : a0 * b = q
+      apply nat.mul_cancel_left_pos 2 (a0 * b) q (by decide)
+      calc 2 * (a0 * b) = (2 * a0) * b := by ring
+        _ = a * b := by rw [← ha0]
+        _ = 2 * q := hab_2q
+    have hb_odd : b % 2 = 1 := by
+      by_contra h0; unfold nat.coprime_primes at hcop_ab
+      exact hcop_ab 2 is_prime_nat_two ⟨h2a, shell7.nat_dvd_of_mod_zero 2 b (by decide) (by have hlt := mod_lt.nat b 2 (by decide); omega)⟩
+    have hcop_4a0_b : nat.coprime_primes (4 * a0) b
+      unfold nat.coprime_primes
+      intro ell hell ⟨he4a, heb⟩
+      obtain he4 | hea0 := hell.2 4 a0 he4a
+      · have h4 : 4 = 2 ^ 2 := by decide; rw [h4] at he4
+        have he2 := prime_dvd_of_dvd_pow.nat ell 2 2 (is_prime_nat.to_prime ell hell) he4
+        obtain h1 | h2 := (is_prime_nat.to_full 2 is_prime_nat_two).2 ell he2
+        · linarith [hell.1]
+        · rw [h2] at heb; have hm := shell7.nat_mod_zero_of_dvd 2 b heb; omega
+      · unfold nat.coprime_primes at hcop_ab
+        exact hcop_ab ell hell ⟨by rw [ha0]; exact dvd.mul_left_nat ell 2 a0 (by linarith [hell.1]) hea0, heb⟩
+    have hQ1_eq : ((4 * a0 : ℕ) : ℤ) ^ 4 - 147 * ((4 * a0 : ℕ) : ℤ) ^ 2 * (b : ℤ) ^ 2 + 5488 * (b : ℤ) ^ 4 = ((4 * p : ℕ) : ℤ) ^ 2
+      have ha_z : (a : ℤ) = 2 * (a0 : ℤ) := by rw [ha0, cast_mul.int]; simp
+      have hq_z : (q : ℤ) = (a0 : ℤ) * (b : ℤ) := by rw [← ha0b, cast_mul.int]
+      have h4a : ((4 * a0 : ℕ) : ℤ) = 4 * (a0 : ℤ) := by simp [cast_mul.int]
+      have h4p : ((4 * p : ℕ) : ℤ) = 4 * (p : ℤ) := by simp [cast_mul.int]
+      rw [h4a, h4p]; rw [ha_z, hq_z] at hsum_ab
+      have hring : (4 * (a0 : ℤ)) ^ 4 - 147 * (4 * (a0 : ℤ)) ^ 2 * (b : ℤ) ^ 2 + 5488 * (b : ℤ) ^ 4 - (4 * (p : ℤ)) ^ 2 = 16 * (((2 * (a0 : ℤ)) ^ 4 + 343 * (b : ℤ) ^ 4) - ((p : ℤ) ^ 2 + 147 * ((a0 : ℤ) * (b : ℤ)) ^ 2)) := by ring
+      linarith
+    have hb_le : b ≤ q := by have hm := mul_le_mul_of_nonneg_right.nat 1 a0 b (by omega) (by omega); rw [ha0b] at hm; omega
+    exact ⟨4 * a0, b, 4 * p, ⟨by omega, hbp, hcop_4a0_b, hQ1_eq⟩, hb_le⟩
+  · obtain ⟨b0, hb0⟩ := (dvd.iff_exists 2 b (by decide)).mp h2b
+    have hb0_pos : 0 < b0 := by by_contra h0; have hz : b0 = 0 := by omega; rw [hz] at hb0; omega
+    have hab0 : a * b0 = q
+      apply nat.mul_cancel_left_pos 2 (a * b0) q (by decide)
+      calc 2 * (a * b0) = a * (2 * b0) := by ring
+        _ = a * b := by rw [← hb0]
+        _ = 2 * q := hab_2q
+    have hcop_ab0 : nat.coprime_primes a b0
+      unfold nat.coprime_primes
+      intro ell hell ⟨hea, heb0⟩
+      unfold nat.coprime_primes at hcop_ab
+      exact hcop_ab ell hell ⟨hea, by rw [hb0]; exact dvd.mul_left_nat ell 2 b0 (by linarith [hell.1]) heb0⟩
+    have hQ1_eq : (a : ℤ) ^ 4 - 147 * (a : ℤ) ^ 2 * (b0 : ℤ) ^ 2 + 5488 * (b0 : ℤ) ^ 4 = (p : ℤ) ^ 2
+      have hb_z : (b : ℤ) = 2 * (b0 : ℤ) := by rw [hb0, cast_mul.int]; simp
+      have hq_z : (q : ℤ) = (a : ℤ) * (b0 : ℤ) := by rw [← hab0, cast_mul.int]
+      rw [hb_z, hq_z] at hsum_ab
+      have hring : (a : ℤ) ^ 4 - 147 * (a : ℤ) ^ 2 * (b0 : ℤ) ^ 2 + 5488 * (b0 : ℤ) ^ 4 - (p : ℤ) ^ 2 = ((a : ℤ) ^ 4 + 343 * (2 * (b0 : ℤ)) ^ 4) - ((p : ℤ) ^ 2 + 147 * ((a : ℤ) * (b0 : ℤ)) ^ 2) := by ring
+      linarith
+    have hb0_le : b0 ≤ q := by have hm := mul_le_mul_of_nonneg_right.nat 1 a b0 (by omega) (by omega); rw [hab0] at hm; omega
+    exact ⟨a, b0, p, ⟨hap, hb0_pos, hcop_ab0, hQ1_eq⟩, hb0_le⟩
+
+-> shell7.Q1_at_z (z : ℕ) : Prop :=
+  0 < z ∧ ∃ w v : ℕ, shell7.Q1 w z v
+
++ shell7.no_Q1 (w z v : ℕ) (hQ : shell7.Q1 w z v) : False
+  have hz : 0 < z := hQ.2.1
+  have hdesc : ∀ k : ℕ, shell7.Q1_at_z k → ∃ m : ℕ, m < k ∧ shell7.Q1_at_z m
+    intro k hk
+    obtain ⟨_, ⟨w0, v0, hQ0⟩⟩ := hk
+    obtain ⟨a, b, r, hQ2, hb_lt⟩ := shell7.Q1_to_Q2 w0 k v0 hQ0
+    obtain ⟨w1, z1, v1, hQ1, hz1_le⟩ := shell7.Q2_to_Q1 a b r hQ2
+    exact ⟨z1, by omega, ⟨hQ1.2.1, ⟨w1, v1, hQ1⟩⟩⟩
+  exact nat.infinite_descent shell7.Q1_at_z hdesc z ⟨hz, ⟨w, v, hQ⟩⟩
+
+
+-- ====================================================================================
+-- 3. Complete Rational-Point Collapse of S_7 ~= X_0(49), ALL-CASE FLT(7), & Reduction to p >= 11
+-- ====================================================================================
+
++ shell7.E49_no_nonzero_rational_point (rn rd Y : ℕ)
+    (hrn : 0 < rn) (hrd : 0 < rd) (hcop : nat.coprime_primes rn rd)
+    (heq : (rn : ℤ) * (rd : ℤ) * ((rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2) = (Y : ℤ) ^ 2) : False
+  have hquad_pos : (0 : ℤ) < (rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2
+    have h4 : 4 * ((rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2) =
+              (2 * (rn : ℤ) - 147 * (rd : ℤ)) ^ 2 + 343 * (rd : ℤ) ^ 2 := by ring
+    have hrd_z : (0 : ℤ) < (rd : ℤ) := (cast_pos.int rd).mpr hrd
+    nlinarith [mul_pos.int (rd : ℤ) (rd : ℤ) hrd_z hrd_z]
+  set Qz : ℤ := (rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2
+  set Qn : ℕ := nat_of_int Qz
+  have hQ_cast : (Qn : ℤ) = Qz := by rw [Qn_def]; exact int_of_nat_of_int Qz (by linarith)
+  have hQn_pos : 0 < Qn := (cast_pos.int Qn).mp (by rw [hQ_cast]; exact hquad_pos)
+  have heq_nat : rd * (rn * Qn) = Y ^ 2
+    apply (cast_inj.int (rd * (rn * Qn)) (Y ^ 2)).mp
+    have hc1 : ((rd * (rn * Qn) : ℕ) : ℤ) = (rd : ℤ) * ((rn : ℤ) * Qz) := by rw [cast_mul.int, cast_mul.int, hQ_cast]
+    have hc2 : ((Y ^ 2 : ℕ) : ℤ) = (Y : ℤ) ^ 2 := cast_pow.int Y 2
+    rw [hc1, hc2]; linarith
+  have hcop_rd : nat.coprime_primes rd (rn * Qn)
+    unfold nat.coprime_primes
+    intro p hp ⟨hprd, hp_rnQ⟩
+    have hp2 : 2 ≤ p := hp.1
+    obtain hprn | hpQ := hp.2 rn Qn hp_rnQ
+    · unfold nat.coprime_primes at hcop; exact hcop p hp ⟨hprn, hprd⟩
+    · have hdQ : int_dvd p Qz := by rw [← hQ_cast]; exact shell7.int_dvd_of_nat_dvd p Qn (by omega) hpQ
+      have hdrd := shell7.int_dvd_of_nat_dvd p rd (by omega) hprd
+      have hd_tail : int_dvd p (-147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2)
+        have h1 : int_dvd p (-147 * (rn : ℤ) * (rd : ℤ)) := shell7.dvd_mul_l p (-147 * (rn : ℤ)) (rd : ℤ) hdrd
+        have h2 : int_dvd p (5488 * (rd : ℤ) ^ 2) := by
+          have hsq : (rd : ℤ) ^ 2 = (rd : ℤ) * (rd : ℤ) := by ring
+          rw [hsq]; exact shell7.dvd_mul_l p 5488 ((rd : ℤ) * (rd : ℤ)) (cshell.dvd_mul_r p (rd : ℤ) (rd : ℤ) hdrd)
+        exact cshell.dvd_add p _ _ h1 h2
+      have hd_rn2 : int_dvd p (((rn ^ 2 : ℕ) : ℤ))
+        rw [cast_pow.int rn 2]
+        have hs := cshell.dvd_sub p Qz (-147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2) hdQ hd_tail
+        have hre : Qz - (-147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2) = (rn : ℤ) ^ 2 := by rw [Qz_def]; ring
+        rw [hre] at hs; exact hs
+      unfold nat.coprime_primes at hcop
+      exact hcop p hp ⟨prime_dvd_of_dvd_pow.nat p rn 2 (is_prime_nat.to_prime p hp) (shell7.nat_dvd_of_int_dvd p (rn ^ 2) (by omega) hd_rn2), hprd⟩
+  obtain ⟨z, Y1, hzd, hY1⟩ := nat.coprime_mul_eq_sq rd (rn * Qn) Y hrd (mul_pos.nat rn Qn hrn hQn_pos) hcop_rd heq_nat
+  have hz_pos : 0 < z := by by_contra h0; have hz_ : z = 0 := by omega; rw [hz_] at hzd; have h02 : 0 ^ 2 = 0 := by decide; rw [h02] at hzd; omega
+  obtain ⟨a, b, M, hM_pos, hM2, hM7, hrn_split⟩ := shell7.split_two_seven rn hrn
+  have hcop_M : nat.coprime_primes M (2 ^ a * 7 ^ b * Qn)
+    unfold nat.coprime_primes
+    intro p hp ⟨hpM, hp_rest⟩
+    have hp2 : 2 ≤ p := hp.1
+    have hp_ne2 : p ≠ 2 := by intro h2; rw [h2] at hpM; exact hM2 (shell7.nat_mod_zero_of_dvd 2 M hpM)
+    have hp_ne7 : p ≠ 7 := by intro h7; rw [h7] at hpM; exact hM7 (shell7.nat_mod_zero_of_dvd 7 M hpM)
+    obtain hp27 | hpQ := hp.2 (2 ^ a * 7 ^ b) Qn hp_rest
+    · obtain hp2a | hp7b := hp.2 (2 ^ a) (7 ^ b) hp27
+      · have h2 := prime_dvd_of_dvd_pow.nat p 2 a (is_prime_nat.to_prime p hp) hp2a
+        obtain h1 | h2_ := (is_prime_nat.to_full 2 is_prime_nat_two).2 p h2 <;> omega
+      · have h7 := prime_dvd_of_dvd_pow.nat p 7 b (is_prime_nat.to_prime p hp) hp7b
+        obtain h1 | h2_ := (is_prime_nat.to_full 7 is_prime_nat_seven).2 p h7 <;> omega
+    · have hprn : p ∣ rn := by rw [hrn_split]; exact dvd.mul_left_nat p (2 ^ a * 7 ^ b) M (by omega) hpM
+      have hdQ : int_dvd p Qz := by rw [← hQ_cast]; exact shell7.int_dvd_of_nat_dvd p Qn (by omega) hpQ
+      have hdrn := shell7.int_dvd_of_nat_dvd p rn (by omega) hprn
+      have hd_head : int_dvd p ((rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ))
+        have h1 : int_dvd p ((rn : ℤ) ^ 2) := by
+          have hsq : (rn : ℤ) ^ 2 = (rn : ℤ) * (rn : ℤ) := by ring
+          rw [hsq]; exact cshell.dvd_mul_r p (rn : ℤ) (rn : ℤ) hdrn
+        have h2 : int_dvd p (147 * (rn : ℤ) * (rd : ℤ)) := by
+          have hre : 147 * (rn : ℤ) * (rd : ℤ) = (147 * (rd : ℤ)) * (rn : ℤ) := by ring
+          rw [hre]; exact shell7.dvd_mul_l p (147 * (rd : ℤ)) (rn : ℤ) hdrn
+        exact cshell.dvd_sub p _ _ h1 h2
+      have hd_5488 : int_dvd p (((5488 * rd ^ 2 : ℕ) : ℤ))
+        have hc : ((5488 * rd ^ 2 : ℕ) : ℤ) = 5488 * (rd : ℤ) ^ 2 := by simp [cast_mul.int, cast_pow.int]
+        rw [hc]
+        have hs := cshell.dvd_sub p Qz ((rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ)) hdQ hd_head
+        have hre : Qz - ((rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ)) = 5488 * (rd : ℤ) ^ 2 := by rw [Qz_def]; ring
+        rw [hre] at hs; exact hs
+      obtain h5488 | hrd2 := hp.2 5488 (rd ^ 2) (shell7.nat_dvd_of_int_dvd p (5488 * rd ^ 2) (by omega) hd_5488)
+      · have hfac : 5488 = 2 ^ 4 * 7 ^ 3 := by decide; rw [hfac] at h5488
+        obtain h2_ | h7_ := hp.2 (2 ^ 4) (7 ^ 3) h5488
+        · have h2d := prime_dvd_of_dvd_pow.nat p 2 4 (is_prime_nat.to_prime p hp) h2_
+          obtain h1 | h2__ := (is_prime_nat.to_full 2 is_prime_nat_two).2 p h2d <;> omega
+        · have h7d := prime_dvd_of_dvd_pow.nat p 7 3 (is_prime_nat.to_prime p hp) h7_
+          obtain h1 | h7__ := (is_prime_nat.to_full 7 is_prime_nat_seven).2 p h7d <;> omega
+      · unfold nat.coprime_primes at hcop
+        exact hcop p hp ⟨hprn, prime_dvd_of_dvd_pow.nat p rd 2 (is_prime_nat.to_prime p hp) hrd2⟩
+  have hM_prod : M * (2 ^ a * 7 ^ b * Qn) = Y1 ^ 2 := by
+    calc M * (2 ^ a * 7 ^ b * Qn) = (2 ^ a * 7 ^ b * M) * Qn := by ring
+      _ = rn * Qn := by rw [← hrn_split]
+      _ = Y1 ^ 2 := hY1
+  have h27Q_pos : 0 < 2 ^ a * 7 ^ b * Qn :=
+    mul_pos.nat (2 ^ a * 7 ^ b) Qn (mul_pos.nat (2 ^ a) (7 ^ b) (pow_pos.nat 2 a (by decide)) (pow_pos.nat 7 b (by decide))) hQn_pos
+  obtain ⟨m0, _, hm0_sq, _⟩ := nat.coprime_mul_eq_sq M (2 ^ a * 7 ^ b * Qn) Y1 hM_pos h27Q_pos hcop_M hM_prod
+  obtain ⟨r2, q2, hr2, h2a_eq⟩ := shell7.pow_parity_decomp 2 a
+  obtain ⟨r7, q7, hr7, h7b_eq⟩ := shell7.pow_parity_decomp 7 b
+  set w := q2 * q7 * m0
+  set d := r2 * r7
+  have hrn_dw2 : rn = d * w ^ 2 := by
+    calc rn = 2 ^ a * 7 ^ b * M := hrn_split
+      _ = (r2 * q2 ^ 2) * (r7 * q7 ^ 2) * m0 ^ 2 := by rw [h2a_eq, h7b_eq, hm0_sq]
+      _ = d * w ^ 2 := by rw [w_def, d_def]; ring
+  have hw_pos : 0 < w := by by_contra h0; have hw0 : w = 0 := by omega; rw [hw0] at hrn_dw2; have h02 : 0 ^ 2 = 0 := by decide; rw [h02] at hrn_dw2; omega
+  have hcop_wz : nat.coprime_primes w z
+    unfold nat.coprime_primes
+    intro p hp ⟨hpw, hpz⟩
+    have hp_rn : p ∣ rn := by
+      rw [hrn_dw2]
+      exact dvd.mul_left_nat p d (w ^ 2) (by linarith [hp.1]) (dvd.mul_right_nat p w w (by linarith [hp.1]) hpw)
+    have hp_rd : p ∣ rd := by rw [hzd]; exact dvd.mul_right_nat p z z (by linarith [hp.1]) hpz
+    unfold nat.coprime_primes at hcop; exact hcop p hp ⟨hp_rn, hp_rd⟩
+  have hmain_z : (d : ℤ) * (w : ℤ) ^ 2 * (((d : ℤ) * (w : ℤ) ^ 2) ^ 2 - 147 * ((d : ℤ) * (w : ℤ) ^ 2) * ((z : ℤ) ^ 2) + 5488 * ((z : ℤ) ^ 2) ^ 2) = (Y1 : ℤ) ^ 2
+    have hrn_z : (rn : ℤ) = (d : ℤ) * (w : ℤ) ^ 2 := by rw [hrn_dw2]; simp [cast_mul.int, cast_pow.int]
+    have hrd_z : (rd : ℤ) = (z : ℤ) ^ 2 := by rw [hzd]; exact cast_pow.int z 2
+    have hY1_z : (rn : ℤ) * Qz = (Y1 : ℤ) ^ 2 := by
+      have hc : ((rn * Qn : ℕ) : ℤ) = ((Y1 ^ 2 : ℕ) : ℤ) := by rw [hY1]
+      rw [cast_mul.int, hQ_cast, cast_pow.int] at hc; exact hc
+    rw [← hrn_z, ← hrd_z, ← Qz_def]; exact hY1_z
+  have hY1_pos : 0 < Y1 := by by_contra h0; have hz_ : Y1 = 0 := by omega; rw [hz_] at hY1; have hpos := mul_pos.nat rn Qn hrn hQn_pos; have h02 : 0 ^ 2 = 0 := by decide; rw [h02] at hY1; omega
+  have hw_Y1 : w ∣ Y1
+    have hw2_Y12 : w ^ 2 ∣ Y1 ^ 2
+      rw [← hY1, hrn_dw2]
+      exact nat.dvd_of_mul_eq (w ^ 2) (d * Qn) (d * w ^ 2 * Qn) (pow_pos.nat w 2 hw_pos) (by ring)
+    obtain ⟨a1, b1, g, ha1p, hb1p, hgp, hcop1, hY1e, hwe⟩ := shell7.reduce_ratio_coprime Y1 w hY1_pos hw_pos
+    have hb1_eq1 : b1 = 1
+      by_contra hne1
+      set p := min_fac b1
+      have hp : is_prime_nat p := by rw [p_def]; exact prime.to_is_prime_nat (min_fac b1) (min_fac.prime b1 (by omega))
+      have hpb1 : p ∣ b1 := by rw [p_def]; exact (min_fac.spec b1 (by omega)).2.2.1
+      have hpa12 : p ∣ (a1 ^ 2)
+        obtain ⟨k0, hk0⟩ := (dvd.iff_exists (w ^ 2) (Y1 ^ 2) (pow_pos.nat w 2 hw_pos)).mp hw2_Y12
+        have hcancel : a1 ^ 2 = b1 ^ 2 * k0
+          apply nat.mul_cancel_left_pos (g ^ 2) (a1 ^ 2) (b1 ^ 2 * k0) (pow_pos.nat g 2 hgp)
+          calc g ^ 2 * a1 ^ 2 = (g * a1) ^ 2 := by ring
+            _ = Y1 ^ 2 := by rw [← hY1e]
+            _ = w ^ 2 * k0 := hk0
+            _ = (g * b1) ^ 2 * k0 := by rw [hwe]
+            _ = g ^ 2 * (b1 ^ 2 * k0) := by ring
+        obtain ⟨q1, hq1⟩ := (dvd.iff_exists p b1 (by linarith [hp.1])).mp hpb1
+        exact nat.dvd_of_mul_eq p (p * q1 ^ 2 * k0) (a1 ^ 2) (by linarith [hp.1]) (by rw [hcancel, hq1]; ring)
+      unfold nat.coprime_primes at hcop1
+      exact hcop1 p hp ⟨prime_dvd_of_dvd_pow.nat p a1 2 (is_prime_nat.to_prime p hp) hpa12, hpb1⟩
+    rw [hb1_eq1] at hwe
+    exact nat.dvd_of_mul_eq w a1 Y1 hw_pos (by rw [hY1e, hwe]; ring)
+  obtain ⟨v, hv_eq⟩ := (dvd.iff_exists w Y1 hw_pos).mp hw_Y1
+  have hv_main : (d : ℤ) * ((d : ℤ) ^ 2 * (w : ℤ) ^ 4 - 147 * (d : ℤ) * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4) = (v : ℤ) ^ 2
+    have hY1_z : (Y1 : ℤ) = (w : ℤ) * (v : ℤ) := by rw [hv_eq, cast_mul.int]
+    have hw2_pos : (0 : ℤ) < (w : ℤ) ^ 2 := mul_pos.int (w : ℤ) (w : ℤ) ((cast_pos.int w).mpr hw_pos) ((cast_pos.int w).mpr hw_pos)
+    have hdiff : (w : ℤ) ^ 2 * ((d : ℤ) * ((d : ℤ) ^ 2 * (w : ℤ) ^ 4 - 147 * (d : ℤ) * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4) - (v : ℤ) ^ 2) = 0
+      have hring : (w : ℤ) ^ 2 * ((d : ℤ) * ((d : ℤ) ^ 2 * (w : ℤ) ^ 4 - 147 * (d : ℤ) * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4) - (v : ℤ) ^ 2) = (d : ℤ) * (w : ℤ) ^ 2 * (((d : ℤ) * (w : ℤ) ^ 2) ^ 2 - 147 * ((d : ℤ) * (w : ℤ) ^ 2) * ((z : ℤ) ^ 2) + 5488 * ((z : ℤ) ^ 2) ^ 2) - ((w : ℤ) * (v : ℤ)) ^ 2 := by ring
+      rw [hY1_z] at hmain_z; linarith
+    obtain h1 | h2 := shell7.int_mul_eq_zero ((w : ℤ) ^ 2) _ hdiff
+    · linarith
+    · linarith
+  -- Dispatch the 4 cases d = r2 * r7 ∈ {1, 2, 7, 14}!
+  obtain hr2_1 | hr2_2 := hr2
+  · obtain hr7_1 | hr7_7 := hr7
+    · have hd1 : (d : ℤ) = 1 := by rw [d_def, hr2_1, hr7_1]; decide
+      rw [hd1] at hv_main
+      have hQ1_eq : (w : ℤ) ^ 4 - 147 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4 = (v : ℤ) ^ 2
+        have h1 : (w : ℤ) ^ 4 - 147 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4 = 1 * (1 ^ 2 * (w : ℤ) ^ 4 - 147 * 1 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4) := by ring
+        linarith
+      exact shell7.no_Q1 w z v ⟨hw_pos, hz_pos, hcop_wz, hQ1_eq⟩
+    · have hd7 : (d : ℤ) = 7 := by rw [d_def, hr2_1, hr7_7]; decide
+      rw [hd7] at hv_main
+      have h7v : 7 ∣ v
+        apply prime_dvd_of_dvd_pow.nat 7 v 2 (is_prime_nat.to_prime 7 is_prime_nat_seven)
+        apply shell7.nat_dvd_of_int_dvd 7 (v ^ 2) (by decide)
+        rw [cast_pow.int v 2]
+        exact ⟨49 * (w : ℤ) ^ 4 - 1029 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4, by rw [← hv_main]; ring⟩
+      obtain ⟨v1, hv1⟩ := (dvd.iff_exists 7 v (by decide)).mp h7v
+      have hv1z : (v : ℤ) = 7 * (v1 : ℤ) := by rw [hv1, cast_mul.int]; simp
+      have heq1 : 7 * ((w : ℤ) ^ 4 - 21 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4) = (v1 : ℤ) ^ 2
+        have h49 : 49 * (7 * ((w : ℤ) ^ 4 - 21 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4) - (v1 : ℤ) ^ 2) = 7 * (7 ^ 2 * (w : ℤ) ^ 4 - 147 * 7 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4) - (7 * (v1 : ℤ)) ^ 2 := by ring
+        rw [hv1z] at hv_main; linarith
+      have h7v1 : 7 ∣ v1
+        apply prime_dvd_of_dvd_pow.nat 7 v1 2 (is_prime_nat.to_prime 7 is_prime_nat_seven)
+        apply shell7.nat_dvd_of_int_dvd 7 (v1 ^ 2) (by decide)
+        rw [cast_pow.int v1 2]
+        exact ⟨(w : ℤ) ^ 4 - 21 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4, by rw [← heq1]; ring⟩
+      obtain ⟨v2, hv2⟩ := (dvd.iff_exists 7 v1 (by decide)).mp h7v1
+      have hv2z : (v1 : ℤ) = 7 * (v2 : ℤ) := by rw [hv2, cast_mul.int]; simp
+      have h7w : 7 ∣ w
+        apply prime_dvd_of_dvd_pow.nat 7 w 4 (is_prime_nat.to_prime 7 is_prime_nat_seven)
+        apply shell7.nat_dvd_of_int_dvd 7 (w ^ 4) (by decide)
+        rw [cast_pow.int w 4]
+        use (v2 : ℤ) ^ 2 + 3 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 - 16 * (z : ℤ) ^ 4
+        have h7r : 7 * ((w : ℤ) ^ 4 - 7 * ((v2 : ℤ) ^ 2 + 3 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 - 16 * (z : ℤ) ^ 4)) = 7 * ((w : ℤ) ^ 4 - 21 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4) - (7 * (v2 : ℤ)) ^ 2 := by ring
+        rw [hv2z] at heq1; linarith
+      obtain ⟨w1, hw1⟩ := (dvd.iff_exists 7 w (by decide)).mp h7w
+      have hw1_pos : 0 < w1 := by by_contra h0; have hz_ : w1 = 0 := by omega; rw [hz_] at hw1; omega
+      have hw1z : (w : ℤ) = 7 * (w1 : ℤ) := by rw [hw1, cast_mul.int]; simp
+      have hswap : 16 * (z : ℤ) ^ 4 - 147 * (z : ℤ) ^ 2 * (w1 : ℤ) ^ 2 + 343 * (w1 : ℤ) ^ 4 = (v2 : ℤ) ^ 2
+        have h49 : 49 * ((16 * (z : ℤ) ^ 4 - 147 * (z : ℤ) ^ 2 * (w1 : ℤ) ^ 2 + 343 * (w1 : ℤ) ^ 4) - (v2 : ℤ) ^ 2) = 7 * ((7 * (w1 : ℤ)) ^ 4 - 21 * (7 * (w1 : ℤ)) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4) - (7 * (v2 : ℤ)) ^ 2 := by ring
+        rw [hv2z, hw1z] at heq1; linarith
+      have hcop_zw1 : nat.coprime_primes z w1
+        unfold nat.coprime_primes
+        intro p hp ⟨hpz, hpw1⟩
+        unfold nat.coprime_primes at hcop_wz
+        exact hcop_wz p hp ⟨by rw [hw1]; exact dvd.mul_left_nat p 7 w1 (by linarith [hp.1]) hpw1, hpz⟩
+      by_cases hw1_ev : w1 % 2 = 0
+      · obtain ⟨w2, hw2⟩ := (dvd.iff_exists 2 w1 (by decide)).mp (shell7.nat_dvd_of_mod_zero 2 w1 (by decide) hw1_ev)
+        have hw2_pos : 0 < w2 := by by_contra h0; have hz_ : w2 = 0 := by omega; rw [hz_] at hw2; omega
+        have hw2z : (w1 : ℤ) = 2 * (w2 : ℤ) := by rw [hw2, cast_mul.int]; simp
+        have hcop_zw2 : nat.coprime_primes z w2
+          unfold nat.coprime_primes
+          intro p hp ⟨hpz, hpw2⟩
+          unfold nat.coprime_primes at hcop_zw1
+          exact hcop_zw1 p hp ⟨hpz, by rw [hw2]; exact dvd.mul_left_nat p 2 w2 (by linarith [hp.1]) hpw2⟩
+        by_cases hw2_ev : w2 % 2 = 0
+        · obtain ⟨w3, hw3⟩ := (dvd.iff_exists 2 w2 (by decide)).mp (shell7.nat_dvd_of_mod_zero 2 w2 (by decide) hw2_ev)
+          have hw3_pos : 0 < w3 := by by_contra h0; have hz_ : w3 = 0 := by omega; rw [hz_] at hw3; omega
+          have hw3z : (w2 : ℤ) = 2 * (w3 : ℤ) := by rw [hw3, cast_mul.int]; simp
+          have h2v2 : 2 ∣ v2
+            apply prime_dvd_of_dvd_pow.nat 2 v2 2 (is_prime_nat.to_prime 2 is_prime_nat_two)
+            apply shell7.nat_dvd_of_int_dvd 2 (v2 ^ 2) (by decide)
+            rw [cast_pow.int v2 2]
+            use 8 * (z : ℤ) ^ 4 - 1176 * (z : ℤ) ^ 2 * (w3 : ℤ) ^ 2 + 43904 * (w3 : ℤ) ^ 4
+            rw [← hswap, hw2z, hw3z]; ring
+          obtain ⟨v3, hv3⟩ := (dvd.iff_exists 2 v2 (by decide)).mp h2v2
+          have hv3z : (v2 : ℤ) = 2 * (v3 : ℤ) := by rw [hv3, cast_mul.int]; simp
+          have h2v3 : 2 ∣ v3
+            apply prime_dvd_of_dvd_pow.nat 2 v3 2 (is_prime_nat.to_prime 2 is_prime_nat_two)
+            apply shell7.nat_dvd_of_int_dvd 2 (v3 ^ 2) (by decide)
+            rw [cast_pow.int v3 2]
+            use 2 * (z : ℤ) ^ 4 - 294 * (z : ℤ) ^ 2 * (w3 : ℤ) ^ 2 + 10976 * (w3 : ℤ) ^ 4
+            have h4 : 4 * ((v3 : ℤ) ^ 2 - 2 * (2 * (z : ℤ) ^ 4 - 294 * (z : ℤ) ^ 2 * (w3 : ℤ) ^ 2 + 10976 * (w3 : ℤ) ^ 4)) = (2 * (v3 : ℤ)) ^ 2 - (16 * (z : ℤ) ^ 4 - 147 * (z : ℤ) ^ 2 * (2 * (2 * (w3 : ℤ))) ^ 2 + 343 * (2 * (2 * (w3 : ℤ))) ^ 4) := by ring
+            rw [hw2z, hw3z, hv3z] at hswap; linarith
+          obtain ⟨v4, hv4⟩ := (dvd.iff_exists 2 v3 (by decide)).mp h2v3
+          have hv4z : (v3 : ℤ) = 2 * (v4 : ℤ) := by rw [hv4, cast_mul.int]; simp
+          have hcop_zw3 : nat.coprime_primes z w3
+            unfold nat.coprime_primes
+            intro p hp ⟨hpz, hpw3⟩
+            unfold nat.coprime_primes at hcop_zw2
+            exact hcop_zw2 p hp ⟨hpz, by rw [hw3]; exact dvd.mul_left_nat p 2 w3 (by linarith [hp.1]) hpw3⟩
+          have hQ1_eq : (z : ℤ) ^ 4 - 147 * (z : ℤ) ^ 2 * (w3 : ℤ) ^ 2 + 5488 * (w3 : ℤ) ^ 4 = (v4 : ℤ) ^ 2
+            have h16 : 16 * ((z : ℤ) ^ 4 - 147 * (z : ℤ) ^ 2 * (w3 : ℤ) ^ 2 + 5488 * (w3 : ℤ) ^ 4 - (v4 : ℤ) ^ 2) = (16 * (z : ℤ) ^ 4 - 147 * (z : ℤ) ^ 2 * (2 * (2 * (w3 : ℤ))) ^ 2 + 343 * (2 * (2 * (w3 : ℤ))) ^ 4) - (2 * (2 * (v4 : ℤ))) ^ 2 := by ring
+            rw [hw2z, hw3z, hv3z, hv4z] at hswap; linarith
+          exact shell7.no_Q1 z w3 v4 ⟨hz_pos, hw3_pos, hcop_zw3, hQ1_eq⟩
+        · have hcop_2z_w2 : nat.coprime_primes (2 * z) w2
+            unfold nat.coprime_primes
+            intro p hp ⟨hp2z, hpw2⟩
+            obtain hp2_ | hpz := hp.2 2 z hp2z
+            · obtain h1 | h2 := (is_prime_nat.to_full 2 is_prime_nat_two).2 p hp2_
+              · linarith [hp.1]
+              · rw [h2] at hpw2; exact hw2_ev (shell7.nat_mod_zero_of_dvd 2 w2 hpw2)
+            · unfold nat.coprime_primes at hcop_zw2; exact hcop_zw2 p hp ⟨hpz, hpw2⟩
+          have hQ1_eq : ((2 * z : ℕ) : ℤ) ^ 4 - 147 * ((2 * z : ℕ) : ℤ) ^ 2 * (w2 : ℤ) ^ 2 + 5488 * (w2 : ℤ) ^ 4 = (v2 : ℤ) ^ 2
+            have h2z : ((2 * z : ℕ) : ℤ) = 2 * (z : ℤ) := by simp [cast_mul.int]
+            rw [h2z]; rw [hw2z] at hswap
+            have hring : (2 * (z : ℤ)) ^ 4 - 147 * (2 * (z : ℤ)) ^ 2 * (w2 : ℤ) ^ 2 + 5488 * (w2 : ℤ) ^ 4 = 16 * (z : ℤ) ^ 4 - 147 * (z : ℤ) ^ 2 * (2 * (w2 : ℤ)) ^ 2 + 343 * (2 * (w2 : ℤ)) ^ 4 := by ring
+            linarith
+          exact shell7.no_Q1 (2 * z) w2 v2 ⟨by omega, hw2_pos, hcop_2z_w2, hQ1_eq⟩
+      · have hcop_4z_w1 : nat.coprime_primes (4 * z) w1
+          unfold nat.coprime_primes
+          intro p hp ⟨hp4z, hpw1⟩
+          obtain hp4_ | hpz := hp.2 4 z hp4z
+          · have h4 : 4 = 2 ^ 2 := by decide; rw [h4] at hp4_
+            have hp2_ := prime_dvd_of_dvd_pow.nat p 2 2 (is_prime_nat.to_prime p hp) hp4_
+            obtain h1 | h2 := (is_prime_nat.to_full 2 is_prime_nat_two).2 p hp2_
+            · linarith [hp.1]
+            · rw [h2] at hpw1; exact hw1_ev (shell7.nat_mod_zero_of_dvd 2 w1 hpw1)
+          · unfold nat.coprime_primes at hcop_zw1; exact hcop_zw1 p hp ⟨hpz, hpw1⟩
+        have hQ1_eq : ((4 * z : ℕ) : ℤ) ^ 4 - 147 * ((4 * z : ℕ) : ℤ) ^ 2 * (w1 : ℤ) ^ 2 + 5488 * (w1 : ℤ) ^ 4 = ((4 * v2 : ℕ) : ℤ) ^ 2
+          have h4z : ((4 * z : ℕ) : ℤ) = 4 * (z : ℤ) := by simp [cast_mul.int]
+          have h4v : ((4 * v2 : ℕ) : ℤ) = 4 * (v2 : ℤ) := by simp [cast_mul.int]
+          rw [h4z, h4v]
+          have h16 : (4 * (z : ℤ)) ^ 4 - 147 * (4 * (z : ℤ)) ^ 2 * (w1 : ℤ) ^ 2 + 5488 * (w1 : ℤ) ^ 4 - (4 * (v2 : ℤ)) ^ 2 = 16 * ((16 * (z : ℤ) ^ 4 - 147 * (z : ℤ) ^ 2 * (w1 : ℤ) ^ 2 + 343 * (w1 : ℤ) ^ 4) - (v2 : ℤ) ^ 2) := by ring
+          linarith
+        exact shell7.no_Q1 (4 * z) w1 (4 * v2) ⟨by omega, hw1_pos, hcop_4z_w1, hQ1_eq⟩
+  · obtain hr7_1 | hr7_7 := hr7
+    · have hd2 : (d : ℤ) = 2 := by rw [d_def, hr2_2, hr7_1]; decide
+      rw [hd2] at hv_main
+      have h2v : 2 ∣ v
+        apply prime_dvd_of_dvd_pow.nat 2 v 2 (is_prime_nat.to_prime 2 is_prime_nat_two)
+        apply shell7.nat_dvd_of_int_dvd 2 (v ^ 2) (by decide)
+        rw [cast_pow.int v 2]
+        exact ⟨4 * (w : ℤ) ^ 4 - 294 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4, by rw [← hv_main]; ring⟩
+      obtain ⟨v1, hv1⟩ := (dvd.iff_exists 2 v (by decide)).mp h2v
+      have hv1z : (v : ℤ) = 2 * (v1 : ℤ) := by rw [hv1, cast_mul.int]; simp
+      have hd2_eq : 2 * (w : ℤ) ^ 4 - 147 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 2744 * (z : ℤ) ^ 4 = (v1 : ℤ) ^ 2
+        have h4 : 4 * (2 * (w : ℤ) ^ 4 - 147 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 2744 * (z : ℤ) ^ 4 - (v1 : ℤ) ^ 2) = 2 * (2 ^ 2 * (w : ℤ) ^ 4 - 147 * 2 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4) - (2 * (v1 : ℤ)) ^ 2 := by ring
+        rw [hv1z] at hv_main; linarith
+      exact shell7.no_d2_quartic w z v1 hcop_wz hd2_eq
+    · have hd14 : (d : ℤ) = 14 := by rw [d_def, hr2_2, hr7_7]; decide
+      rw [hd14] at hv_main
+      have h7v : 7 ∣ v
+        apply prime_dvd_of_dvd_pow.nat 7 v 2 (is_prime_nat.to_prime 7 is_prime_nat_seven)
+        apply shell7.nat_dvd_of_int_dvd 7 (v ^ 2) (by decide)
+        rw [cast_pow.int v 2]
+        exact ⟨2 * (196 * (w : ℤ) ^ 4 - 2058 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4), by rw [← hv_main]; ring⟩
+      obtain ⟨v1, hv1⟩ := (dvd.iff_exists 7 v (by decide)).mp h7v
+      have hv1z : (v : ℤ) = 7 * (v1 : ℤ) := by rw [hv1, cast_mul.int]; simp
+      have heq1 : 14 * (4 * (w : ℤ) ^ 4 - 42 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4) = (v1 : ℤ) ^ 2
+        have h49 : 49 * (14 * (4 * (w : ℤ) ^ 4 - 42 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4) - (v1 : ℤ) ^ 2) = 14 * (14 ^ 2 * (w : ℤ) ^ 4 - 147 * 14 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 5488 * (z : ℤ) ^ 4) - (7 * (v1 : ℤ)) ^ 2 := by ring
+        rw [hv1z] at hv_main; linarith
+      have h7v1 : 7 ∣ v1
+        apply prime_dvd_of_dvd_pow.nat 7 v1 2 (is_prime_nat.to_prime 7 is_prime_nat_seven)
+        apply shell7.nat_dvd_of_int_dvd 7 (v1 ^ 2) (by decide)
+        rw [cast_pow.int v1 2]
+        exact ⟨2 * (4 * (w : ℤ) ^ 4 - 42 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4), by rw [← heq1]; ring⟩
+      obtain ⟨v2, hv2⟩ := (dvd.iff_exists 7 v1 (by decide)).mp h7v1
+      have hv2z : (v1 : ℤ) = 7 * (v2 : ℤ) := by rw [hv2, cast_mul.int]; simp
+      have h7w : 7 ∣ w
+        have h7_8w4 : 7 ∣ (8 * w ^ 4)
+          apply shell7.nat_dvd_of_int_dvd 7 (8 * w ^ 4) (by decide)
+          have hc : ((8 * w ^ 4 : ℕ) : ℤ) = 8 * (w : ℤ) ^ 4 := by simp [cast_mul.int, cast_pow.int]
+          rw [hc]
+          use (v2 : ℤ) ^ 2 + 12 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 - 32 * (z : ℤ) ^ 4
+          have h7r : 7 * (8 * (w : ℤ) ^ 4 - 7 * ((v2 : ℤ) ^ 2 + 12 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 - 32 * (z : ℤ) ^ 4)) = 14 * (4 * (w : ℤ) ^ 4 - 42 * (w : ℤ) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4) - (7 * (v2 : ℤ)) ^ 2 := by ring
+          rw [hv2z] at heq1; linarith
+        obtain h78 | h7w4 := is_prime_nat_seven.2 8 (w ^ 4) h7_8w4
+        · exfalso
+          have hn : ¬ (7 ∣ 8) := by decide
+          exact hn h78
+        · exact prime_dvd_of_dvd_pow.nat 7 w 4 (is_prime_nat.to_prime 7 is_prime_nat_seven) h7w4
+      obtain ⟨w1, hw1⟩ := (dvd.iff_exists 7 w (by decide)).mp h7w
+      have hw1z : (w : ℤ) = 7 * (w1 : ℤ) := by rw [hw1, cast_mul.int]; simp
+      have h2v2 : 2 ∣ v2
+        apply prime_dvd_of_dvd_pow.nat 2 v2 2 (is_prime_nat.to_prime 2 is_prime_nat_two)
+        apply shell7.nat_dvd_of_int_dvd 2 (v2 ^ 2) (by decide)
+        rw [cast_pow.int v2 2]
+        use 1372 * (w1 : ℤ) ^ 4 - 294 * (w1 : ℤ) ^ 2 * (z : ℤ) ^ 2 + 16 * (z : ℤ) ^ 4
+        have h49 : 49 * ((v2 : ℤ) ^ 2 - 2 * (1372 * (w1 : ℤ) ^ 4 - 294 * (w1 : ℤ) ^ 2 * (z : ℤ) ^ 2 + 16 * (z : ℤ) ^ 4)) = (7 * (v2 : ℤ)) ^ 2 - 14 * (4 * (7 * (w1 : ℤ)) ^ 4 - 42 * (7 * (w1 : ℤ)) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4) := by ring
+        rw [hv2z, hw1z] at heq1; linarith
+      obtain ⟨v3, hv3⟩ := (dvd.iff_exists 2 v2 (by decide)).mp h2v2
+      have hv3z : (v2 : ℤ) = 2 * (v3 : ℤ) := by rw [hv3, cast_mul.int]; simp
+      have hcop_zw1 : nat.coprime_primes z w1
+        unfold nat.coprime_primes
+        intro p hp ⟨hpz, hpw1⟩
+        unfold nat.coprime_primes at hcop_wz
+        exact hcop_wz p hp ⟨by rw [hw1]; exact dvd.mul_left_nat p 7 w1 (by linarith [hp.1]) hpw1, hpz⟩
+      have hmid : 686 * (w1 : ℤ) ^ 4 - 147 * (w1 : ℤ) ^ 2 * (z : ℤ) ^ 2 + 8 * (z : ℤ) ^ 4 = (v3 : ℤ) ^ 2
+        have h196 : 196 * (686 * (w1 : ℤ) ^ 4 - 147 * (w1 : ℤ) ^ 2 * (z : ℤ) ^ 2 + 8 * (z : ℤ) ^ 4 - (v3 : ℤ) ^ 2) = 14 * (4 * (7 * (w1 : ℤ)) ^ 4 - 42 * (7 * (w1 : ℤ)) ^ 2 * (z : ℤ) ^ 2 + 112 * (z : ℤ) ^ 4) - (7 * (2 * (v3 : ℤ))) ^ 2 := by ring
+        rw [hv2z, hv3z, hw1z] at heq1; linarith
+      by_cases hw1_ev : w1 % 2 = 0
+      · obtain ⟨w2, hw2⟩ := (dvd.iff_exists 2 w1 (by decide)).mp (shell7.nat_dvd_of_mod_zero 2 w1 (by decide) hw1_ev)
+        have hw2z : (w1 : ℤ) = 2 * (w2 : ℤ) := by rw [hw2, cast_mul.int]; simp
+        have h2v3 : 2 ∣ v3
+          apply prime_dvd_of_dvd_pow.nat 2 v3 2 (is_prime_nat.to_prime 2 is_prime_nat_two)
+          apply shell7.nat_dvd_of_int_dvd 2 (v3 ^ 2) (by decide)
+          rw [cast_pow.int v3 2]
+          use 5488 * (w2 : ℤ) ^ 4 - 294 * (w2 : ℤ) ^ 2 * (z : ℤ) ^ 2 + 4 * (z : ℤ) ^ 4
+          rw [← hmid, hw2z]; ring
+        obtain ⟨v4, hv4⟩ := (dvd.iff_exists 2 v3 (by decide)).mp h2v3
+        have hv4z : (v3 : ℤ) = 2 * (v4 : ℤ) := by rw [hv4, cast_mul.int]; simp
+        have hcop_zw2 : nat.coprime_primes z w2
+          unfold nat.coprime_primes
+          intro p hp ⟨hpz, hpw2⟩
+          unfold nat.coprime_primes at hcop_zw1
+          exact hcop_zw1 p hp ⟨hpz, by rw [hw2]; exact dvd.mul_left_nat p 2 w2 (by linarith [hp.1]) hpw2⟩
+        have hd2_eq : 2 * (z : ℤ) ^ 4 - 147 * (z : ℤ) ^ 2 * (w2 : ℤ) ^ 2 + 2744 * (w2 : ℤ) ^ 4 = (v4 : ℤ) ^ 2
+          have h4 : 4 * (2 * (z : ℤ) ^ 4 - 147 * (z : ℤ) ^ 2 * (w2 : ℤ) ^ 2 + 2744 * (w2 : ℤ) ^ 4 - (v4 : ℤ) ^ 2) = (686 * (2 * (w2 : ℤ)) ^ 4 - 147 * (2 * (w2 : ℤ)) ^ 2 * (z : ℤ) ^ 2 + 8 * (z : ℤ) ^ 4) - (2 * (v4 : ℤ)) ^ 2 := by ring
+          rw [hw2z, hv4z] at hmid; linarith
+        exact shell7.no_d2_quartic z w2 v4 hcop_zw2 hd2_eq
+      · have hcop_2z_w1 : nat.coprime_primes (2 * z) w1
+          unfold nat.coprime_primes
+          intro p hp ⟨hp2z, hpw1⟩
+          obtain hp2_ | hpz := hp.2 2 z hp2z
+          · obtain h1 | h2 := (is_prime_nat.to_full 2 is_prime_nat_two).2 p hp2_
+            · linarith [hp.1]
+            · rw [h2] at hpw1; exact hw1_ev (shell7.nat_mod_zero_of_dvd 2 w1 hpw1)
+          · unfold nat.coprime_primes at hcop_zw1; exact hcop_zw1 p hp ⟨hpz, hpw1⟩
+        have hd2_eq : 2 * ((2 * z : ℕ) : ℤ) ^ 4 - 147 * ((2 * z : ℕ) : ℤ) ^ 2 * (w1 : ℤ) ^ 2 + 2744 * (w1 : ℤ) ^ 4 = ((2 * v3 : ℕ) : ℤ) ^ 2
+          have h2z : ((2 * z : ℕ) : ℤ) = 2 * (z : ℤ) := by simp [cast_mul.int]
+          have h2v : ((2 * v3 : ℕ) : ℤ) = 2 * (v3 : ℤ) := by simp [cast_mul.int]
+          rw [h2z, h2v]
+          have h4 : 2 * (2 * (z : ℤ)) ^ 4 - 147 * (2 * (z : ℤ)) ^ 2 * (w1 : ℤ) ^ 2 + 2744 * (w1 : ℤ) ^ 4 - (2 * (v3 : ℤ)) ^ 2 = 4 * ((686 * (w1 : ℤ) ^ 4 - 147 * (w1 : ℤ) ^ 2 * (z : ℤ) ^ 2 + 8 * (z : ℤ) ^ 4) - (v3 : ℤ) ^ 2) := by ring
+          linarith
+        exact shell7.no_d2_quartic (2 * z) w1 (2 * v3) hcop_2z_w1 hd2_eq
+
++ shell7.lame_to_E49_identity (A B M : ℤ) :
+    (7 * M * (2 * B - A ^ 2)) ^ 2 - 7 * M * A * (28 * M ^ 2 - 21 * A ^ 3 * M + 4 * A ^ 6) =
+    28 * M * (7 * M * (B ^ 2 - A ^ 2 * B + A ^ 4 - A * M) - A ^ 7)
+  ring
+
++ shell7.lame_in_ABM (x y z : ℤ) :
+    (x + y + z) ^ 7 - (x ^ 7 + y ^ 7 + z ^ 7) =
+    7 * ((x + y) * (y + z) * (z + x)) *
+      ((x * y + y * z + z * x) ^ 2 - (x + y + z) ^ 2 * (x * y + y * z + z * x) +
+       (x + y + z) ^ 4 - (x + y + z) * ((x + y) * (y + z) * (z + x)))
+  ring
+
+-- THEOREM 3A (ALL-CASE SIGNED FLT FOR n = 7 DIRECTLY FROM COUPLED 7-SIDED SHELLS — 0 AXIOMS!):
++ shell7.signed_exp_seven (x y z : ℤ) (hx : x ≠ 0) (hy : y ≠ 0) (hz : z ≠ 0)
+    (heq : x ^ 7 + y ^ 7 + z ^ 7 = 0) : False
+  set A : ℤ := x + y + z
+  set B : ℤ := x * y + y * z + z * x
+  set M : ℤ := (x + y) * (y + z) * (z + x)
+  have hlame : A ^ 7 = 7 * M * (B ^ 2 - A ^ 2 * B + A ^ 4 - A * M)
+    have h := shell7.lame_in_ABM x y z
+    rw [heq, ← A_def, ← B_def, ← M_def] at h; linarith
+  have hM_nz : M ≠ 0
+    intro h0
+    have hxy0 : x + y = 0 ∨ y + z = 0 ∨ z + x = 0
+      obtain h12 | h3 := shell7.int_mul_eq_zero ((x + y) * (y + z)) (z + x) (by rw [← M_def]; exact h0)
+      · obtain h1 | h2 := shell7.int_mul_eq_zero (x + y) (y + z) h12
+        · left; exact h1
+        · right; left; exact h2
+      · right; right; exact h3
+    have hpow7_zero : ∀ t : ℤ, t ^ 7 = 0 → t = 0
+      intro t ht7
+      by_contra htnz
+      have h2 : (0 : ℤ) < t ^ 2 := int.sq_pos_of_nz t htnz
+      have h6 : (0 : ℤ) < t ^ 6
+        have hre : t ^ 6 = (t ^ 2) * (t ^ 2) * (t ^ 2) := by ring
+        have h4 : (0 : ℤ) < (t ^ 2) * (t ^ 2) := mul_pos.int (t ^ 2) (t ^ 2) h2 h2
+        rw [hre]; exact mul_pos.int ((t ^ 2) * (t ^ 2)) (t ^ 2) h4 h2
+      have hprod : t * t ^ 6 = 0 := by rw [← ht7]; ring
+      obtain h0 | h60 := shell7.int_mul_eq_zero t (t ^ 6) hprod
+      · exact htnz h0
+      · linarith
+    obtain h1 | h2 | h3 := hxy0
+    · have hyx : y = -x := by linarith
+      rw [hyx] at heq
+      have h07 : x ^ 7 + (-x) ^ 7 = 0 := by ring
+      have hz7 : z ^ 7 = 0 := by linarith
+      exact hz (hpow7_zero z hz7)
+    · have hzy : z = -y := by linarith
+      rw [hzy] at heq
+      have h07 : y ^ 7 + (-y) ^ 7 = 0 := by ring
+      have hx7 : x ^ 7 = 0 := by linarith
+      exact hx (hpow7_zero x hx7)
+    · have hxz : x = -z := by linarith
+      rw [hxz] at heq
+      have h07 : (-z) ^ 7 + z ^ 7 = 0 := by ring
+      have hy7 : y ^ 7 = 0 := by linarith
+      exact hy (hpow7_zero y hy7)
+  have hA_nz : A ≠ 0
+    intro hA0
+    have hz_eq : z = -(x + y) := by linarith
+    have hB_neg : 2 * B = -(x ^ 2 + y ^ 2 + (x + y) ^ 2) := by rw [B_def, hz_eq]; ring
+    have hB_nz : B ≠ 0
+      intro hB0
+      have hx2 : x ^ 2 = 0 := by nlinarith
+      linarith [int.sq_pos_of_nz x hx]
+    rw [hA0] at hlame
+    have h7MB2 : 7 * M * B ^ 2 = 0 := by linarith
+    obtain h7M | hB20 := shell7.int_mul_eq_zero (7 * M) (B ^ 2) h7MB2
+    · exact hM_nz (by linarith)
+    · linarith [int.sq_pos_of_nz B hB_nz]
+  have hE49 : (7 * M * (2 * B - A ^ 2)) ^ 2 = 7 * M * A * (28 * M ^ 2 - 21 * A ^ 3 * M + 4 * A ^ 6)
+    have hid := shell7.lame_to_E49_identity A B M
+    have hzero : 7 * M * (B ^ 2 - A ^ 2 * B + A ^ 4 - A * M) - A ^ 7 = 0 := by linarith
+    rw [hzero] at hid; linarith
+  have hA3_nz : A ^ 3 ≠ 0
+    intro h0
+    have hsq : A ^ 3 = A * (A * A) := by ring
+    rw [hsq] at h0
+    obtain h1 | h2 := shell7.int_mul_eq_zero A (A * A) h0
+    · exact hA_nz h1
+    · linarith [int.sq_pos_of_nz A hA_nz]
+  have hQ_pos : 0 < 28 * M ^ 2 - 21 * A ^ 3 * M + 4 * A ^ 6
+    have h112 : 112 * (28 * M ^ 2 - 21 * A ^ 3 * M + 4 * A ^ 6) = (56 * M - 21 * A ^ 3) ^ 2 + 7 * (A ^ 3) ^ 2 := by ring
+    have hA6 : 0 < (A ^ 3) ^ 2 := by have h := int.sq_pos_of_nz (A ^ 3) hA3_nz; linarith
+    nlinarith
+  have hMA_pos : 0 < M * A
+    by_contra hle
+    have hMA_nz : M * A ≠ 0 := by intro h0; obtain h1 | h2 := shell7.int_mul_eq_zero M A h0 <;> contradiction
+    have h1 : 0 < -(7 * M * A) := by omega
+    have hm := mul_pos.int (-(7 * M * A)) (28 * M ^ 2 - 21 * A ^ 3 * M + 4 * A ^ 6) h1 hQ_pos
+    have hlhs_nn : 0 ≤ (7 * M * (2 * B - A ^ 2)) ^ 2 := by nlinarith
+    linarith
+  set num_n : ℕ := nat_of_int (|196 * M|)
+  set den_n : ℕ := nat_of_int (|A ^ 3|)
+  have hnum_pos : 0 < num_n
+    have h196_nz : 196 * M ≠ 0 := by intro h0; exact hM_nz (by linarith)
+    have habs_pos : (0 : ℤ) < |196 * M| := by obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.int (196 * M) <;> omega
+    exact (cast_pos.int num_n).mp (by rw [num_n_def, int_of_nat_of_int (|196 * M|) (abs_nonneg.int (196 * M))]; exact habs_pos)
+  have hden_pos : 0 < den_n
+    have habs_pos : (0 : ℤ) < |A ^ 3| := by obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.int (A ^ 3) <;> omega
+    exact (cast_pos.int den_n).mp (by rw [den_n_def, int_of_nat_of_int (|A ^ 3|) (abs_nonneg.int (A ^ 3))]; exact habs_pos)
+  obtain ⟨rn, rd, k, hrn_p, hrd_p, hk_p, hcop_r, hnum_eq, hden_eq⟩ := shell7.reduce_ratio_coprime num_n den_n hnum_pos hden_pos
+  have hMA3_pos : 0 < (196 * M) * (A ^ 3)
+    have hA2 : 0 < A * A := int.sq_pos_of_nz A hA_nz
+    have hre : (196 * M) * (A ^ 3) = (196 * (M * A)) * (A * A) := by ring
+    rw [hre]; exact mul_pos.int (196 * (M * A)) (A * A) (by linarith) hA2
+  have hsign_eq : (rn : ℤ) * (A ^ 3) = (rd : ℤ) * (196 * M)
+    have hnum_z : ((k : ℤ) * (rn : ℤ)) = |196 * M| := by
+      rw [← cast_mul.int k rn, ← hnum_eq, num_n_def, int_of_nat_of_int (|196 * M|) (abs_nonneg.int (196 * M))]
+    have hden_z : ((k : ℤ) * (rd : ℤ)) = |A ^ 3| := by
+      rw [← cast_mul.int k rd, ← hden_eq, den_n_def, int_of_nat_of_int (|A ^ 3|) (abs_nonneg.int (A ^ 3))]
+    have hk_pos_z : (0 : ℤ) < (k : ℤ) := (cast_pos.int k).mpr hk_p
+    have hsame : |196 * M| * (A ^ 3) = |A ^ 3| * (196 * M)
+      obtain ⟨e1, h1⟩ | ⟨e1, h1⟩ := abs_cases.int (196 * M)
+      · obtain ⟨e2, h2⟩ | ⟨e2, h2⟩ := abs_cases.int (A ^ 3)
+        · rw [e1, e2]; ring
+        · exfalso; have hm := mul_pos.int (196 * M) (-(A ^ 3)) (by omega) (by omega); linarith
+      · obtain ⟨e2, h2⟩ | ⟨e2, h2⟩ := abs_cases.int (A ^ 3)
+        · exfalso; have hm := mul_pos.int (-(196 * M)) (A ^ 3) (by omega) (by omega); linarith
+        · rw [e1, e2]; ring
+    rw [← hnum_z, ← hden_z] at hsame
+    have hk_diff : (k : ℤ) * ((rn : ℤ) * A ^ 3 - (rd : ℤ) * (196 * M)) = 0 := by linarith
+    obtain hk0 | hdiff0 := shell7.int_mul_eq_zero (k : ℤ) ((rn : ℤ) * A ^ 3 - (rd : ℤ) * (196 * M)) hk_diff <;> linarith
+  have hE49_scaled : (196 * (rd : ℤ) ^ 2 * (7 * M * (2 * B - A ^ 2))) ^ 2 =
+      (A ^ 5) ^ 2 * ((rn : ℤ) * (rd : ℤ) * ((rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2))
+    have hmul : (196 * (rd : ℤ) ^ 2) ^ 2 * (7 * M * (2 * B - A ^ 2)) ^ 2 =
+                (196 * (rd : ℤ) ^ 2) ^ 2 * (7 * M * A * (28 * M ^ 2 - 21 * A ^ 3 * M + 4 * A ^ 6)) := by rw [hE49]
+    have h1 : (rd : ℤ) * (196 * M) = (rn : ℤ) * A ^ 3 := by linarith
+    have hstep : (196 * (rd : ℤ) ^ 2) ^ 2 * (7 * M * A * (28 * M ^ 2 - 21 * A ^ 3 * M + 4 * A ^ 6)) =
+        A * ((rd : ℤ) * (196 * M)) * (rd : ℤ) *
+          (((rd : ℤ) * (196 * M)) ^ 2 - 147 * ((rd : ℤ) * (196 * M)) * ((rd : ℤ) * A ^ 3) + 5488 * ((rd : ℤ) * A ^ 3) ^ 2) := by ring
+    rw [hstep, h1] at hmul
+    have hring_f : A * ((rn : ℤ) * A ^ 3) * (rd : ℤ) * (((rn : ℤ) * A ^ 3) ^ 2 - 147 * ((rn : ℤ) * A ^ 3) * ((rd : ℤ) * A ^ 3) + 5488 * ((rd : ℤ) * A ^ 3) ^ 2) =
+        (A ^ 5) ^ 2 * ((rn : ℤ) * (rd : ℤ) * ((rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2)) := by ring
+    have hsq_l : (196 * (rd : ℤ) ^ 2 * (7 * M * (2 * B - A ^ 2))) ^ 2 = (196 * (rd : ℤ) ^ 2) ^ 2 * (7 * M * (2 * B - A ^ 2)) ^ 2 := by ring
+    linarith
+  set Lval : ℤ := 196 * (rd : ℤ) ^ 2 * (7 * M * (2 * B - A ^ 2))
+  set Rval : ℤ := (rn : ℤ) * (rd : ℤ) * ((rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2)
+  set Lnat : ℕ := nat_of_int (|Lval|)
+  set Anat : ℕ := nat_of_int (|A ^ 5|)
+  have hA5_nz : A ^ 5 ≠ 0
+    intro h0
+    have hre : A ^ 5 = (A * A) * A ^ 3 := by ring; rw [hre] at h0
+    obtain h1 | h2 := shell7.int_mul_eq_zero (A * A) (A ^ 3) h0
+    · linarith [int.sq_pos_of_nz A hA_nz]
+    · exact hA3_nz h2
+  have hAnat_pos : 0 < Anat
+    have habs_pos : (0 : ℤ) < |A ^ 5| := by obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.int (A ^ 5) <;> omega
+    exact (cast_pos.int Anat).mp (by rw [Anat_def, int_of_nat_of_int (|A ^ 5|) (abs_nonneg.int (A ^ 5))]; exact habs_pos)
+  have hAnat_sq : (Anat : ℤ) ^ 2 = (A ^ 5) ^ 2
+    have h1 : (Anat : ℤ) = |A ^ 5| := by rw [Anat_def]; exact int_of_nat_of_int (|A ^ 5|) (abs_nonneg.int (A ^ 5))
+    rw [h1]
+    obtain ⟨e, _⟩ | ⟨e, _⟩ := abs_cases.int (A ^ 5)
+    · rw [e]
+    · rw [e]; ring
+  have hLnat_sq : (Lnat : ℤ) ^ 2 = Lval ^ 2
+    have h1 : (Lnat : ℤ) = |Lval| := by rw [Lnat_def]; exact int_of_nat_of_int (|Lval|) (abs_nonneg.int Lval)
+    rw [h1]
+    obtain ⟨e, _⟩ | ⟨e, _⟩ := abs_cases.int Lval
+    · rw [e]
+    · rw [e]; ring
+  have hR_pos : (0 : ℤ) < Rval
+    have h4 : 4 * ((rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2) =
+              (2 * (rn : ℤ) - 147 * (rd : ℤ)) ^ 2 + 343 * (rd : ℤ) ^ 2 := by ring
+    have hrd_z : (0 : ℤ) < (rd : ℤ) := (cast_pos.int rd).mpr hrd_p
+    have hrn_z : (0 : ℤ) < (rn : ℤ) := (cast_pos.int rn).mpr hrn_p
+    have hq_p : (0 : ℤ) < (rn : ℤ) ^ 2 - 147 * (rn : ℤ) * (rd : ℤ) + 5488 * (rd : ℤ) ^ 2 := by nlinarith [mul_pos.int (rd : ℤ) (rd : ℤ) hrd_z hrd_z]
+    rw [Rval_def]
+    exact mul_pos.int ((rn : ℤ) * (rd : ℤ)) _ (mul_pos.int (rn : ℤ) (rd : ℤ) hrn_z hrd_z) hq_p
+  set Rnat : ℕ := nat_of_int Rval
+  have hRnat_cast : (Rnat : ℤ) = Rval := by rw [Rnat_def]; exact int_of_nat_of_int Rval (by linarith)
+  have hLnat_eq : Lnat ^ 2 = Anat ^ 2 * Rnat
+    apply (cast_inj.int (Lnat ^ 2) (Anat ^ 2 * Rnat)).mp
+    have hc1 : ((Lnat ^ 2 : ℕ) : ℤ) = (Lnat : ℤ) ^ 2 := cast_pow.int Lnat 2
+    have hc2 : ((Anat ^ 2 * Rnat : ℕ) : ℤ) = (Anat : ℤ) ^ 2 * (Rnat : ℤ) := by rw [cast_mul.int, cast_pow.int]
+    rw [hc1, hc2, hLnat_sq, hAnat_sq, hRnat_cast]; exact hE49_scaled
+  have hLnat_pos : 0 < Lnat
+    by_contra h0; have hz_ : Lnat = 0 := by omega
+    rw [hz_] at hLnat_eq; have h02 : 0 ^ 2 = 0 := by decide; rw [h02] at hLnat_eq
+    have hRp : 0 < Rnat := (cast_pos.int Rnat).mp (by rw [hRnat_cast]; exact hR_pos)
+    have hpos := mul_pos.nat (Anat ^ 2) Rnat (pow_pos.nat Anat 2 hAnat_pos) hRp
+    omega
+  obtain ⟨u1, v1, g1, hu1p, hv1p, hg1p, hcop1, hLe, hAe⟩ := shell7.reduce_ratio_coprime Lnat Anat hLnat_pos hAnat_pos
+  have hv1_eq1 : v1 = 1
+    by_contra hne1
+    set p := min_fac v1
+    have hp : is_prime_nat p := by rw [p_def]; exact prime.to_is_prime_nat (min_fac v1) (min_fac.prime v1 (by omega))
+    have hpv1 : p ∣ v1 := by rw [p_def]; exact (min_fac.spec v1 (by omega)).2.2.1
+    have hcancel : u1 ^ 2 = v1 ^ 2 * Rnat
+      apply nat.mul_cancel_left_pos (g1 ^ 2) (u1 ^ 2) (v1 ^ 2 * Rnat) (pow_pos.nat g1 2 hg1p)
+      calc g1 ^ 2 * u1 ^ 2 = (g1 * u1) ^ 2 := by ring
+        _ = Lnat ^ 2 := by rw [← hLe]
+        _ = Anat ^ 2 * Rnat := hLnat_eq
+        _ = (g1 * v1) ^ 2 * Rnat := by rw [hAe]
+        _ = g1 ^ 2 * (v1 ^ 2 * Rnat) := by ring
+    have hpu12 : p ∣ (u1 ^ 2)
+      obtain ⟨qv, hqv⟩ := (dvd.iff_exists p v1 (by linarith [hp.1])).mp hpv1
+      exact nat.dvd_of_mul_eq p (p * qv ^ 2 * Rnat) (u1 ^ 2) (by linarith [hp.1]) (by rw [hcancel, hqv]; ring)
+    unfold nat.coprime_primes at hcop1
+    exact hcop1 p hp ⟨prime_dvd_of_dvd_pow.nat p u1 2 (is_prime_nat.to_prime p hp) hpu12, hpv1⟩
+  have hRnat_sq : Rnat = u1 ^ 2
+    apply nat.mul_cancel_left_pos (Anat ^ 2) Rnat (u1 ^ 2) (pow_pos.nat Anat 2 hAnat_pos)
+    have hAe1 : Anat = g1 := by rw [hAe, hv1_eq1]; ring
+    calc Anat ^ 2 * Rnat = Lnat ^ 2 := by rw [← hLnat_eq]
+      _ = (g1 * u1) ^ 2 := by rw [hLe]
+      _ = Anat ^ 2 * u1 ^ 2 := by rw [hAe1]; ring
+  have hfinal_z : Rval = (u1 : ℤ) ^ 2 := by rw [← hRnat_cast, hRnat_sq, cast_pow.int]
+  rw [Rval_def] at hfinal_z
+  exact shell7.E49_no_nonzero_rational_point rn rd u1 hrn_p hrd_p hcop_r hfinal_z
+
+-- THEOREM 3B (COMPLETE ALL-CASE FLT FOR n = 7 — 0 CUSTOM AXIOMS!):
++ flt.exp_seven (x y z : ℕ) (hx : 0 < x) (hy : 0 < y) : x ^ 7 + y ^ 7 ≠ z ^ 7
+  intro heq
+  have hz : 0 < z
+    by_contra h0; have hz0 : z = 0 := by omega
+    rw [hz0] at heq; have h07 : 0 ^ 7 = 0 := by decide; have hx7 := pow_pos.nat x 7 hx; omega
+  have heq_z : (x : ℤ) ^ 7 + (y : ℤ) ^ 7 + (-(z : ℤ)) ^ 7 = 0
+    have hc : ((x ^ 7 + y ^ 7 : ℕ) : ℤ) = ((z ^ 7 : ℕ) : ℤ) := by rw [heq]
+    rw [cast_add.int, cast_pow.int, cast_pow.int, cast_pow.int] at hc
+    have hneg : (-(z : ℤ)) ^ 7 = -((z : ℤ) ^ 7) := by ring
+    rw [hneg]; linarith
+  have hx_nz : (x : ℤ) ≠ 0 := by linarith [(cast_pos.int x).mpr hx]
+  have hy_nz : (y : ℤ) ≠ 0 := by linarith [(cast_pos.int y).mpr hy]
+  have hz_nz : -(z : ℤ) ≠ 0 := by linarith [(cast_pos.int z).mpr hz]
+  exact shell7.signed_exp_seven (x : ℤ) (y : ℤ) (-(z : ℤ)) hx_nz hy_nz hz_nz heq_z
+
+-- THEOREM 3C (ALL-EXPONENT REDUCTION TO ODD PRIMES p >= 11 — 0 CUSTOM AXIOMS!):
++ flt.reduce_to_primes_ge_11 (hp11 : ∀ p : ℕ, is_prime_nat p → 11 ≤ p → flt_at p) :
+    ∀ n : ℕ, 3 ≤ n → flt_at n
+  apply flt.reduce_to_primes_ge_7
+  intro p hp hp7
+  by_cases h7 : p = 7
+  · rw [h7]; unfold flt_at; exact flt.exp_seven
+  · have hpr := is_prime_nat.to_prime p hp
+    unfold prime at hpr
+    have hge11 : 11 ≤ p
+      by_contra hlt11
+      by_cases h8 : p = 8
+      · rw [h8] at hpr; exact hpr.2 2 (by decide) (by decide) (by decide)
+      · by_cases h9 : p = 9
+        · rw [h9] at hpr; exact hpr.2 3 (by decide) (by decide) (by decide)
+        · have h10 : p = 10 := by omega
+          rw [h10] at hpr; exact hpr.2 2 (by decide) (by decide) (by decide)
+    exact hp11 p hp hge11
+
+
+-- ====================================================================================
+-- 4. Coupled-Shell Taxonomy Across Dimensions: p = 3, 5, 7, 11, Single-Shell Gram Curve E^+_{R,L},
+--    Uniqueness of Genus 1 at p = 7, & Lower-Stratum Deficit Law (ALL 0 Custom Axioms!)
+-- ====================================================================================
+
++ shell7.coupled_deg3_identity (x y z u v w : ℤ)
+    (hu : u = y + z) (hv : v = z + x) (hw : w = x + y) :
+    (u + v + w) ^ 3 - 8 * (x ^ 3 + y ^ 3 + z ^ 3) = 24 * u * v * w
+  rw [hu, hv, hw]; ring
+
++ shell7.coupled_deg3_case1 (x y z a0 b0 c0 : ℤ) (ha : a0 ≠ 0) (hb : b0 ≠ 0) (hc : c0 ≠ 0)
+    (heq : x ^ 3 + y ^ 3 + z ^ 3 = 0)
+    (hu : y + z = a0 ^ 3) (hv : z + x = b0 ^ 3) (hw : x + y = c0 ^ 3) : False
+  have hid := shell7.coupled_deg3_identity x y z (y + z) (z + x) (x + y) rfl rfl rfl
+  rw [heq, hu, hv, hw] at hid
+  set S : ℤ := a0 ^ 3 + b0 ^ 3 + c0 ^ 3
+  set P : ℤ := a0 * b0 * c0
+  have hP_nz : P ≠ 0
+    intro h0
+    obtain hab | hc0 := shell7.int_mul_eq_zero (a0 * b0) c0 (by rw [← P_def]; exact h0)
+    · obtain ha0 | hb0 := shell7.int_mul_eq_zero a0 b0 hab <;> contradiction
+    · exact hc hc0
+  have hP3 : 24 * (a0 ^ 3) * (b0 ^ 3) * (c0 ^ 3) = 24 * P ^ 3 := by rw [P_def]; ring
+  have hcube : S ^ 3 = 24 * P ^ 3 := by linarith
+  set Sn := nat_of_int (|S|); set Pn := nat_of_int (|P|)
+  have hPn_pos : 0 < Pn
+    have habs : (0 : ℤ) < |P| := by obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.int P <;> omega
+    exact (cast_pos.int Pn).mp (by rw [Pn_def, int_of_nat_of_int (|P|) (abs_nonneg.int P)]; exact habs)
+  have hcube_nat : Sn ^ 3 = 24 * Pn ^ 3
+    have hS_abs : |S| ^ 3 = 24 * |P| ^ 3
+      obtain ⟨e1, h1⟩ | ⟨e1, h1⟩ := abs_cases.int S
+      · obtain ⟨e2, h2⟩ | ⟨e2, h2⟩ := abs_cases.int P
+        · rw [e1, e2]; exact hcube
+        · exfalso
+          have hSnn : 0 ≤ S ^ 3 := by nlinarith [mul_nonneg.int S S h1 h1]
+          have hPneg : P ^ 3 < 0 := by have hp := mul_pos.int (-P) (-P) (by linarith) (by linarith); nlinarith
+          linarith
+      · obtain ⟨e2, h2⟩ | ⟨e2, h2⟩ := abs_cases.int P
+        · exfalso
+          have hSneg : S ^ 3 < 0 := by have hp := mul_pos.int (-S) (-S) (by linarith) (by linarith); nlinarith
+          have hPnn : 0 ≤ P ^ 3 := by nlinarith [mul_nonneg.int P P h2 h2]
+          linarith
+        · have hnS : (-S) ^ 3 = -(S ^ 3) := by ring
+          have hnP : (-P) ^ 3 = -(P ^ 3) := by ring
+          rw [e1, e2]; linarith
+    apply (cast_inj.int (Sn ^ 3) (24 * Pn ^ 3)).mp
+    have hc1 : ((Sn ^ 3 : ℕ) : ℤ) = |S| ^ 3 := by rw [Sn_def, cast_pow.int, int_of_nat_of_int (|S|) (abs_nonneg.int S)]
+    have hc2 : ((24 * Pn ^ 3 : ℕ) : ℤ) = 24 * |P| ^ 3 := by rw [Pn_def, cast_mul.int, cast_pow.int, int_of_nat_of_int (|P|) (abs_nonneg.int P)]; simp
+    rw [hc1, hc2, hS_abs]
+  have hSn_pos : 0 < Sn
+    by_contra h0; have hz_ : Sn = 0 := by omega
+    rw [hz_] at hcube_nat; have h03 : 0 ^ 3 = 0 := by decide; rw [h03] at hcube_nat
+    have hpos := mul_pos.nat 24 (Pn ^ 3) (by decide) (pow_pos.nat Pn 3 hPn_pos); omega
+  have hno_cube24 : ∀ k : ℕ, 0 < k → ∀ m : ℕ, m ^ 3 ≠ 24 * k ^ 3
+    intro k_init hk_init
+    have hdesc : ∀ k : ℕ, ¬ (0 < k ∧ ∃ m : ℕ, m ^ 3 = 24 * k ^ 3)
+      intro k0 hbad
+      obtain ⟨k, ⟨hk_pos, ⟨m, hmk⟩⟩, hk_min⟩ := nat.exists_least (fun t => 0 < t ∧ ∃ m : ℕ, m ^ 3 = 24 * t ^ 3) ⟨k0, hbad⟩
+      have h3m3 : 3 ∣ (m ^ 3) := (dvd.iff_exists 3 (m ^ 3) (by decide)).mpr ⟨8 * k ^ 3, by linarith⟩
+      have h3m : 3 ∣ m := prime_dvd_of_dvd_pow.nat 3 m 3 (is_prime_nat.to_prime 3 is_prime_nat_three) h3m3
+      obtain ⟨m1, hm1⟩ := (dvd.iff_exists 3 m (by decide)).mp h3m
+      have h9eq : 9 * m1 ^ 3 = 8 * k ^ 3
+        have h27 : m ^ 3 = 27 * m1 ^ 3 := by rw [hm1]; ring
+        linarith
+      have h3_8k3 : 3 ∣ (8 * k ^ 3) := (dvd.iff_exists 3 (8 * k ^ 3) (by decide)).mpr ⟨3 * m1 ^ 3, by linarith⟩
+      have h3k3 : 3 ∣ (k ^ 3)
+        obtain h38 | h3k3_ := is_prime_nat_three.2 8 (k ^ 3) h3_8k3
+        · exfalso; have hn : ¬ (3 ∣ 8) := by decide; exact hn h38
+        · exact h3k3_
+      have h3k : 3 ∣ k := prime_dvd_of_dvd_pow.nat 3 k 3 (is_prime_nat.to_prime 3 is_prime_nat_three) h3k3
+      obtain ⟨k1, hk1⟩ := (dvd.iff_exists 3 k (by decide)).mp h3k
+      have hk1_pos : 0 < k1 := by omega
+      have hk1_lt : k1 < k := by omega
+      have hm1k1 : m1 ^ 3 = 24 * k1 ^ 3
+        have h27k : k ^ 3 = 27 * k1 ^ 3 := by rw [hk1]; ring
+        linarith
+      exact hk_min k1 hk1_lt ⟨hk1_pos, ⟨m1, hm1k1⟩⟩
+    intro m hm
+    exact hdesc k_init ⟨hk_init, ⟨m, hm⟩⟩
+  exact hno_cube24 Pn hPn_pos Sn hcube_nat
+
++ shell7.coupled_deg5_identity (x y z u v w : ℤ)
+    (hu : u = y + z) (hv : v = z + x) (hw : w = x + y) :
+    (u + v + w) ^ 5 - 32 * (x ^ 5 + y ^ 5 + z ^ 5) = 80 * u * v * w * (u ^ 2 + v ^ 2 + w ^ 2)
+  rw [hu, hv, hw]; ring
+
+-> shell7.Q7 (R L : ℤ) : ℤ :=
+  R ^ 6 + R ^ 5 * L + R ^ 4 * L ^ 2 + R ^ 3 * L ^ 3 + R ^ 2 * L ^ 4 + R * L ^ 5 + L ^ 6
+
+-> shell7.gram_f4 (R L : ℤ) : ℤ :=
+  R ^ 4 + R ^ 3 * L + 3 * R ^ 2 * L ^ 2 + R * L ^ 3 + L ^ 4
+
+-> shell7.gram_p6 (R L : ℤ) : ℤ :=
+  R ^ 6 + 15 * R ^ 5 * L + 15 * R ^ 4 * L ^ 2 + 29 * R ^ 3 * L ^ 3 + 15 * R ^ 2 * L ^ 4 + 15 * R * L ^ 5 + L ^ 6
+
++ shell7.gram_eigenvalue_mordell_identity (R L : ℤ) :
+    28 * (shell7.gram_f4 R L) ^ 3 - (shell7.gram_p6 R L) ^ 2 = 27 * (shell7.Q7 R L) ^ 2 ∧
+    (112 * shell7.gram_f4 R L) ^ 3 - (224 * shell7.gram_p6 R L) ^ 2 = 1728 * (784 * (shell7.Q7 R L) ^ 2)
+  unfold shell7.gram_f4 shell7.gram_p6 shell7.Q7
+  constructor <;> ring
+
++ shell7.gram_f4_Q7_bezout (R L : ℤ) :
+    (8 * L ^ 3 - 9 * R * L ^ 2 - 5 * R ^ 3) * shell7.Q7 R L +
+    (-L ^ 5 + 2 * R * L ^ 4 + 2 * R ^ 2 * L ^ 3 - R ^ 3 * L ^ 2 + 5 * R ^ 5) * shell7.gram_f4 R L = 7 * L ^ 9 ∧
+    (8 * R ^ 3 - 9 * L * R ^ 2 - 5 * L ^ 3) * shell7.Q7 R L +
+    (-R ^ 5 + 2 * L * R ^ 4 + 2 * L ^ 2 * R ^ 3 - L ^ 3 * R ^ 2 + 5 * L ^ 5) * shell7.gram_f4 R L = 7 * R ^ 9
+  unfold shell7.gram_f4 shell7.Q7
+  constructor <;> ring
+
++ shell7.gram_f4_coprime_Q7_away_from_7 (ell : ℕ) (hell : is_prime_nat ell) (hne7 : ell ≠ 7)
+    (R L : ℤ) (hf4 : int_dvd ell (shell7.gram_f4 R L)) (hQ7 : int_dvd ell (shell7.Q7 R L)) :
+    int_dvd ell R ∧ int_dvd ell L
+  have hbez := shell7.gram_f4_Q7_bezout R L
+  have h7L9 : int_dvd ell (7 * L ^ 9)
+    have h1 := shell7.dvd_mul_l ell (8 * L ^ 3 - 9 * R * L ^ 2 - 5 * R ^ 3) (shell7.Q7 R L) hQ7
+    have h2 := shell7.dvd_mul_l ell (-L ^ 5 + 2 * R * L ^ 4 + 2 * R ^ 2 * L ^ 3 - R ^ 3 * L ^ 2 + 5 * R ^ 5) (shell7.gram_f4 R L) hf4
+    rw [← hbez.1]; exact cshell.dvd_add ell _ _ h1 h2
+  have h7R9 : int_dvd ell (7 * R ^ 9)
+    have h1 := shell7.dvd_mul_l ell (8 * R ^ 3 - 9 * L * R ^ 2 - 5 * L ^ 3) (shell7.Q7 R L) hQ7
+    have h2 := shell7.dvd_mul_l ell (-R ^ 5 + 2 * L * R ^ 4 + 2 * L ^ 2 * R ^ 3 - L ^ 3 * R ^ 2 + 5 * L ^ 5) (shell7.gram_f4 R L) hf4
+    rw [← hbez.2]; exact cshell.dvd_add ell _ _ h1 h2
+  have h_elim : ∀ X : ℤ, int_dvd ell (7 * X ^ 9) → int_dvd ell X
+    intro X h7X9
+    have hell_pos : 0 < ell := by linarith [hell.1]
+    have hnat : ell ∣ nat_of_int (|7 * X ^ 9|) := (cshell.dvd_iff_nat_abs ell hell_pos (7 * X ^ 9)).mp h7X9
+    have habs_mul : nat_of_int (|7 * X ^ 9|) = 7 * nat_of_int (|X|) ^ 9
+      apply (cast_inj.int (nat_of_int (|7 * X ^ 9|)) (7 * nat_of_int (|X|) ^ 9)).mp
+      have hc1 : (nat_of_int (|7 * X ^ 9|) : ℤ) = |7 * X ^ 9| := int_of_nat_of_int (|7 * X ^ 9|) (abs_nonneg.int (7 * X ^ 9))
+      have hc2 : ((7 * nat_of_int (|X|) ^ 9 : ℕ) : ℤ) = 7 * |X| ^ 9 := by
+        rw [cast_mul.int, cast_pow.int, int_of_nat_of_int (|X|) (abs_nonneg.int X)]; simp
+      rw [hc1, hc2, abs_mul.int 7 (X ^ 9)]
+      have h7abs : |(7 : ℤ)| = 7 := by decide
+      have hXabs : |X ^ 9| = |X| ^ 9 := by
+        obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.int X
+        · have hnn : 0 ≤ X ^ 9 := by
+            have h2 : 0 ≤ X * X := mul_nonneg.int X X h h
+            have h4 : 0 ≤ (X * X) * (X * X) := mul_nonneg.int _ _ h2 h2
+            have h8 : 0 ≤ ((X * X) * (X * X)) * ((X * X) * (X * X)) := mul_nonneg.int _ _ h4 h4
+            have h9 : X ^ 9 = (((X * X) * (X * X)) * ((X * X) * (X * X))) * X := by ring
+            rw [h9]; exact mul_nonneg.int _ _ h8 h
+          rw [e]; obtain ⟨e9, _⟩ | ⟨_, h9⟩ := abs_cases.int (X ^ 9)
+          · exact e9
+          · linarith
+        · have hnp : X ^ 9 ≤ 0 := by
+            have hm : 0 ≤ -X := by linarith
+            have h2 : 0 ≤ (-X) * (-X) := mul_nonneg.int _ _ hm hm
+            have h4 : 0 ≤ ((-X) * (-X)) * ((-X) * (-X)) := mul_nonneg.int _ _ h2 h2
+            have h8 : 0 ≤ (((-X) * (-X)) * ((-X) * (-X))) * (((-X) * (-X)) * ((-X) * (-X))) := mul_nonneg.int _ _ h4 h4
+            have h9 : -(X ^ 9) = ((((-X) * (-X)) * ((-X) * (-X))) * (((-X) * (-X)) * ((-X) * (-X)))) * (-X) := by ring
+            have hnn := mul_nonneg.int _ _ h8 hm
+            linarith
+          rw [e]; obtain ⟨e9, h9⟩ | ⟨e9, _⟩ := abs_cases.int (X ^ 9)
+          · have hz : X ^ 9 = 0 := by linarith
+            have hneg : (0 - X) ^ 9 = -(X ^ 9) := by ring
+            rw [e9, hneg, hz]; ring
+          · rw [e9]; ring
+      rw [h7abs, hXabs]
+    rw [habs_mul] at hnat
+    obtain h7 | hX9 := hell.2 7 (nat_of_int (|X|) ^ 9) hnat
+    · exfalso
+      obtain h1 | h2 := (is_prime_nat.to_full 7 is_prime_nat_seven).2 ell h7
+      · linarith [hell.1]
+      · exact hne7 h2
+    · exact (cshell.dvd_iff_nat_abs ell hell_pos X).mpr (prime_dvd_of_dvd_pow.nat ell (nat_of_int (|X|)) 9 (is_prime_nat.to_prime ell hell) hX9)
+  exact ⟨h_elim R h7R9, h_elim L h7L9⟩
+
++ shell7.coupled_deg11_identity (x y z : ℤ) :
+    (x + y + z) ^ 11 - (x ^ 11 + y ^ 11 + z ^ 11) =
+    11 * ((x + y) * (y + z) * (z + x)) *
+      (((x * y + y * z + z * x) ^ 4 - (x + y + z) ^ 2 * (x * y + y * z + z * x) ^ 3 +
+        (x + y + z) ^ 4 * (x * y + y * z + z * x) ^ 2 - (x + y + z) ^ 6 * (x * y + y * z + z * x) +
+        (x + y + z) ^ 8) +
+       (-3 * (x * y + y * z + z * x) ^ 2 + 4 * (x + y + z) ^ 2 * (x * y + y * z + z * x) - 3 * (x + y + z) ^ 4) *
+         (x + y + z) * ((x + y) * (y + z) * (z + x)) +
+       (2 * (x + y + z) ^ 2 - (x * y + y * z + z * x)) * ((x + y) * (y + z) * (z + x)) ^ 2)
+  ring
+
++ shell7.genus_Sp_eq_one_iff_seven (p : ℕ) (hp5 : 5 ≤ p) :
+    (p - 1) * (p - 5) = 12 ↔ p = 7
+  constructor
+  · intro heq
+    by_contra hne
+    by_cases hlt : p < 7
+    · have h56 : p = 5 ∨ p = 6 := by omega
+      obtain h5 | h6 := h56
+      · rw [h5] at heq; omega
+      · rw [h6] at heq; omega
+    · have h1 := mul_le_mul_of_nonneg_right.nat 7 (p - 1) (p - 5) (by omega) (by omega)
+      have h2 := mul_le_mul_of_nonneg_left.nat 3 (p - 5) 7 (by omega) (by decide)
+      omega
+  · intro hp7; rw [hp7]; decide
+
++ shell7.lower_power_deficit (n m L B R : ℕ) (hL : 0 < L) (hB : 0 < B)
+    (heq : L ^ n + B ^ n = R ^ n) (hmn : m < n) :
+    R ^ m < L ^ m + B ^ m
+  have hR_gt_L : L < R
+    by_contra hle; have hmono := nat.pow_mono_base n R L (by omega); have hBp := pow_pos.nat B n hB; omega
+  have hR_gt_B : B < R
+    by_contra hle; have hmono := nat.pow_mono_base n R B (by omega); have hLp := pow_pos.nat L n hL; omega
+  set d : ℕ := n - m
+  have hd_pos : 1 ≤ d := by omega
+  have hnm : n = m + d := by omega
+  have hpow_strict : ∀ k : ℕ, 1 ≤ k → ∀ a b : ℕ, 0 < a → a < b → a ^ k < b ^ k
+    intro k hk
+    induction k with r ihr
+    · omega
+    · intro a b ha hab
+      rw [succ_eq_add_one.nat, pow_succ.nat a r, pow_succ.nat b r]
+      by_cases hr0 : r = 0
+      · rw [hr0, pow_zero.nat, pow_zero.nat]; omega
+      · have hih := ihr (by omega) a b ha hab
+        have hm1 := mul_lt_mul_of_pos_right.nat (a ^ r) (b ^ r) a hih ha
+        have hm2 := mul_lt_mul_of_pos_left.nat a b (b ^ r) hab (pow_pos.nat b r (by omega))
+        omega
+  have hLd_lt := hpow_strict d hd_pos L R hL hR_gt_L
+  have hBd_lt := hpow_strict d hd_pos B R hB hR_gt_B
+  have hstrict : R ^ m * R ^ d < (L ^ m + B ^ m) * R ^ d
+    have hLn : L ^ n = L ^ m * L ^ d := by rw [hnm, pow_add.nat L m d]
+    have hBn : B ^ n = B ^ m * B ^ d := by rw [hnm, pow_add.nat B m d]
+    have hRn : R ^ n = R ^ m * R ^ d := by rw [hnm, pow_add.nat R m d]
+    have h1 := mul_lt_mul_of_pos_left.nat (L ^ d) (R ^ d) (L ^ m) hLd_lt (pow_pos.nat L m hL)
+    have h2 := mul_lt_mul_of_pos_left.nat (B ^ d) (R ^ d) (B ^ m) hBd_lt (pow_pos.nat B m hB)
+    have hdist : (L ^ m + B ^ m) * R ^ d = L ^ m * R ^ d + B ^ m * R ^ d := by ring
+    omega
+  by_contra hge
+  have hm := mul_le_mul_of_nonneg_right.nat (L ^ m + B ^ m) (R ^ m) (R ^ d) (by omega) (by omega)
+  omega

@@ -1330,12 +1330,47 @@ Optional:
   Dirichlet–Legendre 1825 infinite descent (`dirichlet.quartic_fifth_descent`), all-case `flt.exp_five`, and all-exponent
   reduction `flt.reduce_to_primes_ge_7` (0 custom axioms).
 * `import frey_elliptic`: bundled `WeierstrassCurve` invariants & coordinate-change minimality (`wc.minimal_of_semistable`),
-  prime-by-prime global semistability of the Frey–Hellegouarch curve (`frey.globally_semistable`), elementary $\le 2\ell + 1$
-  point-count elimination of Mazur across all of Case I and all $3 \nmid abc$ triples (`frey.case1_irreducible_zero_mazur`,
-  `frey.irreducible_of_three_ndvd`, `frey.good_odd_prime_ge_2p`), norm-Euclidean $\mathbb{Z}[i], \mathbb{Z}[\sqrt{-2}], \mathbb{Z}[\sqrt{2}]$
-  and mod-2 $\mathrm{GL}_2(\mathbb{F}_2) \simeq S_3$ non-existence unramified outside $\{2, \infty\}$
-  (`mod2_level2.no_s3_unramified_outside_2`), and Kummer's diagonal-shell Case-I congruence elimination
-  (`kummer.shell_case1_contradiction`, 0 custom axioms).
+  hexagonal $A_2$ cubic-shell resolvent bridge (`frey.shell_A2_invariants_bridge`: $N(\pi(A,B,C)) = 3c_4(E)$ and
+  $2304\Delta(E) = (A^3+B^3+C^3)^2$), prime-by-prime global semistability of the Frey–Hellegouarch curve
+  (`frey.globally_semistable`), mod-2 non-split tangent cone & non-split Tamagawa $p$-torsion obstructions
+  (`frey.mod2_nonsplit_tangent_cone`, `frey.nonsplit_odd_or_two_kills_p`, `frey.serre_minimal_level2_valuations`),
+  elementary $\le 2\ell + 1$ point-count elimination of Mazur across all of Case I and all $3 \nmid abc$ triples
+  (`frey.case1_irreducible_zero_mazur`, `frey.irreducible_of_three_ndvd`, `frey.good_odd_prime_ge_2p`), norm-Euclidean
+  $\mathbb{Z}[i], \mathbb{Z}[\sqrt{-2}], \mathbb{Z}[\sqrt{2}]$ and mod-2 $\mathrm{GL}_2(\mathbb{F}_2) \simeq S_3$
+  non-existence unramified outside $\{2, \infty\}$ (`mod2_level2.no_s3_unramified_outside_2`), and Kummer's diagonal-shell
+  Case-I congruence elimination (`kummer.shell_case1_contradiction`, 0 custom axioms).
+* `import coupled_shells`: coupled three-orientation $n$-sided shell rigidity for primitive Fermat triples: automatic
+  2-adic Hellegouarch–Frey normalization (`cshell.primitive_frey_normalization`: $a^p = 4u+1$, $c^p = 16v$ with $v$ even,
+  $\gcd(c_4, \Delta) = 1$), coupled Case-II $p^2$-divisibility (`cshell.case2_coupled_p_sq_dvd`: $p \mid z \implies p^2 \mid z \land p^2 \mid (x+y)$
+  for all odd primes $p \ge 3$), general Wendt auxiliary-prime Case-I obstruction (`cshell.wendt_aux_prime_case1`) and
+  complete `0`-custom-axiom Case-I FLT across all 28 odd primes $3 \le p \le 109$ including irregular primes
+  $37, 59, 67, 101, 103$ (`cshell.first_case_all_primes_le_109`), and the Cauchy–Lamé–Lebesgue degree-7 coupled Case-II
+  Hensel smoothness barrier (`cshell.case2_coupled_hensel_barrier`, 0 custom axioms).
+* `import kubert_torsion`: Kleinian integers $\mathbb{Z}\left[\frac{1+\sqrt{-7}}{2}\right]$ with unit group $\{\pm 1\}$
+  (`klein7.units_pm1`) and constructive $\frac{11}{16}$-Euclidean division (`klein7.euclidean_div`), 2-step integer
+  infinite descent on both odd/even quartic covers (`kubert.x1_14_odd_quartic_descent`, `kubert.x1_14_even_quartic_unique`),
+  and complete rational-point classification of the modular curve $X_1(14)$ (`14a4`: $y^2 + xy + y = x^3 - x$,
+  `kubert.x1_14_affine_points_all_cusps`), proving $Y_1(14)(\mathbb{Q}) = \emptyset$ and eliminating Mazur 1977/1978
+  at $p = 7$ (0 custom axioms).
+* `import shell_seven`: pure-$\mathbb{Z}$ coupled 7-sided shell proof of all-case $\mathrm{FLT}(7)$
+  (`shell7.lame_to_E49_identity`, `shell7.no_Q1`, `shell7.E49_no_nonzero_rational_point`, `flt.exp_seven` via
+  2-isogeny infinite descent on $\mathcal{S}_7 \cong X_0(49) = 49a1$ — zero cyclotomic fields, zero Mazur, zero
+  modularity) and all-exponent reduction `flt.reduce_to_primes_ge_11`; coupled degree-3 Case I (`shell7.coupled_deg3_case1`),
+  single-shell $p = 7$ Gram-eigenvalue Mordell identity (`shell7.gram_eigenvalue_mordell_identity`:
+  $28 f_4^3 - p_6^2 = 27 Q_7^2$) and prime-to-7 Bézout semistability (`shell7.gram_f4_coprime_Q7_away_from_7`),
+  coupled degree-11 quotient identity (`shell7.coupled_deg11_identity`), genus-1 uniqueness of $\mathcal{S}_p = F_p / S_3$
+  at $p = 7$ (`shell7.genus_Sp_eq_one_iff_seven`), and lower-stratum power deficit law (`shell7.lower_power_deficit`,
+  0 custom axioms).
+* `import shell_thirteen`: nearby shell roads (31 theorems, 0 custom axioms): universal all-$a$ cyclic-shell identity
+  (`shell13.cyclic_shell_identity`: $u^a v + v^a w + w^a u = (xyz)^a (x^{a^2-a+1} + y^{a^2-a+1} + z^{a^2-a+1})$)
+  unifying $H_3 / A_3 \cong X_0(49)$ ($p = 7$) and $Q_{13} = H_4 / A_3$ ($p = 13$); complete zero-cyclotomic reduction
+  of all-case $\mathrm{FLT}(13)$ to affine $s \ne 0$ points on the minimal genus-2 curve $Q_{13}$ ($\Delta_{\min} = 13^3$,
+  `shell13.flt13_implies_Q13_nonzero_s`, including all three degenerate edge cases `no_e1_zero`, `no_s_eq_one`,
+  `no_s_eq_zero`, plus `Q13_no_rational_weierstrass_root` and `Q13_mod2_only_even_or_infty`); closed-form rational
+  Gram Frey curve $E^+_{R,L}$ and $D = -4$ twist (`shell13.gram_curve_p7_invariants`,
+  `shell13.gram_curve_p7_semistable_away_14`); and exact Frey split-reduction $c_6$ character congruences plus
+  Zero-Mazur mod-8 irreducibility (`shell13.frey_split_char_mod_odd_prime`, `shell13.frey_pm3_mod8_forces_u_odd`,
+  `shell13.split_at_2_forces_odd_pm1_mod8`).
   [Spec](spec/flt_prelude_spec.sat) · [Shorter FLT Route](examples/flt_shorter_route.sat)
 
 ## Design notes

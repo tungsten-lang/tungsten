@@ -26,7 +26,7 @@ use cfg
     "w_hash_keys", "w_hash_values",
     "w_strbuf_new", "w_str_concat", "w_str_concat_free_rhs", "w_str_concat_free_lhs",
     "w_str_concat_own", "w_str_concat_i64", "w_i64_concat_str", "w_str_concat_int_wv",
-    "w_int_wv_concat_str", "w_int_to_s", "w_string_repeat"
+    "w_int_wv_concat_str", "w_str_concat_any", "w_int_to_s", "w_string_repeat"
   ]
   i = 0
   while i < names.size()
@@ -1615,9 +1615,13 @@ int_temp_reader_map = init_int_temp_reader_map()
               known_nonneg_i48[t] = true
         elsif k == :string_i64 || k == :symbol_i64
           known_non_int[t] = true
+        elsif k == :call_method_i64
+          fb = wire_get(inst, :fast_builtin)
+          if fb in (:to_s :keys :empty :strip :has_key :starts_with :ends_with)
+            known_non_int[t] = true
         elsif k == :call_direct_i64
           dnm = wire_get(inst, :name)
-          if dnm in ("w_string" "w_str_concat" "w_str_concat_own" "w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_add_rhs" "w_str_add_rhs_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str" "w_int_to_s" "w_string_repeat" "w_strbuf_new" "w_strbuf_append" "w_strbuf_append_any" "w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_hash_new")
+          if dnm in ("w_string" "w_str_concat" "w_str_concat_own" "w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_add_rhs" "w_str_add_rhs_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str" "w_str_concat_any" "w_int_to_s" "w_string_repeat" "w_strbuf_new" "w_strbuf_append" "w_strbuf_append_any" "w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_hash_new")
             known_non_int[t] = true
       refs = loop_release_operands(inst)
       if refs == nil

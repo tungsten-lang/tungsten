@@ -874,12 +874,12 @@
       emit_wire_gep_array(wfn, arr_ptr, captures.size(), ci, gep_reg)
       emit_wire_store_ptr(wfn, gep_reg, cap_bits)
       if cap_store != nil
-        store_op = :store_i64
         if is_raw_int_storage_type(raw_type)
-          store_op = machine_store_op(raw_type)
+          emit_machine_store(wfn, raw_type, cap_slot, cap_store)
         elsif is_machine_float_type(raw_type)
-          store_op = float_store_op(raw_type)
-        emit_wire_dynamic_2(wfn, store_op, :ptr, cap_slot, :value, cap_store)
+          emit_float_store(wfn, raw_type, cap_slot, cap_store)
+        else
+          emit_wire_store_i64(wfn, cap_slot, cap_store)
       ci += 1
     cap_ptr = arr_ptr
   else

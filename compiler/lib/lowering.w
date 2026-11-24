@@ -412,6 +412,32 @@ use lowering/definitions
   while ci < n_components
     component = components[ci]
     n_comp = component.size()
+    scc_names = {}
+    enriched_list = []
+    im = 0
+    while im < n_comp
+      m = defs[component[im]]
+      if m.name != nil
+        scc_names[m.name] = true
+      # Seed inference with declared param types (canonical spelling) and
+      # `## i64`-style body hints. With an empty map, a typed fn whose tail
+      # expression flows through hinted locals inferred nil — its callers
+      # then fell off the native machine-int path, boxing every arithmetic
+      # op that consumed the call result (w_int + w_add per index expression
+      # in the flip-graph walkers).
+      pmap = {}
+      populate_definition_var_types(m, pmap, mod)
+      pts2 = m.param_types
+      m_params = m.params
+      if pts2 != nil && m_params != nil
+        n_pts2 = pts2.size()
+        n_m_params = m_params.size()
+        pi2 = 0
+        while pi2 < n_pts2 && pi2 < n_m_params
+          pmap[param_runtime_name(m_params[pi2])] = canonical_signature_type(pts2[pi2])
+          pi2 += 1
+      enriched_list.push(enrich_int_locals(m.body, pmap))
+      im += 1
     iter = 0
     max_iter = n_comp + 2
     changed = true
@@ -422,32 +448,43 @@ use lowering/definitions
         m = defs[component[im]]
         call_key = method_call_key_for_def(m)
         old_rt = fn_return_types[call_key]
-        # Seed inference with declared param types (canonical spelling) and
-        # `## i64`-style body hints. With an empty map, a typed fn whose tail
-        # expression flows through hinted locals inferred nil — its callers
-        # then fell off the native machine-int path, boxing every arithmetic
-        # op that consumed the call result (w_int + w_add per index expression
-        # in the flip-graph walkers).
-        pmap = {}
-        populate_definition_var_types(m, pmap, mod)
-        pts2 = m.param_types
-        m_params = m.params
-        if pts2 != nil && m_params != nil
-          n_pts2 = pts2.size()
-          n_m_params = m_params.size()
-          pi2 = 0
-          while pi2 < n_pts2 && pi2 < n_m_params
-            pmap[param_runtime_name(m_params[pi2])] = canonical_signature_type(pts2[pi2])
-            pi2 += 1
-        enriched = enrich_int_locals(m.body, pmap)
+        enriched = enriched_list[im]
         new_rt = infer_return_type(m, enriched, fn_return_types, lowering_infer_maps)
         if new_rt == nil
-          new_rt = infer_return_type_evidence(m, enriched, fn_return_types, lowering_infer_maps)
+          new_rt = infer_return_type_evidence(m, enriched, fn_return_types, lowering_infer_maps, scc_names)
         if new_rt != nil && new_rt != old_rt
           fn_return_types[call_key] = normalize_type_symbol(new_rt)
           changed = true
         im += 1
       iter += 1
+    # Strict verification pass: any SCC member seeded via deferred recursive
+    # calls must now justify every return path without deferrals. Shrinking
+    # monotonically drops unsound optimistic guesses (e.g. `x + rec(...)` where
+    # `x` is untyped) and any sibling that depended on them.
+    v_iter = 0
+    v_changed = true
+    while v_changed && v_iter < max_iter
+      v_changed = false
+      im = 0
+      while im < n_comp
+        m = defs[component[im]]
+        call_key = method_call_key_for_def(m)
+        cur_rt = fn_return_types[call_key]
+        if cur_rt != nil
+          enriched = enriched_list[im]
+          strict_rt = infer_return_type(m, enriched, fn_return_types, lowering_infer_maps)
+          if strict_rt == nil
+            strict_rt = infer_return_type_evidence(m, enriched, fn_return_types, lowering_infer_maps, nil)
+          if strict_rt == nil
+            fn_return_types[call_key] = nil
+            v_changed = true
+          else
+            norm_strict = normalize_type_symbol(strict_rt)
+            if norm_strict != cur_rt
+              fn_return_types[call_key] = norm_strict
+              v_changed = true
+        im += 1
+      v_iter += 1
     ci += 1
   nil
 

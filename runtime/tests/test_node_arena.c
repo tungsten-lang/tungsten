@@ -442,6 +442,90 @@ static void test_core_graph_snapshot(void) {
     unlink(path);
 }
 
+static void test_wire_packed_and_overflow(void) {
+    w_wire_store_reset(0);
+
+    /* Kind 1 = add_i64: schema ["lhs", "rhs", "temp"], extra_cap = 0. */
+    int64_t mark_before = w_wire_store_mark();
+    WValue inst = w_wire_packed_3(1, w_string("%a"), w_string("%b"), w_string("%sum"));
+    int64_t mark_after = w_wire_store_mark();
+    CHECK(mark_after - mark_before == 4,
+          "packed 3-field WIRE record occupies exactly 4 arena words (1 header + 3 values)");
+    CHECK(w_wire_kind_extern(inst) == 1 && w_is_wire_extern(inst) == 1,
+          "packed WIRE handle encodes kind and marker bits");
+    CHECK(w_wire_field_count(inst) == 3, "packed record reports fixed field count");
+    CHECK(w_string_content_equal(w_wire_slot_load(inst, 0), w_string("%a")) == W_TRUE &&
+          w_string_content_equal(w_wire_slot_load(inst, 1), w_string("%b")) == W_TRUE &&
+          w_string_content_equal(w_wire_slot_load(inst, 2), w_string("%sum")) == W_TRUE,
+          "w_wire_slot_load reads packed fixed slots by index");
+    CHECK(w_wire_field_symbol_at(inst, 0) == canonical_symbol("lhs") &&
+          w_wire_field_symbol_at(inst, 1) == canonical_symbol("rhs") &&
+          w_wire_field_symbol_at(inst, 2) == canonical_symbol("temp"),
+          "packed record synthesizes canonical field symbols from schema table");
+    CHECK(w_string_content_equal(w_wire_field_load(inst, canonical_symbol("rhs")),
+                                 w_string("%b")) == W_TRUE,
+          "w_wire_field_load resolves packed schema fields by symbol");
+
+    /* Late field store past extra_cap=0 spills to sparse g_wire_overflow. */
+    w_wire_field_store(inst, canonical_symbol("custom_meta"), w_int(42));
+    w_wire_field_store(inst, canonical_symbol("custom_meta2"), w_string("hi"));
+    CHECK(w_wire_field_count(inst) == 5, "overflow fields contribute to field count");
+    CHECK(w_wire_field_load(inst, canonical_symbol("custom_meta")) == w_int(42),
+          "overflow field loads back by symbol");
+    CHECK(w_string_content_equal(w_wire_field_load(inst, canonical_symbol("custom_meta2")),
+                                 w_string("hi")) == W_TRUE,
+          "multiple overflow fields load back");
+    CHECK(w_wire_field_symbol_at(inst, 3) == canonical_symbol("custom_meta") &&
+          w_wire_field_value_at(inst, 3) == w_int(42) &&
+          w_wire_field_symbol_at(inst, 4) == canonical_symbol("custom_meta2"),
+          "ordinal field walk reaches overflow entries");
+    /* Overwrite an existing overflow entry in place. */
+    w_wire_field_store(inst, canonical_symbol("custom_meta"), w_int(99));
+    CHECK(w_wire_field_count(inst) == 5 &&
+          w_wire_field_load(inst, canonical_symbol("custom_meta")) == w_int(99),
+          "updating existing overflow entry preserves count and stores new value");
+
+    /* Clone preserves fixed + overflow fields independently. */
+    WValue cloned = w_wire_clone(inst);
+    CHECK(w_wire_field_count(cloned) == 5 &&
+          w_wire_field_load(cloned, canonical_symbol("custom_meta")) == w_int(99) &&
+          w_string_content_equal(w_wire_slot_load(cloned, 0), w_string("%a")) == W_TRUE,
+          "w_wire_clone copies packed fixed and overflow fields");
+    w_wire_field_store(cloned, canonical_symbol("custom_meta"), w_int(123));
+    CHECK(w_wire_field_load(inst, canonical_symbol("custom_meta")) == w_int(99),
+          "mutating cloned overflow field does not alias source record");
+
+    /* Substitution on packed record updates scalar operands via schema bitmask. */
+    WValue subst = w_hash_new();
+    w_hash_set(subst, w_string("%a"), w_string("%x"));
+    WValue rewritten = w_wire_apply_subst(inst, subst);
+    CHECK(rewritten != inst &&
+          w_string_content_equal(w_wire_slot_load(rewritten, 0), w_string("%x")) == W_TRUE &&
+          w_string_content_equal(w_wire_slot_load(rewritten, 1), w_string("%b")) == W_TRUE &&
+          w_wire_field_load(rewritten, canonical_symbol("custom_meta")) == w_int(99),
+          "w_wire_apply_subst rewrites packed operands and preserves overflow");
+
+    /* Binary cache round-trip preserves packed records + overflow entries. */
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/tungsten-packed-wire-test-%ld.twc", (long)getpid());
+    WValue path_v = w_string(path);
+    WValue root = w_hash_new();
+    w_hash_set(root, canonical_symbol("inst"), inst);
+    w_hash_set(root, canonical_symbol("rewritten"), rewritten);
+    CHECK(w_core_cache_write(path_v, root) == W_TRUE, "packed WIRE cache writes");
+    w_wire_store_reset(0);
+    WValue loaded = w_core_cache_read(path_v);
+    WValue l_inst = w_hash_get(loaded, canonical_symbol("inst"));
+    WValue l_rewr = w_hash_get(loaded, canonical_symbol("rewritten"));
+    CHECK(w_is_wire_extern(l_inst) == 1 && w_wire_kind_extern(l_inst) == 1 &&
+          w_wire_field_count(l_inst) == 5 &&
+          w_string_content_equal(w_wire_slot_load(l_inst, 0), w_string("%a")) == W_TRUE &&
+          w_wire_field_load(l_inst, canonical_symbol("custom_meta")) == w_int(99) &&
+          w_string_content_equal(w_wire_slot_load(l_rewr, 0), w_string("%x")) == W_TRUE,
+          "packed WIRE cache restores fixed slots and overflow fields");
+    unlink(path);
+}
+
 int main(void) {
     test_init_state();
     test_alloc_roundtrip();
@@ -454,6 +538,7 @@ int main(void) {
     test_wire_builder_records();
     test_content_temp_map();
     test_core_graph_snapshot();
+    test_wire_packed_and_overflow();
 
     if (failures) {
         fprintf(stderr, "%d test(s) failed\n", failures);

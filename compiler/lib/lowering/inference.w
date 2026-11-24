@@ -50,6 +50,11 @@
   case t
   when :var
     return var_types[node.name]
+  when :ivar
+    civ = infer_maps[:current_class_confirmed_ta_ivars]
+    if civ != nil
+      return civ[node.name]
+    return nil
   when :int
     if node.format == :hex
       v = node.value
@@ -491,6 +496,8 @@
         return :i64
       if is_small_int_type(tt) && tt != :char && et == tt
         return :i64
+      if tt != nil && et == tt && (tt in (:string :bool :symbol :array :hash) || is_typed_array_type?(tt))
+        return tt
     return nil
   else
     nil

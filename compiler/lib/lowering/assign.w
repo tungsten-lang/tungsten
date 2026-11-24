@@ -242,10 +242,10 @@
   if ptr != nil
     temp = next_temp(wfn)
     if machine_int
-      emit_wire_dynamic_2(wfn, machine_load_op(raw_type), :ptr, ptr, :temp, temp)
+      emit_machine_load(wfn, raw_type, ptr, temp)
       return typed_value(raw_machine_value_type(raw_type), temp)
     if machine_float
-      emit_wire_dynamic_2(wfn, float_load_op(raw_type), :ptr, ptr, :temp, temp)
+      emit_float_load(wfn, raw_type, ptr, temp)
       return typed_value(raw_float_value_type(raw_type), temp)
     emit_wire_load_i64(wfn, ptr, temp)
     return typed_value(:i64, temp)
@@ -347,6 +347,9 @@
     ilits = mod[:top_level_int_literals]
     if ilits != nil && ilits.has_key?(name)
       return lower_expression(ctx, Tungsten:AST:Int.new(ilits[name]))
+    clits = mod[:top_level_const_values]
+    if clits != nil && clits.has_key?(name)
+      return typed_value(:raw_i64, clits[name].to_s())
 
   # Check if it's a top-level (module-scope) variable
   if mod[:top_level_vars][name] == true
@@ -985,7 +988,7 @@
     ctx[:var_types][name] = target_type
     ctx[:bindings][name] = nil
     ptr = ensure_var_slot(wfn, name, machine_slot_type(target_type))
-    emit_wire_dynamic_2(wfn, machine_store_op(target_type), :ptr, ptr, :value, raw_val)
+    emit_machine_store(wfn, target_type, ptr, raw_val)
     if wfn[:name] == "main"
       ctx[:mod][:top_level_vars][name] = true
       ctx[:mod][:top_level_var_types][name] = target_type
@@ -1004,7 +1007,7 @@
     ctx[:var_types][name] = target_type
     ctx[:bindings][name] = nil
     ptr = ensure_var_slot(wfn, name, float_slot_type(target_type))
-    emit_wire_dynamic_2(wfn, float_store_op(target_type), :ptr, ptr, :value, raw_val)
+    emit_float_store(wfn, target_type, ptr, raw_val)
     if wfn[:name] == "main"
       ctx[:mod][:top_level_vars][name] = true
       ctx[:mod][:top_level_var_types][name] = nil
@@ -1121,7 +1124,7 @@
       ctx[:var_types][name] = machine_type
       ctx[:bindings][name] = nil
       ptr = ensure_var_slot(wfn, name, machine_slot_type(machine_type))
-      emit_wire_dynamic_2(wfn, machine_store_op(machine_type), :ptr, ptr, :value, raw_val)
+      emit_machine_store(wfn, machine_type, ptr, raw_val)
       if wfn[:name] == "main"
         ctx[:mod][:top_level_vars][name] = true
         ctx[:mod][:top_level_var_types][name] = machine_type

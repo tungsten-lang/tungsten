@@ -379,6 +379,7 @@
   out << declare_fn("w_i64_concat_str", wv, join_arg_types3("i64", wv, wv))
   out << declare_fn("w_str_concat_int_wv", wv, wv3)
   out << declare_fn("w_int_wv_concat_str", wv, wv3)
+  out << declare_fn("w_str_concat_any", wv, wv3)
   out << declare_fn("w_str_append", wv, wv2)
   out << declare_fn("w_slab_freeze_safe", wv, "")
   out << declare_fn("w_type_tables_lock_safe", wv, "")
@@ -512,6 +513,16 @@
   out << declare_fn("w_fast_size", wv, join_arg_types2(wv, "ptr"))
   out << declare_fn("w_fast_push", wv, join_arg_types3(wv, wv, "ptr"))
   out << declare_fn("w_fast_to_s", wv, join_arg_types2(wv, "ptr"))
+  out << declare_fn("w_fast_has_key", wv, join_arg_types3(wv, wv, "ptr"))
+  out << declare_fn("w_fast_keys", wv, join_arg_types2(wv, "ptr"))
+  out << declare_fn("w_fast_empty", wv, join_arg_types2(wv, "ptr"))
+  out << declare_fn("w_fast_starts_with", wv, join_arg_types3(wv, wv, "ptr"))
+  out << declare_fn("w_fast_ends_with", wv, join_arg_types3(wv, wv, "ptr"))
+  out << declare_fn("w_fast_slice2", wv, join_arg_types4(wv, wv, wv, "ptr"))
+  out << declare_fn("w_fast_byte_at", wv, join_arg_types3(wv, wv, "ptr"))
+  out << declare_fn("w_fast_strip", wv, join_arg_types2(wv, "ptr"))
+  out << declare_fn("w_fast_index", wv, join_arg_types3(wv, wv, "ptr"))
+  out << declare_fn("w_fast_abs", wv, join_arg_types2(wv, "ptr"))
   out << declare_fn_attrs("w_value_is_a", wv, wv2, "nounwind willreturn memory(read)")
 
   # Classes / objects
@@ -569,10 +580,25 @@
   out << declare_fn("w_ast_body_builder_finish", wv, join_arg_types2(wv, "i64"))
   out << declare_fn("w_node_arena_reset", "void", "")
   out << declare_fn("w_ast_schema_hash_compute", "i64", "")
-  # Packed WIRE instruction arena. The handle carries :op as an 8-bit kind;
-  # record fields are inline symbol/value pairs in a resettable word arena.
+  # Packed WIRE instruction arena. The handle carries :op as a 9-bit kind;
+  # schema-known instructions store fixed-order value slots with no per-slot
+  # field symbols in the arena.
   out << declare_fn("w_wire_alloc", wv, "i64, i64")
   out << declare_fn("w_wire_alloc_reserve", wv, "i64, i64, i64")
+  out << declare_fn("w_wire_packed_0", wv, "i64")
+  out << declare_fn("w_wire_packed_1", wv, i64_wv)
+  out << declare_fn("w_wire_packed_2", wv, "i64" + ", " + wv2)
+  out << declare_fn("w_wire_packed_3", wv, "i64" + ", " + wv3)
+  out << declare_fn("w_wire_packed_4", wv, "i64" + ", " + wv4)
+  out << declare_fn("w_wire_packed_5", wv, "i64" + ", " + wv5)
+  out << declare_fn("w_wire_packed_6", wv, "i64" + ", " + wv5 + ", " + wv)
+  out << declare_fn("w_wire_packed_7", wv, "i64" + ", " + wv5 + ", " + wv2)
+  out << declare_fn("w_wire_packed_8", wv, "i64" + ", " + wv5 + ", " + wv3)
+  out << declare_fn("w_wire_packed_9", wv, "i64" + ", " + wv5 + ", " + wv4)
+  out << declare_fn("w_wire_packed_14", wv, "i64" + ", " + wv5 + ", " + wv5 + ", " + wv4)
+  out << declare_fn("w_wire_func_push_inst", wv, wv2)
+  out << declare_fn_attrs("w_wire_slot_load", wv, join_arg_types2(wv, "i64"),
+                          "nounwind willreturn memory(read)")
   out << declare_fn("w_wire_field_store_at", wv, join_arg_types4(wv, "i64", wv, wv))
   out << declare_fn("w_wire_field_load", wv, wv2)
   out << declare_fn("w_wire_field_load_nil", wv, wv2)

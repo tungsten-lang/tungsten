@@ -336,6 +336,39 @@
       parts << t + ".is_node = icmp eq i64 " + t + ".upper, 524275\n  "
       parts << t + " = zext i1 " + t + ".is_node to i64"
       return parts.to_s()
+    if wire_get(inst, :name) == "w_is_wire_extern" && wire_sequence_size(args) == 1
+      t = wire_get(inst, :temp)
+      v = wire_sequence_get(args, 0)
+      parts = StringBuffer(180)
+      parts << t + ".wm = and i64 " + v + ", u0xFFFFF04000000000\n  "
+      parts << t + ".iw = icmp eq i64 " + t + ".wm, u0xFFFE704000000000\n  "
+      parts << t + " = zext i1 " + t + ".iw to i64"
+      return parts.to_s()
+    if wire_get(inst, :name) == "w_wire_kind_extern" && wire_sequence_size(args) == 1
+      t = wire_get(inst, :temp)
+      v = wire_sequence_get(args, 0)
+      parts = StringBuffer(240)
+      parts << t + ".wm = and i64 " + v + ", u0xFFFFF04000000000\n  "
+      parts << t + ".iw = icmp eq i64 " + t + ".wm, u0xFFFE704000000000\n  "
+      parts << t + ".sh = lshr i64 " + v + ", 29\n  "
+      parts << t + ".k = and i64 " + t + ".sh, 511\n  "
+      parts << t + " = select i1 " + t + ".iw, i64 " + t + ".k, i64 0"
+      return parts.to_s()
+    if wire_get(inst, :name) == "w_wire_slot_load" && wire_sequence_size(args) == 2 && wire_sequence_get(args, 1)[0] != "%"
+      t = wire_get(inst, :temp)
+      w = wire_sequence_get(args, 0)
+      slot_i = wire_sequence_get(args, 1).to_i()
+      parts = StringBuffer(420)
+      parts << t + ".off = and i64 " + w + ", 536870911\n  "
+      parts << t + ".bp = getelementptr inbounds { ptr, i32, i32, i32 }, ptr @g_wire_arena, i32 0, i32 0\n  "
+      parts << t + ".base = load ptr, ptr " + t + ".bp, align 8\n  "
+      parts << t + ".hp = getelementptr i64, ptr " + t + ".base, i64 " + t + ".off\n  "
+      parts << t + ".hdr = load i64, ptr " + t + ".hp, align 8\n  "
+      parts << t + ".unp = icmp sge i64 " + t + ".hdr, 0\n  "
+      parts << t + ".slot = select i1 " + t + ".unp, i64 " + (2 + slot_i * 2).to_s() + ", i64 " + (1 + slot_i).to_s() + "\n  "
+      parts << t + ".gep = getelementptr i64, ptr " + t + ".hp, i64 " + t + ".slot\n  "
+      parts << t + " = load i64, ptr " + t + ".gep, align 8"
+      return parts.to_s()
     if wire_get(inst, :name) == "w_node_alloc" && wire_sequence_size(args) == 2
       t = wire_get(inst, :temp)
       kind_in = wire_sequence_get(args, 0)
@@ -568,22 +601,20 @@
     call_keyword = "call"
     if wire_get(inst, :src_line) != nil
       call_keyword = "notail call"
-    if fast_size_call?(inst)
-      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_size(i64 " + wire_get(inst, :receiver) + ic_arg + ")"
-    elsif fast_to_s_call?(inst)
-      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_to_s(i64 " + wire_get(inst, :receiver) + ic_arg + ")"
+    fb_fn = fast_builtin_runtime_fn(inst, argc)
+    if fb_fn != nil
+      if argc == 0
+        parts << dv_temp + " = " + call_keyword + " i64 @" + fb_fn + "(i64 " + wire_get(inst, :receiver) + ic_arg + ")"
+      elsif argc == 1
+        parts << dv_temp + " = " + call_keyword + " i64 @" + fb_fn + "(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
+      else
+        parts << dv_temp + " = " + call_keyword + " i64 @" + fb_fn + "(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ", i64 " + wire_sequence_get(args, 1) + ic_arg + ")"
     elsif argc == 0
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ic_arg + ")"
     elsif sym_idx_get_call?(inst)
       parts << dv_temp + " = " + call_keyword + " i64 @w_fast_sym_get(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
     elsif sym_idx_set_call?(inst)
       parts << dv_temp + " = " + call_keyword + " i64 @w_fast_sym_set(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ", i64 " + wire_sequence_get(args, 1) + ic_arg + ")"
-    elsif fast_idx_get_call?(inst)
-      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_idx_get(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
-    elsif fast_idx_set_call?(inst)
-      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_idx_set(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ", i64 " + wire_sequence_get(args, 1) + ic_arg + ")"
-    elsif fast_push_call?(inst)
-      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_push(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
     elsif scalar_source_one_call?(inst)
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
     elsif scalar_source_two_call?(inst)

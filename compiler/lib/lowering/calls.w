@@ -346,12 +346,12 @@
     tb = next_temp(wfn)
     emit_wire_arr_data_ptr(wfn, bv[:value], tb)
     tc = next_temp(wfn)
-    theop = :asm_neon_redc4
     if name == "asm_neon_madd4"
-      theop = :asm_neon_madd4
-    if name == "asm_neon_msub4"
-      theop = :asm_neon_msub4
-    emit_wire_dynamic_5(wfn, theop, :ap, ta, :bp, tb, :n, nraw, :outp, to, :temp, tc)
+      emit_wire_asm_neon_madd4(wfn, ta, tb, nraw, to, tc)
+    elsif name == "asm_neon_msub4"
+      emit_wire_asm_neon_msub4(wfn, ta, tb, nraw, to, tc)
+    else
+      emit_wire_asm_neon_redc4(wfn, ta, tb, nraw, to, tc)
     return typed_value(:raw_i64, tc)
 
   # NEON whole-butterfly DIT NTT stage — asm_neon_ntt_stage(v, stw, nblocks, halfq):
@@ -518,8 +518,10 @@
     ub = asm_ptr_operand(ctx, args[3])
     ublen = lower_machine_int_expression(ctx, args[4], :i64)
     ut = next_temp(wfn)
-    uop = name == "asm_add_uneq" ? :asm_add_uneq : :asm_sub_uneq
-    emit_wire_dynamic_7(wfn, uop, :ap, ua, :bp, ub, :entry_label, current_block(wfn)[:label], :na, ualen, :nb, ublen, :outp, uo, :temp, ut)
+    if name == "asm_add_uneq"
+      emit_wire_asm_add_uneq(wfn, ua, ub, current_block(wfn)[:label], ualen, ublen, uo, ut)
+    else
+      emit_wire_asm_sub_uneq(wfn, ua, ub, current_block(wfn)[:label], ualen, ublen, uo, ut)
     return typed_value(:raw_i64, ut)
 
   # asm_sub_no(out, oo, a, ao, b, bo, n): offset sub_n; sbcs loop; returns borrow.
@@ -1278,7 +1280,7 @@
           i += 1
         temp = next_temp(wfn)
         raw_return = ctx[:mod][:fn_return_types][typed_key]
-        emit_wire_dynamic_4(wfn, machine_call_return_op(raw_return), :arg_types, nil, :args, arg_regs, :name, typed_target, :temp, temp)
+        emit_machine_call_return(wfn, raw_return, nil, arg_regs, typed_target, temp)
         if raw_return == :bool
           return typed_value(:i64, temp)
         if is_u128_type(raw_return)
@@ -1350,11 +1352,17 @@
               if pkinds != nil
                 pkind = pkinds[i]
               if pkind == :arr
-                arg_regs.push(guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], arg_types[i], name, i))
+                actual_t = arg_types[i]
+                if actual_t == nil && !(is_ast_node?(args[i]) && ast_kind(args[i]) == :ivar) && is_typed_array_type?(arg_tv[:type])
+                  actual_t = arg_tv[:type]
+                arg_regs.push(guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], actual_t, name, i))
               elsif pkind == :boxed
                 arg_regs.push(ensure_i64_value(wfn, arg_tv))
               elsif pkind == :arrptr
-                handle = guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], arg_types[i], name, i)
+                actual_t = arg_types[i]
+                if actual_t == nil && !(is_ast_node?(args[i]) && ast_kind(args[i]) == :ivar) && is_typed_array_type?(arg_tv[:type])
+                  actual_t = arg_tv[:type]
+                handle = guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], actual_t, name, i)
                 tda = next_temp(wfn)
                 emit_wire_ta_data_addr(wfn, tda, handle)
                 arg_regs.push(tda)
@@ -1363,7 +1371,7 @@
               i += 1
             temp = next_temp(wfn)
             raw_return = ctx[:mod][:fn_return_types][fallback_key]
-            emit_wire_dynamic_4(wfn, machine_call_return_op(raw_return), :arg_types, nil, :args, arg_regs, :name, fallback_target, :temp, temp)
+            emit_machine_call_return(wfn, raw_return, nil, arg_regs, fallback_target, temp)
             if raw_return == :bool
               return typed_value(:i64, temp)
             if is_u128_type(raw_return)
@@ -1384,7 +1392,10 @@
             # direct-call path above.
             if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128) && env("TUNGSTEN_FREE") != "0"
               fresh_boxes.push(reg)
-            reg = guard_typed_array_arg(ctx, reg, fallback_types[i], arg_types[i], name, i)
+            actual_t = arg_types[i]
+            if actual_t == nil && !(is_ast_node?(args[i]) && ast_kind(args[i]) == :ivar) && is_typed_array_type?(val[:type])
+              actual_t = val[:type]
+            reg = guard_typed_array_arg(ctx, reg, fallback_types[i], actual_t, name, i)
             arg_regs.push(reg)
             i += 1
 
@@ -1488,7 +1499,7 @@
         arg_regs.push("0")
     temp = next_temp(wfn)
     raw_return = ctx[:mod][:fn_return_types][name]
-    emit_wire_dynamic_4(wfn, machine_call_return_op(raw_return), :arg_types, nil, :args, arg_regs, :name, raw_target, :temp, temp)
+    emit_machine_call_return(wfn, raw_return, nil, arg_regs, raw_target, temp)
     # Preserve unsignedness across the raw call boundary: a u64-returning
     # callee's value must later box via w_u64, not the signed int fast path
     # (which prints values >= 2^63 as negative).

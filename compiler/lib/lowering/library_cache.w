@@ -121,6 +121,7 @@ incremental_library_cache_state = {
     :class_static_new,
     :ivar_types,
     :exact_source_ivar_types,
+    :confirmed_typed_array_ivars,
     :top_level_static_types,
     :top_level_assign_once,
     :top_level_var_types,

@@ -458,9 +458,9 @@
         if !terminated
           if is_raw_int_storage_type(ctx[:var_types][name])
             # Binding may already be raw (from ## i64 param unboxing) — store directly
-            emit_wire_dynamic_2(wfn, machine_store_op(ctx[:var_types][name]), :ptr, ptr, :value, reg)
+            emit_machine_store(wfn, ctx[:var_types][name], ptr, reg)
           elsif is_machine_float_type(ctx[:var_types][name])
-            emit_wire_dynamic_2(wfn, float_store_op(ctx[:var_types][name]), :ptr, ptr, :value, reg)
+            emit_float_store(wfn, ctx[:var_types][name], ptr, reg)
           else
             emit_wire_store_i64(wfn, ptr, reg)
     i += 1

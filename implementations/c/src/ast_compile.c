@@ -1505,6 +1505,24 @@ static int compile_call(TcAstValue node, TcChunk *chunk, TcError *err) {
     else if (argc == 3 && ast_string_unquoted_eq(target, "w_content_temp_norm")) ccall_op = TC_OP_NORM_TEMP;
     else if (argc == 2 && ast_string_unquoted_eq(target, "w_string_first_byte")) ccall_op = TC_OP_STRING_FIRST_BYTE;
     else if (argc == 2 && ast_string_unquoted_eq(target, "w_wire_temp_operands")) ccall_op = TC_OP_WIRE_TEMP_OPERANDS;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_wire_func_push_inst")) ccall_op = TC_OP_WIRE_FUNC_PUSH_INST;
+    else if (argc == 3 && ast_string_unquoted_eq(target, "w_wire_slot_load")) ccall_op = TC_OP_WIRE_SLOT_LOAD;
+    else if ((argc == 2 && ast_string_unquoted_eq(target, "w_wire_packed_0")) ||
+             (argc == 3 && ast_string_unquoted_eq(target, "w_wire_packed_1")) ||
+             (argc == 4 && ast_string_unquoted_eq(target, "w_wire_packed_2")) ||
+             (argc == 5 && ast_string_unquoted_eq(target, "w_wire_packed_3")) ||
+             (argc == 6 && ast_string_unquoted_eq(target, "w_wire_packed_4")) ||
+             (argc == 7 && ast_string_unquoted_eq(target, "w_wire_packed_5")) ||
+             (argc == 8 && ast_string_unquoted_eq(target, "w_wire_packed_6")) ||
+             (argc == 9 && ast_string_unquoted_eq(target, "w_wire_packed_7")) ||
+             (argc == 10 && ast_string_unquoted_eq(target, "w_wire_packed_8")) ||
+             (argc == 11 && ast_string_unquoted_eq(target, "w_wire_packed_9")) ||
+             (argc == 16 && ast_string_unquoted_eq(target, "w_wire_packed_14"))) {
+      for (size_t i = 1; i < argc; i++) {
+        if (!compile_expr(args->as.array->items[i], chunk, err)) return 0;
+      }
+      return tc_emit_op_u32(chunk, TC_OP_WIRE_PACKED, (uint32_t)(argc - 2), err);
+    }
     if (ccall_op != 0) {
       for (size_t i = 1; i < argc; i++) {
         if (!compile_expr(args->as.array->items[i], chunk, err)) return 0;

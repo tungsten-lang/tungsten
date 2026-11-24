@@ -209,6 +209,9 @@ enum {
   TC_OP_IS_MACHINE_INT64_TYPE,
   TC_OP_STRING_FIRST_BYTE,
   TC_OP_WIRE_TEMP_OPERANDS,
+  TC_OP_WIRE_PACKED,
+  TC_OP_WIRE_FUNC_PUSH_INST,
+  TC_OP_WIRE_SLOT_LOAD,
   // DESTRUCTURE <a> <b>: pop a value and push one element of a multiple
   // assignment's spread (compile_multi_assign). An Array spreads; anything
   // else is a one-element list. mode = b >> 28, after = b & 0x0FFFFFFF:

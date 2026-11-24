@@ -33,7 +33,7 @@
     raw = ensure_raw_f32(new_fn, typed_value(:i64, src))
   else
     raw = ensure_raw_f64(new_fn, typed_value(:i64, src))
-  emit_wire_dynamic_2(new_fn, float_store_op(t), :ptr, ptr, :value, raw)
+  emit_float_store(new_fn, t, ptr, raw)
   child_ctx[:bindings][pname] = nil
   nil
 
@@ -1119,7 +1119,9 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
   # Typed definitions (declared parameter types) opt into machine semantics
   # for literal-based shifts (`1 << n`, infer_type's LSHIFT arm).
   saved_typed_def = lowering_infer_maps[:typed_def]
+  saved_confirmed_ta_ivars = lowering_infer_maps[:current_class_confirmed_ta_ivars]
   lowering_infer_maps[:typed_def] = node.param_types != nil
+  lowering_infer_maps[:current_class_confirmed_ta_ivars] = nil
   child_var_types = {}
   child_ctx = {
     mod: mod,
@@ -1246,9 +1248,9 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     if is_raw_int_storage_type(pt)
       if raw_i64_sig || raw_int_sig
         child_ctx[:bindings][pname] = llvm_param_reg(pname)
-      elsif pt in (:i64 :u64)
+      elsif pt in (:i64 :u64 :i128 :u128)
         raw = next_temp(new_fn)
-        emit_wire_call_direct_i64(new_fn, ["i64"], [input], nil, nil, machine_unbox_fn(pt), nil, nil, raw)
+        emit_machine_call_return(new_fn, pt, ["i64"], [input], machine_unbox_fn(pt), raw)
         child_ctx[:bindings][pname] = raw
       else
         child_ctx[:bindings][pname] = nanunbox_int_emit(new_fn, input)
@@ -1304,14 +1306,14 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
       store_captured_float_param(child_ctx, new_fn, pname, ptr, child_var_types[pname])
     elsif child_ctx[:bindings][pname] != nil
       if is_raw_int_storage_type(child_var_types[pname])
-        raw = ensure_raw_machine_int(new_fn, typed_value(:raw_i64, child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
-        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
+        raw = ensure_raw_machine_int(new_fn, typed_value(raw_machine_value_type(child_var_types[pname]), child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
+        emit_machine_store(new_fn, child_var_types[pname], ptr, raw)
       else
         emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
     else
       if is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:i64, llvm_param_reg(pname)), child_var_types[pname], child_var_types[pname])
-        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
+        emit_machine_store(new_fn, child_var_types[pname], ptr, raw)
       else
         emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
     # The slot is now the parameter's only home. A binding left behind holds
@@ -1335,13 +1337,13 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
         store_captured_float_param(child_ctx, new_fn, pname, ptr, child_var_types[pname])
       elsif child_ctx[:bindings][pname] != nil
         if is_raw_int_storage_type(child_var_types[pname])
-          raw = ensure_raw_machine_int(new_fn, typed_value(:raw_i64, child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
-          emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
+          raw = ensure_raw_machine_int(new_fn, typed_value(raw_machine_value_type(child_var_types[pname]), child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
+          emit_machine_store(new_fn, child_var_types[pname], ptr, raw)
         else
           emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
       elsif is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:i64, llvm_param_reg(pname)), child_var_types[pname], child_var_types[pname])
-        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
+        emit_machine_store(new_fn, child_var_types[pname], ptr, raw)
       else
         emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
       # As above: the slot supersedes the entry binding.
@@ -1423,6 +1425,7 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     emit_wire_ret_i64(new_fn, 0, final_reg)
 
   lowering_infer_maps[:typed_def] = saved_typed_def
+  lowering_infer_maps[:current_class_confirmed_ta_ivars] = saved_confirmed_ta_ivars
   finalize_function(new_fn)
   nil
 
@@ -2418,7 +2421,12 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
 
   # Child context with class_name set
   saved_typed_def = lowering_infer_maps[:typed_def]
+  saved_confirmed_ta_ivars = lowering_infer_maps[:current_class_confirmed_ta_ivars]
   lowering_infer_maps[:typed_def] = node.param_types != nil
+  if node.is_class_method != true && name != "new" && mod[:confirmed_typed_array_ivars] != nil
+    lowering_infer_maps[:current_class_confirmed_ta_ivars] = mod[:confirmed_typed_array_ivars][class_name]
+  else
+    lowering_infer_maps[:current_class_confirmed_ta_ivars] = nil
   child_var_types = {}
   # Seed __self type for specialized variants. Drives downstream
   # dispatch (e.g. self[i] → :typed_array_get_inline at the variant's ebits).
@@ -2561,9 +2569,9 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     if is_raw_int_storage_type(pt)
       if raw_abi && is_machine_int64_type(pt)
         child_ctx[:bindings][pname] = llvm_param_reg(pname)
-      elsif pt in (:i64 :u64)
+      elsif pt in (:i64 :u64 :i128 :u128)
         raw = next_temp(new_fn)
-        emit_wire_call_direct_i64(new_fn, ["i64"], [input], nil, nil, machine_unbox_fn(pt), nil, nil, raw)
+        emit_machine_call_return(new_fn, pt, ["i64"], [input], machine_unbox_fn(pt), raw)
         child_ctx[:bindings][pname] = raw
       else
         child_ctx[:bindings][pname] = nanunbox_int_emit(new_fn, input)
@@ -2586,14 +2594,14 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
       store_captured_float_param(child_ctx, new_fn, pname, ptr, child_var_types[pname])
     elsif child_ctx[:bindings][pname] != nil
       if is_raw_int_storage_type(child_var_types[pname])
-        raw = ensure_raw_machine_int(new_fn, typed_value(:raw_i64, child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
-        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
+        raw = ensure_raw_machine_int(new_fn, typed_value(raw_machine_value_type(child_var_types[pname]), child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
+        emit_machine_store(new_fn, child_var_types[pname], ptr, raw)
       else
         emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
     else
       if is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:i64, llvm_param_reg(pname)), child_var_types[pname], child_var_types[pname])
-        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
+        emit_machine_store(new_fn, child_var_types[pname], ptr, raw)
       else
         emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
     # As in lower_method_def: the slot supersedes the entry binding, which
@@ -2616,13 +2624,13 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
         store_captured_float_param(child_ctx, new_fn, pname, ptr, child_var_types[pname])
       elsif child_ctx[:bindings][pname] != nil
         if is_raw_int_storage_type(child_var_types[pname])
-          raw = ensure_raw_machine_int(new_fn, typed_value(:raw_i64, child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
-          emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
+          raw = ensure_raw_machine_int(new_fn, typed_value(raw_machine_value_type(child_var_types[pname]), child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
+          emit_machine_store(new_fn, child_var_types[pname], ptr, raw)
         else
           emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
       elsif is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:i64, llvm_param_reg(pname)), child_var_types[pname], child_var_types[pname])
-        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
+        emit_machine_store(new_fn, child_var_types[pname], ptr, raw)
       else
         emit_wire_store_i64(new_fn, ptr, llvm_param_reg(pname))
       # As in lower_method_def: the slot supersedes the entry binding.
@@ -2685,6 +2693,7 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     emit_wire_ret_i64(new_fn, 0, final_reg)
 
   lowering_infer_maps[:typed_def] = saved_typed_def
+  lowering_infer_maps[:current_class_confirmed_ta_ivars] = saved_confirmed_ta_ivars
   finalize_function(new_fn)
   if raw_abi && wrapper_fn_name != nil && wrapper_fn_name != fn_name
     lower_static_method_boxed_wrapper(ctx, class_name, node, fn_name, wrapper_fn_name, child_var_types)

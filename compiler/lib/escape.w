@@ -171,7 +171,7 @@ escape_derive_fields = [:value, :boxed, :raw, :arr, :base, :ptr, :lhs, :rhs]
 # handed to one of these is consumed, never merely read.
 -> init_escape_consuming_builtins_map()
   m = {}
-  names = ["w_str_concat_free_lhs", "w_str_concat_free_rhs", "w_str_concat_own", "w_str_add_rhs_own", "w_str_concat_i64", "w_i64_concat_str", "w_str_concat_int_wv", "w_int_wv_concat_str"]
+  names = ["w_str_concat_free_lhs", "w_str_concat_free_rhs", "w_str_concat_own", "w_str_add_rhs_own", "w_str_concat_i64", "w_i64_concat_str", "w_str_concat_int_wv", "w_int_wv_concat_str", "w_str_concat_any"]
   i = 0
   while i < names.size()
     m[names[i]] = true
@@ -232,21 +232,31 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
       ii = 0
       while ii < instrs.size()
         inst = instrs[ii]
-        op = wire_kind(inst)
-        if op == :call_direct_i64 || op == :call_direct_void
-          call_name = wire_get(inst, :name)
+        kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+        case kid
+        when WIRE_KIND_CALL_DIRECT_I64
+          call_name = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_NAME)
           if !is_escape_array_read_call(call_name) && container_store_first_kept(call_name) == nil && !is_consuming_builtin(call_name) && !is_pure_builtin(call_name)
             if is_impure_call(call_name)
               has_side_effects = true
               break
-        elsif op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :call_loc_set_col || op == :phi_ssa
+        when WIRE_KIND_CALL_DIRECT_VOID
+          call_name = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_VOID_NAME)
+          if !is_escape_array_read_call(call_name) && container_store_first_kept(call_name) == nil && !is_consuming_builtin(call_name) && !is_pure_builtin(call_name)
+            if is_impure_call(call_name)
+              has_side_effects = true
+              break
+        when WIRE_KIND_LOAD_I64, WIRE_KIND_STORE_I64, WIRE_KIND_BR, WIRE_KIND_COND_BR, WIRE_KIND_CALL_LOC_SET_COL, WIRE_KIND_PHI_SSA
           ignored = nil
-        elsif op in (:call_method_i64 :ivar_set :ivar_set_idx :store_global :store_cvar :class_store :puts_i64 :print_i64 :class_add_method :class_add_static_method :class_add_ivar :type_class_register :node_kind_class_register :class_new)
+        when WIRE_KIND_CALL_METHOD_I64, WIRE_KIND_IVAR_SET, WIRE_KIND_IVAR_SET_IDX, WIRE_KIND_STORE_GLOBAL, WIRE_KIND_STORE_CVAR, WIRE_KIND_CLASS_STORE, WIRE_KIND_PUTS_I64, WIRE_KIND_PRINT_I64, WIRE_KIND_CLASS_ADD_METHOD, WIRE_KIND_CLASS_ADD_STATIC_METHOD, WIRE_KIND_CLASS_ADD_IVAR, WIRE_KIND_TYPE_CLASS_REGISTER, WIRE_KIND_NODE_KIND_CLASS_REGISTER, WIRE_KIND_CLASS_NEW
           has_side_effects = true
           break
-        elsif (wire_get(inst, :args) != nil || wire_get(inst, :receiver) != nil) && !(op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64 :call_direct_i128 :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_direct_ptr :call_fused_out_reuse))
-          has_side_effects = true
-          break
+        when WIRE_KIND_MEMO_CALL0_I64, WIRE_KIND_MEMO_CALL1_I64, WIRE_KIND_MEMO_CALL2_I64, WIRE_KIND_CALL_DIRECT_I128, WIRE_KIND_CALL_DIRECT_I64_PTR1, WIRE_KIND_CALL_DIRECT_VOID_PTR1, WIRE_KIND_CALL_DIRECT_PTR, WIRE_KIND_CALL_FUSED_OUT_REUSE
+          ignored = nil
+        else
+          if wire_get(inst, :args) != nil || wire_get(inst, :receiver) != nil
+            has_side_effects = true
+            break
         ii += 1
       bi += 1
     fn_escs[func[:name]] = {
@@ -270,11 +280,16 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      op = wire_kind(inst)
+      kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
 
-      if op == :call_direct_i64 || op == :call_direct_void
-        call_name = wire_get(inst, :name)
-        args = wire_get(inst, :args)
+      case kid
+      when WIRE_KIND_CALL_DIRECT_I64, WIRE_KIND_CALL_DIRECT_VOID
+        if kid == WIRE_KIND_CALL_DIRECT_I64
+          call_name = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_NAME)
+          args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS)
+        else
+          call_name = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_VOID_NAME)
+          args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_VOID_ARGS)
         kept = container_store_first_kept(call_name)
         if is_escape_array_read_call(call_name)
           # an element read / reduction / bounds check: the container is neither kept nor returned
@@ -326,8 +341,10 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
                     param_stored[src] = true
                   elsif callee_escs[:escs][ai] == true
                     # Returned by the callee, not stored: the result aliases it.
-                    if wire_get(inst, :temp) != nil
-                      temp_from_param[wire_get(inst, :temp)] = src
+                    if kid == WIRE_KIND_CALL_DIRECT_I64
+                      ct = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_TEMP)
+                      if ct != nil
+                        temp_from_param[ct] = src
                 if !known
                   param_escaped[src] = true
                   param_stored[src] = true
@@ -339,25 +356,33 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
           if is_impure_call(call_name)
             has_side_effects = true
 
-      elsif op == :load_i64 || op == :load_ptr
-        src = escape_param_source(wire_get(inst, :ptr), temp_from_param, param_idx)
-        if src != nil && wire_get(inst, :temp) != nil
-          temp_from_param[wire_get(inst, :temp)] = src
+      when WIRE_KIND_LOAD_I64, WIRE_KIND_LOAD_PTR
+        src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_PTR), temp_from_param, param_idx)
+        if src != nil
+          lt = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_TEMP)
+          if lt != nil
+            temp_from_param[lt] = src
 
-      elsif op == :store_i64 || op == :store_ptr || op == :view_store_field || op == :store_memo_ptr || op == :slab_node_set_idx
+      when WIRE_KIND_STORE_I64
+        escape_mark_value(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_VALUE), true, state)
+
+      when WIRE_KIND_STORE_PTR
+        escape_mark_value(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_PTR_VALUE), true, state)
+
+      when WIRE_KIND_VIEW_STORE_FIELD, WIRE_KIND_STORE_MEMO_PTR, WIRE_KIND_SLAB_NODE_SET_IDX
         escape_mark_value(wire_get(inst, :value), true, state)
 
-      elsif op in (:br :cond_br :call_loc_set_col :scope_push :scope_pop :alloca_i64 :ret_void :ret_i32 :unreachable :load_global :load_class :free_value)
+      when WIRE_KIND_BR, WIRE_KIND_COND_BR, WIRE_KIND_CALL_LOC_SET_COL, WIRE_KIND_SCOPE_PUSH, WIRE_KIND_SCOPE_POP, WIRE_KIND_ALLOCA_I64, WIRE_KIND_RET_VOID, WIRE_KIND_RET_I32, WIRE_KIND_UNREACHABLE, WIRE_KIND_LOAD_GLOBAL, WIRE_KIND_LOAD_CLASS, WIRE_KIND_FREE_VALUE, WIRE_KIND_SWITCH_I64, WIRE_KIND_CLEANUP_POP, WIRE_KIND_LOAD_CVAR, WIRE_KIND_IVAR_GET, WIRE_KIND_IVAR_GET_IDX, WIRE_KIND_BIGINT_LITERAL_I64, WIRE_KIND_CONST_FLOAT, WIRE_KIND_CONST_DECIMAL, WIRE_KIND_CONST_RATIONAL, WIRE_KIND_CONST_CHAR, WIRE_KIND_FN_ADDR_I64
         ignored = nil
 
-      elsif op == :ret_i64
-        escape_mark_value(wire_get(inst, :value), false, state)
+      when WIRE_KIND_RET_I64
+        escape_mark_value(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_RET_I64_VALUE), false, state)
 
-      elsif op == :call_method_i64
+      when WIRE_KIND_CALL_METHOD_I64
         has_side_effects = true
-        escape_mark_args(wire_get(inst, :args), true, state)
-        receiver = wire_get(inst, :receiver)
-        mv = wire_get(inst, :method_name_val)
+        escape_mark_args(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_ARGS), true, state)
+        receiver = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_RECEIVER)
+        mv = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_METHOD_NAME_VAL)
         mname = name_texts[mv]
         if mname == nil && strings != nil && type(mv) == "String" && mv.starts_with?("u0x")
           mname = strings[mv]
@@ -372,110 +397,126 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
           param_kind_stored[:string][src] = true if mname == nil || !container_reader_method?(:string, mname)
           param_kind_stored[:hash][src] = true if mname == nil || !container_reader_method?(:hash, mname)
 
-      elsif op == :string_i64 || op == :symbol_i64
-        if wire_get(inst, :temp) != nil && strings != nil
-          name_texts[wire_get(inst, :temp)] = strings[wire_get(inst, :string_id)]
+      when WIRE_KIND_STRING_I64, WIRE_KIND_SYMBOL_I64
+        st = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STRING_I64_TEMP)
+        if st != nil && strings != nil
+          name_texts[st] = strings[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STRING_I64_STRING_ID)]
 
-      elsif op in (:truthy_inline :nanbox_bool :not_i1 :zext_i1_i64)
+      when WIRE_KIND_TRUTHY_INLINE, WIRE_KIND_NANBOX_BOOL, WIRE_KIND_NOT_I1, WIRE_KIND_ICMP_NE_ZERO, WIRE_KIND_INTTOPTR_I64, WIRE_KIND_PTR_TO_I64, WIRE_KIND_I64_TO_PTR
+        src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_TRUTHY_INLINE_VALUE), temp_from_param, param_idx)
+        if src != nil
+          ut = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_TRUTHY_INLINE_TEMP)
+          if ut != nil
+            temp_from_param[ut] = src
+
+      when WIRE_KIND_ZEXT_I1_I64
         src = escape_param_source(wire_get(inst, :value), temp_from_param, param_idx)
         if src != nil && wire_get(inst, :temp) != nil
           temp_from_param[wire_get(inst, :temp)] = src
 
-      elsif op == :nanbox_int
-        src = escape_param_source(wire_get(inst, :raw), temp_from_param, param_idx)
-        if src != nil && wire_get(inst, :temp) != nil
-          temp_from_param[wire_get(inst, :temp)] = src
+      when WIRE_KIND_NANBOX_INT
+        src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_NANBOX_INT_RAW), temp_from_param, param_idx)
+        if src != nil
+          nt = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_NANBOX_INT_TEMP)
+          if nt != nil
+            temp_from_param[nt] = src
 
-      elsif op == :nanunbox_int
-        src = escape_param_source(wire_get(inst, :boxed), temp_from_param, param_idx)
-        if src != nil && wire_get(inst, :temp) != nil
-          temp_from_param[wire_get(inst, :temp)] = src
+      when WIRE_KIND_NANUNBOX_INT
+        src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_NANUNBOX_INT_BOXED), temp_from_param, param_idx)
+        if src != nil
+          nt = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_NANUNBOX_INT_TEMP)
+          if nt != nil
+            temp_from_param[nt] = src
 
-      elsif op in (:icmp_i64 :add_i64 :sub_i64 :mul_i64 :sdiv_i64 :srem_i64 :and_i64 :or_i64 :xor_i64 :shl_i64 :ashr_i64 :lshr_i64 :and_i1 :or_i1)
-        src = escape_param_source(wire_get(inst, :lhs), temp_from_param, param_idx)
+      when WIRE_KIND_ICMP_I64
+        src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ICMP_I64_LHS), temp_from_param, param_idx)
         if src == nil
-          src = escape_param_source(wire_get(inst, :rhs), temp_from_param, param_idx)
-        if src != nil && wire_get(inst, :temp) != nil
-          temp_from_param[wire_get(inst, :temp)] = src
+          src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ICMP_I64_RHS), temp_from_param, param_idx)
+        if src != nil
+          bt = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ICMP_I64_TEMP)
+          if bt != nil
+            temp_from_param[bt] = src
 
-      elsif op == :phi_ssa
-        incoming = wire_get(inst, :incoming)
+      when WIRE_KIND_ADD_I64, WIRE_KIND_SUB_I64, WIRE_KIND_MUL_I64, WIRE_KIND_SDIV_I64, WIRE_KIND_SREM_I64, WIRE_KIND_AND_I64, WIRE_KIND_OR_I64, WIRE_KIND_XOR_I64, WIRE_KIND_SHL_I64, WIRE_KIND_ASHR_I64, WIRE_KIND_LSHR_I64, WIRE_KIND_AND_I1, WIRE_KIND_OR_I1
+        src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ADD_I64_LHS), temp_from_param, param_idx)
+        if src == nil
+          src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ADD_I64_RHS), temp_from_param, param_idx)
+        if src != nil
+          bt = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ADD_I64_TEMP)
+          if bt != nil
+            temp_from_param[bt] = src
+
+      when WIRE_KIND_PHI_SSA
+        incoming = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PHI_SSA_INCOMING)
         if incoming != nil
+          pt = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PHI_SSA_TEMP)
           pi = 0
           while pi < wire_sequence_size(incoming)
             src = escape_param_source(wire_sequence_get(incoming, pi), temp_from_param, param_idx)
             if src != nil
-              temp_from_param[wire_get(inst, :temp)] = src
+              temp_from_param[pt] = src
             pi += 2
 
-      elsif op == :phi_i64
-        src = escape_param_source(wire_get(inst, :a_value), temp_from_param, param_idx)
+      when WIRE_KIND_PHI_I64
+        src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PHI_I64_A_VALUE), temp_from_param, param_idx)
         if src == nil
-          src = escape_param_source(wire_get(inst, :b_value), temp_from_param, param_idx)
+          src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PHI_I64_B_VALUE), temp_from_param, param_idx)
         if src != nil
-          temp_from_param[wire_get(inst, :temp)] = src
+          temp_from_param[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PHI_I64_TEMP)] = src
 
-      elsif op == :select_i64
-        src = escape_param_source(wire_get(inst, :then_val), temp_from_param, param_idx)
+      when WIRE_KIND_SELECT_I64
+        src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_SELECT_I64_THEN_VAL), temp_from_param, param_idx)
         if src == nil
-          src = escape_param_source(wire_get(inst, :else_val), temp_from_param, param_idx)
+          src = escape_param_source(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_SELECT_I64_ELSE_VAL), temp_from_param, param_idx)
         if src != nil
-          temp_from_param[wire_get(inst, :temp)] = src
+          temp_from_param[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_SELECT_I64_TEMP)] = src
 
-      elsif op in (:ivar_set :ivar_set_idx :store_global :store_cvar :class_store)
+      when WIRE_KIND_IVAR_SET, WIRE_KIND_IVAR_SET_IDX, WIRE_KIND_STORE_GLOBAL, WIRE_KIND_STORE_CVAR, WIRE_KIND_CLASS_STORE
         has_side_effects = true
         escape_mark_value(wire_get(inst, :value), true, state)
 
-      elsif op in (:small_array_set_inline :typed_array_set_inline :typed_array_compound_op_inline)
+      when WIRE_KIND_SMALL_ARRAY_SET_INLINE, WIRE_KIND_TYPED_ARRAY_SET_INLINE, WIRE_KIND_TYPED_ARRAY_COMPOUND_OP_INLINE
         escape_mark_value(wire_get(inst, :value), true, state)
 
-      elsif op in (:bool_array_set_inline :bool_array_set_byte_inline)
+      when WIRE_KIND_BOOL_ARRAY_SET_INLINE, WIRE_KIND_BOOL_ARRAY_SET_BYTE_INLINE
         escape_mark_value(wire_get(inst, :val), true, state)
 
-      elsif op in (:cleanup_push_hash :cleanup_push_array :cleanup_push_typed :cleanup_push_strbuf :call_recycle_hash :call_recycle_array :call_recycle_typed :call_recycle_strbuf)
+      when WIRE_KIND_CLEANUP_PUSH_HASH, WIRE_KIND_CLEANUP_PUSH_ARRAY, WIRE_KIND_CLEANUP_PUSH_TYPED, WIRE_KIND_CLEANUP_PUSH_STRBUF, WIRE_KIND_CALL_RECYCLE_HASH, WIRE_KIND_CALL_RECYCLE_ARRAY, WIRE_KIND_CALL_RECYCLE_TYPED, WIRE_KIND_CALL_RECYCLE_STRBUF
         escape_mark_value(wire_get(inst, :value), true, state)
 
-      elsif op == :closure_new
-        escape_mark_value(wire_get(inst, :captures_ptr), true, state)
+      when WIRE_KIND_CLOSURE_NEW
+        escape_mark_value(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CLOSURE_NEW_CAPTURES_PTR), true, state)
 
-      elsif op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64)
+      when WIRE_KIND_MEMO_CALL0_I64, WIRE_KIND_MEMO_CALL1_I64, WIRE_KIND_MEMO_CALL2_I64
         escape_mark_args(wire_get(inst, :args), true, state)
 
-      elsif op in (:puts_i64 :print_i64)
+      when WIRE_KIND_PUTS_I64, WIRE_KIND_PRINT_I64
         has_side_effects = true
-        escape_mark_value(wire_get(inst, :value), true, state)
+        escape_mark_value(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PUTS_I64_VALUE), true, state)
 
-      elsif op in (:call_direct_i128 :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_direct_ptr :call_fused_out_reuse)
+      when WIRE_KIND_CALL_DIRECT_I128, WIRE_KIND_CALL_DIRECT_I64_PTR1, WIRE_KIND_CALL_DIRECT_VOID_PTR1, WIRE_KIND_CALL_DIRECT_PTR, WIRE_KIND_CALL_FUSED_OUT_REUSE
         # The ptr1 kinds carry their single payload in :arg, not :args.
         escape_mark_args(wire_get(inst, :args), true, state)
         escape_mark_value(wire_get(inst, :arg), true, state)
 
-      elsif op == :slab_alloc_init
+      when WIRE_KIND_SLAB_ALLOC_INIT
         # Packed AST node constructor: every field value is frozen into the
         # AST arena and stored in the node (w_ast_freeze_if_array keeps the
         # array it is handed) — the node retains all of them.
         escape_mark_args(wire_get(inst, :fields), true, state)
 
-      elsif op in (:typed_array_store_u64 :view_store_inline_elem)
+      when WIRE_KIND_TYPED_ARRAY_STORE_U64, WIRE_KIND_VIEW_STORE_INLINE_ELEM
         # Raw stores whose slot may hold a boxed WValue (w64[] arrays,
         # `- data` inline element slots).
         escape_mark_value(wire_get(inst, :value), true, state)
 
-      elsif op in (:class_add_method :class_add_static_method :class_add_ivar :type_class_register :node_kind_class_register)
+      when WIRE_KIND_CLASS_ADD_METHOD, WIRE_KIND_CLASS_ADD_STATIC_METHOD, WIRE_KIND_CLASS_ADD_IVAR, WIRE_KIND_TYPE_CLASS_REGISTER, WIRE_KIND_NODE_KIND_CLASS_REGISTER
         has_side_effects = true
         escape_mark_value(wire_get(inst, :class_temp), true, state)
 
-      elsif op == :class_new
+      when WIRE_KIND_CLASS_NEW
         has_side_effects = true
-        escape_mark_value(wire_get(inst, :super_reg), true, state)
-
-      elsif op in (:switch_i64 :cleanup_pop :load_cvar :ivar_get :ivar_get_idx :bigint_literal_i64 :const_float :const_decimal :const_rational :const_char :fn_addr_i64)
-        ignored = nil
-
-      elsif op in (:icmp_ne_zero :inttoptr_i64 :ptr_to_i64 :i64_to_ptr)
-        src = escape_param_source(wire_get(inst, :value), temp_from_param, param_idx)
-        if src != nil && wire_get(inst, :temp) != nil
-          temp_from_param[wire_get(inst, :temp)] = src
+        escape_mark_value(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CLASS_NEW_SUPER_REG), true, state)
 
       else
         # Catch-all for every other instruction shape. Any op that carries
@@ -549,8 +590,10 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if wire_kind(inst) in (:call_direct_i64 :call_direct_void)
-        callee_idx = fn_map[wire_get(inst, :name)]
+      kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+      if kid == WIRE_KIND_CALL_DIRECT_I64 || kid == WIRE_KIND_CALL_DIRECT_VOID
+        cn = kid == WIRE_KIND_CALL_DIRECT_I64 ? ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_NAME) : ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_VOID_NAME)
+        callee_idx = fn_map[cn]
         if callee_idx != nil
           found = false
           ei = 0

@@ -16,6 +16,19 @@ if wire_field_symbol_at(inst, 1) != :rhs || wire_field_value_at(inst, 1) != "%ri
   raise "fixed-layout WIRE rhs ordinal did not round-trip"
 if wire_field_symbol_at(inst, 2) != :temp || wire_field_value_at(inst, 2) != "%sum"
   raise "fixed-layout WIRE temp ordinal did not round-trip"
+inst_kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+if inst_kid != WIRE_KIND_ADD_I64
+  raise "WIRE_KIND_ADD_I64 did not match w_wire_kind_extern"
+if ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ADD_I64_LHS) != "%left"
+  raise "w_wire_slot_load lhs did not match packed schema slot"
+if ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ADD_I64_RHS) != "%right"
+  raise "w_wire_slot_load rhs did not match packed schema slot"
+if ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ADD_I64_TEMP) != "%sum"
+  raise "w_wire_slot_load temp did not match packed schema slot"
+
+wire_set(inst, :late_tag, 42)
+if wire_get(inst, :late_tag) != 42 || wire_field_count(inst) != 4
+  raise "packed WIRE late-field overflow did not round-trip"
 
 dynamic = wire_make_dynamic_3(:add_i64, :lhs, "%a", :rhs, "%b", :temp, "%c")
 if wire_kind(dynamic) != :add_i64 || wire_field_count(dynamic) != 3

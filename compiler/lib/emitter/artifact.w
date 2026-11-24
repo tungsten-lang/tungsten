@@ -1,5 +1,40 @@
 # Emitter artifact orchestration — module and function rendering.
 
+# Pure WIRE ops whose instructions need no runtime declarations, call-site
+# recording, or IC layout collection during emit_artifact's prescan.
+-> init_emitter_prescan_skip_kinds()
+  tbl = Array.new(WIRE_KIND_MAX + 1)
+  skip_ids = [
+    WIRE_KIND_LOAD_I64, WIRE_KIND_STORE_I64, WIRE_KIND_BR, WIRE_KIND_COND_BR, WIRE_KIND_RET_I64,
+    WIRE_KIND_RET_VOID, WIRE_KIND_ALLOCA_I64, WIRE_KIND_ICMP_I64, WIRE_KIND_ADD_I64, WIRE_KIND_SUB_I64,
+    WIRE_KIND_TRUTHY_INLINE, WIRE_KIND_NANBOX_INT, WIRE_KIND_NANUNBOX_INT, WIRE_KIND_NANBOX_BOOL,
+    WIRE_KIND_PHI_SSA, WIRE_KIND_SCOPE_PUSH, WIRE_KIND_SCOPE_POP, WIRE_KIND_LOAD_CLASS,
+    WIRE_KIND_CLASS_STORE, WIRE_KIND_LOAD_GLOBAL, WIRE_KIND_STORE_GLOBAL, WIRE_KIND_LOAD_CVAR,
+    WIRE_KIND_STORE_CVAR, WIRE_KIND_IVAR_GET_IDX, WIRE_KIND_IVAR_SET_IDX, WIRE_KIND_GEP_ARRAY,
+    WIRE_KIND_ALLOCA_ARRAY, WIRE_KIND_PTR_TO_I64, WIRE_KIND_I64_TO_PTR, WIRE_KIND_LOAD_PTR,
+    WIRE_KIND_STORE_PTR, WIRE_KIND_AND_I64, WIRE_KIND_OR_I64, WIRE_KIND_XOR_I64, WIRE_KIND_SHL_I64,
+    WIRE_KIND_ASHR_I64, WIRE_KIND_LSHR_I64, WIRE_KIND_MUL_I64, WIRE_KIND_SDIV_I64, WIRE_KIND_UDIV_I64,
+    WIRE_KIND_SREM_I64, WIRE_KIND_UREM_I64, WIRE_KIND_NOT_I1, WIRE_KIND_AND_I1, WIRE_KIND_OR_I1,
+    WIRE_KIND_SELECT_I64, WIRE_KIND_ICMP_NE_ZERO, WIRE_KIND_ICMP_NE_I64, WIRE_KIND_ZEXT_I1_I64,
+    WIRE_KIND_TRUNC_I64_I32, WIRE_KIND_PHI_I64, WIRE_KIND_PHI_I1, WIRE_KIND_UNREACHABLE,
+    WIRE_KIND_RET_I32, WIRE_KIND_ARRAY_SIZE_RAW, WIRE_KIND_TA_SIZE_RAW, WIRE_KIND_TA_CAP_RAW,
+    WIRE_KIND_LOAD_DOUBLE, WIRE_KIND_STORE_DOUBLE, WIRE_KIND_LOAD_FLOAT, WIRE_KIND_STORE_FLOAT,
+    WIRE_KIND_NANBOX_FLOAT, WIRE_KIND_NANUNBOX_FLOAT, WIRE_KIND_NULL_PTR, WIRE_KIND_CONST_FLOAT,
+    WIRE_KIND_FADD_F64, WIRE_KIND_FSUB_F64, WIRE_KIND_FMUL_F64, WIRE_KIND_FDIV_F64, WIRE_KIND_FREM_F64,
+    WIRE_KIND_FCMP_F64, WIRE_KIND_SITOFP_I64_F64, WIRE_KIND_UITOFP_I64_F64, WIRE_KIND_FPTOSI_F64_I64,
+    WIRE_KIND_FPTOUI_F64_I64, WIRE_KIND_LOAD_I128, WIRE_KIND_STORE_I128, WIRE_KIND_ICMP_I128,
+    WIRE_KIND_ICMP_EQ_I32, WIRE_KIND_SWITCH_I64, WIRE_KIND_ZEXT_I32_I64,
+    WIRE_KIND_ZEXT_I16_I64, WIRE_KIND_TRUNC_I64_I16, WIRE_KIND_SEXT_I64_I128, WIRE_KIND_ZEXT_I64_I128,
+    WIRE_KIND_TRUNC_I128_I64, WIRE_KIND_CTPOP_I64, WIRE_KIND_CTTZ_I64
+  ]
+  i = 0
+  while i < skip_ids.size()
+    tbl[skip_ids[i]] = true
+    i += 1
+  tbl
+
+emitter_prescan_skip_kinds = init_emitter_prescan_skip_kinds()
+
 -> emit_artifact(mod, frame_pointers = false)
   emitter_last_artifact_state[:link_features] = nil
   emitter_last_artifact_state[:shard_plan] = nil
@@ -51,6 +86,7 @@
   max_ascope_slots = 0
   max_ewscope_sites = 0
   uses_g_ast_store = false
+  uses_g_wire_arena = false
   nfns_pre = mod[:functions].size()
   prescanned_ic_layouts = Array.new(nfns_pre)
   # Verbatim `ll <<~IR` bodies, concatenated: their `@name(` call targets are
@@ -79,11 +115,11 @@
       ii = 0
       while ii < ninstrs_b
         inst = instrs[ii]
-        op = wire_kind(inst)
-        if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop || op == :load_class || op == :class_store || op == :load_global || op == :store_global || op == :load_cvar || op == :store_cvar || op == :ivar_get_idx || op == :ivar_set_idx || op == :gep_array || op == :alloca_array || op == :ptr_to_i64 || op == :i64_to_ptr || op == :load_ptr || op == :store_ptr || op == :and_i64 || op == :or_i64 || op == :xor_i64 || op == :shl_i64 || op == :ashr_i64 || op == :lshr_i64 || op == :mul_i64 || op == :sdiv_i64 || op == :udiv_i64 || op == :srem_i64 || op == :urem_i64 || op == :not_i1 || op == :and_i1 || op == :or_i1 || op == :select_i64 || op == :icmp_ne_zero || op == :icmp_ne_i64 || op == :zext_i1_i64 || op == :trunc_i64_i32 || op == :phi_i64 || op == :phi_i1 || op == :unreachable || op == :ret_i32 || op == :array_size_raw || op == :ta_size_raw || op == :ta_cap_raw || op == :load_double || op == :store_double || op == :load_float || op == :store_float || op == :nanbox_float || op == :nanunbox_float || op == :null_ptr
+        kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+        if kid > 0 && kid <= WIRE_KIND_MAX && emitter_prescan_skip_kinds[kid] == true
           ii += 1
           next
-        if op == :call_direct_i64
+        if kid == WIRE_KIND_CALL_DIRECT_I64
           if wfunc_check_contract
             wire_contract_error = check_wire_inst_call_contract(mod, wire_contracts, wfunc_orig_name, inst)
             if wire_contract_error != nil
@@ -91,49 +127,46 @@
               exit(1)
           if collect_sites && emit_blockaddress_sites
             record_call_site_for_inst(inst, wfunc[:name], wfunc_path, cs_sites, cs_files, cs_file_list, emit_blockaddress_sites)
-          iname = wire_get(inst, :name)
+          iname = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_NAME)
           if iname != nil
             used_runtime_fns[iname] = true
             if iname == "w_node_field_store"
               used_runtime_fns["w_ast_freeze_if_array"] = true
-              iargs = wire_get(inst, :args)
+              iargs = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS)
               if wire_sequence_size(iargs) >= 2 && wire_sequence_get(iargs, 1)[0] != "%"
                 uses_g_ast_store = true
             elsif iname == "w_node_field_load"
-              iargs = wire_get(inst, :args)
+              iargs = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS)
               if wire_sequence_size(iargs) >= 2 && wire_sequence_get(iargs, 1)[0] != "%"
                 uses_g_ast_store = true
+            elsif iname == "w_wire_slot_load"
+              iargs = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS)
+              if wire_sequence_size(iargs) >= 2 && wire_sequence_get(iargs, 1)[0] != "%"
+                uses_g_wire_arena = true
             if !known_fns.has_key?(iname) && !ccall_needed.has_key?(iname)
-              ccall_needed[iname] = wire_sequence_size(wire_get(inst, :args))
+              ccall_needed[iname] = wire_sequence_size(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS))
           ii += 1
           next
-        if op == :call_method_i64
+        if kid == WIRE_KIND_CALL_METHOD_I64
           if ic_layout_buf == nil
             ic_layout_buf = StringBuffer(32)
-          ic_layout_buf << wire_get(inst, :ic_id).to_s()
+          ic_layout_buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_IC_ID).to_s()
           ic_layout_buf << ","
           if collect_sites
             record_call_site_for_inst(inst, wfunc[:name], wfunc_path, cs_sites, cs_files, cs_file_list, emit_blockaddress_sites)
-          if !saw_lchs_mcall && wire_get(inst, :method_name_val) == lchs_mcall_lit
+          if !saw_lchs_mcall && ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_METHOD_NAME_VAL) == lchs_mcall_lit
             saw_lchs_mcall = true
-          margs = wire_get(inst, :args)
+          margs = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_ARGS)
           margc = margs != nil ? wire_sequence_size(margs) : 0
-          if fast_size_call?(inst)
-            used_runtime_fns["w_fast_size"] = true
-          elsif fast_to_s_call?(inst)
-            used_runtime_fns["w_fast_to_s"] = true
+          fb_fn = fast_builtin_runtime_fn(inst, margc)
+          if fb_fn != nil
+            used_runtime_fns[fb_fn] = true
           elsif margc == 0
             used_runtime_fns["w_method_call_cached_0"] = true
           elsif sym_idx_get_call?(inst)
             used_runtime_fns["w_fast_sym_get"] = true
           elsif sym_idx_set_call?(inst)
             used_runtime_fns["w_fast_sym_set"] = true
-          elsif fast_idx_get_call?(inst)
-            used_runtime_fns["w_fast_idx_get"] = true
-          elsif fast_idx_set_call?(inst)
-            used_runtime_fns["w_fast_idx_set"] = true
-          elsif fast_push_call?(inst)
-            used_runtime_fns["w_fast_push"] = true
           elsif scalar_source_one_call?(inst)
             used_runtime_fns["w_method_call_cached_1"] = true
           elsif scalar_source_two_call?(inst)
@@ -146,13 +179,13 @@
             used_runtime_fns["w_method_call_cached_3_any"] = true
           else
             used_runtime_fns["w_method_call_cached"] = true
-          if wire_get(inst, :devirt_fn) != nil
+          if ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_DEVIRT_FN) != nil
             used_runtime_fns["__w_guard_class"] = true
-          if wire_get(inst, :construct_fn) != nil
+          if ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_CONSTRUCT_FN) != nil
             used_runtime_fns[wire_get(inst, :construct_recycle) == true ? "w_object_recycle_or_new" : "w_object_new"] = true
           ii += 1
           next
-        if op == :call_direct_void
+        if kid == WIRE_KIND_CALL_DIRECT_VOID
           if wfunc_check_contract
             wire_contract_error = check_wire_inst_call_contract(mod, wire_contracts, wfunc_orig_name, inst)
             if wire_contract_error != nil
@@ -160,60 +193,60 @@
               exit(1)
           if collect_sites && emit_blockaddress_sites
             record_call_site_for_inst(inst, wfunc[:name], wfunc_path, cs_sites, cs_files, cs_file_list, emit_blockaddress_sites)
-          iname = wire_get(inst, :name)
+          iname = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_VOID_NAME)
           if iname != nil
             used_runtime_fns[iname] = true
           ii += 1
           next
-        if op == :call_loc_set_col
+        if kid == WIRE_KIND_CALL_LOC_SET_COL
           used_runtime_fns["__w_loc_set_col"] = true
           ii += 1
           next
-        if op == :string_i64
+        if kid == WIRE_KIND_STRING_I64
           used_runtime_fns["w_string"] = true
           ii += 1
           next
-        if op == :symbol_i64
+        if kid == WIRE_KIND_SYMBOL_I64
           used_runtime_fns["w_string"] = true
           used_runtime_fns["w_str_to_sym"] = true
           ii += 1
           next
-        if op == :free_value
+        if kid == WIRE_KIND_FREE_VALUE
           used_runtime_fns["w_value_free"] = true
           ii += 1
           next
-        if op == :closure_new
+        if kid == WIRE_KIND_CLOSURE_NEW
           used_runtime_fns["w_closure_new_a"] = true
           ii += 1
           next
-        if op == :puts_i64
+        if kid == WIRE_KIND_PUTS_I64
           used_runtime_fns["w_puts"] = true
           ii += 1
           next
-        if op == :print_i64
+        if kid == WIRE_KIND_PRINT_I64
           used_runtime_fns["w_print"] = true
           ii += 1
           next
-        if op == :slab_alloc_init
+        if kid == WIRE_KIND_SLAB_ALLOC_INIT
           uses_g_ast_store = true
           used_runtime_fns["w_node_alloc"] = true
           used_runtime_fns["w_ast_freeze_if_array"] = true
           ii += 1
           next
-        if wfunc_check_contract && (op == :call_direct_i128 || op == :call_direct_ptr || op == :call_direct_i64_ptr1 || op == :call_direct_void_ptr1)
+        if wfunc_check_contract && (kid == WIRE_KIND_CALL_DIRECT_I128 || kid == WIRE_KIND_CALL_DIRECT_PTR || kid == WIRE_KIND_CALL_DIRECT_I64_PTR1 || kid == WIRE_KIND_CALL_DIRECT_VOID_PTR1)
           wire_contract_error = check_wire_inst_call_contract(mod, wire_contracts, wfunc_orig_name, inst)
           if wire_contract_error != nil
             << "error: " + wire_contract_error
             exit(1)
-        if op in (:typed_array_get_inline :typed_array_set_inline :typed_array_compound_op_inline :typed_array_load_u64 :typed_array_store_u64)
+        if kid == WIRE_KIND_TYPED_ARRAY_GET_INLINE || kid == WIRE_KIND_TYPED_ARRAY_SET_INLINE || kid == WIRE_KIND_TYPED_ARRAY_COMPOUND_OP_INLINE || kid == WIRE_KIND_TYPED_ARRAY_LOAD_U64 || kid == WIRE_KIND_TYPED_ARRAY_STORE_U64
           ascope = wire_get(inst, :ascope)
           if ascope != nil && ascope + 1 > max_ascope_slots
             max_ascope_slots = ascope + 1
-        elsif op in (:load_f64_at :store_f64_at :load_f32_at :store_f32_at :load_i64_at :load_int_at :store_int_at)
+        elsif kid == WIRE_KIND_LOAD_F64_AT || kid == WIRE_KIND_STORE_F64_AT || kid == WIRE_KIND_LOAD_F32_AT || kid == WIRE_KIND_STORE_F32_AT || kid == WIRE_KIND_LOAD_I64_AT || kid == WIRE_KIND_LOAD_INT_AT || kid == WIRE_KIND_STORE_INT_AT
           ewscope = wire_get(inst, :ewscope)
           if ewscope != nil && ewscope + 1 > max_ewscope_sites
             max_ewscope_sites = ewscope + 1
-        elsif op == :call_num_to_f64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
+        elsif kid == WIRE_KIND_CALL_NUM_TO_F64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
           ccall_needed["__w_num_to_f64_fast"] = 1
         fns = runtime_fns_for_inst(inst, mod[:string_wvalues])
         if fns != nil
@@ -807,6 +840,8 @@
   embedded_ir_str = embedded_ir_text.to_s()
   if !uses_g_ast_store && embedded_ir_str != "" && embedded_ir_str.index("@g_ast_store") != nil
     uses_g_ast_store = true
+  if !uses_g_wire_arena && embedded_ir_str != "" && embedded_ir_str.index("@g_wire_arena") != nil
+    uses_g_wire_arena = true
   decls_out = filter_runtime_decls(declare_runtime(), used_runtime_fns, embedded_ir_str) + seam_decls.to_s()
   if used_runtime_fns["__w_int_temp_release"] == true
     decls_out = decls_out + "declare void @w_int_temp_release(i64, i64, i64, i64, i64) nounwind\n" + int_temp_release_helper_ir() + "\n"
@@ -865,6 +900,8 @@
   # fast paths / node field access). Plain programs emit neither the externs
   # nor any init call — the runtime arena is lazy (offset 0 reserved on first
   # growth inside w_node_alloc).
+  if uses_g_wire_arena
+    decls_out = "@g_wire_arena = external global { ptr, i32, i32, i32 }\n\n" + decls_out
   if uses_g_ast_store
     # WAstStore begins with its exact-width node arena; declaring the symbol
     # prefix type keeps the hot GEPs compact while the runtime owns the rest.

@@ -231,46 +231,47 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
 
 # Encode one instruction into the canonical string buffer.
 -> encode_inst(inst, buf, temp_map, label_map, fn_hashes, mod, self_name, op_codes)
-  op = wire_kind(inst)
   kind_id = ccall_nobox("w_wire_kind_extern", inst) ## i64
-  if kind_id > 0 && kind_id < 274
+  if kind_id > 0 && kind_id <= WIRE_KIND_MAX
     buf << canonical_op_tokens[kind_id]
   else
     buf << "o"
-    buf << canonical_op_code(op, op_codes).to_s()
+    buf << canonical_op_code(wire_kind(inst), op_codes).to_s()
 
-  if op == :call_loc_set_col
-    encode_int_meta_field("kcol=", wire_get(inst, :col), buf)
-    encode_int_meta_field("kfile_byte_len=", wire_get(inst, :file_byte_len), buf)
-    encode_int_meta_field("kfile_str_id=", wire_get(inst, :file_str_id), buf)
-    encode_int_meta_field("kline=", wire_get(inst, :line), buf)
+  case kind_id
+  when WIRE_KIND_CALL_LOC_SET_COL
+    encode_int_meta_field("kcol=", ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_LOC_SET_COL_COL), buf)
+    encode_int_meta_field("kfile_byte_len=", ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_LOC_SET_COL_FILE_BYTE_LEN), buf)
+    encode_int_meta_field("kfile_str_id=", ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_LOC_SET_COL_FILE_STR_ID), buf)
+    encode_int_meta_field("kline=", ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_LOC_SET_COL_LINE), buf)
     buf << ";"
     return nil
-
-  # Register temp output
-  t = wire_get(inst, :temp)
-  if t != nil
-    norm_temp(t, temp_map)
-
-  if op in (:load_i64 :alloca_i64 :load_ptr)
+  when WIRE_KIND_LOAD_I64, WIRE_KIND_LOAD_PTR
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
     buf << "p"
-    buf << wire_get(inst, :ptr)
+    buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_PTR)
     buf << ";"
     return nil
-
-  if op == :store_i64
-    encode_val(buf, wire_get(inst, :value), temp_map)
+  when WIRE_KIND_ALLOCA_I64
     buf << "p"
-    buf << wire_get(inst, :ptr)
+    buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ALLOCA_I64_PTR)
     buf << ";"
     return nil
-
-  if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
-    if op == :call_direct_i64
-      encode_codegen_meta_field(:arg_types, wire_get(inst, :arg_types), buf, temp_map, mod)
-    encode_codegen_meta_field(:call_conv, wire_get(inst, :call_conv), buf, temp_map, mod)
-    callee = wire_get(inst, :name)
-
+  when WIRE_KIND_STORE_I64
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_VALUE), temp_map)
+    buf << "p"
+    buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_PTR)
+    buf << ";"
+    return nil
+  when WIRE_KIND_CALL_DIRECT_I64
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    encode_codegen_meta_field(:arg_types, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARG_TYPES), buf, temp_map, mod)
+    encode_codegen_meta_field(:call_conv, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_CALL_CONV), buf, temp_map, mod)
+    callee = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_NAME)
     if callee == self_name
       buf << "@R"
     else
@@ -281,39 +282,83 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
       else
         buf << "@"
         buf << callee
-
-    args = wire_get(inst, :args)
-
+    args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS)
     if args != nil
       ai = 0
       n_args = wire_sequence_size(args)
       while ai < n_args
         encode_val(buf, wire_sequence_get(args, ai), temp_map)
         ai += 1
-
     buf << ";"
     return nil
-
-  if op == :call_method_i64
-    encode_codegen_meta_field(:fast_builtin, wire_get(inst, :fast_builtin), buf, temp_map, mod)
-    encode_codegen_meta_field(:scalar_source_argc1, wire_get(inst, :scalar_source_argc1), buf, temp_map, mod)
-    encode_codegen_meta_field(:scalar_source_argc2, wire_get(inst, :scalar_source_argc2), buf, temp_map, mod)
-    encode_codegen_meta_field(:sym_idx_get, wire_get(inst, :sym_idx_get), buf, temp_map, mod)
-    encode_codegen_meta_field(:sym_idx_set, wire_get(inst, :sym_idx_set), buf, temp_map, mod)
-    encode_val(buf, wire_get(inst, :receiver), temp_map)
-    encode_val(buf, wire_get(inst, :method_name_val), temp_map)
-    args = wire_get(inst, :args)
-
+  when WIRE_KIND_CALL_DIRECT_VOID
+    encode_codegen_meta_field(:call_conv, wire_get(inst, :call_conv), buf, temp_map, mod)
+    callee = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_VOID_NAME)
+    if callee == self_name
+      buf << "@R"
+    else
+      ch = fn_hash_get(fn_hashes, callee)
+      if ch != nil
+        buf << "@"
+        buf << ch
+      else
+        buf << "@"
+        buf << callee
+    args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_VOID_ARGS)
     if args != nil
       ai = 0
       n_args = wire_sequence_size(args)
       while ai < n_args
         encode_val(buf, wire_sequence_get(args, ai), temp_map)
         ai += 1
-
+    buf << ";"
+    return nil
+  when WIRE_KIND_CALL_DIRECT_PTR
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_PTR_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    encode_codegen_meta_field(:call_conv, wire_get(inst, :call_conv), buf, temp_map, mod)
+    callee = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_PTR_NAME)
+    if callee == self_name
+      buf << "@R"
+    else
+      ch = fn_hash_get(fn_hashes, callee)
+      if ch != nil
+        buf << "@"
+        buf << ch
+      else
+        buf << "@"
+        buf << callee
+    args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_PTR_ARGS)
+    if args != nil
+      ai = 0
+      n_args = wire_sequence_size(args)
+      while ai < n_args
+        encode_val(buf, wire_sequence_get(args, ai), temp_map)
+        ai += 1
+    buf << ";"
+    return nil
+  when WIRE_KIND_CALL_METHOD_I64
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    encode_codegen_meta_field(:fast_builtin, wire_get(inst, :fast_builtin), buf, temp_map, mod)
+    encode_codegen_meta_field(:scalar_source_argc1, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_SCALAR_SOURCE_ARGC1), buf, temp_map, mod)
+    encode_codegen_meta_field(:scalar_source_argc2, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_SCALAR_SOURCE_ARGC2), buf, temp_map, mod)
+    encode_codegen_meta_field(:sym_idx_get, wire_get(inst, :sym_idx_get), buf, temp_map, mod)
+    encode_codegen_meta_field(:sym_idx_set, wire_get(inst, :sym_idx_set), buf, temp_map, mod)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_RECEIVER), temp_map)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_METHOD_NAME_VAL), temp_map)
+    args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_ARGS)
+    if args != nil
+      ai = 0
+      n_args = wire_sequence_size(args)
+      while ai < n_args
+        encode_val(buf, wire_sequence_get(args, ai), temp_map)
+        ai += 1
     # Devirtualized target: two otherwise-identical bodies whose call sites
     # devirtualize to DIFFERENT methods must not content-collapse.
-    devirt_fn = wire_get(inst, :devirt_fn)
+    devirt_fn = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_DEVIRT_FN)
     if devirt_fn != nil
       buf << "dv:"
       if devirt_fn == self_name
@@ -322,8 +367,8 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
         dh = fn_hash_get(fn_hashes, devirt_fn)
         buf << (dh != nil ? dh : devirt_fn)
       buf << ":"
-      buf << wire_get(inst, :devirt_class)
-    construct_fn = wire_get(inst, :construct_fn)
+      buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_DEVIRT_CLASS)
+    construct_fn = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_CONSTRUCT_FN)
     if construct_fn != nil
       buf << "ctor:"
       if construct_fn == self_name
@@ -332,17 +377,18 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
         cth = fn_hash_get(fn_hashes, construct_fn)
         buf << (cth != nil ? cth : construct_fn)
       buf << ":"
-      buf << wire_get(inst, :construct_class)
+      buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_METHOD_I64_CONSTRUCT_CLASS)
       if wire_get(inst, :construct_recycle) == true
         buf << ":recycle"
-
     buf << ";"
     return nil
-
-  if op == :closure_new
-    encode_codegen_meta_field(:block_arity, wire_get(inst, :block_arity), buf, temp_map, mod)
-    encode_codegen_meta_field(:captures_ptr, wire_get(inst, :captures_ptr), buf, temp_map, mod)
-    callee = wire_get(inst, :fn_name)
+  when WIRE_KIND_CLOSURE_NEW
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CLOSURE_NEW_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    encode_codegen_meta_field(:block_arity, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CLOSURE_NEW_BLOCK_ARITY), buf, temp_map, mod)
+    encode_codegen_meta_field(:captures_ptr, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CLOSURE_NEW_CAPTURES_PTR), buf, temp_map, mod)
+    callee = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CLOSURE_NEW_FN_NAME)
     ch = fn_hash_get(fn_hashes, callee)
     if ch != nil
       buf << "@"
@@ -351,33 +397,33 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
       buf << "@"
       buf << callee
     buf << "c"
-    buf << wire_get(inst, :capture_count).to_s()
+    buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CLOSURE_NEW_CAPTURE_COUNT).to_s()
     buf << ";"
     return nil
-
-  if op in (:string_i64 :symbol_i64)
+  when WIRE_KIND_STRING_I64, WIRE_KIND_SYMBOL_I64
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STRING_I64_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
     str_idx = mod[:string_index]
     if str_idx != nil
-      text = str_idx[wire_get(inst, :string_id)]
+      text = str_idx[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STRING_I64_STRING_ID)]
       if text != nil
         buf << "\""
         buf << text
         buf << "\""
     buf << ";"
     return nil
-
-  if op == :br
-    idx = label_map[wire_get(inst, :label)]
+  when WIRE_KIND_BR
+    idx = label_map[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_BR_LABEL)]
     if idx != nil
       buf << ">"
       buf << idx.to_s()
     buf << ";"
     return nil
-
-  if op == :cond_br
-    encode_val(buf, wire_get(inst, :cond), temp_map)
-    idx1 = label_map[wire_get(inst, :then_label)]
-    idx2 = label_map[wire_get(inst, :else_label)]
+  when WIRE_KIND_COND_BR
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_COND_BR_COND), temp_map)
+    idx1 = label_map[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_COND_BR_THEN_LABEL)]
+    idx2 = label_map[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_COND_BR_ELSE_LABEL)]
     if idx1 != nil
       buf << ">"
       buf << idx1.to_s()
@@ -386,105 +432,143 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
       buf << idx2.to_s()
     buf << ";"
     return nil
-
-  if op in (:ret_i64 :ret_i32)
-    encode_val(buf, wire_get(inst, :value), temp_map)
+  when WIRE_KIND_RET_I64
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_RET_I64_VALUE), temp_map)
     buf << ";"
     return nil
-
-  if op == :phi_ssa
-    incoming = wire_get(inst, :incoming)
+  when WIRE_KIND_RET_I32
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_RET_I32_VALUE), temp_map)
+    buf << ";"
+    return nil
+  when WIRE_KIND_PHI_SSA
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PHI_SSA_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    incoming = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PHI_SSA_INCOMING)
     if incoming != nil
       i = 0
       n_inc = wire_sequence_size(incoming)
       while i < n_inc
         encode_val(buf, wire_sequence_get(incoming, i), temp_map)
         idx = label_map[wire_sequence_get(incoming, i + 1)]
-
         if idx != nil
           buf << ">"
           buf << idx.to_s()
         i += 2
-
     buf << ";"
     return nil
-
-  if op == :store_ptr
-    encode_codegen_meta_field(:dest, wire_get(inst, :dest), buf, temp_map, mod)
+  when WIRE_KIND_STORE_PTR
+    encode_codegen_meta_field(:dest, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_PTR_DEST), buf, temp_map, mod)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_PTR_VALUE), temp_map)
+    buf << ";"
+    return nil
+  when WIRE_KIND_TRUTHY_INLINE, WIRE_KIND_NANBOX_BOOL, WIRE_KIND_NOT_I1, WIRE_KIND_TRUNC_I64_I32, WIRE_KIND_ICMP_NE_ZERO, WIRE_KIND_INTTOPTR_I64, WIRE_KIND_PTR_TO_I64, WIRE_KIND_I64_TO_PTR
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_TRUTHY_INLINE_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_TRUTHY_INLINE_VALUE), temp_map)
+    buf << ";"
+    return nil
+  when WIRE_KIND_FREE_VALUE
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_FREE_VALUE_VALUE), temp_map)
+    buf << ";"
+    return nil
+  when WIRE_KIND_ZEXT_I1_I64
+    t = wire_get(inst, :temp)
+    if t != nil
+      norm_temp(t, temp_map)
     encode_val(buf, wire_get(inst, :value), temp_map)
     buf << ";"
     return nil
-
-  if op in (:truthy_inline :nanbox_bool :free_value :not_i1 :zext_i1_i64 :trunc_i64_i32 :icmp_ne_zero :inttoptr_i64 :ptr_to_i64 :i64_to_ptr)
-    encode_val(buf, wire_get(inst, :value), temp_map)
-    buf << ";"
-    return nil
-
-  if op == :nanbox_int
+  when WIRE_KIND_NANBOX_INT
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_NANBOX_INT_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
     buf << "r"
-    buf << wire_get(inst, :raw).to_s()
+    buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_NANBOX_INT_RAW).to_s()
     buf << ";"
     return nil
-
-  if op in (:nanunbox_int :scope_push :scope_pop :ret_void :unreachable :cleanup_pop)
+  when WIRE_KIND_NANUNBOX_INT
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_NANUNBOX_INT_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
     buf << ";"
     return nil
-
-  if op in (:add_i64 :sub_i64 :mul_i64 :sdiv_i64 :srem_i64 :and_i64 :or_i64 :xor_i64 :shl_i64 :ashr_i64 :lshr_i64 :and_i1 :or_i1)
-    encode_val(buf, wire_get(inst, :lhs), temp_map)
-    encode_val(buf, wire_get(inst, :rhs), temp_map)
+  when WIRE_KIND_SCOPE_PUSH, WIRE_KIND_SCOPE_POP, WIRE_KIND_RET_VOID, WIRE_KIND_UNREACHABLE, WIRE_KIND_CLEANUP_POP
     buf << ";"
     return nil
-
-  if op == :icmp_i64
-    encode_val(buf, wire_get(inst, :lhs), temp_map)
-    encode_val(buf, wire_get(inst, :rhs), temp_map)
+  when WIRE_KIND_ADD_I64, WIRE_KIND_SUB_I64, WIRE_KIND_MUL_I64, WIRE_KIND_SDIV_I64, WIRE_KIND_SREM_I64, WIRE_KIND_AND_I64, WIRE_KIND_OR_I64, WIRE_KIND_XOR_I64, WIRE_KIND_SHL_I64, WIRE_KIND_ASHR_I64, WIRE_KIND_LSHR_I64, WIRE_KIND_AND_I1, WIRE_KIND_OR_I1
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ADD_I64_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ADD_I64_LHS), temp_map)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ADD_I64_RHS), temp_map)
+    buf << ";"
+    return nil
+  when WIRE_KIND_ICMP_I64
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ICMP_I64_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ICMP_I64_LHS), temp_map)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ICMP_I64_RHS), temp_map)
     buf << "P"
-    buf << wire_get(inst, :pred)
+    buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_ICMP_I64_PRED)
     buf << ";"
     return nil
-
-  if op == :load_global
-    encode_codegen_meta_field(:type, wire_get(inst, :type), buf, temp_map, mod)
+  when WIRE_KIND_LOAD_GLOBAL
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_GLOBAL_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    encode_codegen_meta_field(:type, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_GLOBAL_TYPE), buf, temp_map, mod)
     buf << "N"
-    buf << wire_get(inst, :name)
+    buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_GLOBAL_NAME)
     buf << ";"
     return nil
-
-  if op == :store_global
-    encode_codegen_meta_field(:type, wire_get(inst, :type), buf, temp_map, mod)
-    encode_val(buf, wire_get(inst, :value), temp_map)
+  when WIRE_KIND_STORE_GLOBAL
+    encode_codegen_meta_field(:type, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_GLOBAL_TYPE), buf, temp_map, mod)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_GLOBAL_VALUE), temp_map)
     buf << "N"
-    buf << wire_get(inst, :name)
+    buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_GLOBAL_NAME)
     buf << ";"
     return nil
-
-  if op == :load_class
+  when WIRE_KIND_LOAD_CLASS
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_CLASS_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
     buf << "C"
-    buf << wire_get(inst, :class_name)
+    buf << ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_CLASS_CLASS_NAME)
+    buf << ";"
+    return nil
+  when WIRE_KIND_IVAR_GET_IDX
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_IVAR_GET_IDX_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_IVAR_GET_IDX_SELF_REG), temp_map)
+    off = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_IVAR_GET_IDX_OFFSET).to_s()
+    buf << "O"
+    buf << off
+    buf << "O"
+    buf << off
+    buf << ";"
+    return nil
+  when WIRE_KIND_IVAR_SET_IDX
+    t = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_IVAR_SET_IDX_TEMP)
+    if t != nil
+      norm_temp(t, temp_map)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_IVAR_SET_IDX_VALUE), temp_map)
+    encode_val(buf, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_IVAR_SET_IDX_SELF_REG), temp_map)
+    off = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_IVAR_SET_IDX_OFFSET).to_s()
+    buf << "O"
+    buf << off
+    buf << "O"
+    buf << off
     buf << ";"
     return nil
 
-  if op == :ivar_get_idx
-    encode_val(buf, wire_get(inst, :self_reg), temp_map)
-    off = wire_get(inst, :offset).to_s()
-    buf << "O"
-    buf << off
-    buf << "O"
-    buf << off
-    buf << ";"
-    return nil
-
-  if op == :ivar_set_idx
-    encode_val(buf, wire_get(inst, :value), temp_map)
-    encode_val(buf, wire_get(inst, :self_reg), temp_map)
-    off = wire_get(inst, :offset).to_s()
-    buf << "O"
-    buf << off
-    buf << "O"
-    buf << off
-    buf << ";"
-    return nil
+  # Generic fallback for remaining opcodes.
+  t = wire_get(inst, :temp)
+  if t != nil
+    norm_temp(t, temp_map)
 
   encode_codegen_metadata(inst, buf, temp_map, mod)
 
@@ -530,7 +614,7 @@ content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_has
   if wire_get(inst, :class_name) != nil
     buf << "C"
     buf << wire_get(inst, :class_name)
-  if wire_get(inst, :name) != nil && op != :call_direct_i64 && op != :call_direct_void && op != :call_direct_ptr
+  if wire_get(inst, :name) != nil && kind_id != WIRE_KIND_CALL_DIRECT_I64 && kind_id != WIRE_KIND_CALL_DIRECT_VOID && kind_id != WIRE_KIND_CALL_DIRECT_PTR
     buf << "N"
     buf << wire_get(inst, :name)
   if wire_get(inst, :cvar_key) != nil

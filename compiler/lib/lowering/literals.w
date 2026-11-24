@@ -214,7 +214,10 @@ sso5_sym_text_cache = {}
     else
       part_type = infer_type(part[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
       expr_tv = lower_expression(ctx, part[1])
-      if result != nil && part_type in (:int :i64 :i32 :i16 :i8 :i4 :u32 :u16 :u8 :u4 :raw_int :raw_i64)
+      if part_type == :string
+        part_reg = ensure_i64_value(wfn, expr_tv)
+        part_fresh = false
+      elsif result != nil && (part_type in (:int :i64 :i32 :i16 :i8 :i4 :u32 :u16 :u8 :u4 :raw_int :raw_i64) || expr_tv[:type] in (:raw_int :raw_i64))
         concat = next_temp(wfn)
         own_lhs = (env("TUNGSTEN_FREE") != "0" && i >= 2 && result_is_chain) ? 1 : 0
         if expr_tv[:type] in (:raw_int :raw_i64)
@@ -226,14 +229,24 @@ sso5_sym_text_cache = {}
         result_is_chain = true
         i += 1
         next
-      expr_reg = ensure_i64_value(wfn, expr_tv)
-      part_reg = next_temp(wfn)
-      part_fresh = false
-      if is_integer_like_type(part_type)
-        emit_wire_call_direct_i64(wfn, nil, [expr_reg], nil, nil, "w_int_to_s", nil, nil, part_reg)
-        part_fresh = true
+      elsif result != nil && !is_integer_like_type(part_type)
+        expr_reg = ensure_i64_value(wfn, expr_tv)
+        own_lhs = (env("TUNGSTEN_FREE") != "0" && i >= 2 && result_is_chain) ? 1 : 0
+        concat = next_temp(wfn)
+        emit_wire_call_direct_i64(wfn, nil, [result, expr_reg, own_lhs.to_s()], nil, nil, "w_str_concat_any", nil, nil, concat)
+        result = concat
+        result_is_chain = true
+        i += 1
+        next
       else
-        emit_wire_call_direct_i64(wfn, nil, [expr_reg], nil, nil, "w_to_s", nil, nil, part_reg)
+        expr_reg = ensure_i64_value(wfn, expr_tv)
+        part_reg = next_temp(wfn)
+        part_fresh = false
+        if is_integer_like_type(part_type) || expr_tv[:type] in (:raw_int :raw_i64)
+          emit_wire_call_direct_i64(wfn, nil, [expr_reg], nil, nil, "w_int_to_s", nil, nil, part_reg)
+          part_fresh = true
+        else
+          emit_wire_call_direct_i64(wfn, nil, [expr_reg], nil, nil, "w_to_s", nil, nil, part_reg)
     if result == nil
       result = part_reg
     else

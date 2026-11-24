@@ -1238,6 +1238,9 @@ static const char *op_name(uint8_t op) {
     case TC_OP_IS_MACHINE_INT64_TYPE: return "IS_MACHINE_INT64_TYPE";
     case TC_OP_STRING_FIRST_BYTE: return "STRING_FIRST_BYTE";
     case TC_OP_WIRE_TEMP_OPERANDS: return "WIRE_TEMP_OPERANDS";
+    case TC_OP_WIRE_PACKED: return "WIRE_PACKED";
+    case TC_OP_WIRE_FUNC_PUSH_INST: return "WIRE_FUNC_PUSH_INST";
+    case TC_OP_WIRE_SLOT_LOAD: return "WIRE_SLOT_LOAD";
     default: return "?";
   }
 }
@@ -1294,7 +1297,7 @@ void tc_dump_bytecode(const TcChunk *chunk) {
         const TcCaseTable *t = &chunk->case_tables[tid];
         printf(" ; %u arms, default=%u", t->count, t->default_target);
       }
-    } else if (op == TC_OP_ARRAY || op == TC_OP_HASH) {
+    } else if (op == TC_OP_ARRAY || op == TC_OP_HASH || op == TC_OP_WIRE_PACKED) {
       printf(" %u", read_u32(chunk->code, &ip));
     }
     printf("\n");

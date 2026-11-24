@@ -329,7 +329,20 @@ module Tungsten
         "__w_bit_ctpop_u64" => 99,
         "__w_bit_cttz_u32" => 100,
         "__w_bit_cttz_u64" => 101,
-        "__w_bit_ctlz_u64" => 102
+        "__w_bit_ctlz_u64" => 102,
+        "w_wire_packed_0" => 103,
+        "w_wire_packed_1" => 103,
+        "w_wire_packed_2" => 103,
+        "w_wire_packed_3" => 103,
+        "w_wire_packed_4" => 103,
+        "w_wire_packed_5" => 103,
+        "w_wire_packed_6" => 103,
+        "w_wire_packed_7" => 103,
+        "w_wire_packed_8" => 103,
+        "w_wire_packed_9" => 103,
+        "w_wire_packed_14" => 103,
+        "w_wire_func_push_inst" => 104,
+        "w_wire_slot_load" => 105
       }.freeze
 
       def dispatch_compiler_ccall(cname, args)
@@ -812,9 +825,54 @@ module Tungsten
         when 102
           raw = args[1].to_i & U64_MASK
           raw.zero? ? 64 : 64 - raw.bit_length
+        when 103
+          kind = args[1].to_i
+          syms = wire_packed_schema_fields(kind)
+          rec = WireRecord.new(kind)
+          if syms
+            i = 0
+            while i < syms.length
+              rec.store_at(i, syms[i], args[2 + i])
+              i += 1
+            end
+          end
+          rec
+        when 104
+          f = args[1]
+          inst = args[2]
+          blocks = f.is_a?(WireRecord) ? f.load(:blocks) : hash_indifferent_get(f, :blocks)
+          blk = blocks.is_a?(Array) ? blocks.last : nil
+          instrs =
+            if blk.is_a?(WireRecord)
+              blk.load(:instructions)
+            elsif blk.is_a?(Hash)
+              hash_indifferent_get(blk, :instructions)
+            end
+          instrs.push(inst) if instrs.is_a?(Array)
+          instrs
+        when 105
+          rec = args[1]
+          idx = args[2].to_i
+          rec.is_a?(WireRecord) && idx >= 0 && idx < rec.values.length ? rec.values[idx] : nil
         else
           COMPILER_CCALL_MISS
         end
+      end
+
+      def wire_packed_schema_fields(kind)
+        unless defined?(@wire_packed_schemas) && @wire_packed_schemas
+          @wire_packed_schemas = {}
+          header_path = File.expand_path("../../../../../runtime/wire_schema_table.h", __dir__)
+          arrays = {}
+          File.foreach(header_path) do |line|
+            if (m = line.match(/\Astatic const char \*const (w_wire_schema_fields_\w+)\[\d+\] = \{ (.*) \};/))
+              arrays[m[1]] = m[2].scan(/"([^"]+)"/).map { |s| s[0].to_sym }
+            elsif (m = line.match(/\A\s*\[(\d+)\] = \{ (\d+), .*, (NULL|w_wire_schema_fields_\w+) \}/))
+              @wire_packed_schemas[m[1].to_i] = m[3] == "NULL" ? [] : (arrays[m[3]] || [])
+            end
+          end
+        end
+        @wire_packed_schemas[kind]
       end
 
       def register_loc_file_entry(path, line_at, col_at)

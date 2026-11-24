@@ -161,6 +161,19 @@ typedef struct WWireArena {
 extern WWireArena g_wire_arena;
 WValue  w_wire_alloc(int64_t kind, int64_t field_count);
 WValue  w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fields);
+WValue  w_wire_packed_0(int64_t kind);
+WValue  w_wire_packed_1(int64_t kind, WValue v0);
+WValue  w_wire_packed_2(int64_t kind, WValue v0, WValue v1);
+WValue  w_wire_packed_3(int64_t kind, WValue v0, WValue v1, WValue v2);
+WValue  w_wire_packed_4(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3);
+WValue  w_wire_packed_5(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4);
+WValue  w_wire_packed_6(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4, WValue v5);
+WValue  w_wire_packed_7(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4, WValue v5, WValue v6);
+WValue  w_wire_packed_8(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4, WValue v5, WValue v6, WValue v7);
+WValue  w_wire_packed_9(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4, WValue v5, WValue v6, WValue v7, WValue v8);
+WValue  w_wire_packed_14(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4, WValue v5, WValue v6, WValue v7, WValue v8, WValue v9, WValue v10, WValue v11, WValue v12, WValue v13);
+WValue  w_wire_func_push_inst(WValue f, WValue inst);
+WValue  w_wire_slot_load(WValue wire, int64_t index);
 WValue  w_wire_function_record_new(WValue field_symbols, WValue name,
                                    WValue params, WValue return_type,
                                    WValue is_toplevel, WValue extra_params);
@@ -1051,6 +1064,7 @@ WValue w_str_concat_i64(WValue a, int64_t n, WValue own_a);
 WValue w_i64_concat_str(int64_t n, WValue b, WValue own_b);
 WValue w_str_concat_int_wv(WValue a, WValue b_int, WValue own_a);
 WValue w_int_wv_concat_str(WValue a_int, WValue b, WValue own_b);
+WValue w_str_concat_any(WValue a, WValue b, WValue own_a);
 WValue w_string_idx_raw(WValue str, int64_t index);
 WValue w_string_slice_raw(WValue str, int64_t start, int64_t len);
 int64_t w_parser_chars_equal_ascii(WValue chars, int64_t off, int64_t len, WValue lit);
@@ -1458,6 +1472,16 @@ WValue w_fast_idx_set(WValue recv, WValue key, WValue val, WInlineCache *cache);
 WValue w_fast_size(WValue recv, WInlineCache *cache);
 WValue w_fast_push(WValue recv, WValue val, WInlineCache *cache);
 WValue w_fast_to_s(WValue recv, WInlineCache *cache);
+WValue w_fast_has_key(WValue recv, WValue key, WInlineCache *cache);
+WValue w_fast_keys(WValue recv, WInlineCache *cache);
+WValue w_fast_empty(WValue recv, WInlineCache *cache);
+WValue w_fast_starts_with(WValue recv, WValue prefix, WInlineCache *cache);
+WValue w_fast_ends_with(WValue recv, WValue suffix, WInlineCache *cache);
+WValue w_fast_slice2(WValue recv, WValue start_v, WValue len_v, WInlineCache *cache);
+WValue w_fast_byte_at(WValue recv, WValue idx_v, WInlineCache *cache);
+WValue w_fast_strip(WValue recv, WInlineCache *cache);
+WValue w_fast_index(WValue recv, WValue arg, WInlineCache *cache);
+WValue w_fast_abs(WValue recv, WInlineCache *cache);
 WValue w_string_chars(WValue r);
 WValue w_value_is_a(WValue recv, WValue target);
 

@@ -228,7 +228,7 @@
   result_var = "__if_expr." + next_label(wfn, "ie")
   if result_machine_type != nil
     result_ptr = ensure_var_slot(wfn, result_var, machine_slot_type(result_machine_type))
-    emit_wire_dynamic_2(wfn, machine_store_op(result_machine_type), :ptr, result_ptr, :value, "0")
+    emit_machine_store(wfn, result_machine_type, result_ptr, "0")
   else
     result_ptr = ensure_var_slot(wfn, result_var)
     # Initialize an ordinary value conditional to nil.
@@ -346,7 +346,7 @@
   start_block(wfn, end_label)
   result = next_temp(wfn)
   if result_machine_type != nil
-    emit_wire_dynamic_2(wfn, machine_load_op(result_machine_type), :ptr, result_ptr, :temp, result)
+    emit_machine_load(wfn, result_machine_type, result_ptr, result)
     return typed_value(raw_machine_value_type(result_machine_type), result)
   emit_wire_load_i64(wfn, result_ptr, result)
   typed_value(:i64, result)
@@ -369,7 +369,7 @@
     # above INT64_MAX and then immediately unbox it at the branch merge.
     last_reg = lower_machine_int_expression(ctx, last, result_machine_type)
     if !block_terminated(wfn)
-      emit_wire_dynamic_2(wfn, machine_store_op(result_machine_type), :ptr, result_ptr, :value, last_reg)
+      emit_machine_store(wfn, result_machine_type, result_ptr, last_reg)
   else
     last_tv = lower_expression(ctx, last)
     if !block_terminated(wfn)
@@ -1396,7 +1396,7 @@
     start_block(wfn, info[:body_label])
     slot = wfn[:var_slots][info[:name]]
     if is_machine_int_type(info[:from_type])
-      emit_wire_dynamic_2(wfn, machine_store_op(info[:from_type]), :ptr, slot, :value, phi_reg)
+      emit_machine_store(wfn, info[:from_type], slot, phi_reg)
     else
       boxed_tv = nanbox_int_emit(wfn, phi_reg)
       emit_wire_store_i64(wfn, slot, boxed_tv[:value])
@@ -1943,11 +1943,29 @@
     pop_case(wfn)
   result
 
--> case_switch_literal_value(pattern)
-  if ast_kind(pattern) == :int
+-> case_switch_const_int_value(ctx, pattern)
+  pk = ast_kind(pattern)
+  if pk == :int || pk == :char
     return pattern.value.to_i()
-  if ast_kind(pattern) == :char
-    return pattern.value.to_i()
+  if pk == :var && ctx != nil && ctx[:func][:name] != "main"
+    nm = pattern.name
+    mod = ctx[:mod]
+    clits = mod[:top_level_const_values]
+    ilits = mod[:top_level_int_literals]
+    has_c = clits != nil && clits.has_key?(nm)
+    has_i = !has_c && ilits != nil && ilits.has_key?(nm)
+    if (has_c || has_i) && !pipe_ident_shadowed?(ctx, nm)
+      lac = ctx[:local_assignment_counts]
+      if lac == nil || lac[nm] == nil
+        v = has_c ? clits[nm] : ilits[nm]
+        if type(v) == "Int"
+          return v
+  nil
+
+-> case_switch_literal_value(ctx, pattern)
+  iv = case_switch_const_int_value(ctx, pattern)
+  if iv != nil
+    return iv
   # SSO-5 symbols / strings (≤5 bytes) have a deterministic
   # compile-time WValue. Symbols add the `| 1` symbol bit; strings
   # don't. Medium-length (6-61 bytes) symbols and strings are also
@@ -1993,12 +2011,12 @@
   k
 
 -> case_switch_simple_body?(body)
-  if body == nil || body.size() == 0 || body.size() > 8
+  if body == nil || body.size() == 0
     return false
   i = 0
   while i < body.size()
     t = ast_kind(body[i])
-    if t in (:while :with :parallel_with :case :case_value :begin :method_def :fn_def :class_def)
+    if t in (:with :parallel_with :begin :method_def :fn_def :class_def)
       return false
     i += 1
   true
@@ -2035,7 +2053,7 @@
 -> case_switch_body_equiv?(b1, b2)
   if b1 == nil && b2 == nil
     return true
-  if b1 == nil || b2 == nil || b1.size() != b2.size()
+  if b1 == nil || b2 == nil || b1.size() != b2.size() || b1.size() > 16
     return false
   i = 0
   while i < b1.size()
@@ -2044,21 +2062,18 @@
     i += 1
   true
 
-# True when every arm pattern is an integer (or char) literal. Used
-# to relax the case-switch gate the same way case_switch_interned_kind
-# relaxes it for symbol/string arms: when the arm patterns themselves
-# determine the literal type, we don't need infer_type to confirm
-# the subject's type. The subject's runtime form must produce
-# integer-compatible bits — ensure_raw_machine_int handles raw_int
-# directly and nanunboxes :i64-typed values; mismatched subjects
-# (e.g. a string passed to an int-case) will simply not match any
-# arm and fall through to the default.
--> case_switch_all_int_literals?(arms)
+# True when every arm pattern is a compile-time integer (or char) literal or
+# unshadowed top-level integer constant. Used to relax the case-switch gate the
+# same way case_switch_interned_kind relaxes it for symbol/string arms: when the
+# arm patterns themselves determine the literal type, we don't need infer_type
+# to confirm the subject's type. The subject's runtime form must produce
+# integer-compatible bits — ensure_raw_machine_int handles raw_int directly and
+# nanunboxes :i64-typed values; mismatched subjects (e.g. a string passed to an
+# int-case) will simply not match any arm and fall through to the default.
+-> case_switch_all_int_literals?(ctx, arms)
   i = 0
   while i < arms.size()
-    pattern = arms[i].pattern
-    pk = ast_kind(pattern)
-    if pk != :int && pk != :char
+    if case_switch_const_int_value(ctx, arms[i].pattern) == nil
       return false
     i += 1
   true
@@ -2092,7 +2107,7 @@
   symbol_switch = interned_kind == :symbol
   string_switch = interned_kind == :string
   interned_switch = symbol_switch || string_switch
-  all_int_arms = case_switch_all_int_literals?(arms)
+  all_int_arms = case_switch_all_int_literals?(ctx, arms)
   subj_type = infer_type(node.subject, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
   # If we have neither an interned-arm shape nor an all-integer-arm
   # shape, we need the subject's type to confirm it's integer-like.
@@ -2121,7 +2136,7 @@
     if !case_switch_simple_body?(arm.body)
       return nil
     pattern = arm.pattern
-    v = case_switch_literal_value(pattern)
+    v = case_switch_literal_value(ctx, pattern)
     str_id = nil
     if v == nil
       # Medium-length symbol/string (6-61 bytes): defer WValue to

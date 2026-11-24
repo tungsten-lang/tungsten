@@ -453,7 +453,7 @@ wire_var_slot_names = build_wire_var_slot_names()
       while ei >= 0
         entry = entries[ei]
         emit_wire_cleanup_pop(f)
-        emit_wire_dynamic_1(f, recycle_op_for_kind(entry[:kind]), :value, entry[:temp])
+        emit_recycle_for_kind(f, entry[:kind], entry[:temp])
         ei -= 1
     si -= 1
 
@@ -495,14 +495,14 @@ wire_var_slot_names = build_wire_var_slot_names()
     stack[idx] = top
   # Emit cleanup_push so raise unwind can recycle this value even if normal
   # scope-exit code doesn't run.
-  push_op = :cleanup_push_array
   if kind == :hash
-    push_op = :cleanup_push_hash
+    emit_wire_cleanup_push_hash(f, temp)
   elsif kind == :typed
-    push_op = :cleanup_push_typed
+    emit_wire_cleanup_push_typed(f, temp)
   elsif kind == :strbuf
-    push_op = :cleanup_push_strbuf
-  emit_wire_dynamic_1(f, push_op, :value, temp)
+    emit_wire_cleanup_push_strbuf(f, temp)
+  else
+    emit_wire_cleanup_push_array(f, temp)
   top.push({temp: temp, kind: kind})
 
 -> block_terminated(f)
@@ -637,10 +637,7 @@ wire_var_slot_names = build_wire_var_slot_names()
 # after the stable wire_sequence kind (267).
 
 -> typed_value(type, value)
-  handle = ccall_rawargs("w_wire_alloc_reserve", 268, 2, 0)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :type, type)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 268, type, value)
 
 -> is_i48_decimal_literal?(s, signed = true)
   if s == nil
@@ -756,6 +753,18 @@ wire_var_slot_names = build_wire_var_slot_names()
 
 # Map a recycle-kind symbol to its runtime recycle op. Shared by the
 # scope-exit emitter and the per-ret function-scope flush below.
+-> wire_make_recycle_for_kind(kind, value)
+  if kind == :hash
+    return wire_make_call_recycle_hash(value)
+  if kind == :typed
+    return wire_make_call_recycle_typed(value)
+  if kind == :strbuf
+    return wire_make_call_recycle_strbuf(value)
+  wire_make_call_recycle_array(value)
+
+-> emit_recycle_for_kind(f, kind, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_recycle_for_kind(kind, value))
+
 -> recycle_op_for_kind(kind)
   if kind == :hash
     return :call_recycle_hash
@@ -799,7 +808,7 @@ wire_var_slot_names = build_wire_var_slot_names()
           while ri >= 0
             entry = fnbody[ri]
             new_instrs.push(wire_make_cleanup_pop())
-            new_instrs.push(wire_make_dynamic_1(recycle_op_for_kind(entry[:kind]), :value, entry[:temp]))
+            new_instrs.push(wire_make_recycle_for_kind(entry[:kind], entry[:temp]))
             ri -= 1
       new_instrs.push(inst)
       ii += 1
@@ -850,6 +859,29 @@ wire_var_slot_names = build_wire_var_slot_names()
 -> wire_is_call_op?(op)
   op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_method_i64 :call_indirect_i64 :memo_call0_i64 :memo_call1_i64 :memo_call2_i64 :call_reuse_or_new_array :call_reuse_or_new_hash :call_reuse_or_new_typed :call_reuse_or_new_strbuf :call_reuse_and_drain_or_new_hash :call_recycle_or_new_array :call_recycle_or_new_hash :call_recycle_or_new_typed :call_recycle_or_new_strbuf :call_recycle_array :call_recycle_hash :call_recycle_typed :call_recycle_strbuf)
 
+-> init_wire_call_kind_table()
+  tbl = Array.new(WIRE_KIND_MAX + 1)
+  call_ids = [
+    WIRE_KIND_CALL_DIRECT_I64, WIRE_KIND_CALL_DIRECT_I128, WIRE_KIND_CALL_DIRECT_VOID,
+    WIRE_KIND_CALL_DIRECT_PTR, WIRE_KIND_CALL_DIRECT_I64_PTR1, WIRE_KIND_CALL_DIRECT_VOID_PTR1,
+    WIRE_KIND_CALL_METHOD_I64,
+    WIRE_KIND_MEMO_CALL0_I64, WIRE_KIND_MEMO_CALL1_I64, WIRE_KIND_MEMO_CALL2_I64,
+    WIRE_KIND_CALL_REUSE_OR_NEW_ARRAY, WIRE_KIND_CALL_REUSE_OR_NEW_HASH,
+    WIRE_KIND_CALL_REUSE_OR_NEW_TYPED, WIRE_KIND_CALL_REUSE_OR_NEW_STRBUF,
+    WIRE_KIND_CALL_REUSE_AND_DRAIN_OR_NEW_HASH,
+    WIRE_KIND_CALL_RECYCLE_OR_NEW_ARRAY, WIRE_KIND_CALL_RECYCLE_OR_NEW_HASH,
+    WIRE_KIND_CALL_RECYCLE_OR_NEW_TYPED, WIRE_KIND_CALL_RECYCLE_OR_NEW_STRBUF,
+    WIRE_KIND_CALL_RECYCLE_ARRAY, WIRE_KIND_CALL_RECYCLE_HASH,
+    WIRE_KIND_CALL_RECYCLE_TYPED, WIRE_KIND_CALL_RECYCLE_STRBUF
+  ]
+  i = 0
+  while i < call_ids.size()
+    tbl[call_ids[i]] = true
+    i += 1
+  tbl
+
+wire_call_kind_table = init_wire_call_kind_table()
+
 -> wire_collect_fn_escape_and_setjmp(f)
   fn_escaped = {}
   fn_has_setjmp = false
@@ -868,32 +900,54 @@ wire_var_slot_names = build_wire_var_slot_names()
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
     ii = 0
-    while ii < instrs.size()
+    n_instrs = instrs.size()
+    while ii < n_instrs
       inst = instrs[ii]
-      op = wire_kind(inst)
-      if op == :ptr_to_i64
-        v = wire_get(inst, :value)
+      kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+      case kid
+      when WIRE_KIND_PTR_TO_I64
+        v = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PTR_TO_I64_VALUE)
         if v != nil
           fn_escaped[v] = true
-      elsif op == :setjmp
+      when WIRE_KIND_SETJMP
         fn_has_setjmp = true
-        b = wire_get(inst, :buf)
+        b = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_SETJMP_BUF)
         if b != nil
           fn_escaped[b] = true
-      elsif op == :call_direct_i64_ptr1 || op == :call_direct_void_ptr1
-        a = wire_get(inst, :arg)
+      when WIRE_KIND_CALL_DIRECT_I64_PTR1, WIRE_KIND_CALL_DIRECT_VOID_PTR1
+        a = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_PTR1_ARG)
         if a != nil
           fn_escaped[a] = true
-      elsif op == :store_ptr
-        d = wire_get(inst, :dest)
+      when WIRE_KIND_STORE_PTR
+        d = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_PTR_DEST)
         if d != nil
           fn_escaped[d] = true
-      elsif op == :gep_array
-        gb = wire_get(inst, :base)
+      when WIRE_KIND_GEP_ARRAY
+        gb = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_GEP_ARRAY_BASE)
         if gb != nil
           fn_escaped[gb] = true
-      elsif op == :call_direct_i64 || op == :call_direct_void || op == :call_direct_ptr || op == :call_direct_i128
-        args = wire_get(inst, :args)
+      when WIRE_KIND_CALL_DIRECT_I64
+        args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS)
+        if args != nil
+          ai = 0
+          nargs = wire_sequence_size(args)
+          while ai < nargs
+            arg = wire_sequence_get(args, ai)
+            if arg != nil && arg.starts_with?("%v")
+              fn_escaped[arg] = true
+            ai += 1
+      when WIRE_KIND_CALL_DIRECT_VOID, WIRE_KIND_CALL_DIRECT_PTR
+        args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_VOID_ARGS)
+        if args != nil
+          ai = 0
+          nargs = wire_sequence_size(args)
+          while ai < nargs
+            arg = wire_sequence_get(args, ai)
+            if arg != nil && arg.starts_with?("%v")
+              fn_escaped[arg] = true
+            ai += 1
+      when WIRE_KIND_CALL_DIRECT_I128
+        args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I128_ARGS)
         if args != nil
           ai = 0
           nargs = wire_sequence_size(args)
@@ -907,20 +961,21 @@ wire_var_slot_names = build_wire_var_slot_names()
   {escaped: fn_escaped, has_setjmp: fn_has_setjmp}
 
 -> wire_try_fold_box_call(f, inst)
-  if wire_kind(inst) != :call_direct_i64
+  kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+  if kid != WIRE_KIND_CALL_DIRECT_I64
     return inst
-  nm = wire_get(inst, :name)
+  nm = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_NAME)
   if nm != "__w_int_fast" && nm != "w_u64"
     return inst
-  if wire_get(inst, :arg_types) != nil || wire_get(inst, :src_line) != nil
+  if ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARG_TYPES) != nil || ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_SRC_LINE) != nil
     return inst
-  args = wire_get(inst, :args)
+  args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS)
   if args == nil || wire_sequence_size(args) != 1
     return inst
   a0 = wire_sequence_get(args, 0)
   if !is_i48_decimal_literal?(a0, nm == "__w_int_fast")
     return inst
-  temp = wire_get(inst, :temp)
+  temp = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_TEMP)
   tm = f != nil ? next_temp(f) : (temp + ".m")
   wire_make_nanbox_int(a0, temp, tm)
 
@@ -996,30 +1051,59 @@ wire_var_slot_names = build_wire_var_slot_names()
 # into all subsequent uses of the load's temp. Unescaped local stack slots
 # (`%v*` not in fn_escaped) survive calls when the function has no setjmp.
 
+-> wire_array_alloc_ebits_spec(cname, cargs)
+  if cname == "w_bytes_new"
+    return ":8:0"
+  if cname in ("w_array_zeros" "w_array_new_uninit" "w_array_new_uninit_sized") && cargs != nil && wire_sequence_size(cargs) >= 1
+    eb = wire_sequence_get(cargs, 0)
+    if eb in ("64" "66" "-64")
+      return ":64:0"
+    if eb in ("32" "33" "-32")
+      return ":32:0"
+    if eb in ("16" "116" "-16" "-116")
+      return ":16:0"
+    if eb in ("8" "108" "-108" "-109")
+      return ":8:0"
+    if eb in ("4" "-4" "-104")
+      return ":4:0"
+    if eb == "65"
+      return ":64:1"
+  nil
+
 -> cse_block(block, global_subst = nil, fn_escaped = nil, fn_has_setjmp = false, f = nil)
   known = {}
   known_type = {}
   has_known = false
   has_non_slot_known = false
   escaped = {}
+  checked_ebits = nil
   subst = {}
   subst_count = 0
   new_instrs = []
 
   i = 0
   instrs = block[:instructions]
-  while i < instrs.size()
+  n_instrs = instrs.size()
+  while i < n_instrs
     inst = instrs[i]
     if subst_count > 0
       inst = wire_try_fold_box_call(f, apply_subst(inst, subst, subst_count))
-    op = wire_kind(inst)
+    kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
 
-    st_type = wire_slot_store_type(op)
+    st_type = nil
+    if kid == WIRE_KIND_STORE_I64
+      st_type = :i64
+    elsif kid == WIRE_KIND_STORE_DOUBLE
+      st_type = :f64
+    elsif kid == WIRE_KIND_STORE_FLOAT
+      st_type = :f32
+    elsif kid == WIRE_KIND_STORE_I128
+      st_type = :i128
     if st_type != nil
-      ptr = wire_get(inst, :ptr)
+      ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_PTR)
       is_esc = escaped[ptr] == true || (fn_escaped != nil && fn_escaped[ptr] == true)
       if !is_esc
-        known[ptr] = wire_get(inst, :value)
+        known[ptr] = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_VALUE)
         known_type[ptr] = st_type
         has_known = true
         if !ptr.starts_with?("%v")
@@ -1029,15 +1113,23 @@ wire_var_slot_names = build_wire_var_slot_names()
         known_type[ptr] = nil
       new_instrs.push(inst)
     else
-      ld_type = wire_slot_load_type(op)
+      ld_type = nil
+      if kid == WIRE_KIND_LOAD_I64
+        ld_type = :i64
+      elsif kid == WIRE_KIND_LOAD_DOUBLE
+        ld_type = :f64
+      elsif kid == WIRE_KIND_LOAD_FLOAT
+        ld_type = :f32
+      elsif kid == WIRE_KIND_LOAD_I128
+        ld_type = :i128
       if ld_type != nil
-        ptr = wire_get(inst, :ptr)
+        ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_PTR)
         kv = nil
         if has_known && known_type[ptr] == ld_type
           kv = known[ptr]
         if kv != nil
           # Value is known with matching slot type — record substitution, skip the load
-          temp = wire_get(inst, :temp)
+          temp = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_TEMP)
           subst[temp] = kv
           subst_count += 1
           # Also record function-wide so cross-block uses of this temp
@@ -1051,50 +1143,75 @@ wire_var_slot_names = build_wire_var_slot_names()
           # from the same unescaped slot.
           is_esc = escaped[ptr] == true || (fn_escaped != nil && fn_escaped[ptr] == true)
           if !is_esc
-            known[ptr] = wire_get(inst, :temp)
+            known[ptr] = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_TEMP)
             known_type[ptr] = ld_type
             has_known = true
             if !ptr.starts_with?("%v")
               has_non_slot_known = true
-      elsif op == :ptr_to_i64
+      elsif kid == WIRE_KIND_PTR_TO_I64
         # Address-of escape: any pointer whose address is taken can be
         # mutated through aliasing (closures, callee, indirect store). Mark
         # the slot as escaped and drop all known values so subsequent loads
         # always re-fetch from memory.
-        escaped[wire_get(inst, :value)] = true
+        escaped[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PTR_TO_I64_VALUE)] = true
         if has_known
           known = {}
           known_type = {}
           has_known = false
           has_non_slot_known = false
         new_instrs.push(inst)
-      elsif has_known && (op == :store_ptr || wire_is_call_op?(op))
-        if fn_has_setjmp || fn_escaped == nil
-          # Conservative under setjmp (or standalone cse_block without fn_escaped):
-          # drop all known values across calls.
-          known = {}
-          known_type = {}
-          has_known = false
-          has_non_slot_known = false
-        elsif has_non_slot_known
-          # Unescaped local `%v*` slots cannot be aliased by callees or indirect
-          # stores; drop only non-slot pointers.
-          kkeys = known.keys()
-          ki = 0
-          kept = false
-          while ki < kkeys.size()
-            kp = kkeys[ki]
-            if known[kp] != nil
-              if !kp.starts_with?("%v")
-                known[kp] = nil
-                known_type[kp] = nil
-              else
-                kept = true
-            ki += 1
-          has_known = kept
-          has_non_slot_known = false
-        new_instrs.push(inst)
       else
+        if kid == WIRE_KIND_CALL_DIRECT_I64
+          cname = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_NAME)
+          if cname == "w_check_array_ebits"
+            cargs = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS)
+            if cargs != nil && wire_sequence_size(cargs) >= 3
+              arr_reg = wire_sequence_get(cargs, 0)
+              eb_suffix = ":" + wire_sequence_get(cargs, 1) + ":" + wire_sequence_get(cargs, 2)
+              eb_key = arr_reg + eb_suffix
+              if checked_ebits != nil && checked_ebits[eb_key] == true
+                temp = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_TEMP)
+                subst[temp] = arr_reg
+                subst_count += 1
+                if global_subst != nil
+                  global_subst[temp] = arr_reg
+                i += 1
+                next
+              if checked_ebits == nil
+                checked_ebits = {}
+              checked_ebits[eb_key] = true
+              checked_ebits[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_TEMP) + eb_suffix] = true
+          elsif cname == "w_array_zeros" || cname == "w_array_new_uninit" || cname == "w_array_new_uninit_sized" || cname == "w_bytes_new"
+            spec = wire_array_alloc_ebits_spec(cname, ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS))
+            if spec != nil
+              if checked_ebits == nil
+                checked_ebits = {}
+              checked_ebits[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_TEMP) + spec] = true
+        if has_known && (kid == WIRE_KIND_STORE_PTR || (kid > 0 && kid <= WIRE_KIND_MAX && wire_call_kind_table[kid] == true))
+          if fn_has_setjmp || fn_escaped == nil
+            # Conservative under setjmp (or standalone cse_block without fn_escaped):
+            # drop all known values across calls.
+            known = {}
+            known_type = {}
+            has_known = false
+            has_non_slot_known = false
+          elsif has_non_slot_known
+            # Unescaped local `%v*` slots cannot be aliased by callees or indirect
+            # stores; drop only non-slot pointers.
+            kkeys = known.keys()
+            ki = 0
+            kept = false
+            while ki < kkeys.size()
+              kp = kkeys[ki]
+              if known[kp] != nil
+                if !kp.starts_with?("%v")
+                  known[kp] = nil
+                  known_type[kp] = nil
+                else
+                  kept = true
+              ki += 1
+            has_known = kept
+            has_non_slot_known = false
         new_instrs.push(inst)
     i += 1
 
@@ -1736,25 +1853,26 @@ wire_var_slot_names = build_wire_var_slot_names()
 
   i = 0
   instrs = block[:instructions]
-  while i < instrs.size()
+  n_instrs = instrs.size()
+  while i < n_instrs
     inst = instrs[i]
-    op = wire_kind(inst)
-    if op in (:store_i64 :store_i128 :store_float :store_double)
-      ptr = wire_get(inst, :ptr)
+    kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+    if kid == WIRE_KIND_STORE_I64 || kid == WIRE_KIND_STORE_I128 || kid == WIRE_KIND_STORE_FLOAT || kid == WIRE_KIND_STORE_DOUBLE
+      ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_PTR)
       prev = prev_store[ptr]
       is_esc = escaped[ptr] == true || (fn_escaped != nil && fn_escaped[ptr] == true)
       if prev != nil && !is_esc
         dead_set[prev] = true
         has_dead = true
       prev_store[ptr] = i
-    elsif op in (:load_i64 :load_i128 :load_float :load_double)
+    elsif kid == WIRE_KIND_LOAD_I64 || kid == WIRE_KIND_LOAD_I128 || kid == WIRE_KIND_LOAD_FLOAT || kid == WIRE_KIND_LOAD_DOUBLE
       # Load makes the previous store to this slot live
-      prev_store[wire_get(inst, :ptr)] = nil
-    elsif op == :ptr_to_i64
-      val = wire_get(inst, :value)
+      prev_store[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_PTR)] = nil
+    elsif kid == WIRE_KIND_PTR_TO_I64
+      val = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PTR_TO_I64_VALUE)
       escaped[val] = true
       prev_store[val] = nil
-    elsif fn_has_setjmp && wire_is_call_op?(op)
+    elsif fn_has_setjmp && kid > 0 && kid <= WIRE_KIND_MAX && wire_call_kind_table[kid] == true
       prev_store = {}
     i += 1
 
@@ -1784,13 +1902,14 @@ wire_var_slot_names = build_wire_var_slot_names()
     blk = f[:blocks][i]
     instrs = blk[:instructions]
     j = 0
-    while j < instrs.size()
+    n_instrs = instrs.size()
+    while j < n_instrs
       inst = instrs[j]
-      op = wire_kind(inst)
-      if op in (:load_i64 :load_i128 :load_float :load_double)
-        loaded[wire_get(inst, :ptr)] = true
-      elsif op == :ptr_to_i64
-        loaded[wire_get(inst, :value)] = true
+      kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+      if kid == WIRE_KIND_LOAD_I64 || kid == WIRE_KIND_LOAD_I128 || kid == WIRE_KIND_LOAD_FLOAT || kid == WIRE_KIND_LOAD_DOUBLE
+        loaded[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_PTR)] = true
+      elsif kid == WIRE_KIND_PTR_TO_I64
+        loaded[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PTR_TO_I64_VALUE)] = true
       j += 1
     i += 1
 
@@ -1830,10 +1949,11 @@ wire_var_slot_names = build_wire_var_slot_names()
     instrs = blk[:instructions]
     new_instrs = []
     j = 0
-    while j < instrs.size()
+    n_instrs = instrs.size()
+    while j < n_instrs
       inst = instrs[j]
-      op = wire_kind(inst)
-      if ((op != :store_i64 && op != :store_i128 && op != :store_float && op != :store_double) || dead[wire_get(inst, :ptr)] != true)
+      kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+      if ((kid != WIRE_KIND_STORE_I64 && kid != WIRE_KIND_STORE_I128 && kid != WIRE_KIND_STORE_FLOAT && kid != WIRE_KIND_STORE_DOUBLE) || dead[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_PTR)] != true)
         new_instrs.push(inst)
       j += 1
     blk[:instructions] = new_instrs

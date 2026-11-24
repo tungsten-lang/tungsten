@@ -2,1979 +2,2036 @@
 # Fields are stored in the canonical order recorded in
 # compiler/wire_instruction_schema.json.
 
+WIRE_KIND_MAX = 274 ## i64
+WIRE_KIND_ADD_I64 = 1 ## i64
+WIRE_KIND_ADDCARRY_U64 = 2 ## i64
+WIRE_KIND_ALLOCA_ARRAY = 3 ## i64
+WIRE_KIND_ALLOCA_I64 = 4 ## i64
+WIRE_KIND_AND_I1 = 5 ## i64
+WIRE_KIND_AND_I64 = 6 ## i64
+WIRE_KIND_ARGV_INIT = 7 ## i64
+WIRE_KIND_ARR_DATA_PTR = 8 ## i64
+WIRE_KIND_ARRAY_GET_INLINE = 9 ## i64
+WIRE_KIND_ARRAY_SIZE_RAW = 10 ## i64
+WIRE_KIND_ASM_ADD_N = 11 ## i64
+WIRE_KIND_ASM_ADD_NO = 12 ## i64
+WIRE_KIND_ASM_ADD_TEST = 13 ## i64
+WIRE_KIND_ASM_ADDMUL1 = 14 ## i64
+WIRE_KIND_ASM_GOLD_STAGE = 15 ## i64
+WIRE_KIND_ASM_GOLD_STAGE_INV = 16 ## i64
+WIRE_KIND_ASM_MULBASE = 17 ## i64
+WIRE_KIND_ASM_NEON_GADD2 = 18 ## i64
+WIRE_KIND_ASM_NEON_NTT_STAGE = 19 ## i64
+WIRE_KIND_ASM_NEON_REDC = 20 ## i64
+WIRE_KIND_ASM_NEON_UMULL = 21 ## i64
+WIRE_KIND_ASM_SUB_NO = 22 ## i64
+WIRE_KIND_BIG_ARRAY_GET_INLINE = 23 ## i64
+WIRE_KIND_BIGINT_LITERAL_I64 = 24 ## i64
+WIRE_KIND_BITCAST_F16_I16 = 25 ## i64
+WIRE_KIND_BITCAST_F32_I32 = 26 ## i64
+WIRE_KIND_BITCAST_F64_I64 = 27 ## i64
+WIRE_KIND_BITCAST_I16_F16 = 28 ## i64
+WIRE_KIND_BITCAST_I32_F32 = 29 ## i64
+WIRE_KIND_BITCAST_I64_F64 = 30 ## i64
+WIRE_KIND_BOOL_ARRAY_GET_INLINE = 31 ## i64
+WIRE_KIND_BOOL_ARRAY_SET_INLINE = 32 ## i64
+WIRE_KIND_BR = 33 ## i64
+WIRE_KIND_BUILTIN_CLASS_INIT = 34 ## i64
+WIRE_KIND_CALL_DIRECT_I64 = 35 ## i64
+WIRE_KIND_CALL_DIRECT_I64_PTR1 = 36 ## i64
+WIRE_KIND_CALL_DIRECT_PTR = 37 ## i64
+WIRE_KIND_CALL_DIRECT_VOID = 38 ## i64
+WIRE_KIND_CALL_DIRECT_VOID_PTR1 = 39 ## i64
+WIRE_KIND_CALL_FUSED_OUT_REUSE = 40 ## i64
+WIRE_KIND_CALL_LIBM_F64 = 41 ## i64
+WIRE_KIND_CALL_LOC_SET_COL = 42 ## i64
+WIRE_KIND_CALL_METHOD_I64 = 43 ## i64
+WIRE_KIND_CALL_NUM_TO_F64 = 44 ## i64
+WIRE_KIND_CALL_RECYCLE_OR_NEW_ARRAY = 45 ## i64
+WIRE_KIND_CALL_RECYCLE_OR_NEW_HASH = 46 ## i64
+WIRE_KIND_CALL_RECYCLE_OR_NEW_STRBUF = 47 ## i64
+WIRE_KIND_CALL_RECYCLE_OR_NEW_TYPED = 48 ## i64
+WIRE_KIND_CALL_REUSE_AND_DRAIN_OR_NEW_HASH = 49 ## i64
+WIRE_KIND_CALL_REUSE_OR_NEW_ARRAY = 50 ## i64
+WIRE_KIND_CALL_REUSE_OR_NEW_HASH = 51 ## i64
+WIRE_KIND_CALL_REUSE_OR_NEW_STRBUF = 52 ## i64
+WIRE_KIND_CALL_REUSE_OR_NEW_TYPED = 53 ## i64
+WIRE_KIND_CLASS_ADD_IVAR = 54 ## i64
+WIRE_KIND_CLASS_ADD_METHOD = 55 ## i64
+WIRE_KIND_CLASS_ADD_STATIC_METHOD = 56 ## i64
+WIRE_KIND_CLASS_NEW = 57 ## i64
+WIRE_KIND_CLASS_STORE = 58 ## i64
+WIRE_KIND_CLEANUP_POP = 59 ## i64
+WIRE_KIND_CLOSURE_NEW = 60 ## i64
+WIRE_KIND_COND_BR = 61 ## i64
+WIRE_KIND_CONST_CHAR = 62 ## i64
+WIRE_KIND_CONST_COLOR = 63 ## i64
+WIRE_KIND_CONST_CURRENCY = 64 ## i64
+WIRE_KIND_CONST_DATE = 65 ## i64
+WIRE_KIND_CONST_DECIMAL = 66 ## i64
+WIRE_KIND_CONST_DURATION_MONTHS_MS = 67 ## i64
+WIRE_KIND_CONST_DURATION_NS = 68 ## i64
+WIRE_KIND_CONST_IPV4 = 69 ## i64
+WIRE_KIND_CONST_IPV6 = 70 ## i64
+WIRE_KIND_CONST_QUANTITY = 71 ## i64
+WIRE_KIND_CONST_RATIONAL = 72 ## i64
+WIRE_KIND_CONST_UUID = 73 ## i64
+WIRE_KIND_FCMP_F64 = 74 ## i64
+WIRE_KIND_FMA_F64 = 75 ## i64
+WIRE_KIND_FMULADD_F64 = 76 ## i64
+WIRE_KIND_FN_ADDR_I64 = 77 ## i64
+WIRE_KIND_FNEG_F64 = 78 ## i64
+WIRE_KIND_FPEXT_F16_F32 = 79 ## i64
+WIRE_KIND_FPEXT_F32_F64 = 80 ## i64
+WIRE_KIND_FPTOSI_F64_I64 = 81 ## i64
+WIRE_KIND_FPTRUNC_F32_F16 = 82 ## i64
+WIRE_KIND_FPTRUNC_F64_F32 = 83 ## i64
+WIRE_KIND_FREE_VALUE = 84 ## i64
+WIRE_KIND_GEP_ARRAY = 85 ## i64
+WIRE_KIND_I64_TO_PTR = 86 ## i64
+WIRE_KIND_ICMP_EQ_I32 = 87 ## i64
+WIRE_KIND_ICMP_I64 = 88 ## i64
+WIRE_KIND_ICMP_NE_I64 = 89 ## i64
+WIRE_KIND_ICMP_NE_ZERO = 90 ## i64
+WIRE_KIND_INTTOPTR_I64 = 91 ## i64
+WIRE_KIND_IVAR_GET = 92 ## i64
+WIRE_KIND_IVAR_GET_IDX = 93 ## i64
+WIRE_KIND_IVAR_SET = 94 ## i64
+WIRE_KIND_IVAR_SET_IDX = 95 ## i64
+WIRE_KIND_LOAD_CLASS = 96 ## i64
+WIRE_KIND_LOAD_CVAR = 97 ## i64
+WIRE_KIND_LOAD_GLOBAL = 98 ## i64
+WIRE_KIND_LOAD_I64 = 99 ## i64
+WIRE_KIND_LOAD_I64_AT = 100 ## i64
+WIRE_KIND_LOAD_MEMO_PTR = 101 ## i64
+WIRE_KIND_LOAD_PTR = 102 ## i64
+WIRE_KIND_LOAD_U32_PTR = 103 ## i64
+WIRE_KIND_LOAD_U64_PTR = 104 ## i64
+WIRE_KIND_LOAD_U8_PTR = 105 ## i64
+WIRE_KIND_LSHR_I128 = 106 ## i64
+WIRE_KIND_LSHR_I64 = 107 ## i64
+WIRE_KIND_MEMO_CALL0_I64 = 108 ## i64
+WIRE_KIND_MEMO_CALL1_I64 = 109 ## i64
+WIRE_KIND_MEMO_CALL2_I64 = 110 ## i64
+WIRE_KIND_MEMO_INIT = 111 ## i64
+WIRE_KIND_MUL_I128 = 112 ## i64
+WIRE_KIND_MULHI_U64 = 113 ## i64
+WIRE_KIND_NANBOX_BOOL = 114 ## i64
+WIRE_KIND_NANBOX_FLOAT = 115 ## i64
+WIRE_KIND_NANBOX_INT = 116 ## i64
+WIRE_KIND_NANUNBOX_FLOAT = 117 ## i64
+WIRE_KIND_NANUNBOX_INT = 118 ## i64
+WIRE_KIND_NODE_KIND_CLASS_REGISTER = 119 ## i64
+WIRE_KIND_NOT_I1 = 120 ## i64
+WIRE_KIND_NULL_PTR = 121 ## i64
+WIRE_KIND_OR_I1 = 122 ## i64
+WIRE_KIND_PHI_I64 = 123 ## i64
+WIRE_KIND_PHI_SSA = 124 ## i64
+WIRE_KIND_POLY_ARRAY_GUARD = 125 ## i64
+WIRE_KIND_PRINT_I64 = 126 ## i64
+WIRE_KIND_PTR_SLOT_GET = 127 ## i64
+WIRE_KIND_PTR_TO_I64 = 128 ## i64
+WIRE_KIND_PUTS_I64 = 129 ## i64
+WIRE_KIND_REGISTER_UNIT = 130 ## i64
+WIRE_KIND_RET_I32 = 131 ## i64
+WIRE_KIND_RET_I64 = 132 ## i64
+WIRE_KIND_RET_VOID = 133 ## i64
+WIRE_KIND_SADD_WITH_OVERFLOW = 134 ## i64
+WIRE_KIND_SCOPE_POP = 135 ## i64
+WIRE_KIND_SCOPE_PUSH = 136 ## i64
+WIRE_KIND_SDIV_I64 = 137 ## i64
+WIRE_KIND_SELECT_I64 = 138 ## i64
+WIRE_KIND_SETJMP = 139 ## i64
+WIRE_KIND_SHL_I64 = 140 ## i64
+WIRE_KIND_SLAB_ALLOC_INIT = 141 ## i64
+WIRE_KIND_SMALL_ARRAY_ALLOCA = 142 ## i64
+WIRE_KIND_SMALL_ARRAY_CONST_LOAD = 143 ## i64
+WIRE_KIND_SMALL_ARRAY_GET_INLINE = 144 ## i64
+WIRE_KIND_SMALL_ARRAY_SET_INLINE = 145 ## i64
+WIRE_KIND_STORE_CVAR = 146 ## i64
+WIRE_KIND_STORE_DOUBLE = 147 ## i64
+WIRE_KIND_STORE_FLOAT = 148 ## i64
+WIRE_KIND_STORE_GLOBAL = 149 ## i64
+WIRE_KIND_STORE_I64 = 150 ## i64
+WIRE_KIND_STORE_MEMO_PTR = 151 ## i64
+WIRE_KIND_STORE_PTR = 152 ## i64
+WIRE_KIND_STORE_U8_PTR = 153 ## i64
+WIRE_KIND_STRING_I64 = 154 ## i64
+WIRE_KIND_SUB_I64 = 155 ## i64
+WIRE_KIND_SUBBORROW_U64 = 156 ## i64
+WIRE_KIND_SWITCH_I64 = 157 ## i64
+WIRE_KIND_SYMBOL_I64 = 158 ## i64
+WIRE_KIND_TA_CAP_RAW = 159 ## i64
+WIRE_KIND_TA_DATA_ADDR = 160 ## i64
+WIRE_KIND_TA_SIZE_RAW = 161 ## i64
+WIRE_KIND_TRUNC_I128_I64 = 162 ## i64
+WIRE_KIND_TRUNC_I64_I16 = 163 ## i64
+WIRE_KIND_TRUNC_I64_I32 = 164 ## i64
+WIRE_KIND_TRUTHY_INLINE = 165 ## i64
+WIRE_KIND_TYPE_CLASS_REGISTER = 166 ## i64
+WIRE_KIND_TYPED_ARRAY_COMPOUND_OP_INLINE = 167 ## i64
+WIRE_KIND_TYPED_ARRAY_GET_INLINE = 168 ## i64
+WIRE_KIND_TYPED_ARRAY_SET_INLINE = 169 ## i64
+WIRE_KIND_UNREACHABLE = 170 ## i64
+WIRE_KIND_VIEW_BASE_PTR = 171 ## i64
+WIRE_KIND_VIEW_LOAD_BIT = 172 ## i64
+WIRE_KIND_VIEW_LOAD_BYTE = 173 ## i64
+WIRE_KIND_VIEW_LOAD_FIELD = 174 ## i64
+WIRE_KIND_VIEW_LOAD_INLINE_BYTE = 175 ## i64
+WIRE_KIND_VIEW_LOAD_INLINE_ELEM = 176 ## i64
+WIRE_KIND_VIEW_STORE_FIELD = 177 ## i64
+WIRE_KIND_VIEW_STORE_INLINE_ELEM = 178 ## i64
+WIRE_KIND_XOR_I64 = 179 ## i64
+WIRE_KIND_ZEXT_I16_I64 = 180 ## i64
+WIRE_KIND_ZEXT_I32_I64 = 181 ## i64
+WIRE_KIND_ZEXT_I64_I128 = 182 ## i64
+WIRE_KIND_AMPERSAND = 183 ## i64
+WIRE_KIND_CARET = 184 ## i64
+WIRE_KIND_LSHIFT = 185 ## i64
+WIRE_KIND_MINUS = 186 ## i64
+WIRE_KIND_PIPE = 187 ## i64
+WIRE_KIND_PLUS = 188 ## i64
+WIRE_KIND_RSHIFT = 189 ## i64
+WIRE_KIND_STAR = 190 ## i64
+WIRE_KIND_ADD_I128 = 191 ## i64
+WIRE_KIND_ADD_I48_CHECKED = 192 ## i64
+WIRE_KIND_ADD_I48_GUARDED = 193 ## i64
+WIRE_KIND_ALLOCA_I128 = 194 ## i64
+WIRE_KIND_AND_I128 = 195 ## i64
+WIRE_KIND_ASHR_I128 = 196 ## i64
+WIRE_KIND_ASHR_I64 = 197 ## i64
+WIRE_KIND_ASM_ADD_UNEQ = 198 ## i64
+WIRE_KIND_ASM_NEON_MADD4 = 199 ## i64
+WIRE_KIND_ASM_NEON_MSUB4 = 200 ## i64
+WIRE_KIND_ASM_NEON_REDC4 = 201 ## i64
+WIRE_KIND_ASM_SUB_UNEQ = 202 ## i64
+WIRE_KIND_BOOL_ARRAY_GET_BYTE_INLINE = 203 ## i64
+WIRE_KIND_BOOL_ARRAY_SET_BYTE_INLINE = 204 ## i64
+WIRE_KIND_CALL_DIRECT_I128 = 205 ## i64
+WIRE_KIND_CALL_RECYCLE_ARRAY = 206 ## i64
+WIRE_KIND_CALL_RECYCLE_HASH = 207 ## i64
+WIRE_KIND_CALL_RECYCLE_STRBUF = 208 ## i64
+WIRE_KIND_CALL_RECYCLE_TYPED = 209 ## i64
+WIRE_KIND_CLEANUP_PUSH_ARRAY = 210 ## i64
+WIRE_KIND_CLEANUP_PUSH_HASH = 211 ## i64
+WIRE_KIND_CLEANUP_PUSH_STRBUF = 212 ## i64
+WIRE_KIND_CLEANUP_PUSH_TYPED = 213 ## i64
+WIRE_KIND_CONST_FLOAT = 214 ## i64
+WIRE_KIND_FADD_F64 = 215 ## i64
+WIRE_KIND_FDIV_F64 = 216 ## i64
+WIRE_KIND_FMUL_F64 = 217 ## i64
+WIRE_KIND_FPTOSI_F64_I128 = 218 ## i64
+WIRE_KIND_FPTOUI_F64_I128 = 219 ## i64
+WIRE_KIND_FPTOUI_F64_I64 = 220 ## i64
+WIRE_KIND_FREM_F64 = 221 ## i64
+WIRE_KIND_FSUB_F64 = 222 ## i64
+WIRE_KIND_ICMP_I128 = 223 ## i64
+WIRE_KIND_LOAD_DOUBLE = 224 ## i64
+WIRE_KIND_LOAD_F32_AT = 225 ## i64
+WIRE_KIND_LOAD_F64_AT = 226 ## i64
+WIRE_KIND_LOAD_FLOAT = 227 ## i64
+WIRE_KIND_LOAD_I128 = 228 ## i64
+WIRE_KIND_LOAD_INT_AT = 229 ## i64
+WIRE_KIND_MUL_I48_CHECKED = 230 ## i64
+WIRE_KIND_MUL_I48_GUARDED = 231 ## i64
+WIRE_KIND_MUL_I64 = 232 ## i64
+WIRE_KIND_NARROW_I64 = 233 ## i64
+WIRE_KIND_OR_I128 = 234 ## i64
+WIRE_KIND_OR_I64 = 235 ## i64
+WIRE_KIND_PHI_I1 = 236 ## i64
+WIRE_KIND_SDIV_I128 = 237 ## i64
+WIRE_KIND_SEXT_I64_I128 = 238 ## i64
+WIRE_KIND_SHL_I128 = 239 ## i64
+WIRE_KIND_SITOFP_I128_F64 = 240 ## i64
+WIRE_KIND_SITOFP_I64_F64 = 241 ## i64
+WIRE_KIND_SLAB_NODE_GET_IDX = 242 ## i64
+WIRE_KIND_SLAB_NODE_SET_IDX = 243 ## i64
+WIRE_KIND_SREM_I128 = 244 ## i64
+WIRE_KIND_SREM_I64 = 245 ## i64
+WIRE_KIND_STORE_F32_AT = 246 ## i64
+WIRE_KIND_STORE_F64_AT = 247 ## i64
+WIRE_KIND_STORE_I128 = 248 ## i64
+WIRE_KIND_STORE_INT_AT = 249 ## i64
+WIRE_KIND_SUB_I128 = 250 ## i64
+WIRE_KIND_SUB_I48_CHECKED = 251 ## i64
+WIRE_KIND_SUB_I48_GUARDED = 252 ## i64
+WIRE_KIND_TA_F32_ELEMS_PTR = 253 ## i64
+WIRE_KIND_TA_F64_ELEMS_PTR = 254 ## i64
+WIRE_KIND_TA_INT_ELEMS_PTR = 255 ## i64
+WIRE_KIND_UDIV_I128 = 256 ## i64
+WIRE_KIND_UDIV_I64 = 257 ## i64
+WIRE_KIND_UITOFP_I128_F64 = 258 ## i64
+WIRE_KIND_UITOFP_I64_F64 = 259 ## i64
+WIRE_KIND_UREM_I128 = 260 ## i64
+WIRE_KIND_UREM_I64 = 261 ## i64
+WIRE_KIND_XOR_I128 = 262 ## i64
+WIRE_KIND_ZEXT_I1_I64 = 263 ## i64
+WIRE_KIND_WIRE_MODULE = 264 ## i64
+WIRE_KIND_WIRE_FUNCTION = 265 ## i64
+WIRE_KIND_WIRE_BLOCK = 266 ## i64
+WIRE_KIND_WIRE_SEQUENCE = 267 ## i64
+WIRE_KIND_WIRE_TYPED_VALUE = 268 ## i64
+WIRE_KIND_CTPOP_I64 = 269 ## i64
+WIRE_KIND_CTTZ_I64 = 270 ## i64
+WIRE_KIND_TYPED_ARRAY_LOAD_U64 = 271 ## i64
+WIRE_KIND_TYPED_ARRAY_STORE_U64 = 272 ## i64
+WIRE_KIND_TYPED_ARRAY_PREFETCH = 273 ## i64
+WIRE_KIND_RECYCLE_OBJECT = 274 ## i64
+
+WIRE_SLOT_ADD_I64_LHS = 0 ## i64
+WIRE_SLOT_ADD_I64_RHS = 1 ## i64
+WIRE_SLOT_ADD_I64_TEMP = 2 ## i64
+WIRE_SLOT_ALLOCA_ARRAY_COUNT = 0 ## i64
+WIRE_SLOT_ALLOCA_ARRAY_PTR = 1 ## i64
+WIRE_SLOT_ALLOCA_I64_PTR = 0 ## i64
+WIRE_SLOT_AND_I1_LHS = 0 ## i64
+WIRE_SLOT_AND_I1_RHS = 1 ## i64
+WIRE_SLOT_AND_I1_TEMP = 2 ## i64
+WIRE_SLOT_AND_I64_LHS = 0 ## i64
+WIRE_SLOT_AND_I64_RHS = 1 ## i64
+WIRE_SLOT_AND_I64_TEMP = 2 ## i64
+WIRE_SLOT_ARRAY_SIZE_RAW_TEMP = 0 ## i64
+WIRE_SLOT_ARRAY_SIZE_RAW_VALUE = 1 ## i64
+WIRE_SLOT_ASHR_I64_LHS = 0 ## i64
+WIRE_SLOT_ASHR_I64_RHS = 1 ## i64
+WIRE_SLOT_ASHR_I64_TEMP = 2 ## i64
+WIRE_SLOT_BIGINT_LITERAL_I64_BYTE_LEN = 0 ## i64
+WIRE_SLOT_BIGINT_LITERAL_I64_SLOT_ID = 1 ## i64
+WIRE_SLOT_BIGINT_LITERAL_I64_STRING_ID = 2 ## i64
+WIRE_SLOT_BIGINT_LITERAL_I64_TEMP = 3 ## i64
+WIRE_SLOT_BIGINT_LITERAL_I64_TEMP_PTR = 4 ## i64
+WIRE_SLOT_BR_LABEL = 0 ## i64
+WIRE_SLOT_BR_NOVEC = 1 ## i64
+WIRE_SLOT_BR_UNROLL_COUNT = 2 ## i64
+WIRE_SLOT_BUILTIN_CLASS_INIT_CLASS_NAME = 0 ## i64
+WIRE_SLOT_BUILTIN_CLASS_INIT_NAME_BYTE_LEN = 1 ## i64
+WIRE_SLOT_BUILTIN_CLASS_INIT_NAME_STR_ID = 2 ## i64
+WIRE_SLOT_CALL_DIRECT_I128_ARG_TYPES = 0 ## i64
+WIRE_SLOT_CALL_DIRECT_I128_ARGS = 1 ## i64
+WIRE_SLOT_CALL_DIRECT_I128_CALL_CONV = 2 ## i64
+WIRE_SLOT_CALL_DIRECT_I128_NAME = 3 ## i64
+WIRE_SLOT_CALL_DIRECT_I128_TEMP = 4 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_ARG_TYPES = 0 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_ARGS = 1 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_CALL_CONV = 2 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_LOC_SITE_ID = 3 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_NAME = 4 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_SRC_COL = 5 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_SRC_LINE = 6 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_TEMP = 7 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_PTR1_ARG = 0 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_PTR1_NAME = 1 ## i64
+WIRE_SLOT_CALL_DIRECT_I64_PTR1_TEMP = 2 ## i64
+WIRE_SLOT_CALL_DIRECT_PTR_ARGS = 0 ## i64
+WIRE_SLOT_CALL_DIRECT_PTR_NAME = 1 ## i64
+WIRE_SLOT_CALL_DIRECT_PTR_TEMP = 2 ## i64
+WIRE_SLOT_CALL_DIRECT_VOID_ARGS = 0 ## i64
+WIRE_SLOT_CALL_DIRECT_VOID_NAME = 1 ## i64
+WIRE_SLOT_CALL_DIRECT_VOID_PTR1_ARG = 0 ## i64
+WIRE_SLOT_CALL_DIRECT_VOID_PTR1_NAME = 1 ## i64
+WIRE_SLOT_CALL_LOC_SET_COL_COL = 0 ## i64
+WIRE_SLOT_CALL_LOC_SET_COL_FILE_BYTE_LEN = 1 ## i64
+WIRE_SLOT_CALL_LOC_SET_COL_FILE_STR_ID = 2 ## i64
+WIRE_SLOT_CALL_LOC_SET_COL_LINE = 3 ## i64
+WIRE_SLOT_CALL_LOC_SET_COL_TEMP_PTR = 4 ## i64
+WIRE_SLOT_CALL_METHOD_I64_ARGS = 0 ## i64
+WIRE_SLOT_CALL_METHOD_I64_CONSTRUCT_CLASS = 1 ## i64
+WIRE_SLOT_CALL_METHOD_I64_CONSTRUCT_FN = 2 ## i64
+WIRE_SLOT_CALL_METHOD_I64_DEVIRT_CLASS = 3 ## i64
+WIRE_SLOT_CALL_METHOD_I64_DEVIRT_FN = 4 ## i64
+WIRE_SLOT_CALL_METHOD_I64_IC_ID = 5 ## i64
+WIRE_SLOT_CALL_METHOD_I64_METHOD_NAME_VAL = 6 ## i64
+WIRE_SLOT_CALL_METHOD_I64_RECEIVER = 7 ## i64
+WIRE_SLOT_CALL_METHOD_I64_SCALAR_SOURCE_ARGC1 = 8 ## i64
+WIRE_SLOT_CALL_METHOD_I64_SCALAR_SOURCE_ARGC2 = 9 ## i64
+WIRE_SLOT_CALL_METHOD_I64_SRC_COL = 10 ## i64
+WIRE_SLOT_CALL_METHOD_I64_SRC_LINE = 11 ## i64
+WIRE_SLOT_CALL_METHOD_I64_TEMP = 12 ## i64
+WIRE_SLOT_CALL_METHOD_I64_TEMP_ARGS_VAL = 13 ## i64
+WIRE_SLOT_CLASS_ADD_METHOD_ARITY = 0 ## i64
+WIRE_SLOT_CLASS_ADD_METHOD_CLASS_TEMP = 1 ## i64
+WIRE_SLOT_CLASS_ADD_METHOD_FN_NAME = 2 ## i64
+WIRE_SLOT_CLASS_ADD_METHOD_METHOD_BYTE_LEN = 3 ## i64
+WIRE_SLOT_CLASS_ADD_METHOD_METHOD_STR_ID = 4 ## i64
+WIRE_SLOT_CLASS_ADD_METHOD_MIN_ARITY = 5 ## i64
+WIRE_SLOT_CLASS_ADD_METHOD_SPLAT_INDEX = 6 ## i64
+WIRE_SLOT_CLASS_ADD_STATIC_METHOD_ARITY = 0 ## i64
+WIRE_SLOT_CLASS_ADD_STATIC_METHOD_CLASS_TEMP = 1 ## i64
+WIRE_SLOT_CLASS_ADD_STATIC_METHOD_FN_NAME = 2 ## i64
+WIRE_SLOT_CLASS_ADD_STATIC_METHOD_METHOD_BYTE_LEN = 3 ## i64
+WIRE_SLOT_CLASS_ADD_STATIC_METHOD_METHOD_STR_ID = 4 ## i64
+WIRE_SLOT_CLASS_ADD_STATIC_METHOD_MIN_ARITY = 5 ## i64
+WIRE_SLOT_CLASS_ADD_STATIC_METHOD_SPLAT_INDEX = 6 ## i64
+WIRE_SLOT_CLASS_NEW_NAME_BYTE_LEN = 0 ## i64
+WIRE_SLOT_CLASS_NEW_NAME_STR_ID = 1 ## i64
+WIRE_SLOT_CLASS_NEW_SUPER_REG = 2 ## i64
+WIRE_SLOT_CLASS_NEW_TEMP = 3 ## i64
+WIRE_SLOT_CLASS_STORE_CLASS_NAME = 0 ## i64
+WIRE_SLOT_CLASS_STORE_VALUE = 1 ## i64
+WIRE_SLOT_CLOSURE_NEW_BLOCK_ARITY = 0 ## i64
+WIRE_SLOT_CLOSURE_NEW_CAPTURE_COUNT = 1 ## i64
+WIRE_SLOT_CLOSURE_NEW_CAPTURES_PTR = 2 ## i64
+WIRE_SLOT_CLOSURE_NEW_FN_NAME = 3 ## i64
+WIRE_SLOT_CLOSURE_NEW_TEMP = 4 ## i64
+WIRE_SLOT_COND_BR_COND = 0 ## i64
+WIRE_SLOT_COND_BR_ELSE_LABEL = 1 ## i64
+WIRE_SLOT_COND_BR_PROF = 2 ## i64
+WIRE_SLOT_COND_BR_THEN_LABEL = 3 ## i64
+WIRE_SLOT_FADD_F64_FP_FLAGS = 0 ## i64
+WIRE_SLOT_FADD_F64_LHS = 1 ## i64
+WIRE_SLOT_FADD_F64_RHS = 2 ## i64
+WIRE_SLOT_FADD_F64_TEMP = 3 ## i64
+WIRE_SLOT_FDIV_F64_FP_FLAGS = 0 ## i64
+WIRE_SLOT_FDIV_F64_LHS = 1 ## i64
+WIRE_SLOT_FDIV_F64_RHS = 2 ## i64
+WIRE_SLOT_FDIV_F64_TEMP = 3 ## i64
+WIRE_SLOT_FMUL_F64_FP_FLAGS = 0 ## i64
+WIRE_SLOT_FMUL_F64_LHS = 1 ## i64
+WIRE_SLOT_FMUL_F64_RHS = 2 ## i64
+WIRE_SLOT_FMUL_F64_TEMP = 3 ## i64
+WIRE_SLOT_FREE_VALUE_VALUE = 0 ## i64
+WIRE_SLOT_FREM_F64_FP_FLAGS = 0 ## i64
+WIRE_SLOT_FREM_F64_LHS = 1 ## i64
+WIRE_SLOT_FREM_F64_RHS = 2 ## i64
+WIRE_SLOT_FREM_F64_TEMP = 3 ## i64
+WIRE_SLOT_FSUB_F64_FP_FLAGS = 0 ## i64
+WIRE_SLOT_FSUB_F64_LHS = 1 ## i64
+WIRE_SLOT_FSUB_F64_RHS = 2 ## i64
+WIRE_SLOT_FSUB_F64_TEMP = 3 ## i64
+WIRE_SLOT_GEP_ARRAY_BASE = 0 ## i64
+WIRE_SLOT_GEP_ARRAY_COUNT = 1 ## i64
+WIRE_SLOT_GEP_ARRAY_INDEX = 2 ## i64
+WIRE_SLOT_GEP_ARRAY_TEMP = 3 ## i64
+WIRE_SLOT_I64_TO_PTR_TEMP = 0 ## i64
+WIRE_SLOT_I64_TO_PTR_VALUE = 1 ## i64
+WIRE_SLOT_ICMP_EQ_I32_LHS = 0 ## i64
+WIRE_SLOT_ICMP_EQ_I32_RHS = 1 ## i64
+WIRE_SLOT_ICMP_EQ_I32_TEMP = 2 ## i64
+WIRE_SLOT_ICMP_I64_LHS = 0 ## i64
+WIRE_SLOT_ICMP_I64_PRED = 1 ## i64
+WIRE_SLOT_ICMP_I64_RHS = 2 ## i64
+WIRE_SLOT_ICMP_I64_TEMP = 3 ## i64
+WIRE_SLOT_ICMP_NE_I64_LHS = 0 ## i64
+WIRE_SLOT_ICMP_NE_I64_RHS = 1 ## i64
+WIRE_SLOT_ICMP_NE_I64_TEMP = 2 ## i64
+WIRE_SLOT_ICMP_NE_ZERO_TEMP = 0 ## i64
+WIRE_SLOT_ICMP_NE_ZERO_VALUE = 1 ## i64
+WIRE_SLOT_INTTOPTR_I64_TEMP = 0 ## i64
+WIRE_SLOT_INTTOPTR_I64_VALUE = 1 ## i64
+WIRE_SLOT_IVAR_GET_BYTE_LEN = 0 ## i64
+WIRE_SLOT_IVAR_GET_SELF_REG = 1 ## i64
+WIRE_SLOT_IVAR_GET_STR_ID = 2 ## i64
+WIRE_SLOT_IVAR_GET_TEMP = 3 ## i64
+WIRE_SLOT_IVAR_GET_TEMP_PTR = 4 ## i64
+WIRE_SLOT_IVAR_GET_IDX_OFFSET = 0 ## i64
+WIRE_SLOT_IVAR_GET_IDX_SELF_REG = 1 ## i64
+WIRE_SLOT_IVAR_GET_IDX_TEMP = 2 ## i64
+WIRE_SLOT_IVAR_SET_BYTE_LEN = 0 ## i64
+WIRE_SLOT_IVAR_SET_SELF_REG = 1 ## i64
+WIRE_SLOT_IVAR_SET_STR_ID = 2 ## i64
+WIRE_SLOT_IVAR_SET_TEMP = 3 ## i64
+WIRE_SLOT_IVAR_SET_TEMP_PTR = 4 ## i64
+WIRE_SLOT_IVAR_SET_VALUE = 5 ## i64
+WIRE_SLOT_IVAR_SET_IDX_OFFSET = 0 ## i64
+WIRE_SLOT_IVAR_SET_IDX_SELF_REG = 1 ## i64
+WIRE_SLOT_IVAR_SET_IDX_TEMP = 2 ## i64
+WIRE_SLOT_IVAR_SET_IDX_VALUE = 3 ## i64
+WIRE_SLOT_LOAD_CLASS_CLASS_NAME = 0 ## i64
+WIRE_SLOT_LOAD_CLASS_TEMP = 1 ## i64
+WIRE_SLOT_LOAD_CVAR_CVAR_KEY = 0 ## i64
+WIRE_SLOT_LOAD_CVAR_TEMP = 1 ## i64
+WIRE_SLOT_LOAD_DOUBLE_PTR = 0 ## i64
+WIRE_SLOT_LOAD_DOUBLE_TEMP = 1 ## i64
+WIRE_SLOT_LOAD_FLOAT_PTR = 0 ## i64
+WIRE_SLOT_LOAD_FLOAT_TEMP = 1 ## i64
+WIRE_SLOT_LOAD_GLOBAL_NAME = 0 ## i64
+WIRE_SLOT_LOAD_GLOBAL_TEMP = 1 ## i64
+WIRE_SLOT_LOAD_GLOBAL_TYPE = 2 ## i64
+WIRE_SLOT_LOAD_I128_PTR = 0 ## i64
+WIRE_SLOT_LOAD_I128_TEMP = 1 ## i64
+WIRE_SLOT_LOAD_I64_PTR = 0 ## i64
+WIRE_SLOT_LOAD_I64_TEMP = 1 ## i64
+WIRE_SLOT_LOAD_PTR_PTR = 0 ## i64
+WIRE_SLOT_LOAD_PTR_TEMP = 1 ## i64
+WIRE_SLOT_LSHR_I64_LHS = 0 ## i64
+WIRE_SLOT_LSHR_I64_RHS = 1 ## i64
+WIRE_SLOT_LSHR_I64_TEMP = 2 ## i64
+WIRE_SLOT_MUL_I64_LHS = 0 ## i64
+WIRE_SLOT_MUL_I64_RHS = 1 ## i64
+WIRE_SLOT_MUL_I64_TEMP = 2 ## i64
+WIRE_SLOT_NANBOX_BOOL_TEMP = 0 ## i64
+WIRE_SLOT_NANBOX_BOOL_VALUE = 1 ## i64
+WIRE_SLOT_NANBOX_FLOAT_RAW = 0 ## i64
+WIRE_SLOT_NANBOX_FLOAT_TEMP = 1 ## i64
+WIRE_SLOT_NANBOX_FLOAT_TEMP_BITS = 2 ## i64
+WIRE_SLOT_NANBOX_INT_RAW = 0 ## i64
+WIRE_SLOT_NANBOX_INT_TEMP = 1 ## i64
+WIRE_SLOT_NANBOX_INT_TEMP_MASKED = 2 ## i64
+WIRE_SLOT_NANUNBOX_FLOAT_BOXED = 0 ## i64
+WIRE_SLOT_NANUNBOX_FLOAT_TEMP = 1 ## i64
+WIRE_SLOT_NANUNBOX_FLOAT_TEMP_BITS = 2 ## i64
+WIRE_SLOT_NANUNBOX_INT_BOXED = 0 ## i64
+WIRE_SLOT_NANUNBOX_INT_TEMP = 1 ## i64
+WIRE_SLOT_NANUNBOX_INT_TEMP_SHL = 2 ## i64
+WIRE_SLOT_NODE_KIND_CLASS_REGISTER_CLASS_TEMP = 0 ## i64
+WIRE_SLOT_NODE_KIND_CLASS_REGISTER_KIND_ID = 1 ## i64
+WIRE_SLOT_NOT_I1_TEMP = 0 ## i64
+WIRE_SLOT_NOT_I1_VALUE = 1 ## i64
+WIRE_SLOT_NULL_PTR_TEMP = 0 ## i64
+WIRE_SLOT_OR_I1_LHS = 0 ## i64
+WIRE_SLOT_OR_I1_RHS = 1 ## i64
+WIRE_SLOT_OR_I1_TEMP = 2 ## i64
+WIRE_SLOT_OR_I64_LHS = 0 ## i64
+WIRE_SLOT_OR_I64_RHS = 1 ## i64
+WIRE_SLOT_OR_I64_TEMP = 2 ## i64
+WIRE_SLOT_PHI_I64_A_LABEL = 0 ## i64
+WIRE_SLOT_PHI_I64_A_VALUE = 1 ## i64
+WIRE_SLOT_PHI_I64_B_LABEL = 2 ## i64
+WIRE_SLOT_PHI_I64_B_VALUE = 3 ## i64
+WIRE_SLOT_PHI_I64_TEMP = 4 ## i64
+WIRE_SLOT_PHI_SSA_INCOMING = 0 ## i64
+WIRE_SLOT_PHI_SSA_TEMP = 1 ## i64
+WIRE_SLOT_PRINT_I64_TEMP = 0 ## i64
+WIRE_SLOT_PRINT_I64_VALUE = 1 ## i64
+WIRE_SLOT_PTR_TO_I64_TEMP = 0 ## i64
+WIRE_SLOT_PTR_TO_I64_VALUE = 1 ## i64
+WIRE_SLOT_PUTS_I64_TEMP = 0 ## i64
+WIRE_SLOT_PUTS_I64_VALUE = 1 ## i64
+WIRE_SLOT_RECYCLE_OBJECT_VALUE = 0 ## i64
+WIRE_SLOT_RET_I32_VALUE = 0 ## i64
+WIRE_SLOT_RET_I64_FUNCTION_RECYCLE_COUNT = 0 ## i64
+WIRE_SLOT_RET_I64_VALUE = 1 ## i64
+WIRE_SLOT_SDIV_I64_LHS = 0 ## i64
+WIRE_SLOT_SDIV_I64_RHS = 1 ## i64
+WIRE_SLOT_SDIV_I64_TEMP = 2 ## i64
+WIRE_SLOT_SELECT_I64_COND = 0 ## i64
+WIRE_SLOT_SELECT_I64_ELSE_VAL = 1 ## i64
+WIRE_SLOT_SELECT_I64_TEMP = 2 ## i64
+WIRE_SLOT_SELECT_I64_THEN_VAL = 3 ## i64
+WIRE_SLOT_SETJMP_BUF = 0 ## i64
+WIRE_SLOT_SETJMP_TEMP = 1 ## i64
+WIRE_SLOT_SHL_I64_LHS = 0 ## i64
+WIRE_SLOT_SHL_I64_RHS = 1 ## i64
+WIRE_SLOT_SHL_I64_TEMP = 2 ## i64
+WIRE_SLOT_SREM_I64_LHS = 0 ## i64
+WIRE_SLOT_SREM_I64_RHS = 1 ## i64
+WIRE_SLOT_SREM_I64_TEMP = 2 ## i64
+WIRE_SLOT_STORE_CVAR_CVAR_KEY = 0 ## i64
+WIRE_SLOT_STORE_CVAR_VALUE = 1 ## i64
+WIRE_SLOT_STORE_DOUBLE_PTR = 0 ## i64
+WIRE_SLOT_STORE_DOUBLE_VALUE = 1 ## i64
+WIRE_SLOT_STORE_FLOAT_PTR = 0 ## i64
+WIRE_SLOT_STORE_FLOAT_VALUE = 1 ## i64
+WIRE_SLOT_STORE_GLOBAL_NAME = 0 ## i64
+WIRE_SLOT_STORE_GLOBAL_TYPE = 1 ## i64
+WIRE_SLOT_STORE_GLOBAL_VALUE = 2 ## i64
+WIRE_SLOT_STORE_I128_PTR = 0 ## i64
+WIRE_SLOT_STORE_I128_VALUE = 1 ## i64
+WIRE_SLOT_STORE_I64_PTR = 0 ## i64
+WIRE_SLOT_STORE_I64_VALUE = 1 ## i64
+WIRE_SLOT_STORE_PTR_DEST = 0 ## i64
+WIRE_SLOT_STORE_PTR_VALUE = 1 ## i64
+WIRE_SLOT_STRING_I64_BYTE_LEN = 0 ## i64
+WIRE_SLOT_STRING_I64_STRING_ID = 1 ## i64
+WIRE_SLOT_STRING_I64_TEMP = 2 ## i64
+WIRE_SLOT_STRING_I64_TEMP_PTR = 3 ## i64
+WIRE_SLOT_SUB_I64_LHS = 0 ## i64
+WIRE_SLOT_SUB_I64_RHS = 1 ## i64
+WIRE_SLOT_SUB_I64_TEMP = 2 ## i64
+WIRE_SLOT_SWITCH_I64_CASES = 0 ## i64
+WIRE_SLOT_SWITCH_I64_DEFAULT_LABEL = 1 ## i64
+WIRE_SLOT_SWITCH_I64_IS_SYMBOL = 2 ## i64
+WIRE_SLOT_SWITCH_I64_VALUE = 3 ## i64
+WIRE_SLOT_SYMBOL_I64_BYTE_LEN = 0 ## i64
+WIRE_SLOT_SYMBOL_I64_STRING_ID = 1 ## i64
+WIRE_SLOT_SYMBOL_I64_TEMP = 2 ## i64
+WIRE_SLOT_SYMBOL_I64_TEMP_PTR = 3 ## i64
+WIRE_SLOT_TA_SIZE_RAW_TEMP = 0 ## i64
+WIRE_SLOT_TA_SIZE_RAW_VALUE = 1 ## i64
+WIRE_SLOT_TRUNC_I64_I32_TEMP = 0 ## i64
+WIRE_SLOT_TRUNC_I64_I32_VALUE = 1 ## i64
+WIRE_SLOT_TRUTHY_INLINE_TEMP = 0 ## i64
+WIRE_SLOT_TRUTHY_INLINE_VALUE = 1 ## i64
+WIRE_SLOT_TYPE_CLASS_REGISTER_CLASS_TEMP = 0 ## i64
+WIRE_SLOT_TYPE_CLASS_REGISTER_DISPATCH_KEY = 1 ## i64
+WIRE_SLOT_TYPED_ARRAY_GET_INLINE_ARR = 0 ## i64
+WIRE_SLOT_TYPED_ARRAY_GET_INLINE_BITS = 1 ## i64
+WIRE_SLOT_TYPED_ARRAY_GET_INLINE_IDX = 2 ## i64
+WIRE_SLOT_TYPED_ARRAY_GET_INLINE_IDX_RAW = 3 ## i64
+WIRE_SLOT_TYPED_ARRAY_GET_INLINE_S = 4 ## i64
+WIRE_SLOT_TYPED_ARRAY_GET_INLINE_SIGNED = 5 ## i64
+WIRE_SLOT_TYPED_ARRAY_GET_INLINE_TEMP = 6 ## i64
+WIRE_SLOT_TYPED_ARRAY_SET_INLINE_ARR = 0 ## i64
+WIRE_SLOT_TYPED_ARRAY_SET_INLINE_BITS = 1 ## i64
+WIRE_SLOT_TYPED_ARRAY_SET_INLINE_IDX = 2 ## i64
+WIRE_SLOT_TYPED_ARRAY_SET_INLINE_IDX_RAW = 3 ## i64
+WIRE_SLOT_TYPED_ARRAY_SET_INLINE_S = 4 ## i64
+WIRE_SLOT_TYPED_ARRAY_SET_INLINE_SIGNED = 5 ## i64
+WIRE_SLOT_TYPED_ARRAY_SET_INLINE_TEMP = 6 ## i64
+WIRE_SLOT_TYPED_ARRAY_SET_INLINE_VALUE = 7 ## i64
+WIRE_SLOT_UDIV_I64_LHS = 0 ## i64
+WIRE_SLOT_UDIV_I64_RHS = 1 ## i64
+WIRE_SLOT_UDIV_I64_TEMP = 2 ## i64
+WIRE_SLOT_UREM_I64_LHS = 0 ## i64
+WIRE_SLOT_UREM_I64_RHS = 1 ## i64
+WIRE_SLOT_UREM_I64_TEMP = 2 ## i64
+WIRE_SLOT_XOR_I64_LHS = 0 ## i64
+WIRE_SLOT_XOR_I64_RHS = 1 ## i64
+WIRE_SLOT_XOR_I64_TEMP = 2 ## i64
+WIRE_SLOT_WIRE_TYPED_VALUE_TYPE = 0 ## i64
+WIRE_SLOT_WIRE_TYPED_VALUE_VALUE = 1 ## i64
+
+-> wire_make_add_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 191, lhs, rhs, temp)
+
+-> emit_wire_add_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_add_i128(lhs, rhs, temp))
+
+-> wire_make_add_i48_guarded(block_id, lhs, rhs, rt_fallback, temp, trap)
+  ccall_rawargs("w_wire_packed_6", 193, block_id, lhs, rhs, rt_fallback, temp, trap)
+
+-> emit_wire_add_i48_guarded(f, block_id, lhs, rhs, rt_fallback, temp, trap)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_add_i48_guarded(block_id, lhs, rhs, rt_fallback, temp, trap))
+
 -> wire_make_add_i64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 1, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 1, lhs, rhs, temp)
 
 -> emit_wire_add_i64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_add_i64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_add_i64(lhs, rhs, temp))
 
 -> wire_make_addcarry_u64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 2, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 2, lhs, rhs, temp)
 
 -> emit_wire_addcarry_u64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_addcarry_u64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_addcarry_u64(lhs, rhs, temp))
 
 -> wire_make_alloca_array(count, ptr)
-  handle = ccall_rawargs("w_wire_alloc", 3, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :count, count)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
-  handle
+  ccall_rawargs("w_wire_packed_2", 3, count, ptr)
 
 -> emit_wire_alloca_array(f, count, ptr)
-  current_block(f)[:instructions].push(wire_make_alloca_array(count, ptr))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_alloca_array(count, ptr))
 
 -> wire_make_alloca_i64(ptr)
-  handle = ccall_rawargs("w_wire_alloc", 4, 1)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ptr, ptr)
-  handle
+  ccall_rawargs("w_wire_packed_1", 4, ptr)
 
 -> emit_wire_alloca_i64(f, ptr)
-  current_block(f)[:instructions].push(wire_make_alloca_i64(ptr))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_alloca_i64(ptr))
 
 -> wire_make_and_i1(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 5, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 5, lhs, rhs, temp)
 
 -> emit_wire_and_i1(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_and_i1(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_and_i1(lhs, rhs, temp))
+
+-> wire_make_and_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 195, lhs, rhs, temp)
+
+-> emit_wire_and_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_and_i128(lhs, rhs, temp))
 
 -> wire_make_and_i64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 6, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 6, lhs, rhs, temp)
 
 -> emit_wire_and_i64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_and_i64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_and_i64(lhs, rhs, temp))
 
 -> wire_make_argv_init()
-  handle = ccall_rawargs("w_wire_alloc", 7, 0)
-  handle
+  ccall_rawargs("w_wire_packed_0", 7)
 
 -> emit_wire_argv_init(f)
-  current_block(f)[:instructions].push(wire_make_argv_init())
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_argv_init())
 
 -> wire_make_arr_data_ptr(arr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 8, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 8, arr, temp)
 
 -> emit_wire_arr_data_ptr(f, arr, temp)
-  current_block(f)[:instructions].push(wire_make_arr_data_ptr(arr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_arr_data_ptr(arr, temp))
 
 -> wire_make_array_get_inline(arr, idx, s, temp)
-  handle = ccall_rawargs("w_wire_alloc", 9, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :idx, idx)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :s, wire_sequence(s))
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 9, arr, idx, wire_sequence(s), temp)
 
 -> emit_wire_array_get_inline(f, arr, idx, s, temp)
-  current_block(f)[:instructions].push(wire_make_array_get_inline(arr, idx, s, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_array_get_inline(arr, idx, s, temp))
 
 -> wire_make_array_size_raw(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 10, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 10, temp, value)
 
 -> emit_wire_array_size_raw(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_array_size_raw(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_array_size_raw(temp, value))
+
+-> wire_make_ashr_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 196, lhs, rhs, temp)
+
+-> emit_wire_ashr_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ashr_i128(lhs, rhs, temp))
+
+-> wire_make_ashr_i64(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 197, lhs, rhs, temp)
+
+-> emit_wire_ashr_i64(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ashr_i64(lhs, rhs, temp))
 
 -> wire_make_asm_add_n(ap, bp, n, outp, temp)
-  handle = ccall_rawargs("w_wire_alloc", 11, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ap, ap)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :bp, bp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :n, n)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :outp, outp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_5", 11, ap, bp, n, outp, temp)
 
 -> emit_wire_asm_add_n(f, ap, bp, n, outp, temp)
-  current_block(f)[:instructions].push(wire_make_asm_add_n(ap, bp, n, outp, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_add_n(ap, bp, n, outp, temp))
 
 -> wire_make_asm_add_no(aoff, ap, boff, bp, n, ooff, outp, temp)
-  handle = ccall_rawargs("w_wire_alloc", 12, 8)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :aoff, aoff)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ap, ap)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :boff, boff)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :bp, bp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :n, n)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :ooff, ooff)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :outp, outp)
-  ccall_nobox("w_wire_field_store_at", handle, 7, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_8", 12, aoff, ap, boff, bp, n, ooff, outp, temp)
 
 -> emit_wire_asm_add_no(f, aoff, ap, boff, bp, n, ooff, outp, temp)
-  current_block(f)[:instructions].push(wire_make_asm_add_no(aoff, ap, boff, bp, n, ooff, outp, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_add_no(aoff, ap, boff, bp, n, ooff, outp, temp))
 
 -> wire_make_asm_add_test(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 13, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 13, lhs, rhs, temp)
 
 -> emit_wire_asm_add_test(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_asm_add_test(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_add_test(lhs, rhs, temp))
+
+-> wire_make_asm_add_uneq(ap, bp, entry_label, na, nb, outp, temp)
+  ccall_rawargs("w_wire_packed_7", 198, ap, bp, entry_label, na, nb, outp, temp)
+
+-> emit_wire_asm_add_uneq(f, ap, bp, entry_label, na, nb, outp, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_add_uneq(ap, bp, entry_label, na, nb, outp, temp))
 
 -> wire_make_asm_addmul1(aoff, ap, bsc, n, ooff, outp, temp)
-  handle = ccall_rawargs("w_wire_alloc", 14, 7)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :aoff, aoff)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ap, ap)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :bsc, bsc)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :n, n)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :ooff, ooff)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :outp, outp)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_7", 14, aoff, ap, bsc, n, ooff, outp, temp)
 
 -> emit_wire_asm_addmul1(f, aoff, ap, bsc, n, ooff, outp, temp)
-  current_block(f)[:instructions].push(wire_make_asm_addmul1(aoff, ap, bsc, n, ooff, outp, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_addmul1(aoff, ap, bsc, n, ooff, outp, temp))
 
 -> wire_make_asm_gold_stage(hq, nb, temp, twp, vp)
-  handle = ccall_rawargs("w_wire_alloc", 15, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :hq, hq)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :nb, nb)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :twp, twp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :vp, vp)
-  handle
+  ccall_rawargs("w_wire_packed_5", 15, hq, nb, temp, twp, vp)
 
 -> emit_wire_asm_gold_stage(f, hq, nb, temp, twp, vp)
-  current_block(f)[:instructions].push(wire_make_asm_gold_stage(hq, nb, temp, twp, vp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_gold_stage(hq, nb, temp, twp, vp))
 
 -> wire_make_asm_gold_stage_inv(hq, ivp, nb, temp, twp, vp)
-  handle = ccall_rawargs("w_wire_alloc", 16, 6)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :hq, hq)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ivp, ivp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :nb, nb)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :twp, twp)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :vp, vp)
-  handle
+  ccall_rawargs("w_wire_packed_6", 16, hq, ivp, nb, temp, twp, vp)
 
 -> emit_wire_asm_gold_stage_inv(f, hq, ivp, nb, temp, twp, vp)
-  current_block(f)[:instructions].push(wire_make_asm_gold_stage_inv(hq, ivp, nb, temp, twp, vp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_gold_stage_inv(hq, ivp, nb, temp, twp, vp))
 
 -> wire_make_asm_mulbase(aoff, ap, boff, bp, na, nb, ooff, outp, temp)
-  handle = ccall_rawargs("w_wire_alloc", 17, 9)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :aoff, aoff)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ap, ap)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :boff, boff)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :bp, bp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :na, na)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :nb, nb)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :ooff, ooff)
-  ccall_nobox("w_wire_field_store_at", handle, 7, :outp, outp)
-  ccall_nobox("w_wire_field_store_at", handle, 8, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_9", 17, aoff, ap, boff, bp, na, nb, ooff, outp, temp)
 
 -> emit_wire_asm_mulbase(f, aoff, ap, boff, bp, na, nb, ooff, outp, temp)
-  current_block(f)[:instructions].push(wire_make_asm_mulbase(aoff, ap, boff, bp, na, nb, ooff, outp, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_mulbase(aoff, ap, boff, bp, na, nb, ooff, outp, temp))
 
 -> wire_make_asm_neon_gadd2(ap, bp, n, outp, temp)
-  handle = ccall_rawargs("w_wire_alloc", 18, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ap, ap)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :bp, bp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :n, n)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :outp, outp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_5", 18, ap, bp, n, outp, temp)
 
 -> emit_wire_asm_neon_gadd2(f, ap, bp, n, outp, temp)
-  current_block(f)[:instructions].push(wire_make_asm_neon_gadd2(ap, bp, n, outp, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_neon_gadd2(ap, bp, n, outp, temp))
+
+-> wire_make_asm_neon_madd4(ap, bp, n, outp, temp)
+  ccall_rawargs("w_wire_packed_5", 199, ap, bp, n, outp, temp)
+
+-> emit_wire_asm_neon_madd4(f, ap, bp, n, outp, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_neon_madd4(ap, bp, n, outp, temp))
+
+-> wire_make_asm_neon_msub4(ap, bp, n, outp, temp)
+  ccall_rawargs("w_wire_packed_5", 200, ap, bp, n, outp, temp)
+
+-> emit_wire_asm_neon_msub4(f, ap, bp, n, outp, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_neon_msub4(ap, bp, n, outp, temp))
 
 -> wire_make_asm_neon_ntt_stage(hq, nb, temp, twp, vp)
-  handle = ccall_rawargs("w_wire_alloc", 19, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :hq, hq)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :nb, nb)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :twp, twp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :vp, vp)
-  handle
+  ccall_rawargs("w_wire_packed_5", 19, hq, nb, temp, twp, vp)
 
 -> emit_wire_asm_neon_ntt_stage(f, hq, nb, temp, twp, vp)
-  current_block(f)[:instructions].push(wire_make_asm_neon_ntt_stage(hq, nb, temp, twp, vp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_neon_ntt_stage(hq, nb, temp, twp, vp))
 
 -> wire_make_asm_neon_redc(ap, bp, n, outp, temp)
-  handle = ccall_rawargs("w_wire_alloc", 20, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ap, ap)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :bp, bp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :n, n)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :outp, outp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_5", 20, ap, bp, n, outp, temp)
 
 -> emit_wire_asm_neon_redc(f, ap, bp, n, outp, temp)
-  current_block(f)[:instructions].push(wire_make_asm_neon_redc(ap, bp, n, outp, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_neon_redc(ap, bp, n, outp, temp))
+
+-> wire_make_asm_neon_redc4(ap, bp, n, outp, temp)
+  ccall_rawargs("w_wire_packed_5", 201, ap, bp, n, outp, temp)
+
+-> emit_wire_asm_neon_redc4(f, ap, bp, n, outp, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_neon_redc4(ap, bp, n, outp, temp))
 
 -> wire_make_asm_neon_umull(ap, bp, n, outp, temp)
-  handle = ccall_rawargs("w_wire_alloc", 21, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ap, ap)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :bp, bp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :n, n)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :outp, outp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_5", 21, ap, bp, n, outp, temp)
 
 -> emit_wire_asm_neon_umull(f, ap, bp, n, outp, temp)
-  current_block(f)[:instructions].push(wire_make_asm_neon_umull(ap, bp, n, outp, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_neon_umull(ap, bp, n, outp, temp))
 
 -> wire_make_asm_sub_no(aoff, ap, boff, bp, n, ooff, outp, temp)
-  handle = ccall_rawargs("w_wire_alloc", 22, 8)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :aoff, aoff)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ap, ap)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :boff, boff)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :bp, bp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :n, n)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :ooff, ooff)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :outp, outp)
-  ccall_nobox("w_wire_field_store_at", handle, 7, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_8", 22, aoff, ap, boff, bp, n, ooff, outp, temp)
 
 -> emit_wire_asm_sub_no(f, aoff, ap, boff, bp, n, ooff, outp, temp)
-  current_block(f)[:instructions].push(wire_make_asm_sub_no(aoff, ap, boff, bp, n, ooff, outp, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_sub_no(aoff, ap, boff, bp, n, ooff, outp, temp))
+
+-> wire_make_asm_sub_uneq(ap, bp, entry_label, na, nb, outp, temp)
+  ccall_rawargs("w_wire_packed_7", 202, ap, bp, entry_label, na, nb, outp, temp)
+
+-> emit_wire_asm_sub_uneq(f, ap, bp, entry_label, na, nb, outp, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_asm_sub_uneq(ap, bp, entry_label, na, nb, outp, temp))
 
 -> wire_make_big_array_get_inline(arr, bits, idx, idx_raw, s, signed, temp)
-  handle = ccall_rawargs("w_wire_alloc", 23, 7)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :bits, bits)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :idx, idx)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :idx_raw, idx_raw)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :s, wire_sequence(s))
-  ccall_nobox("w_wire_field_store_at", handle, 5, :signed, signed)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_7", 23, arr, bits, idx, idx_raw, wire_sequence(s), signed, temp)
 
 -> emit_wire_big_array_get_inline(f, arr, bits, idx, idx_raw, s, signed, temp)
-  current_block(f)[:instructions].push(wire_make_big_array_get_inline(arr, bits, idx, idx_raw, s, signed, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_big_array_get_inline(arr, bits, idx, idx_raw, s, signed, temp))
 
 -> wire_make_bigint_literal_i64(byte_len, slot_id, string_id, temp, temp_ptr)
-  handle = ccall_rawargs("w_wire_alloc", 24, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :byte_len, byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :slot_id, slot_id)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :string_id, string_id)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp_ptr, temp_ptr)
-  handle
+  ccall_rawargs("w_wire_packed_5", 24, byte_len, slot_id, string_id, temp, temp_ptr)
 
 -> emit_wire_bigint_literal_i64(f, byte_len, slot_id, string_id, temp, temp_ptr)
-  current_block(f)[:instructions].push(wire_make_bigint_literal_i64(byte_len, slot_id, string_id, temp, temp_ptr))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_bigint_literal_i64(byte_len, slot_id, string_id, temp, temp_ptr))
 
 -> wire_make_bitcast_f16_i16(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 25, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 25, temp, value)
 
 -> emit_wire_bitcast_f16_i16(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_bitcast_f16_i16(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_bitcast_f16_i16(temp, value))
 
 -> wire_make_bitcast_f32_i32(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 26, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 26, temp, value)
 
 -> emit_wire_bitcast_f32_i32(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_bitcast_f32_i32(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_bitcast_f32_i32(temp, value))
 
 -> wire_make_bitcast_f64_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 27, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 27, temp, value)
 
 -> emit_wire_bitcast_f64_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_bitcast_f64_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_bitcast_f64_i64(temp, value))
 
 -> wire_make_bitcast_i16_f16(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 28, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 28, temp, value)
 
 -> emit_wire_bitcast_i16_f16(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_bitcast_i16_f16(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_bitcast_i16_f16(temp, value))
 
 -> wire_make_bitcast_i32_f32(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 29, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 29, temp, value)
 
 -> emit_wire_bitcast_i32_f32(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_bitcast_i32_f32(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_bitcast_i32_f32(temp, value))
 
 -> wire_make_bitcast_i64_f64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 30, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 30, temp, value)
 
 -> emit_wire_bitcast_i64_f64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_bitcast_i64_f64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_bitcast_i64_f64(temp, value))
 
 -> wire_make_bool_array_get_inline(arr, as_i1, idx, temp)
-  handle = ccall_rawargs("w_wire_alloc", 31, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :as_i1, as_i1)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :idx, idx)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 31, arr, as_i1, idx, temp)
 
 -> emit_wire_bool_array_get_inline(f, arr, as_i1, idx, temp)
-  current_block(f)[:instructions].push(wire_make_bool_array_get_inline(arr, as_i1, idx, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_bool_array_get_inline(arr, as_i1, idx, temp))
 
 -> wire_make_bool_array_set_inline(arr, idx, temp, val)
-  handle = ccall_rawargs("w_wire_alloc", 32, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :idx, idx)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :val, val)
-  handle
+  ccall_rawargs("w_wire_packed_4", 32, arr, idx, temp, val)
 
 -> emit_wire_bool_array_set_inline(f, arr, idx, temp, val)
-  current_block(f)[:instructions].push(wire_make_bool_array_set_inline(arr, idx, temp, val))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_bool_array_set_inline(arr, idx, temp, val))
 
 -> wire_make_br(label, novec, unroll_count)
-  handle = ccall_rawargs("w_wire_alloc", 33, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :label, label)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :novec, novec)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :unroll_count, unroll_count)
-  handle
+  ccall_rawargs("w_wire_packed_3", 33, label, novec, unroll_count)
 
 -> emit_wire_br(f, label, novec, unroll_count)
-  current_block(f)[:instructions].push(wire_make_br(label, novec, unroll_count))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_br(label, novec, unroll_count))
 
 -> wire_make_builtin_class_init(class_name, name_byte_len, name_str_id)
-  handle = ccall_rawargs("w_wire_alloc", 34, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :class_name, class_name)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :name_byte_len, name_byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :name_str_id, name_str_id)
-  handle
+  ccall_rawargs("w_wire_packed_3", 34, class_name, name_byte_len, name_str_id)
 
 -> emit_wire_builtin_class_init(f, class_name, name_byte_len, name_str_id)
-  current_block(f)[:instructions].push(wire_make_builtin_class_init(class_name, name_byte_len, name_str_id))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_builtin_class_init(class_name, name_byte_len, name_str_id))
+
+-> wire_make_call_direct_i128(arg_types, args, call_conv, name, temp)
+  ccall_rawargs("w_wire_packed_5", 205, wire_sequence(arg_types), wire_sequence(args), call_conv, name, temp)
+
+-> emit_wire_call_direct_i128(f, arg_types, args, call_conv, name, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_direct_i128(arg_types, args, call_conv, name, temp))
 
 -> wire_make_call_direct_i64(arg_types, args, call_conv, loc_site_id, name, src_col, src_line, temp)
-  handle = ccall_rawargs("w_wire_alloc", 35, 8)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arg_types, wire_sequence(arg_types))
-  ccall_nobox("w_wire_field_store_at", handle, 1, :args, wire_sequence(args))
-  ccall_nobox("w_wire_field_store_at", handle, 2, :call_conv, call_conv)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :loc_site_id, loc_site_id)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :name, name)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :src_col, src_col)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :src_line, src_line)
-  ccall_nobox("w_wire_field_store_at", handle, 7, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_8", 35, wire_sequence(arg_types), wire_sequence(args), call_conv, loc_site_id, name, src_col, src_line, temp)
 
 -> emit_wire_call_direct_i64(f, arg_types, args, call_conv, loc_site_id, name, src_col, src_line, temp)
-  current_block(f)[:instructions].push(wire_make_call_direct_i64(arg_types, args, call_conv, loc_site_id, name, src_col, src_line, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_direct_i64(arg_types, args, call_conv, loc_site_id, name, src_col, src_line, temp))
 
 -> wire_make_call_direct_i64_ptr1(arg, name, temp)
-  handle = ccall_rawargs("w_wire_alloc", 36, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arg, arg)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :name, name)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 36, arg, name, temp)
 
 -> emit_wire_call_direct_i64_ptr1(f, arg, name, temp)
-  current_block(f)[:instructions].push(wire_make_call_direct_i64_ptr1(arg, name, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_direct_i64_ptr1(arg, name, temp))
 
 -> wire_make_call_direct_ptr(args, name, temp)
-  handle = ccall_rawargs("w_wire_alloc", 37, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :args, wire_sequence(args))
-  ccall_nobox("w_wire_field_store_at", handle, 1, :name, name)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 37, wire_sequence(args), name, temp)
 
 -> emit_wire_call_direct_ptr(f, args, name, temp)
-  current_block(f)[:instructions].push(wire_make_call_direct_ptr(args, name, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_direct_ptr(args, name, temp))
 
 -> wire_make_call_direct_void(args, name)
-  handle = ccall_rawargs("w_wire_alloc", 38, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :args, wire_sequence(args))
-  ccall_nobox("w_wire_field_store_at", handle, 1, :name, name)
-  handle
+  ccall_rawargs("w_wire_packed_2", 38, wire_sequence(args), name)
 
 -> emit_wire_call_direct_void(f, args, name)
-  current_block(f)[:instructions].push(wire_make_call_direct_void(args, name))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_direct_void(args, name))
 
 -> wire_make_call_direct_void_ptr1(arg, name)
-  handle = ccall_rawargs("w_wire_alloc", 39, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arg, arg)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :name, name)
-  handle
+  ccall_rawargs("w_wire_packed_2", 39, arg, name)
 
 -> emit_wire_call_direct_void_ptr1(f, arg, name)
-  current_block(f)[:instructions].push(wire_make_call_direct_void_ptr1(arg, name))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_direct_void_ptr1(arg, name))
 
 -> wire_make_call_fused_out_reuse(bits, cap, slot, temp)
-  handle = ccall_rawargs("w_wire_alloc", 40, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :bits, bits)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :cap, cap)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :slot, slot)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 40, bits, cap, slot, temp)
 
 -> emit_wire_call_fused_out_reuse(f, bits, cap, slot, temp)
-  current_block(f)[:instructions].push(wire_make_call_fused_out_reuse(bits, cap, slot, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_fused_out_reuse(bits, cap, slot, temp))
 
 -> wire_make_call_libm_f64(lhs, name, rhs, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 41, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :name, name)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_5", 41, lhs, name, rhs, temp, value)
 
 -> emit_wire_call_libm_f64(f, lhs, name, rhs, temp, value)
-  current_block(f)[:instructions].push(wire_make_call_libm_f64(lhs, name, rhs, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_libm_f64(lhs, name, rhs, temp, value))
 
 -> wire_make_call_loc_set_col(col, file_byte_len, file_str_id, line, temp_ptr)
-  handle = ccall_rawargs("w_wire_alloc", 42, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :col, col)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :file_byte_len, file_byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :file_str_id, file_str_id)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :line, line)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp_ptr, temp_ptr)
-  handle
+  ccall_rawargs("w_wire_packed_5", 42, col, file_byte_len, file_str_id, line, temp_ptr)
 
 -> emit_wire_call_loc_set_col(f, col, file_byte_len, file_str_id, line, temp_ptr)
-  current_block(f)[:instructions].push(wire_make_call_loc_set_col(col, file_byte_len, file_str_id, line, temp_ptr))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_loc_set_col(col, file_byte_len, file_str_id, line, temp_ptr))
 
 -> wire_make_call_method_i64(args, construct_class, construct_fn, devirt_class, devirt_fn, ic_id, method_name_val, receiver, scalar_source_argc1, scalar_source_argc2, src_col, src_line, temp, temp_args_val)
-  handle = ccall_rawargs("w_wire_alloc", 43, 14)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :args, wire_sequence(args))
-  ccall_nobox("w_wire_field_store_at", handle, 1, :construct_class, construct_class)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :construct_fn, construct_fn)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :devirt_class, devirt_class)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :devirt_fn, devirt_fn)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :ic_id, ic_id)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :method_name_val, method_name_val)
-  ccall_nobox("w_wire_field_store_at", handle, 7, :receiver, receiver)
-  ccall_nobox("w_wire_field_store_at", handle, 8, :scalar_source_argc1, scalar_source_argc1)
-  ccall_nobox("w_wire_field_store_at", handle, 9, :scalar_source_argc2, scalar_source_argc2)
-  ccall_nobox("w_wire_field_store_at", handle, 10, :src_col, src_col)
-  ccall_nobox("w_wire_field_store_at", handle, 11, :src_line, src_line)
-  ccall_nobox("w_wire_field_store_at", handle, 12, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 13, :temp_args_val, temp_args_val)
-  handle
+  ccall_rawargs("w_wire_packed_14", 43, wire_sequence(args), construct_class, construct_fn, devirt_class, devirt_fn, ic_id, method_name_val, receiver, scalar_source_argc1, scalar_source_argc2, src_col, src_line, temp, temp_args_val)
 
 -> emit_wire_call_method_i64(f, args, construct_class, construct_fn, devirt_class, devirt_fn, ic_id, method_name_val, receiver, scalar_source_argc1, scalar_source_argc2, src_col, src_line, temp, temp_args_val)
-  current_block(f)[:instructions].push(wire_make_call_method_i64(args, construct_class, construct_fn, devirt_class, devirt_fn, ic_id, method_name_val, receiver, scalar_source_argc1, scalar_source_argc2, src_col, src_line, temp, temp_args_val))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_method_i64(args, construct_class, construct_fn, devirt_class, devirt_fn, ic_id, method_name_val, receiver, scalar_source_argc1, scalar_source_argc2, src_col, src_line, temp, temp_args_val))
 
 -> wire_make_call_num_to_f64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 44, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 44, temp, value)
 
 -> emit_wire_call_num_to_f64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_call_num_to_f64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_num_to_f64(temp, value))
+
+-> wire_make_call_recycle_array(value)
+  ccall_rawargs("w_wire_packed_1", 206, value)
+
+-> emit_wire_call_recycle_array(f, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_recycle_array(value))
+
+-> wire_make_call_recycle_hash(value)
+  ccall_rawargs("w_wire_packed_1", 207, value)
+
+-> emit_wire_call_recycle_hash(f, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_recycle_hash(value))
 
 -> wire_make_call_recycle_or_new_array(temp)
-  handle = ccall_rawargs("w_wire_alloc", 45, 1)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_1", 45, temp)
 
 -> emit_wire_call_recycle_or_new_array(f, temp)
-  current_block(f)[:instructions].push(wire_make_call_recycle_or_new_array(temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_recycle_or_new_array(temp))
 
 -> wire_make_call_recycle_or_new_hash(temp)
-  handle = ccall_rawargs("w_wire_alloc", 46, 1)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_1", 46, temp)
 
 -> emit_wire_call_recycle_or_new_hash(f, temp)
-  current_block(f)[:instructions].push(wire_make_call_recycle_or_new_hash(temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_recycle_or_new_hash(temp))
 
 -> wire_make_call_recycle_or_new_strbuf(cap, temp)
-  handle = ccall_rawargs("w_wire_alloc", 47, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :cap, cap)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 47, cap, temp)
 
 -> emit_wire_call_recycle_or_new_strbuf(f, cap, temp)
-  current_block(f)[:instructions].push(wire_make_call_recycle_or_new_strbuf(cap, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_recycle_or_new_strbuf(cap, temp))
 
 -> wire_make_call_recycle_or_new_typed(bits, cap, temp)
-  handle = ccall_rawargs("w_wire_alloc", 48, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :bits, bits)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :cap, cap)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 48, bits, cap, temp)
 
 -> emit_wire_call_recycle_or_new_typed(f, bits, cap, temp)
-  current_block(f)[:instructions].push(wire_make_call_recycle_or_new_typed(bits, cap, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_recycle_or_new_typed(bits, cap, temp))
+
+-> wire_make_call_recycle_strbuf(value)
+  ccall_rawargs("w_wire_packed_1", 208, value)
+
+-> emit_wire_call_recycle_strbuf(f, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_recycle_strbuf(value))
+
+-> wire_make_call_recycle_typed(value)
+  ccall_rawargs("w_wire_packed_1", 209, value)
+
+-> emit_wire_call_recycle_typed(f, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_recycle_typed(value))
 
 -> wire_make_call_reuse_and_drain_or_new_hash(slot, temp)
-  handle = ccall_rawargs("w_wire_alloc", 49, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :slot, slot)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 49, slot, temp)
 
 -> emit_wire_call_reuse_and_drain_or_new_hash(f, slot, temp)
-  current_block(f)[:instructions].push(wire_make_call_reuse_and_drain_or_new_hash(slot, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_reuse_and_drain_or_new_hash(slot, temp))
 
 -> wire_make_call_reuse_or_new_array(slot, temp)
-  handle = ccall_rawargs("w_wire_alloc", 50, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :slot, slot)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 50, slot, temp)
 
 -> emit_wire_call_reuse_or_new_array(f, slot, temp)
-  current_block(f)[:instructions].push(wire_make_call_reuse_or_new_array(slot, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_reuse_or_new_array(slot, temp))
 
 -> wire_make_call_reuse_or_new_hash(slot, temp)
-  handle = ccall_rawargs("w_wire_alloc", 51, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :slot, slot)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 51, slot, temp)
 
 -> emit_wire_call_reuse_or_new_hash(f, slot, temp)
-  current_block(f)[:instructions].push(wire_make_call_reuse_or_new_hash(slot, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_reuse_or_new_hash(slot, temp))
 
 -> wire_make_call_reuse_or_new_strbuf(cap, slot, temp)
-  handle = ccall_rawargs("w_wire_alloc", 52, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :cap, cap)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :slot, slot)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 52, cap, slot, temp)
 
 -> emit_wire_call_reuse_or_new_strbuf(f, cap, slot, temp)
-  current_block(f)[:instructions].push(wire_make_call_reuse_or_new_strbuf(cap, slot, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_reuse_or_new_strbuf(cap, slot, temp))
 
 -> wire_make_call_reuse_or_new_typed(bits, cap, slot, temp)
-  handle = ccall_rawargs("w_wire_alloc", 53, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :bits, bits)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :cap, cap)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :slot, slot)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 53, bits, cap, slot, temp)
 
 -> emit_wire_call_reuse_or_new_typed(f, bits, cap, slot, temp)
-  current_block(f)[:instructions].push(wire_make_call_reuse_or_new_typed(bits, cap, slot, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_call_reuse_or_new_typed(bits, cap, slot, temp))
 
 -> wire_make_class_add_ivar(class_temp, ivar_byte_len, ivar_str_id)
-  handle = ccall_rawargs("w_wire_alloc", 54, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :class_temp, class_temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ivar_byte_len, ivar_byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :ivar_str_id, ivar_str_id)
-  handle
+  ccall_rawargs("w_wire_packed_3", 54, class_temp, ivar_byte_len, ivar_str_id)
 
 -> emit_wire_class_add_ivar(f, class_temp, ivar_byte_len, ivar_str_id)
-  current_block(f)[:instructions].push(wire_make_class_add_ivar(class_temp, ivar_byte_len, ivar_str_id))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_class_add_ivar(class_temp, ivar_byte_len, ivar_str_id))
 
 -> wire_make_class_add_method(arity, class_temp, fn_name, method_byte_len, method_str_id, min_arity, splat_index)
-  handle = ccall_rawargs("w_wire_alloc", 55, 7)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arity, arity)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :class_temp, class_temp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :fn_name, fn_name)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :method_byte_len, method_byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :method_str_id, method_str_id)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :min_arity, min_arity)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :splat_index, splat_index)
-  handle
+  ccall_rawargs("w_wire_packed_7", 55, arity, class_temp, fn_name, method_byte_len, method_str_id, min_arity, splat_index)
 
 -> emit_wire_class_add_method(f, arity, class_temp, fn_name, method_byte_len, method_str_id, min_arity, splat_index)
-  current_block(f)[:instructions].push(wire_make_class_add_method(arity, class_temp, fn_name, method_byte_len, method_str_id, min_arity, splat_index))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_class_add_method(arity, class_temp, fn_name, method_byte_len, method_str_id, min_arity, splat_index))
 
 -> wire_make_class_add_static_method(arity, class_temp, fn_name, method_byte_len, method_str_id, min_arity, splat_index)
-  handle = ccall_rawargs("w_wire_alloc", 56, 7)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arity, arity)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :class_temp, class_temp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :fn_name, fn_name)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :method_byte_len, method_byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :method_str_id, method_str_id)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :min_arity, min_arity)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :splat_index, splat_index)
-  handle
+  ccall_rawargs("w_wire_packed_7", 56, arity, class_temp, fn_name, method_byte_len, method_str_id, min_arity, splat_index)
 
 -> emit_wire_class_add_static_method(f, arity, class_temp, fn_name, method_byte_len, method_str_id, min_arity, splat_index)
-  current_block(f)[:instructions].push(wire_make_class_add_static_method(arity, class_temp, fn_name, method_byte_len, method_str_id, min_arity, splat_index))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_class_add_static_method(arity, class_temp, fn_name, method_byte_len, method_str_id, min_arity, splat_index))
 
 -> wire_make_class_new(name_byte_len, name_str_id, super_reg, temp)
-  handle = ccall_rawargs("w_wire_alloc", 57, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :name_byte_len, name_byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :name_str_id, name_str_id)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :super_reg, super_reg)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 57, name_byte_len, name_str_id, super_reg, temp)
 
 -> emit_wire_class_new(f, name_byte_len, name_str_id, super_reg, temp)
-  current_block(f)[:instructions].push(wire_make_class_new(name_byte_len, name_str_id, super_reg, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_class_new(name_byte_len, name_str_id, super_reg, temp))
 
 -> wire_make_class_store(class_name, value)
-  handle = ccall_rawargs("w_wire_alloc", 58, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :class_name, class_name)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 58, class_name, value)
 
 -> emit_wire_class_store(f, class_name, value)
-  current_block(f)[:instructions].push(wire_make_class_store(class_name, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_class_store(class_name, value))
 
 -> wire_make_cleanup_pop()
-  handle = ccall_rawargs("w_wire_alloc", 59, 0)
-  handle
+  ccall_rawargs("w_wire_packed_0", 59)
 
 -> emit_wire_cleanup_pop(f)
-  current_block(f)[:instructions].push(wire_make_cleanup_pop())
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_cleanup_pop())
+
+-> wire_make_cleanup_push_array(value)
+  ccall_rawargs("w_wire_packed_1", 210, value)
+
+-> emit_wire_cleanup_push_array(f, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_cleanup_push_array(value))
+
+-> wire_make_cleanup_push_hash(value)
+  ccall_rawargs("w_wire_packed_1", 211, value)
+
+-> emit_wire_cleanup_push_hash(f, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_cleanup_push_hash(value))
+
+-> wire_make_cleanup_push_strbuf(value)
+  ccall_rawargs("w_wire_packed_1", 212, value)
+
+-> emit_wire_cleanup_push_strbuf(f, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_cleanup_push_strbuf(value))
+
+-> wire_make_cleanup_push_typed(value)
+  ccall_rawargs("w_wire_packed_1", 213, value)
+
+-> emit_wire_cleanup_push_typed(f, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_cleanup_push_typed(value))
 
 -> wire_make_closure_new(block_arity, capture_count, captures_ptr, fn_name, temp)
-  handle = ccall_rawargs("w_wire_alloc", 60, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :block_arity, block_arity)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :capture_count, capture_count)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :captures_ptr, captures_ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :fn_name, fn_name)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_5", 60, block_arity, capture_count, captures_ptr, fn_name, temp)
 
 -> emit_wire_closure_new(f, block_arity, capture_count, captures_ptr, fn_name, temp)
-  current_block(f)[:instructions].push(wire_make_closure_new(block_arity, capture_count, captures_ptr, fn_name, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_closure_new(block_arity, capture_count, captures_ptr, fn_name, temp))
 
 -> wire_make_cond_br(cond, else_label, prof, then_label)
-  handle = ccall_rawargs("w_wire_alloc", 61, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :cond, cond)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :else_label, else_label)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :prof, prof)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :then_label, then_label)
-  handle
+  ccall_rawargs("w_wire_packed_4", 61, cond, else_label, prof, then_label)
 
 -> emit_wire_cond_br(f, cond, else_label, prof, then_label)
-  current_block(f)[:instructions].push(wire_make_cond_br(cond, else_label, prof, then_label))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_cond_br(cond, else_label, prof, then_label))
 
 -> wire_make_const_char(codepoint, temp)
-  handle = ccall_rawargs("w_wire_alloc", 62, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :codepoint, codepoint)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 62, codepoint, temp)
 
 -> emit_wire_const_char(f, codepoint, temp)
-  current_block(f)[:instructions].push(wire_make_const_char(codepoint, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_char(codepoint, temp))
 
 -> wire_make_const_color(a, b, g, r, temp)
-  handle = ccall_rawargs("w_wire_alloc", 63, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :a, a)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :b, b)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :g, g)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :r, r)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_5", 63, a, b, g, r, temp)
 
 -> emit_wire_const_color(f, a, b, g, r, temp)
-  current_block(f)[:instructions].push(wire_make_const_color(a, b, g, r, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_color(a, b, g, r, temp))
 
 -> wire_make_const_currency(scale, sig, symbol_id, temp)
-  handle = ccall_rawargs("w_wire_alloc", 64, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :scale, scale)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :sig, sig)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :symbol_id, symbol_id)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 64, scale, sig, symbol_id, temp)
 
 -> emit_wire_const_currency(f, scale, sig, symbol_id, temp)
-  current_block(f)[:instructions].push(wire_make_const_currency(scale, sig, symbol_id, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_currency(scale, sig, symbol_id, temp))
 
 -> wire_make_const_date(day, hour, min, month, sec, temp, tz, year)
-  handle = ccall_rawargs("w_wire_alloc", 65, 8)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :day, day)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :hour, hour)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :min, min)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :month, month)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :sec, sec)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :tz, tz)
-  ccall_nobox("w_wire_field_store_at", handle, 7, :year, year)
-  handle
+  ccall_rawargs("w_wire_packed_8", 65, day, hour, min, month, sec, temp, tz, year)
 
 -> emit_wire_const_date(f, day, hour, min, month, sec, temp, tz, year)
-  current_block(f)[:instructions].push(wire_make_const_date(day, hour, min, month, sec, temp, tz, year))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_date(day, hour, min, month, sec, temp, tz, year))
 
 -> wire_make_const_decimal(scale, sig, temp)
-  handle = ccall_rawargs("w_wire_alloc", 66, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :scale, scale)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :sig, sig)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 66, scale, sig, temp)
 
 -> emit_wire_const_decimal(f, scale, sig, temp)
-  current_block(f)[:instructions].push(wire_make_const_decimal(scale, sig, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_decimal(scale, sig, temp))
 
 -> wire_make_const_duration_months_ms(months, ms, temp)
-  handle = ccall_rawargs("w_wire_alloc", 67, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :months, months)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ms, ms)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 67, months, ms, temp)
 
 -> emit_wire_const_duration_months_ms(f, months, ms, temp)
-  current_block(f)[:instructions].push(wire_make_const_duration_months_ms(months, ms, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_duration_months_ms(months, ms, temp))
 
 -> wire_make_const_duration_ns(ns, temp)
-  handle = ccall_rawargs("w_wire_alloc", 68, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ns, ns)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 68, ns, temp)
 
 -> emit_wire_const_duration_ns(f, ns, temp)
-  current_block(f)[:instructions].push(wire_make_const_duration_ns(ns, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_duration_ns(ns, temp))
 
 -> wire_make_const_ipv4(a, b, c, cidr, d, temp)
-  handle = ccall_rawargs("w_wire_alloc", 69, 6)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :a, a)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :b, b)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :c, c)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :cidr, cidr)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :d, d)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_6", 69, a, b, c, cidr, d, temp)
 
 -> emit_wire_const_ipv4(f, a, b, c, cidr, d, temp)
-  current_block(f)[:instructions].push(wire_make_const_ipv4(a, b, c, cidr, d, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_ipv4(a, b, c, cidr, d, temp))
 
 -> wire_make_const_ipv6(byte_len, cidr, string_id, temp, temp_ptr)
-  handle = ccall_rawargs("w_wire_alloc", 70, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :byte_len, byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :cidr, cidr)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :string_id, string_id)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp_ptr, temp_ptr)
-  handle
+  ccall_rawargs("w_wire_packed_5", 70, byte_len, cidr, string_id, temp, temp_ptr)
 
 -> emit_wire_const_ipv6(f, byte_len, cidr, string_id, temp, temp_ptr)
-  current_block(f)[:instructions].push(wire_make_const_ipv6(byte_len, cidr, string_id, temp, temp_ptr))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_ipv6(byte_len, cidr, string_id, temp, temp_ptr))
 
 -> wire_make_const_quantity(scale, sig, temp, unit_id)
-  handle = ccall_rawargs("w_wire_alloc", 71, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :scale, scale)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :sig, sig)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :unit_id, unit_id)
-  handle
+  ccall_rawargs("w_wire_packed_4", 71, scale, sig, temp, unit_id)
 
 -> emit_wire_const_quantity(f, scale, sig, temp, unit_id)
-  current_block(f)[:instructions].push(wire_make_const_quantity(scale, sig, temp, unit_id))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_quantity(scale, sig, temp, unit_id))
 
 -> wire_make_const_rational(den, num, temp)
-  handle = ccall_rawargs("w_wire_alloc", 72, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :den, den)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :num, num)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 72, den, num, temp)
 
 -> emit_wire_const_rational(f, den, num, temp)
-  current_block(f)[:instructions].push(wire_make_const_rational(den, num, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_rational(den, num, temp))
 
 -> wire_make_const_uuid(byte_len, string_id, temp, temp_ptr)
-  handle = ccall_rawargs("w_wire_alloc", 73, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :byte_len, byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :string_id, string_id)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp_ptr, temp_ptr)
-  handle
+  ccall_rawargs("w_wire_packed_4", 73, byte_len, string_id, temp, temp_ptr)
 
 -> emit_wire_const_uuid(f, byte_len, string_id, temp, temp_ptr)
-  current_block(f)[:instructions].push(wire_make_const_uuid(byte_len, string_id, temp, temp_ptr))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_const_uuid(byte_len, string_id, temp, temp_ptr))
 
 -> wire_make_ctpop_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 269, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 269, temp, value)
 
 -> emit_wire_ctpop_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_ctpop_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ctpop_i64(temp, value))
 
 -> wire_make_cttz_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 270, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 270, temp, value)
 
 -> emit_wire_cttz_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_cttz_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_cttz_i64(temp, value))
+
+-> wire_make_fadd_f64(fp_flags, lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_4", 215, fp_flags, lhs, rhs, temp)
+
+-> emit_wire_fadd_f64(f, fp_flags, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fadd_f64(fp_flags, lhs, rhs, temp))
 
 -> wire_make_fcmp_f64(lhs, pred, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 74, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :pred, pred)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 74, lhs, pred, rhs, temp)
 
 -> emit_wire_fcmp_f64(f, lhs, pred, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_fcmp_f64(lhs, pred, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fcmp_f64(lhs, pred, rhs, temp))
+
+-> wire_make_fdiv_f64(fp_flags, lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_4", 216, fp_flags, lhs, rhs, temp)
+
+-> emit_wire_fdiv_f64(f, fp_flags, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fdiv_f64(fp_flags, lhs, rhs, temp))
 
 -> wire_make_fma_f64(lhs, rhs, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 75, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_4", 75, lhs, rhs, temp, value)
 
 -> emit_wire_fma_f64(f, lhs, rhs, temp, value)
-  current_block(f)[:instructions].push(wire_make_fma_f64(lhs, rhs, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fma_f64(lhs, rhs, temp, value))
+
+-> wire_make_fmul_f64(fp_flags, lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_4", 217, fp_flags, lhs, rhs, temp)
+
+-> emit_wire_fmul_f64(f, fp_flags, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fmul_f64(fp_flags, lhs, rhs, temp))
 
 -> wire_make_fmuladd_f64(lhs, rhs, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 76, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_4", 76, lhs, rhs, temp, value)
 
 -> emit_wire_fmuladd_f64(f, lhs, rhs, temp, value)
-  current_block(f)[:instructions].push(wire_make_fmuladd_f64(lhs, rhs, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fmuladd_f64(lhs, rhs, temp, value))
 
 -> wire_make_fn_addr_i64(name, temp)
-  handle = ccall_rawargs("w_wire_alloc", 77, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :name, name)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 77, name, temp)
 
 -> emit_wire_fn_addr_i64(f, name, temp)
-  current_block(f)[:instructions].push(wire_make_fn_addr_i64(name, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fn_addr_i64(name, temp))
 
 -> wire_make_fneg_f64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 78, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 78, temp, value)
 
 -> emit_wire_fneg_f64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_fneg_f64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fneg_f64(temp, value))
 
 -> wire_make_fpext_f16_f32(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 79, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 79, temp, value)
 
 -> emit_wire_fpext_f16_f32(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_fpext_f16_f32(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fpext_f16_f32(temp, value))
 
 -> wire_make_fpext_f32_f64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 80, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 80, temp, value)
 
 -> emit_wire_fpext_f32_f64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_fpext_f32_f64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fpext_f32_f64(temp, value))
+
+-> wire_make_fptosi_f64_i128(temp, value)
+  ccall_rawargs("w_wire_packed_2", 218, temp, value)
+
+-> emit_wire_fptosi_f64_i128(f, temp, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fptosi_f64_i128(temp, value))
 
 -> wire_make_fptosi_f64_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 81, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 81, temp, value)
 
 -> emit_wire_fptosi_f64_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_fptosi_f64_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fptosi_f64_i64(temp, value))
+
+-> wire_make_fptoui_f64_i128(temp, value)
+  ccall_rawargs("w_wire_packed_2", 219, temp, value)
+
+-> emit_wire_fptoui_f64_i128(f, temp, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fptoui_f64_i128(temp, value))
+
+-> wire_make_fptoui_f64_i64(temp, value)
+  ccall_rawargs("w_wire_packed_2", 220, temp, value)
+
+-> emit_wire_fptoui_f64_i64(f, temp, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fptoui_f64_i64(temp, value))
 
 -> wire_make_fptrunc_f32_f16(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 82, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 82, temp, value)
 
 -> emit_wire_fptrunc_f32_f16(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_fptrunc_f32_f16(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fptrunc_f32_f16(temp, value))
 
 -> wire_make_fptrunc_f64_f32(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 83, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 83, temp, value)
 
 -> emit_wire_fptrunc_f64_f32(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_fptrunc_f64_f32(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fptrunc_f64_f32(temp, value))
 
 -> wire_make_free_value(value)
-  handle = ccall_rawargs("w_wire_alloc", 84, 1)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_1", 84, value)
 
 -> emit_wire_free_value(f, value)
-  current_block(f)[:instructions].push(wire_make_free_value(value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_free_value(value))
+
+-> wire_make_frem_f64(fp_flags, lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_4", 221, fp_flags, lhs, rhs, temp)
+
+-> emit_wire_frem_f64(f, fp_flags, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_frem_f64(fp_flags, lhs, rhs, temp))
+
+-> wire_make_fsub_f64(fp_flags, lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_4", 222, fp_flags, lhs, rhs, temp)
+
+-> emit_wire_fsub_f64(f, fp_flags, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_fsub_f64(fp_flags, lhs, rhs, temp))
 
 -> wire_make_gep_array(base, count, index, temp)
-  handle = ccall_rawargs("w_wire_alloc", 85, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :base, base)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :count, count)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 85, base, count, index, temp)
 
 -> emit_wire_gep_array(f, base, count, index, temp)
-  current_block(f)[:instructions].push(wire_make_gep_array(base, count, index, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_gep_array(base, count, index, temp))
 
 -> wire_make_i64_to_ptr(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 86, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 86, temp, value)
 
 -> emit_wire_i64_to_ptr(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_i64_to_ptr(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_i64_to_ptr(temp, value))
 
 -> wire_make_icmp_eq_i32(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 87, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 87, lhs, rhs, temp)
 
 -> emit_wire_icmp_eq_i32(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_icmp_eq_i32(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_icmp_eq_i32(lhs, rhs, temp))
+
+-> wire_make_icmp_i128(lhs, pred, rhs, temp)
+  ccall_rawargs("w_wire_packed_4", 223, lhs, pred, rhs, temp)
+
+-> emit_wire_icmp_i128(f, lhs, pred, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_icmp_i128(lhs, pred, rhs, temp))
 
 -> wire_make_icmp_i64(lhs, pred, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 88, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :pred, pred)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 88, lhs, pred, rhs, temp)
 
 -> emit_wire_icmp_i64(f, lhs, pred, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_icmp_i64(lhs, pred, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_icmp_i64(lhs, pred, rhs, temp))
 
 -> wire_make_icmp_ne_i64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 89, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 89, lhs, rhs, temp)
 
 -> emit_wire_icmp_ne_i64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_icmp_ne_i64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_icmp_ne_i64(lhs, rhs, temp))
 
 -> wire_make_icmp_ne_zero(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 90, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 90, temp, value)
 
 -> emit_wire_icmp_ne_zero(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_icmp_ne_zero(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_icmp_ne_zero(temp, value))
 
 -> wire_make_inttoptr_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 91, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 91, temp, value)
 
 -> emit_wire_inttoptr_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_inttoptr_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_inttoptr_i64(temp, value))
 
 -> wire_make_ivar_get(byte_len, self_reg, str_id, temp, temp_ptr)
-  handle = ccall_rawargs("w_wire_alloc", 92, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :byte_len, byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :self_reg, self_reg)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :str_id, str_id)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp_ptr, temp_ptr)
-  handle
+  ccall_rawargs("w_wire_packed_5", 92, byte_len, self_reg, str_id, temp, temp_ptr)
 
 -> emit_wire_ivar_get(f, byte_len, self_reg, str_id, temp, temp_ptr)
-  current_block(f)[:instructions].push(wire_make_ivar_get(byte_len, self_reg, str_id, temp, temp_ptr))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ivar_get(byte_len, self_reg, str_id, temp, temp_ptr))
 
 -> wire_make_ivar_get_idx(offset, self_reg, temp)
-  handle = ccall_rawargs("w_wire_alloc", 93, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :offset, offset)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :self_reg, self_reg)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 93, offset, self_reg, temp)
 
 -> emit_wire_ivar_get_idx(f, offset, self_reg, temp)
-  current_block(f)[:instructions].push(wire_make_ivar_get_idx(offset, self_reg, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ivar_get_idx(offset, self_reg, temp))
 
 -> wire_make_ivar_set(byte_len, self_reg, str_id, temp, temp_ptr, value)
-  handle = ccall_rawargs("w_wire_alloc", 94, 6)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :byte_len, byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :self_reg, self_reg)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :str_id, str_id)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp_ptr, temp_ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_6", 94, byte_len, self_reg, str_id, temp, temp_ptr, value)
 
 -> emit_wire_ivar_set(f, byte_len, self_reg, str_id, temp, temp_ptr, value)
-  current_block(f)[:instructions].push(wire_make_ivar_set(byte_len, self_reg, str_id, temp, temp_ptr, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ivar_set(byte_len, self_reg, str_id, temp, temp_ptr, value))
 
 -> wire_make_ivar_set_idx(offset, self_reg, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 95, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :offset, offset)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :self_reg, self_reg)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_4", 95, offset, self_reg, temp, value)
 
 -> emit_wire_ivar_set_idx(f, offset, self_reg, temp, value)
-  current_block(f)[:instructions].push(wire_make_ivar_set_idx(offset, self_reg, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ivar_set_idx(offset, self_reg, temp, value))
 
 -> wire_make_load_class(class_name, temp)
-  handle = ccall_rawargs("w_wire_alloc", 96, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :class_name, class_name)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 96, class_name, temp)
 
 -> emit_wire_load_class(f, class_name, temp)
-  current_block(f)[:instructions].push(wire_make_load_class(class_name, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_class(class_name, temp))
 
 -> wire_make_load_cvar(cvar_key, temp)
-  handle = ccall_rawargs("w_wire_alloc", 97, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :cvar_key, cvar_key)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 97, cvar_key, temp)
 
 -> emit_wire_load_cvar(f, cvar_key, temp)
-  current_block(f)[:instructions].push(wire_make_load_cvar(cvar_key, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_cvar(cvar_key, temp))
 
 -> wire_make_load_double(ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 224, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 224, ptr, temp)
 
 -> emit_wire_load_double(f, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_load_double(ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_double(ptr, temp))
 
 -> wire_make_load_f64_at(index, ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 226, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 226, index, ptr, temp)
 
 -> emit_wire_load_f64_at(f, index, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_load_f64_at(index, ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_f64_at(index, ptr, temp))
 
 -> wire_make_load_float(ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 227, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 227, ptr, temp)
 
 -> emit_wire_load_float(f, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_load_float(ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_float(ptr, temp))
 
 -> wire_make_load_global(name, temp, type)
-  handle = ccall_rawargs("w_wire_alloc", 98, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :name, name)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :type, type)
-  handle
+  ccall_rawargs("w_wire_packed_3", 98, name, temp, type)
 
 -> emit_wire_load_global(f, name, temp, type)
-  current_block(f)[:instructions].push(wire_make_load_global(name, temp, type))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_global(name, temp, type))
+
+-> wire_make_load_i128(ptr, temp)
+  ccall_rawargs("w_wire_packed_2", 228, ptr, temp)
+
+-> emit_wire_load_i128(f, ptr, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_i128(ptr, temp))
 
 -> wire_make_load_i64(ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 99, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 99, ptr, temp)
 
 -> emit_wire_load_i64(f, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_load_i64(ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_i64(ptr, temp))
 
 -> wire_make_load_i64_at(index, ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 100, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 100, index, ptr, temp)
 
 -> emit_wire_load_i64_at(f, index, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_load_i64_at(index, ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_i64_at(index, ptr, temp))
 
 -> wire_make_load_memo_ptr(global, temp)
-  handle = ccall_rawargs("w_wire_alloc", 101, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :global, global)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 101, global, temp)
 
 -> emit_wire_load_memo_ptr(f, global, temp)
-  current_block(f)[:instructions].push(wire_make_load_memo_ptr(global, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_memo_ptr(global, temp))
 
 -> wire_make_load_ptr(ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 102, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 102, ptr, temp)
 
 -> emit_wire_load_ptr(f, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_load_ptr(ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_ptr(ptr, temp))
 
 -> wire_make_load_u32_ptr(index, ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 103, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 103, index, ptr, temp)
 
 -> emit_wire_load_u32_ptr(f, index, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_load_u32_ptr(index, ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_u32_ptr(index, ptr, temp))
 
 -> wire_make_load_u64_ptr(index, ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 104, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 104, index, ptr, temp)
 
 -> emit_wire_load_u64_ptr(f, index, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_load_u64_ptr(index, ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_u64_ptr(index, ptr, temp))
 
 -> wire_make_load_u8_ptr(index, ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 105, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 105, index, ptr, temp)
 
 -> emit_wire_load_u8_ptr(f, index, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_load_u8_ptr(index, ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_load_u8_ptr(index, ptr, temp))
 
 -> wire_make_lshr_i128(shift, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 106, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :shift, shift)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_3", 106, shift, temp, value)
 
 -> emit_wire_lshr_i128(f, shift, temp, value)
-  current_block(f)[:instructions].push(wire_make_lshr_i128(shift, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_lshr_i128(shift, temp, value))
 
 -> wire_make_lshr_i64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 107, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 107, lhs, rhs, temp)
 
 -> emit_wire_lshr_i64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_lshr_i64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_lshr_i64(lhs, rhs, temp))
 
 -> wire_make_memo_call0_i64(fn_name, table, temp)
-  handle = ccall_rawargs("w_wire_alloc", 108, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :fn_name, fn_name)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :table, table)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 108, fn_name, table, temp)
 
 -> emit_wire_memo_call0_i64(f, fn_name, table, temp)
-  current_block(f)[:instructions].push(wire_make_memo_call0_i64(fn_name, table, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_memo_call0_i64(fn_name, table, temp))
 
 -> wire_make_memo_call1_i64(args, fn_name, table, temp)
-  handle = ccall_rawargs("w_wire_alloc", 109, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :args, wire_sequence(args))
-  ccall_nobox("w_wire_field_store_at", handle, 1, :fn_name, fn_name)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :table, table)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 109, wire_sequence(args), fn_name, table, temp)
 
 -> emit_wire_memo_call1_i64(f, args, fn_name, table, temp)
-  current_block(f)[:instructions].push(wire_make_memo_call1_i64(args, fn_name, table, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_memo_call1_i64(args, fn_name, table, temp))
 
 -> wire_make_memo_call2_i64(args, fn_name, table, temp)
-  handle = ccall_rawargs("w_wire_alloc", 110, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :args, wire_sequence(args))
-  ccall_nobox("w_wire_field_store_at", handle, 1, :fn_name, fn_name)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :table, table)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 110, wire_sequence(args), fn_name, table, temp)
 
 -> emit_wire_memo_call2_i64(f, args, fn_name, table, temp)
-  current_block(f)[:instructions].push(wire_make_memo_call2_i64(args, fn_name, table, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_memo_call2_i64(args, fn_name, table, temp))
 
 -> wire_make_memo_init(temp)
-  handle = ccall_rawargs("w_wire_alloc", 111, 1)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_1", 111, temp)
 
 -> emit_wire_memo_init(f, temp)
-  current_block(f)[:instructions].push(wire_make_memo_init(temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_memo_init(temp))
 
 -> wire_make_mul_i128(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 112, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 112, lhs, rhs, temp)
 
 -> emit_wire_mul_i128(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_mul_i128(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_mul_i128(lhs, rhs, temp))
+
+-> wire_make_mul_i48_guarded(block_id, lhs, rhs, rt_fallback, temp, trap)
+  ccall_rawargs("w_wire_packed_6", 231, block_id, lhs, rhs, rt_fallback, temp, trap)
+
+-> emit_wire_mul_i48_guarded(f, block_id, lhs, rhs, rt_fallback, temp, trap)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_mul_i48_guarded(block_id, lhs, rhs, rt_fallback, temp, trap))
+
+-> wire_make_mul_i64(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 232, lhs, rhs, temp)
+
+-> emit_wire_mul_i64(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_mul_i64(lhs, rhs, temp))
 
 -> wire_make_mulhi_u64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 113, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 113, lhs, rhs, temp)
 
 -> emit_wire_mulhi_u64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_mulhi_u64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_mulhi_u64(lhs, rhs, temp))
 
 -> wire_make_nanbox_bool(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 114, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 114, temp, value)
 
 -> emit_wire_nanbox_bool(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_nanbox_bool(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_nanbox_bool(temp, value))
 
 -> wire_make_nanbox_float(raw, temp, temp_bits)
-  handle = ccall_rawargs("w_wire_alloc", 115, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :raw, raw)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp_bits, temp_bits)
-  handle
+  ccall_rawargs("w_wire_packed_3", 115, raw, temp, temp_bits)
 
 -> emit_wire_nanbox_float(f, raw, temp, temp_bits)
-  current_block(f)[:instructions].push(wire_make_nanbox_float(raw, temp, temp_bits))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_nanbox_float(raw, temp, temp_bits))
 
 -> wire_make_nanbox_int(raw, temp, temp_masked)
-  handle = ccall_rawargs("w_wire_alloc", 116, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :raw, raw)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp_masked, temp_masked)
-  handle
+  ccall_rawargs("w_wire_packed_3", 116, raw, temp, temp_masked)
 
 -> emit_wire_nanbox_int(f, raw, temp, temp_masked)
-  current_block(f)[:instructions].push(wire_make_nanbox_int(raw, temp, temp_masked))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_nanbox_int(raw, temp, temp_masked))
 
 -> wire_make_nanunbox_float(boxed, temp, temp_bits)
-  handle = ccall_rawargs("w_wire_alloc", 117, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :boxed, boxed)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp_bits, temp_bits)
-  handle
+  ccall_rawargs("w_wire_packed_3", 117, boxed, temp, temp_bits)
 
 -> emit_wire_nanunbox_float(f, boxed, temp, temp_bits)
-  current_block(f)[:instructions].push(wire_make_nanunbox_float(boxed, temp, temp_bits))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_nanunbox_float(boxed, temp, temp_bits))
 
 -> wire_make_nanunbox_int(boxed, temp, temp_shl)
-  handle = ccall_rawargs("w_wire_alloc", 118, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :boxed, boxed)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp_shl, temp_shl)
-  handle
+  ccall_rawargs("w_wire_packed_3", 118, boxed, temp, temp_shl)
 
 -> emit_wire_nanunbox_int(f, boxed, temp, temp_shl)
-  current_block(f)[:instructions].push(wire_make_nanunbox_int(boxed, temp, temp_shl))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_nanunbox_int(boxed, temp, temp_shl))
 
 -> wire_make_node_kind_class_register(class_temp, kind_id)
-  handle = ccall_rawargs("w_wire_alloc", 119, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :class_temp, class_temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :kind_id, kind_id)
-  handle
+  ccall_rawargs("w_wire_packed_2", 119, class_temp, kind_id)
 
 -> emit_wire_node_kind_class_register(f, class_temp, kind_id)
-  current_block(f)[:instructions].push(wire_make_node_kind_class_register(class_temp, kind_id))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_node_kind_class_register(class_temp, kind_id))
 
 -> wire_make_not_i1(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 120, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 120, temp, value)
 
 -> emit_wire_not_i1(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_not_i1(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_not_i1(temp, value))
 
 -> wire_make_null_ptr(temp)
-  handle = ccall_rawargs("w_wire_alloc", 121, 1)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_1", 121, temp)
 
 -> emit_wire_null_ptr(f, temp)
-  current_block(f)[:instructions].push(wire_make_null_ptr(temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_null_ptr(temp))
 
 -> wire_make_or_i1(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 122, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 122, lhs, rhs, temp)
 
 -> emit_wire_or_i1(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_or_i1(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_or_i1(lhs, rhs, temp))
+
+-> wire_make_or_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 234, lhs, rhs, temp)
+
+-> emit_wire_or_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_or_i128(lhs, rhs, temp))
+
+-> wire_make_or_i64(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 235, lhs, rhs, temp)
+
+-> emit_wire_or_i64(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_or_i64(lhs, rhs, temp))
 
 -> wire_make_phi_i64(a_label, a_value, b_label, b_value, temp)
-  handle = ccall_rawargs("w_wire_alloc", 123, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :a_label, a_label)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :a_value, a_value)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :b_label, b_label)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :b_value, b_value)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_5", 123, a_label, a_value, b_label, b_value, temp)
 
 -> emit_wire_phi_i64(f, a_label, a_value, b_label, b_value, temp)
-  current_block(f)[:instructions].push(wire_make_phi_i64(a_label, a_value, b_label, b_value, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_phi_i64(a_label, a_value, b_label, b_value, temp))
 
 -> wire_make_phi_ssa(incoming, temp)
-  handle = ccall_rawargs("w_wire_alloc", 124, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :incoming, wire_sequence(incoming))
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 124, wire_sequence(incoming), temp)
 
 -> emit_wire_phi_ssa(f, incoming, temp)
-  current_block(f)[:instructions].push(wire_make_phi_ssa(incoming, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_phi_ssa(incoming, temp))
 
 -> wire_make_poly_array_guard(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 125, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 125, temp, value)
 
 -> emit_wire_poly_array_guard(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_poly_array_guard(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_poly_array_guard(temp, value))
 
 -> wire_make_print_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 126, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 126, temp, value)
 
 -> emit_wire_print_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_print_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_print_i64(temp, value))
 
 -> wire_make_ptr_slot_get(index, ptr, slot_type, temp)
-  handle = ccall_rawargs("w_wire_alloc", 127, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :slot_type, slot_type)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 127, index, ptr, slot_type, temp)
 
 -> emit_wire_ptr_slot_get(f, index, ptr, slot_type, temp)
-  current_block(f)[:instructions].push(wire_make_ptr_slot_get(index, ptr, slot_type, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ptr_slot_get(index, ptr, slot_type, temp))
 
 -> wire_make_ptr_to_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 128, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 128, temp, value)
 
 -> emit_wire_ptr_to_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_ptr_to_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ptr_to_i64(temp, value))
 
 -> wire_make_puts_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 129, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 129, temp, value)
 
 -> emit_wire_puts_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_puts_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_puts_i64(temp, value))
 
 -> wire_make_recycle_object(value)
-  handle = ccall_rawargs("w_wire_alloc", 274, 1)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_1", 274, value)
 
 -> emit_wire_recycle_object(f, value)
-  current_block(f)[:instructions].push(wire_make_recycle_object(value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_recycle_object(value))
 
 -> wire_make_register_unit(byte_len, str_id, unit_id)
-  handle = ccall_rawargs("w_wire_alloc", 130, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :byte_len, byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :str_id, str_id)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :unit_id, unit_id)
-  handle
+  ccall_rawargs("w_wire_packed_3", 130, byte_len, str_id, unit_id)
 
 -> emit_wire_register_unit(f, byte_len, str_id, unit_id)
-  current_block(f)[:instructions].push(wire_make_register_unit(byte_len, str_id, unit_id))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_register_unit(byte_len, str_id, unit_id))
 
 -> wire_make_ret_i32(value)
-  handle = ccall_rawargs("w_wire_alloc", 131, 1)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_1", 131, value)
 
 -> emit_wire_ret_i32(f, value)
-  current_block(f)[:instructions].push(wire_make_ret_i32(value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ret_i32(value))
 
 -> wire_make_ret_i64(function_recycle_count, value)
-  handle = ccall_rawargs("w_wire_alloc", 132, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :function_recycle_count, function_recycle_count)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 132, function_recycle_count, value)
 
 -> emit_wire_ret_i64(f, function_recycle_count, value)
-  current_block(f)[:instructions].push(wire_make_ret_i64(function_recycle_count, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ret_i64(function_recycle_count, value))
 
 -> wire_make_ret_void()
-  handle = ccall_rawargs("w_wire_alloc", 133, 0)
-  handle
+  ccall_rawargs("w_wire_packed_0", 133)
 
 -> emit_wire_ret_void(f)
-  current_block(f)[:instructions].push(wire_make_ret_void())
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ret_void())
 
 -> wire_make_sadd_with_overflow(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 134, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 134, lhs, rhs, temp)
 
 -> emit_wire_sadd_with_overflow(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_sadd_with_overflow(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_sadd_with_overflow(lhs, rhs, temp))
 
 -> wire_make_scope_pop(id)
-  handle = ccall_rawargs("w_wire_alloc", 135, 1)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :id, id)
-  handle
+  ccall_rawargs("w_wire_packed_1", 135, id)
 
 -> emit_wire_scope_pop(f, id)
-  current_block(f)[:instructions].push(wire_make_scope_pop(id))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_scope_pop(id))
 
 -> wire_make_scope_push(id)
-  handle = ccall_rawargs("w_wire_alloc", 136, 1)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :id, id)
-  handle
+  ccall_rawargs("w_wire_packed_1", 136, id)
 
 -> emit_wire_scope_push(f, id)
-  current_block(f)[:instructions].push(wire_make_scope_push(id))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_scope_push(id))
+
+-> wire_make_sdiv_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 237, lhs, rhs, temp)
+
+-> emit_wire_sdiv_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_sdiv_i128(lhs, rhs, temp))
 
 -> wire_make_sdiv_i64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 137, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 137, lhs, rhs, temp)
 
 -> emit_wire_sdiv_i64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_sdiv_i64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_sdiv_i64(lhs, rhs, temp))
 
 -> wire_make_select_i64(cond, else_val, temp, then_val)
-  handle = ccall_rawargs("w_wire_alloc", 138, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :cond, cond)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :else_val, else_val)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :then_val, then_val)
-  handle
+  ccall_rawargs("w_wire_packed_4", 138, cond, else_val, temp, then_val)
 
 -> emit_wire_select_i64(f, cond, else_val, temp, then_val)
-  current_block(f)[:instructions].push(wire_make_select_i64(cond, else_val, temp, then_val))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_select_i64(cond, else_val, temp, then_val))
 
 -> wire_make_setjmp(buf, temp)
-  handle = ccall_rawargs("w_wire_alloc", 139, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :buf, buf)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 139, buf, temp)
 
 -> emit_wire_setjmp(f, buf, temp)
-  current_block(f)[:instructions].push(wire_make_setjmp(buf, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_setjmp(buf, temp))
+
+-> wire_make_sext_i64_i128(temp, value)
+  ccall_rawargs("w_wire_packed_2", 238, temp, value)
+
+-> emit_wire_sext_i64_i128(f, temp, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_sext_i64_i128(temp, value))
+
+-> wire_make_shl_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 239, lhs, rhs, temp)
+
+-> emit_wire_shl_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_shl_i128(lhs, rhs, temp))
 
 -> wire_make_shl_i64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 140, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 140, lhs, rhs, temp)
 
 -> emit_wire_shl_i64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_shl_i64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_shl_i64(lhs, rhs, temp))
+
+-> wire_make_sitofp_i128_f64(temp, value)
+  ccall_rawargs("w_wire_packed_2", 240, temp, value)
+
+-> emit_wire_sitofp_i128_f64(f, temp, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_sitofp_i128_f64(temp, value))
+
+-> wire_make_sitofp_i64_f64(temp, value)
+  ccall_rawargs("w_wire_packed_2", 241, temp, value)
+
+-> emit_wire_sitofp_i64_f64(f, temp, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_sitofp_i64_f64(temp, value))
 
 -> wire_make_slab_alloc_init(fields, kind, sc, temp)
-  handle = ccall_rawargs("w_wire_alloc", 141, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :fields, wire_sequence(fields))
-  ccall_nobox("w_wire_field_store_at", handle, 1, :kind, kind)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :sc, sc)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 141, wire_sequence(fields), kind, sc, temp)
 
 -> emit_wire_slab_alloc_init(f, fields, kind, sc, temp)
-  current_block(f)[:instructions].push(wire_make_slab_alloc_init(fields, kind, sc, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_slab_alloc_init(fields, kind, sc, temp))
 
 -> wire_make_small_array_alloca(temp_ptr, total_bytes)
-  handle = ccall_rawargs("w_wire_alloc", 142, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp_ptr, temp_ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :total_bytes, total_bytes)
-  handle
+  ccall_rawargs("w_wire_packed_2", 142, temp_ptr, total_bytes)
 
 -> emit_wire_small_array_alloca(f, temp_ptr, total_bytes)
-  current_block(f)[:instructions].push(wire_make_small_array_alloca(temp_ptr, total_bytes))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_small_array_alloca(temp_ptr, total_bytes))
 
 -> wire_make_small_array_const_load(const_name, temp)
-  handle = ccall_rawargs("w_wire_alloc", 143, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :const_name, const_name)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_2", 143, const_name, temp)
 
 -> emit_wire_small_array_const_load(f, const_name, temp)
-  current_block(f)[:instructions].push(wire_make_small_array_const_load(const_name, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_small_array_const_load(const_name, temp))
 
 -> wire_make_small_array_get_inline(arr, bits, headerless, idx, idx_raw, s, signed, temp)
-  handle = ccall_rawargs("w_wire_alloc", 144, 8)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :bits, bits)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :headerless, headerless)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :idx, idx)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :idx_raw, idx_raw)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :s, wire_sequence(s))
-  ccall_nobox("w_wire_field_store_at", handle, 6, :signed, signed)
-  ccall_nobox("w_wire_field_store_at", handle, 7, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_8", 144, arr, bits, headerless, idx, idx_raw, wire_sequence(s), signed, temp)
 
 -> emit_wire_small_array_get_inline(f, arr, bits, headerless, idx, idx_raw, s, signed, temp)
-  current_block(f)[:instructions].push(wire_make_small_array_get_inline(arr, bits, headerless, idx, idx_raw, s, signed, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_small_array_get_inline(arr, bits, headerless, idx, idx_raw, s, signed, temp))
 
 -> wire_make_small_array_set_inline(arr, bits, headerless, idx, idx_raw, s, signed, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 145, 9)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :bits, bits)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :headerless, headerless)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :idx, idx)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :idx_raw, idx_raw)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :s, wire_sequence(s))
-  ccall_nobox("w_wire_field_store_at", handle, 6, :signed, signed)
-  ccall_nobox("w_wire_field_store_at", handle, 7, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 8, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_9", 145, arr, bits, headerless, idx, idx_raw, wire_sequence(s), signed, temp, value)
 
 -> emit_wire_small_array_set_inline(f, arr, bits, headerless, idx, idx_raw, s, signed, temp, value)
-  current_block(f)[:instructions].push(wire_make_small_array_set_inline(arr, bits, headerless, idx, idx_raw, s, signed, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_small_array_set_inline(arr, bits, headerless, idx, idx_raw, s, signed, temp, value))
+
+-> wire_make_srem_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 244, lhs, rhs, temp)
+
+-> emit_wire_srem_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_srem_i128(lhs, rhs, temp))
+
+-> wire_make_srem_i64(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 245, lhs, rhs, temp)
+
+-> emit_wire_srem_i64(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_srem_i64(lhs, rhs, temp))
 
 -> wire_make_store_cvar(cvar_key, value)
-  handle = ccall_rawargs("w_wire_alloc", 146, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :cvar_key, cvar_key)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 146, cvar_key, value)
 
 -> emit_wire_store_cvar(f, cvar_key, value)
-  current_block(f)[:instructions].push(wire_make_store_cvar(cvar_key, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_store_cvar(cvar_key, value))
 
 -> wire_make_store_double(ptr, value)
-  handle = ccall_rawargs("w_wire_alloc", 147, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 147, ptr, value)
 
 -> emit_wire_store_double(f, ptr, value)
-  current_block(f)[:instructions].push(wire_make_store_double(ptr, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_store_double(ptr, value))
 
 -> wire_make_store_float(ptr, value)
-  handle = ccall_rawargs("w_wire_alloc", 148, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 148, ptr, value)
 
 -> emit_wire_store_float(f, ptr, value)
-  current_block(f)[:instructions].push(wire_make_store_float(ptr, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_store_float(ptr, value))
 
 -> wire_make_store_global(name, type, value)
-  handle = ccall_rawargs("w_wire_alloc", 149, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :name, name)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :type, type)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_3", 149, name, type, value)
 
 -> emit_wire_store_global(f, name, type, value)
-  current_block(f)[:instructions].push(wire_make_store_global(name, type, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_store_global(name, type, value))
+
+-> wire_make_store_i128(ptr, value)
+  ccall_rawargs("w_wire_packed_2", 248, ptr, value)
+
+-> emit_wire_store_i128(f, ptr, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_store_i128(ptr, value))
 
 -> wire_make_store_i64(ptr, value)
-  handle = ccall_rawargs("w_wire_alloc", 150, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 150, ptr, value)
 
 -> emit_wire_store_i64(f, ptr, value)
-  current_block(f)[:instructions].push(wire_make_store_i64(ptr, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_store_i64(ptr, value))
 
 -> wire_make_store_memo_ptr(global, value)
-  handle = ccall_rawargs("w_wire_alloc", 151, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :global, global)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 151, global, value)
 
 -> emit_wire_store_memo_ptr(f, global, value)
-  current_block(f)[:instructions].push(wire_make_store_memo_ptr(global, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_store_memo_ptr(global, value))
 
 -> wire_make_store_ptr(dest, value)
-  handle = ccall_rawargs("w_wire_alloc", 152, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :dest, dest)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 152, dest, value)
 
 -> emit_wire_store_ptr(f, dest, value)
-  current_block(f)[:instructions].push(wire_make_store_ptr(dest, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_store_ptr(dest, value))
 
 -> wire_make_store_u8_ptr(index, ptr, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 153, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_4", 153, index, ptr, temp, value)
 
 -> emit_wire_store_u8_ptr(f, index, ptr, temp, value)
-  current_block(f)[:instructions].push(wire_make_store_u8_ptr(index, ptr, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_store_u8_ptr(index, ptr, temp, value))
 
 -> wire_make_string_i64(byte_len, string_id, temp, temp_ptr)
-  handle = ccall_rawargs("w_wire_alloc", 154, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :byte_len, byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :string_id, string_id)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp_ptr, temp_ptr)
-  handle
+  ccall_rawargs("w_wire_packed_4", 154, byte_len, string_id, temp, temp_ptr)
 
 -> emit_wire_string_i64(f, byte_len, string_id, temp, temp_ptr)
-  current_block(f)[:instructions].push(wire_make_string_i64(byte_len, string_id, temp, temp_ptr))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_string_i64(byte_len, string_id, temp, temp_ptr))
+
+-> wire_make_sub_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 250, lhs, rhs, temp)
+
+-> emit_wire_sub_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_sub_i128(lhs, rhs, temp))
+
+-> wire_make_sub_i48_guarded(block_id, lhs, rhs, rt_fallback, temp, trap)
+  ccall_rawargs("w_wire_packed_6", 252, block_id, lhs, rhs, rt_fallback, temp, trap)
+
+-> emit_wire_sub_i48_guarded(f, block_id, lhs, rhs, rt_fallback, temp, trap)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_sub_i48_guarded(block_id, lhs, rhs, rt_fallback, temp, trap))
 
 -> wire_make_sub_i64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 155, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 155, lhs, rhs, temp)
 
 -> emit_wire_sub_i64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_sub_i64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_sub_i64(lhs, rhs, temp))
 
 -> wire_make_subborrow_u64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 156, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 156, lhs, rhs, temp)
 
 -> emit_wire_subborrow_u64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_subborrow_u64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_subborrow_u64(lhs, rhs, temp))
 
 -> wire_make_switch_i64(cases, default_label, is_symbol, value)
-  handle = ccall_rawargs("w_wire_alloc", 157, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :cases, wire_sequence(cases))
-  ccall_nobox("w_wire_field_store_at", handle, 1, :default_label, default_label)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :is_symbol, is_symbol)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_4", 157, wire_sequence(cases), default_label, is_symbol, value)
 
 -> emit_wire_switch_i64(f, cases, default_label, is_symbol, value)
-  current_block(f)[:instructions].push(wire_make_switch_i64(cases, default_label, is_symbol, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_switch_i64(cases, default_label, is_symbol, value))
 
 -> wire_make_symbol_i64(byte_len, string_id, temp, temp_ptr)
-  handle = ccall_rawargs("w_wire_alloc", 158, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :byte_len, byte_len)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :string_id, string_id)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp_ptr, temp_ptr)
-  handle
+  ccall_rawargs("w_wire_packed_4", 158, byte_len, string_id, temp, temp_ptr)
 
 -> emit_wire_symbol_i64(f, byte_len, string_id, temp, temp_ptr)
-  current_block(f)[:instructions].push(wire_make_symbol_i64(byte_len, string_id, temp, temp_ptr))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_symbol_i64(byte_len, string_id, temp, temp_ptr))
 
 -> wire_make_ta_cap_raw(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 159, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 159, temp, value)
 
 -> emit_wire_ta_cap_raw(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_ta_cap_raw(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ta_cap_raw(temp, value))
 
 -> wire_make_ta_data_addr(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 160, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 160, temp, value)
 
 -> emit_wire_ta_data_addr(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_ta_data_addr(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ta_data_addr(temp, value))
 
 -> wire_make_ta_f64_elems_ptr(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 254, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 254, temp, value)
 
 -> emit_wire_ta_f64_elems_ptr(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_ta_f64_elems_ptr(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ta_f64_elems_ptr(temp, value))
 
 -> wire_make_ta_size_raw(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 161, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 161, temp, value)
 
 -> emit_wire_ta_size_raw(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_ta_size_raw(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_ta_size_raw(temp, value))
 
 -> wire_make_trunc_i128_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 162, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 162, temp, value)
 
 -> emit_wire_trunc_i128_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_trunc_i128_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_trunc_i128_i64(temp, value))
 
 -> wire_make_trunc_i64_i16(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 163, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 163, temp, value)
 
 -> emit_wire_trunc_i64_i16(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_trunc_i64_i16(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_trunc_i64_i16(temp, value))
 
 -> wire_make_trunc_i64_i32(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 164, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 164, temp, value)
 
 -> emit_wire_trunc_i64_i32(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_trunc_i64_i32(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_trunc_i64_i32(temp, value))
 
 -> wire_make_truthy_inline(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 165, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 165, temp, value)
 
 -> emit_wire_truthy_inline(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_truthy_inline(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_truthy_inline(temp, value))
 
 -> wire_make_type_class_register(class_temp, dispatch_key)
-  handle = ccall_rawargs("w_wire_alloc", 166, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :class_temp, class_temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :dispatch_key, dispatch_key)
-  handle
+  ccall_rawargs("w_wire_packed_2", 166, class_temp, dispatch_key)
 
 -> emit_wire_type_class_register(f, class_temp, dispatch_key)
-  current_block(f)[:instructions].push(wire_make_type_class_register(class_temp, dispatch_key))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_type_class_register(class_temp, dispatch_key))
 
 -> wire_make_typed_array_compound_op_inline(arr, bits, compound_op, idx, idx_raw, s, signed, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 167, 9)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :bits, bits)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :compound_op, compound_op)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :idx, idx)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :idx_raw, idx_raw)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :s, wire_sequence(s))
-  ccall_nobox("w_wire_field_store_at", handle, 6, :signed, signed)
-  ccall_nobox("w_wire_field_store_at", handle, 7, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 8, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_9", 167, arr, bits, compound_op, idx, idx_raw, wire_sequence(s), signed, temp, value)
 
 -> emit_wire_typed_array_compound_op_inline(f, arr, bits, compound_op, idx, idx_raw, s, signed, temp, value)
-  current_block(f)[:instructions].push(wire_make_typed_array_compound_op_inline(arr, bits, compound_op, idx, idx_raw, s, signed, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_typed_array_compound_op_inline(arr, bits, compound_op, idx, idx_raw, s, signed, temp, value))
 
 -> wire_make_typed_array_get_inline(arr, bits, idx, idx_raw, s, signed, temp)
-  handle = ccall_rawargs("w_wire_alloc", 168, 7)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :bits, bits)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :idx, idx)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :idx_raw, idx_raw)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :s, wire_sequence(s))
-  ccall_nobox("w_wire_field_store_at", handle, 5, :signed, signed)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_7", 168, arr, bits, idx, idx_raw, wire_sequence(s), signed, temp)
 
 -> emit_wire_typed_array_get_inline(f, arr, bits, idx, idx_raw, s, signed, temp)
-  current_block(f)[:instructions].push(wire_make_typed_array_get_inline(arr, bits, idx, idx_raw, s, signed, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_typed_array_get_inline(arr, bits, idx, idx_raw, s, signed, temp))
 
 -> wire_make_typed_array_load_u64(arr, index, temp)
-  handle = ccall_rawargs("w_wire_alloc", 271, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 271, arr, index, temp)
 
 -> emit_wire_typed_array_load_u64(f, arr, index, temp)
-  current_block(f)[:instructions].push(wire_make_typed_array_load_u64(arr, index, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_typed_array_load_u64(arr, index, temp))
 
 -> wire_make_typed_array_prefetch(arr, index, temp)
-  handle = ccall_rawargs("w_wire_alloc", 273, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 273, arr, index, temp)
 
 -> emit_wire_typed_array_prefetch(f, arr, index, temp)
-  current_block(f)[:instructions].push(wire_make_typed_array_prefetch(arr, index, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_typed_array_prefetch(arr, index, temp))
 
 -> wire_make_typed_array_set_inline(arr, bits, idx, idx_raw, s, signed, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 169, 8)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :bits, bits)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :idx, idx)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :idx_raw, idx_raw)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :s, wire_sequence(s))
-  ccall_nobox("w_wire_field_store_at", handle, 5, :signed, signed)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 7, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_8", 169, arr, bits, idx, idx_raw, wire_sequence(s), signed, temp, value)
 
 -> emit_wire_typed_array_set_inline(f, arr, bits, idx, idx_raw, s, signed, temp, value)
-  current_block(f)[:instructions].push(wire_make_typed_array_set_inline(arr, bits, idx, idx_raw, s, signed, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_typed_array_set_inline(arr, bits, idx, idx_raw, s, signed, temp, value))
 
 -> wire_make_typed_array_store_u64(arr, index, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 272, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_4", 272, arr, index, temp, value)
 
 -> emit_wire_typed_array_store_u64(f, arr, index, temp, value)
-  current_block(f)[:instructions].push(wire_make_typed_array_store_u64(arr, index, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_typed_array_store_u64(arr, index, temp, value))
+
+-> wire_make_udiv_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 256, lhs, rhs, temp)
+
+-> emit_wire_udiv_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_udiv_i128(lhs, rhs, temp))
+
+-> wire_make_udiv_i64(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 257, lhs, rhs, temp)
+
+-> emit_wire_udiv_i64(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_udiv_i64(lhs, rhs, temp))
+
+-> wire_make_uitofp_i128_f64(temp, value)
+  ccall_rawargs("w_wire_packed_2", 258, temp, value)
+
+-> emit_wire_uitofp_i128_f64(f, temp, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_uitofp_i128_f64(temp, value))
+
+-> wire_make_uitofp_i64_f64(temp, value)
+  ccall_rawargs("w_wire_packed_2", 259, temp, value)
+
+-> emit_wire_uitofp_i64_f64(f, temp, value)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_uitofp_i64_f64(temp, value))
 
 -> wire_make_unreachable()
-  handle = ccall_rawargs("w_wire_alloc", 170, 0)
-  handle
+  ccall_rawargs("w_wire_packed_0", 170)
 
 -> emit_wire_unreachable(f)
-  current_block(f)[:instructions].push(wire_make_unreachable())
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_unreachable())
+
+-> wire_make_urem_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 260, lhs, rhs, temp)
+
+-> emit_wire_urem_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_urem_i128(lhs, rhs, temp))
+
+-> wire_make_urem_i64(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 261, lhs, rhs, temp)
+
+-> emit_wire_urem_i64(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_urem_i64(lhs, rhs, temp))
 
 -> wire_make_view_base_ptr(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 171, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 171, temp, value)
 
 -> emit_wire_view_base_ptr(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_view_base_ptr(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_view_base_ptr(temp, value))
 
 -> wire_make_view_load_bit(index, ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 172, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 172, index, ptr, temp)
 
 -> emit_wire_view_load_bit(f, index, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_view_load_bit(index, ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_view_load_bit(index, ptr, temp))
 
 -> wire_make_view_load_byte(index, ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 173, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 173, index, ptr, temp)
 
 -> emit_wire_view_load_byte(f, index, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_view_load_byte(index, ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_view_load_byte(index, ptr, temp))
 
 -> wire_make_view_load_field(field_type, offset, ptr, size, temp)
-  handle = ccall_rawargs("w_wire_alloc", 174, 5)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :field_type, field_type)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :offset, offset)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :size, size)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_5", 174, field_type, offset, ptr, size, temp)
 
 -> emit_wire_view_load_field(f, field_type, offset, ptr, size, temp)
-  current_block(f)[:instructions].push(wire_make_view_load_field(field_type, offset, ptr, size, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_view_load_field(field_type, offset, ptr, size, temp))
 
 -> wire_make_view_load_inline_byte(index, offset, ptr, temp)
-  handle = ccall_rawargs("w_wire_alloc", 175, 4)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :offset, offset)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_4", 175, index, offset, ptr, temp)
 
 -> emit_wire_view_load_inline_byte(f, index, offset, ptr, temp)
-  current_block(f)[:instructions].push(wire_make_view_load_inline_byte(index, offset, ptr, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_view_load_inline_byte(index, offset, ptr, temp))
 
 -> wire_make_view_load_inline_elem(elem, index, offset, ptr, size, temp)
-  handle = ccall_rawargs("w_wire_alloc", 176, 6)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :elem, elem)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :offset, offset)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :size, size)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_6", 176, elem, index, offset, ptr, size, temp)
 
 -> emit_wire_view_load_inline_elem(f, elem, index, offset, ptr, size, temp)
-  current_block(f)[:instructions].push(wire_make_view_load_inline_elem(elem, index, offset, ptr, size, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_view_load_inline_elem(elem, index, offset, ptr, size, temp))
 
 -> wire_make_view_store_field(field_type, offset, ptr, size, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 177, 6)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :field_type, field_type)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :offset, offset)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :size, size)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_6", 177, field_type, offset, ptr, size, temp, value)
 
 -> emit_wire_view_store_field(f, field_type, offset, ptr, size, temp, value)
-  current_block(f)[:instructions].push(wire_make_view_store_field(field_type, offset, ptr, size, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_view_store_field(field_type, offset, ptr, size, temp, value))
 
 -> wire_make_view_store_inline_elem(elem, index, offset, ptr, size, temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 178, 7)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :elem, elem)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :index, index)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :offset, offset)
-  ccall_nobox("w_wire_field_store_at", handle, 3, :ptr, ptr)
-  ccall_nobox("w_wire_field_store_at", handle, 4, :size, size)
-  ccall_nobox("w_wire_field_store_at", handle, 5, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 6, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_7", 178, elem, index, offset, ptr, size, temp, value)
 
 -> emit_wire_view_store_inline_elem(f, elem, index, offset, ptr, size, temp, value)
-  current_block(f)[:instructions].push(wire_make_view_store_inline_elem(elem, index, offset, ptr, size, temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_view_store_inline_elem(elem, index, offset, ptr, size, temp, value))
+
+-> wire_make_xor_i128(lhs, rhs, temp)
+  ccall_rawargs("w_wire_packed_3", 262, lhs, rhs, temp)
+
+-> emit_wire_xor_i128(f, lhs, rhs, temp)
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_xor_i128(lhs, rhs, temp))
 
 -> wire_make_xor_i64(lhs, rhs, temp)
-  handle = ccall_rawargs("w_wire_alloc", 179, 3)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :rhs, rhs)
-  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
-  handle
+  ccall_rawargs("w_wire_packed_3", 179, lhs, rhs, temp)
 
 -> emit_wire_xor_i64(f, lhs, rhs, temp)
-  current_block(f)[:instructions].push(wire_make_xor_i64(lhs, rhs, temp))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_xor_i64(lhs, rhs, temp))
 
 -> wire_make_zext_i16_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 180, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 180, temp, value)
 
 -> emit_wire_zext_i16_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_zext_i16_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_zext_i16_i64(temp, value))
 
 -> wire_make_zext_i32_i64(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 181, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 181, temp, value)
 
 -> emit_wire_zext_i32_i64(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_zext_i32_i64(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_zext_i32_i64(temp, value))
 
 -> wire_make_zext_i64_i128(temp, value)
-  handle = ccall_rawargs("w_wire_alloc", 182, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
-  handle
+  ccall_rawargs("w_wire_packed_2", 182, temp, value)
 
 -> emit_wire_zext_i64_i128(f, temp, value)
-  current_block(f)[:instructions].push(wire_make_zext_i64_i128(temp, value))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_zext_i64_i128(temp, value))
 
 -> wire_make_dynamic_0(op)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -1982,7 +2039,7 @@
   handle
 
 -> emit_wire_dynamic_0(f, op)
-  current_block(f)[:instructions].push(wire_make_dynamic_0(op))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_0(op))
 
 -> wire_make_dynamic_1(op, field0, value0)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -1993,7 +2050,7 @@
   handle
 
 -> emit_wire_dynamic_1(f, op, field0, value0)
-  current_block(f)[:instructions].push(wire_make_dynamic_1(op, field0, value0))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_1(op, field0, value0))
 
 -> wire_make_dynamic_2(op, field0, value0, field1, value1)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -2007,7 +2064,7 @@
   handle
 
 -> emit_wire_dynamic_2(f, op, field0, value0, field1, value1)
-  current_block(f)[:instructions].push(wire_make_dynamic_2(op, field0, value0, field1, value1))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_2(op, field0, value0, field1, value1))
 
 -> wire_make_dynamic_3(op, field0, value0, field1, value1, field2, value2)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -2024,7 +2081,7 @@
   handle
 
 -> emit_wire_dynamic_3(f, op, field0, value0, field1, value1, field2, value2)
-  current_block(f)[:instructions].push(wire_make_dynamic_3(op, field0, value0, field1, value1, field2, value2))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_3(op, field0, value0, field1, value1, field2, value2))
 
 -> wire_make_dynamic_4(op, field0, value0, field1, value1, field2, value2, field3, value3)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -2044,7 +2101,7 @@
   handle
 
 -> emit_wire_dynamic_4(f, op, field0, value0, field1, value1, field2, value2, field3, value3)
-  current_block(f)[:instructions].push(wire_make_dynamic_4(op, field0, value0, field1, value1, field2, value2, field3, value3))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_4(op, field0, value0, field1, value1, field2, value2, field3, value3))
 
 -> wire_make_dynamic_5(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -2067,7 +2124,7 @@
   handle
 
 -> emit_wire_dynamic_5(f, op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4)
-  current_block(f)[:instructions].push(wire_make_dynamic_5(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_5(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4))
 
 -> wire_make_dynamic_6(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -2093,7 +2150,7 @@
   handle
 
 -> emit_wire_dynamic_6(f, op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5)
-  current_block(f)[:instructions].push(wire_make_dynamic_6(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_6(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5))
 
 -> wire_make_dynamic_7(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -2122,7 +2179,7 @@
   handle
 
 -> emit_wire_dynamic_7(f, op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6)
-  current_block(f)[:instructions].push(wire_make_dynamic_7(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_7(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6))
 
 -> wire_make_dynamic_8(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -2154,7 +2211,7 @@
   handle
 
 -> emit_wire_dynamic_8(f, op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7)
-  current_block(f)[:instructions].push(wire_make_dynamic_8(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_8(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7))
 
 -> wire_make_dynamic_9(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7, field8, value8)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -2189,7 +2246,7 @@
   handle
 
 -> emit_wire_dynamic_9(f, op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7, field8, value8)
-  current_block(f)[:instructions].push(wire_make_dynamic_9(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7, field8, value8))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_9(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7, field8, value8))
 
 -> wire_make_dynamic_10(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7, field8, value8, field9, value9)
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
@@ -2227,4 +2284,4 @@
   handle
 
 -> emit_wire_dynamic_10(f, op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7, field8, value8, field9, value9)
-  current_block(f)[:instructions].push(wire_make_dynamic_10(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7, field8, value8, field9, value9))
+  ccall_rawargs("w_wire_func_push_inst", f, wire_make_dynamic_10(op, field0, value0, field1, value1, field2, value2, field3, value3, field4, value4, field5, value5, field6, value6, field7, value7, field8, value8, field9, value9))

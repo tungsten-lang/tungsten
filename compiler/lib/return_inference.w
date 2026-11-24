@@ -68,15 +68,38 @@ use runtime_types
   # already does).
   infer_fn_return_type(node, infer_maps)
 
+# True when an expression whose type is currently unknown directly depends on
+# an unresolved call inside the active recursive SCC. Only those edges may be
+# deferred during optimistic SCC seeding; every other unknown return expression
+# (e.g. `yield`, an untyped parameter, or an external call) marks :unknown so
+# soundness never drops a branch.
+-> return_evidence_defers_to_scc?(node, fn_return_types, scc_names)
+  if scc_names == nil || node == nil || !is_ast_node?(node)
+    return false
+  k = ast_kind(node)
+  if k == :call && node.receiver == nil && node.name != nil && scc_names[node.name] == true
+    return fn_return_types[node.name] == nil
+  if k == :binary_op
+    return return_evidence_defers_to_scc?(node.left, fn_return_types, scc_names) || return_evidence_defers_to_scc?(node.right, fn_return_types, scc_names)
+  if k == :unary_op
+    return return_evidence_defers_to_scc?(node.operand, fn_return_types, scc_names)
+  false
+
 # Return inference needs more than the final expression for recursion: a base
 # case commonly returns explicitly while the tail calls a sibling in the same
-# SCC. Collect every explicit return plus the tail position, ignoring unknown
-# recursive edges until another member supplies a seed. A singleton evidence
-# set is safe to publish; mixed evidence remains unknown.
--> collect_return_type_evidence(node, tail_position, var_types, fn_return_types, infer_maps, evidence)
+# SCC. Collect every explicit return plus the tail position, deferring ONLY
+# unresolved recursive edges inside scc_names (and verifying strictly once the
+# SCC converges). A singleton evidence set with no :nil/:unknown is safe to
+# publish; mixed or incomplete evidence remains unknown.
+-> collect_return_type_evidence(node, tail_position, var_types, fn_return_types, infer_maps, evidence, scc_names = nil)
   if node == nil || !is_ast_node?(node)
     return nil
   kind = ast_kind(node)
+  if kind == :return_nil
+    evidence[:nil] = true
+    return nil
+  if kind == :raise
+    return nil
   if kind == :return
     if node.value != nil
       if ast_kind(node.value) == :nil_lit
@@ -85,33 +108,47 @@ use runtime_types
         rt = infer_type(node.value, var_types, fn_return_types, infer_maps)
         if rt != nil
           evidence[normalize_type_symbol(rt)] = true
+        elsif !return_evidence_defers_to_scc?(node.value, fn_return_types, scc_names)
+          evidence[:unknown] = true
     else
       evidence[:nil] = true
     return nil
   if tail_position && kind == :if
-    collect_body_return_evidence(node.then_body, var_types, fn_return_types, infer_maps, evidence)
+    collect_return_type_evidence(node.condition, false, var_types, fn_return_types, infer_maps, evidence, scc_names)
+    collect_body_return_evidence(node.then_body, var_types, fn_return_types, infer_maps, evidence, scc_names)
     if node.elsif_clauses != nil
       ei = 0
       while ei < node.elsif_clauses.size()
-        collect_body_return_evidence(node.elsif_clauses[ei][1], var_types, fn_return_types, infer_maps, evidence)
+        collect_return_type_evidence(node.elsif_clauses[ei][0], false, var_types, fn_return_types, infer_maps, evidence, scc_names)
+        collect_body_return_evidence(node.elsif_clauses[ei][1], var_types, fn_return_types, infer_maps, evidence, scc_names)
         ei += 1
-    collect_body_return_evidence(node.else_body, var_types, fn_return_types, infer_maps, evidence)
+    if node.else_body != nil && node.else_body.size() > 0
+      collect_body_return_evidence(node.else_body, var_types, fn_return_types, infer_maps, evidence, scc_names)
+    else
+      evidence[:nil] = true
   elsif tail_position && kind == :begin
-    collect_body_return_evidence(node.body, var_types, fn_return_types, infer_maps, evidence)
-    collect_body_return_evidence(node.rescue_body, var_types, fn_return_types, infer_maps, evidence)
-    collect_body_return_evidence(node.ensure_body, var_types, fn_return_types, infer_maps, evidence)
+    collect_body_return_evidence(node.body, var_types, fn_return_types, infer_maps, evidence, scc_names)
+    if node.rescue_body != nil && node.rescue_body.size() > 0
+      collect_body_return_evidence(node.rescue_body, var_types, fn_return_types, infer_maps, evidence, scc_names)
+    if node.ensure_body != nil && node.ensure_body.size() > 0
+      ei = 0
+      while ei < node.ensure_body.size()
+        collect_return_type_evidence(node.ensure_body[ei], false, var_types, fn_return_types, infer_maps, evidence, scc_names)
+        ei += 1
   elsif tail_position && kind == :case_value && node.arms != nil && node.else_body != nil && node.else_body.size() > 0
+    collect_return_type_evidence(node.subject, false, var_types, fn_return_types, infer_maps, evidence, scc_names)
     ai = 0
     while ai < node.arms.size()
-      collect_body_return_evidence(node.arms[ai].body, var_types, fn_return_types, infer_maps, evidence)
+      collect_body_return_evidence(node.arms[ai].body, var_types, fn_return_types, infer_maps, evidence, scc_names)
       ai += 1
-    collect_body_return_evidence(node.else_body, var_types, fn_return_types, infer_maps, evidence)
+    collect_body_return_evidence(node.else_body, var_types, fn_return_types, infer_maps, evidence, scc_names)
   elsif tail_position && kind == :case && node.whens != nil && node.else_body != nil && node.else_body.size() > 0
+    collect_return_type_evidence(node.subject, false, var_types, fn_return_types, infer_maps, evidence, scc_names)
     wi = 0
     while wi < node.whens.size()
-      collect_body_return_evidence(node.whens[wi].body, var_types, fn_return_types, infer_maps, evidence)
+      collect_body_return_evidence(node.whens[wi].body, var_types, fn_return_types, infer_maps, evidence, scc_names)
       wi += 1
-    collect_body_return_evidence(node.else_body, var_types, fn_return_types, infer_maps, evidence)
+    collect_body_return_evidence(node.else_body, var_types, fn_return_types, infer_maps, evidence, scc_names)
   else
     if tail_position
       if kind == :nil_lit
@@ -120,26 +157,29 @@ use runtime_types
         rt = infer_type(node, var_types, fn_return_types, infer_maps)
         if rt != nil
           evidence[normalize_type_symbol(rt)] = true
+        elsif !return_evidence_defers_to_scc?(node, fn_return_types, scc_names)
+          evidence[:unknown] = true
     children = ast_children(node)
     ci = 0
     while ci < children.size()
-      collect_return_type_evidence(children[ci], false, var_types, fn_return_types, infer_maps, evidence)
+      collect_return_type_evidence(children[ci], false, var_types, fn_return_types, infer_maps, evidence, scc_names)
       ci += 1
   nil
 
--> collect_body_return_evidence(body, var_types, fn_return_types, infer_maps, evidence)
+-> collect_body_return_evidence(body, var_types, fn_return_types, infer_maps, evidence, scc_names = nil)
   if body == nil || body.size() == 0
+    evidence[:nil] = true
     return nil
   i = 0
   while i < body.size()
-    collect_return_type_evidence(body[i], i == body.size() - 1, var_types, fn_return_types, infer_maps, evidence)
+    collect_return_type_evidence(body[i], i == body.size() - 1, var_types, fn_return_types, infer_maps, evidence, scc_names)
     i += 1
   nil
 
--> infer_return_type_evidence(node, var_types, fn_return_types, infer_maps)
+-> infer_return_type_evidence(node, var_types, fn_return_types, infer_maps, scc_names = nil)
   evidence = {}
-  collect_body_return_evidence(node.body, var_types, fn_return_types, infer_maps, evidence)
-  if evidence[:nil] == true
+  collect_body_return_evidence(node.body, var_types, fn_return_types, infer_maps, evidence, scc_names)
+  if evidence[:nil] == true || evidence[:unknown] == true
     return nil
   types = evidence.keys()
   if types.size() == 1

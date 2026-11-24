@@ -1,4 +1,17 @@
 {
+  "add_i128": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "add_i48_guarded": [
+    "block_id",
+    "lhs",
+    "rhs",
+    "rt_fallback",
+    "temp",
+    "trap"
+  ],
   "add_i64": [
     "lhs",
     "rhs",
@@ -17,6 +30,11 @@
     "ptr"
   ],
   "and_i1": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "and_i128": [
     "lhs",
     "rhs",
     "temp"
@@ -41,6 +59,16 @@
     "temp",
     "value"
   ],
+  "ashr_i128": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "ashr_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
   "asm_add_n": [
     "ap",
     "bp",
@@ -61,6 +89,15 @@
   "asm_add_test": [
     "lhs",
     "rhs",
+    "temp"
+  ],
+  "asm_add_uneq": [
+    "ap",
+    "bp",
+    "entry_label",
+    "na",
+    "nb",
+    "outp",
     "temp"
   ],
   "asm_addmul1": [
@@ -105,6 +142,20 @@
     "outp",
     "temp"
   ],
+  "asm_neon_madd4": [
+    "ap",
+    "bp",
+    "n",
+    "outp",
+    "temp"
+  ],
+  "asm_neon_msub4": [
+    "ap",
+    "bp",
+    "n",
+    "outp",
+    "temp"
+  ],
   "asm_neon_ntt_stage": [
     "hq",
     "nb",
@@ -113,6 +164,13 @@
     "vp"
   ],
   "asm_neon_redc": [
+    "ap",
+    "bp",
+    "n",
+    "outp",
+    "temp"
+  ],
+  "asm_neon_redc4": [
     "ap",
     "bp",
     "n",
@@ -133,6 +191,15 @@
     "bp",
     "n",
     "ooff",
+    "outp",
+    "temp"
+  ],
+  "asm_sub_uneq": [
+    "ap",
+    "bp",
+    "entry_label",
+    "na",
+    "nb",
     "outp",
     "temp"
   ],
@@ -197,6 +264,13 @@
     "class_name",
     "name_byte_len",
     "name_str_id"
+  ],
+  "call_direct_i128": [
+    "arg_types",
+    "args",
+    "call_conv",
+    "name",
+    "temp"
   ],
   "call_direct_i64": [
     "arg_types",
@@ -266,6 +340,12 @@
     "temp",
     "value"
   ],
+  "call_recycle_array": [
+    "value"
+  ],
+  "call_recycle_hash": [
+    "value"
+  ],
   "call_recycle_or_new_array": [
     "temp"
   ],
@@ -280,6 +360,12 @@
     "bits",
     "cap",
     "temp"
+  ],
+  "call_recycle_strbuf": [
+    "value"
+  ],
+  "call_recycle_typed": [
+    "value"
   ],
   "call_reuse_and_drain_or_new_hash": [
     "slot",
@@ -338,6 +424,18 @@
     "value"
   ],
   "cleanup_pop": [],
+  "cleanup_push_array": [
+    "value"
+  ],
+  "cleanup_push_hash": [
+    "value"
+  ],
+  "cleanup_push_strbuf": [
+    "value"
+  ],
+  "cleanup_push_typed": [
+    "value"
+  ],
   "closure_new": [
     "block_arity",
     "capture_count",
@@ -432,9 +530,21 @@
     "temp",
     "value"
   ],
+  "fadd_f64": [
+    "fp_flags",
+    "lhs",
+    "rhs",
+    "temp"
+  ],
   "fcmp_f64": [
     "lhs",
     "pred",
+    "rhs",
+    "temp"
+  ],
+  "fdiv_f64": [
+    "fp_flags",
+    "lhs",
     "rhs",
     "temp"
   ],
@@ -443,6 +553,12 @@
     "rhs",
     "temp",
     "value"
+  ],
+  "fmul_f64": [
+    "fp_flags",
+    "lhs",
+    "rhs",
+    "temp"
   ],
   "fmuladd_f64": [
     "lhs",
@@ -466,7 +582,19 @@
     "temp",
     "value"
   ],
+  "fptosi_f64_i128": [
+    "temp",
+    "value"
+  ],
   "fptosi_f64_i64": [
+    "temp",
+    "value"
+  ],
+  "fptoui_f64_i128": [
+    "temp",
+    "value"
+  ],
+  "fptoui_f64_i64": [
     "temp",
     "value"
   ],
@@ -481,6 +609,18 @@
   "free_value": [
     "value"
   ],
+  "frem_f64": [
+    "fp_flags",
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "fsub_f64": [
+    "fp_flags",
+    "lhs",
+    "rhs",
+    "temp"
+  ],
   "gep_array": [
     "base",
     "count",
@@ -493,6 +633,12 @@
   ],
   "icmp_eq_i32": [
     "lhs",
+    "rhs",
+    "temp"
+  ],
+  "icmp_i128": [
+    "lhs",
+    "pred",
     "rhs",
     "temp"
   ],
@@ -567,6 +713,10 @@
     "temp",
     "type"
   ],
+  "load_i128": [
+    "ptr",
+    "temp"
+  ],
   "load_i64": [
     "ptr",
     "temp"
@@ -634,6 +784,19 @@
     "rhs",
     "temp"
   ],
+  "mul_i48_guarded": [
+    "block_id",
+    "lhs",
+    "rhs",
+    "rt_fallback",
+    "temp",
+    "trap"
+  ],
+  "mul_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
   "mulhi_u64": [
     "lhs",
     "rhs",
@@ -675,6 +838,16 @@
     "temp"
   ],
   "or_i1": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "or_i128": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "or_i64": [
     "lhs",
     "rhs",
     "temp"
@@ -739,6 +912,11 @@
   "scope_push": [
     "id"
   ],
+  "sdiv_i128": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
   "sdiv_i64": [
     "lhs",
     "rhs",
@@ -754,10 +932,27 @@
     "buf",
     "temp"
   ],
+  "sext_i64_i128": [
+    "temp",
+    "value"
+  ],
+  "shl_i128": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
   "shl_i64": [
     "lhs",
     "rhs",
     "temp"
+  ],
+  "sitofp_i128_f64": [
+    "temp",
+    "value"
+  ],
+  "sitofp_i64_f64": [
+    "temp",
+    "value"
   ],
   "slab_alloc_init": [
     "fields",
@@ -794,6 +989,16 @@
     "temp",
     "value"
   ],
+  "srem_i128": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "srem_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
   "store_cvar": [
     "cvar_key",
     "value"
@@ -809,6 +1014,10 @@
   "store_global": [
     "name",
     "type",
+    "value"
+  ],
+  "store_i128": [
+    "ptr",
     "value"
   ],
   "store_i64": [
@@ -834,6 +1043,19 @@
     "string_id",
     "temp",
     "temp_ptr"
+  ],
+  "sub_i128": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "sub_i48_guarded": [
+    "block_id",
+    "lhs",
+    "rhs",
+    "rt_fallback",
+    "temp",
+    "trap"
   ],
   "sub_i64": [
     "lhs",
@@ -939,7 +1161,35 @@
     "temp",
     "value"
   ],
+  "udiv_i128": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "udiv_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "uitofp_i128_f64": [
+    "temp",
+    "value"
+  ],
+  "uitofp_i64_f64": [
+    "temp",
+    "value"
+  ],
   "unreachable": [],
+  "urem_i128": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "urem_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
   "view_base_ptr": [
     "temp",
     "value"
@@ -991,6 +1241,11 @@
     "size",
     "temp",
     "value"
+  ],
+  "xor_i128": [
+    "lhs",
+    "rhs",
+    "temp"
   ],
   "xor_i64": [
     "lhs",

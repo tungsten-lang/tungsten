@@ -14730,18 +14730,172 @@ void w_node_arena_init(void) {
      * previously emitted modules whose main still calls it. */
 }
 
+#include "wire_schema_table.h"
+
 /* ---- Packed WIRE instruction arena ----
  *
- * Record layout (WValue words):
+ * Unpacked record layout (bit 63 of header == 0; legacy/dynamic/structural):
  *   [0] raw header: low32=count, high32=capacity
  *   [1] field symbol, [2] field value, ...
  *
- * Two spare pairs absorb the small amount of metadata attached after initial
- * emission (source locations, recycle counts) without relocating the handle.
- * Existing-field rewrites are in-place; reset retains the high-water buffer.
+ * Schema-packed record layout (bit 63 of header == W_WIRE_HDR_PACKED):
+ *   [0] W_WIRE_HDR_PACKED | [W_WIRE_HDR_OVERFLOW] |
+ *       (extra_cap:16 << 32) | (fixed_count:16 << 16) | (extra_count:16)
+ *   [1 .. fixed_count]  schema field values ONLY (field symbols live in
+ *       g_wire_schema_syms[kind][0..fixed_count-1], zero arena overhead)
+ *   [1 + fixed_count ..] optional inline extra (symbol, value) pairs
+ *
+ * Rare late metadata writes past extra_cap spill into a generation-scoped
+ * bucketed overflow list (flagged by W_WIRE_HDR_OVERFLOW) so zero-extra ops
+ * never exhaust capacity.
  */
+#define W_WIRE_HDR_PACKED   (UINT64_C(1) << 63)
+#define W_WIRE_HDR_OVERFLOW (UINT64_C(1) << 62)
+
 WWireArena g_wire_arena = { .generation = 1 };
 static const uint32_t g_wire_initial_cap_words = 262144;
+
+static _Atomic int g_wire_schema_syms_ready = 0;
+static WValue g_wire_schema_syms[W_WIRE_SCHEMA_MAX_KIND][W_WIRE_SCHEMA_MAX_FIELDS];
+
+typedef struct WWireOvfNode {
+    uint32_t off;
+    uint32_t next;
+    WValue sym;
+    WValue val;
+} WWireOvfNode;
+
+#define W_WIRE_OVF_BUCKETS 1024u
+static uint32_t g_wire_ovf_buckets[W_WIRE_OVF_BUCKETS];
+static WWireOvfNode *g_wire_ovf_nodes = NULL;
+static uint32_t g_wire_ovf_count = 0;
+static uint32_t g_wire_ovf_cap = 0;
+
+static void w_wire_schema_init_syms_slow(void) {
+    for (uint32_t k = 1; k < W_WIRE_SCHEMA_MAX_KIND; k++) {
+        const WWireKindSchema *sc = &g_wire_kind_schemas[k];
+        if (!sc->is_schema || sc->fixed_count == 0) continue;
+        for (uint32_t i = 0; i < sc->fixed_count; i++) {
+            const char *name = sc->field_names[i];
+            size_t len = strlen(name);
+            WValue sym;
+            if (len <= 5) {
+                sym = w_box_symbol_from_str(w_box_inline_str(name, len));
+            } else {
+                sym = w_box_symbol_from_str(w_string_n(name, len));
+                if (w_is_slab_sym(sym))
+                    sym = w_box_slab_sym(w_as_slab_index(sym));
+            }
+            g_wire_schema_syms[k][i] = sym;
+        }
+    }
+    atomic_store_explicit(&g_wire_schema_syms_ready, 1, memory_order_release);
+}
+
+static inline void w_wire_schema_ensure_syms(void) {
+    if (__builtin_expect(!atomic_load_explicit(&g_wire_schema_syms_ready, memory_order_acquire), 0))
+        w_wire_schema_init_syms_slow();
+}
+
+static inline uint32_t w_wire_ovf_count_for(uint32_t off) {
+    uint32_t n = 0;
+    for (uint32_t idx = g_wire_ovf_buckets[off & (W_WIRE_OVF_BUCKETS - 1u)]; idx != 0; ) {
+        const WWireOvfNode *nd = &g_wire_ovf_nodes[idx - 1u];
+        if (nd->off == off) n++;
+        idx = nd->next;
+    }
+    return n;
+}
+
+static WValue w_wire_ovf_load(uint32_t off, WValue sym, WValue missing_val) {
+    for (uint32_t idx = g_wire_ovf_buckets[off & (W_WIRE_OVF_BUCKETS - 1u)]; idx != 0; ) {
+        const WWireOvfNode *nd = &g_wire_ovf_nodes[idx - 1u];
+        if (nd->off == off && nd->sym == sym) return nd->val;
+        idx = nd->next;
+    }
+    return missing_val;
+}
+
+static void w_wire_ovf_store(uint32_t off, WValue sym, WValue val) {
+    uint32_t b = off & (W_WIRE_OVF_BUCKETS - 1u);
+    uint32_t tail = 0;
+    for (uint32_t idx = g_wire_ovf_buckets[b]; idx != 0; ) {
+        WWireOvfNode *nd = &g_wire_ovf_nodes[idx - 1u];
+        if (nd->off == off && nd->sym == sym) {
+            nd->val = val;
+            return;
+        }
+        tail = idx;
+        idx = nd->next;
+    }
+    if (g_wire_ovf_count == g_wire_ovf_cap) {
+        uint32_t ncap = g_wire_ovf_cap ? g_wire_ovf_cap * 2u : 256u;
+        WWireOvfNode *nn = (WWireOvfNode *)realloc(g_wire_ovf_nodes, (size_t)ncap * sizeof(*nn));
+        if (!nn) die("w_wire_ovf_store: realloc failed");
+        g_wire_ovf_nodes = nn;
+        g_wire_ovf_cap = ncap;
+    }
+    uint32_t new_id = ++g_wire_ovf_count;
+    WWireOvfNode *nd = &g_wire_ovf_nodes[new_id - 1u];
+    nd->off = off;
+    nd->next = 0;
+    nd->sym = sym;
+    nd->val = val;
+    if (tail == 0)
+        g_wire_ovf_buckets[b] = new_id;
+    else
+        g_wire_ovf_nodes[tail - 1u].next = new_id;
+}
+
+static const WWireOvfNode *w_wire_ovf_nth(uint32_t off, uint32_t nth) {
+    uint32_t cur = 0;
+    for (uint32_t idx = g_wire_ovf_buckets[off & (W_WIRE_OVF_BUCKETS - 1u)]; idx != 0; ) {
+        const WWireOvfNode *nd = &g_wire_ovf_nodes[idx - 1u];
+        if (nd->off == off) {
+            if (cur == nth) return nd;
+            cur++;
+        }
+        idx = nd->next;
+    }
+    return NULL;
+}
+
+static void w_wire_ovf_reset(uint32_t keep_cursor) {
+    if (g_wire_ovf_count == 0) return;
+    if (keep_cursor <= 1u) {
+        g_wire_ovf_count = 0;
+        memset(g_wire_ovf_buckets, 0, sizeof(g_wire_ovf_buckets));
+        return;
+    }
+    memset(g_wire_ovf_buckets, 0, sizeof(g_wire_ovf_buckets));
+    uint32_t w = 0;
+    for (uint32_t i = 0; i < g_wire_ovf_count; i++) {
+        WWireOvfNode nd = g_wire_ovf_nodes[i];
+        if (nd.off >= keep_cursor) continue;
+        uint32_t new_id = ++w;
+        nd.next = 0;
+        g_wire_ovf_nodes[new_id - 1u] = nd;
+        uint32_t b = nd.off & (W_WIRE_OVF_BUCKETS - 1u);
+        uint32_t cur = g_wire_ovf_buckets[b];
+        if (cur == 0) {
+            g_wire_ovf_buckets[b] = new_id;
+        } else {
+            while (g_wire_ovf_nodes[cur - 1u].next != 0)
+                cur = g_wire_ovf_nodes[cur - 1u].next;
+            g_wire_ovf_nodes[cur - 1u].next = new_id;
+        }
+    }
+    g_wire_ovf_count = w;
+}
+
+static inline uint64_t w_wire_packed_header(uint32_t fixed_count, uint32_t extra_count,
+                                            uint32_t extra_cap, int has_overflow) {
+    return W_WIRE_HDR_PACKED
+         | (has_overflow ? W_WIRE_HDR_OVERFLOW : 0ULL)
+         | ((uint64_t)(extra_cap & 0xFFFFu) << 32)
+         | ((uint64_t)(fixed_count & 0xFFFFu) << 16)
+         | (uint64_t)(extra_count & 0xFFFFu);
+}
 
 #define W_WIRE_FIELD_CACHE_SIZE 4096u
 /* Emission can read independent frozen functions concurrently. Each entry is
@@ -14817,6 +14971,129 @@ WValue w_wire_alloc(int64_t kind, int64_t field_count) {
      * facts can all be attached after initial emission. Six slots cover the
      * current worst case without relocating the one-word handle. */
     return w_wire_alloc_reserve(kind, field_count, 6);
+}
+
+static inline uint32_t w_wire_packed_alloc_raw(int64_t kind, uint32_t fixed_count,
+                                               uint32_t extra_cap) {
+    w_wire_schema_ensure_syms();
+    uint64_t words = 1u + (uint64_t)fixed_count + (uint64_t)extra_cap * 2u;
+    uint32_t off = w_wire_arena_alloc_words(words);
+    g_wire_arena.base[off] = w_wire_packed_header(fixed_count, 0u, extra_cap, 0);
+    return off;
+}
+
+static inline WValue w_wire_packed_alloc_checked(int64_t kind, uint32_t fixed_count,
+                                                 const WValue *vals) {
+    if (__builtin_expect(kind <= 0 || kind >= W_WIRE_SCHEMA_MAX_KIND, 0))
+        die("w_wire_packed: invalid kind");
+    const WWireKindSchema *sc = &g_wire_kind_schemas[kind];
+    if (__builtin_expect(!sc->is_schema || sc->fixed_count != fixed_count, 0))
+        die("w_wire_packed: schema field count mismatch");
+    uint32_t off = w_wire_packed_alloc_raw(kind, fixed_count, sc->extra_cap);
+    WValue *dst = &g_wire_arena.base[off + 1u];
+    for (uint32_t i = 0; i < fixed_count; i++)
+        dst[i] = vals[i];
+    return w_box_wire((int)kind, off);
+}
+
+WValue w_wire_packed_0(int64_t kind) {
+    return w_wire_packed_alloc_checked(kind, 0u, NULL);
+}
+WValue w_wire_packed_1(int64_t kind, WValue v0) {
+    WValue vals[1] = { v0 };
+    return w_wire_packed_alloc_checked(kind, 1u, vals);
+}
+WValue w_wire_packed_2(int64_t kind, WValue v0, WValue v1) {
+    WValue vals[2] = { v0, v1 };
+    return w_wire_packed_alloc_checked(kind, 2u, vals);
+}
+WValue w_wire_packed_3(int64_t kind, WValue v0, WValue v1, WValue v2) {
+    WValue vals[3] = { v0, v1, v2 };
+    return w_wire_packed_alloc_checked(kind, 3u, vals);
+}
+WValue w_wire_packed_4(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3) {
+    WValue vals[4] = { v0, v1, v2, v3 };
+    return w_wire_packed_alloc_checked(kind, 4u, vals);
+}
+WValue w_wire_packed_5(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4) {
+    WValue vals[5] = { v0, v1, v2, v3, v4 };
+    return w_wire_packed_alloc_checked(kind, 5u, vals);
+}
+WValue w_wire_packed_6(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4, WValue v5) {
+    WValue vals[6] = { v0, v1, v2, v3, v4, v5 };
+    return w_wire_packed_alloc_checked(kind, 6u, vals);
+}
+WValue w_wire_packed_7(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4, WValue v5, WValue v6) {
+    WValue vals[7] = { v0, v1, v2, v3, v4, v5, v6 };
+    return w_wire_packed_alloc_checked(kind, 7u, vals);
+}
+WValue w_wire_packed_8(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4, WValue v5, WValue v6, WValue v7) {
+    WValue vals[8] = { v0, v1, v2, v3, v4, v5, v6, v7 };
+    return w_wire_packed_alloc_checked(kind, 8u, vals);
+}
+WValue w_wire_packed_9(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4, WValue v5, WValue v6, WValue v7, WValue v8) {
+    WValue vals[9] = { v0, v1, v2, v3, v4, v5, v6, v7, v8 };
+    return w_wire_packed_alloc_checked(kind, 9u, vals);
+}
+WValue w_wire_packed_14(int64_t kind, WValue v0, WValue v1, WValue v2, WValue v3, WValue v4, WValue v5, WValue v6, WValue v7, WValue v8, WValue v9, WValue v10, WValue v11, WValue v12, WValue v13) {
+    WValue vals[14] = { v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13 };
+    return w_wire_packed_alloc_checked(kind, 14u, vals);
+}
+
+WValue w_wire_func_push_inst(WValue f, WValue inst) {
+    if (__builtin_expect(w_is_wire(f) && w_wire_kind(f) == 265, 1)) {
+        uint64_t f_off = w_wire_offset(f);
+        if (__builtin_expect(f_off > 0 && f_off + 15u <= g_wire_arena.cursor, 1)) {
+            /* wire_function slot 6 is :blocks (rec[1 + 6*2 + 1] = rec[14]). */
+            WValue blocks_v = g_wire_arena.base[f_off + 14u];
+            if (__builtin_expect(w_is_array(blocks_v), 1)) {
+                WArray *ba = w_as_array(blocks_v);
+                if (__builtin_expect(ba->size > 0, 1)) {
+                    WValue blk = ba->slots[ba->start + ba->size - 1];
+                    if (__builtin_expect(w_is_wire(blk) && w_wire_kind(blk) == 266, 1)) {
+                        uint64_t b_off = w_wire_offset(blk);
+                        if (__builtin_expect(b_off > 0 && b_off + 5u <= g_wire_arena.cursor, 1)) {
+                            /* wire_block slot 1 is :instructions (rec[1 + 1*2 + 1] = rec[4]). */
+                            WValue instrs_v = g_wire_arena.base[b_off + 4u];
+                            if (__builtin_expect(w_is_array(instrs_v), 1)) {
+                                WArray *ia = w_as_array(instrs_v);
+                                if (__builtin_expect(ia->ebits == 65 && (ia->flags & W_FLAG_OWNED) != 0 && ia->start + ia->size < ia->cap, 1)) {
+                                    ia->slots[ia->start + ia->size++] = inst;
+                                    return instrs_v;
+                                }
+                                return w_array_push(instrs_v, inst);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    /* Generic fallback for non-canonical function/block shapes. */
+    WValue blocks_v = w_wire_field_load(f, w_symbol("blocks"));
+    WArray *ba = w_as_array(blocks_v);
+    WValue blk = ba->slots[ba->start + ba->size - 1];
+    WValue instrs_v = w_wire_field_load(blk, w_symbol("instructions"));
+    return w_array_push(instrs_v, inst);
+}
+
+WValue w_wire_slot_load(WValue wire, int64_t index) {
+    uint64_t cursor = g_wire_arena.cursor;
+    uint64_t off = w_wire_offset(wire);
+    if (__builtin_expect(!w_is_wire(wire) || w_is_wire_sequence(wire) || off == 0 || off >= cursor, 0))
+        die("w_wire_slot_load: invalid WIRE handle");
+    const WValue *rec = &g_wire_arena.base[off];
+    uint64_t hdr = rec[0];
+    if (__builtin_expect((hdr & W_WIRE_HDR_PACKED) != 0, 1)) {
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        if (__builtin_expect((uint64_t)index < fixed_count, 1))
+            return rec[1u + (uint32_t)index];
+        return W_NIL;
+    }
+    uint32_t count = (uint32_t)hdr;
+    if ((uint64_t)index < count)
+        return rec[2u + (uint32_t)index * 2u];
+    return W_NIL;
 }
 
 static WValue w_wire_fixed_record_new(int kind, int field_count,
@@ -14967,7 +15244,15 @@ static uint64_t w_wire_checked_offset(WValue wire) {
     uint64_t off = w_wire_offset(wire);
     if (off == 0 || off >= g_wire_arena.cursor)
         die("WIRE field access: handle is outside the active generation");
-    uint32_t cap = w_wire_record_capacity(off);
+    uint64_t hdr = g_wire_arena.base[off];
+    if (hdr & W_WIRE_HDR_PACKED) {
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        uint32_t extra_cap = (uint32_t)((hdr >> 32) & 0xFFFFu);
+        if (off + 1u + (uint64_t)fixed_count + (uint64_t)extra_cap * 2u > g_wire_arena.cursor)
+            die("WIRE field access: corrupt packed record bounds");
+        return off;
+    }
+    uint32_t cap = (uint32_t)(hdr >> 32);
     if (off + 1u + (uint64_t)cap * 2u > g_wire_arena.cursor)
         die("WIRE field access: corrupt record bounds");
     return off;
@@ -15073,14 +15358,25 @@ static WValue w_wire_canonical_field_value(WValue wire, WValue sym,
 
 WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value) {
     uint64_t off = w_wire_checked_offset(wire);
-    uint32_t cap = w_wire_record_capacity(off);
+    uint64_t hdr = g_wire_arena.base[off];
+    if (__builtin_expect((hdr & W_WIRE_HDR_PACKED) != 0, 0)) {
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        if (index >= 0 && (uint32_t)index < fixed_count) {
+            value = w_wire_canonical_field_value(wire, sym, value);
+            g_wire_arena.base[off + 1u + (uint32_t)index] = value;
+            return wire;
+        }
+        w_wire_field_store(wire, sym, value);
+        return wire;
+    }
+    uint32_t cap = (uint32_t)(hdr >> 32);
     if (index < 0 || (uint64_t)index >= cap)
         die("w_wire_field_store_at: index exceeds record capacity");
     value = w_wire_canonical_field_value(wire, sym, value);
     uint32_t idx = (uint32_t)index;
     g_wire_arena.base[off + 1 + idx * 2] = sym;
     g_wire_arena.base[off + 2 + idx * 2] = value;
-    uint32_t count = w_wire_record_count(off);
+    uint32_t count = (uint32_t)hdr;
     if (idx >= count) w_wire_record_header(off, idx + 1, cap);
     if (idx >= 4) {
         uint16_t kind = (uint16_t)w_wire_kind(wire);
@@ -15103,6 +15399,39 @@ static inline __attribute__((always_inline)) WValue w_wire_field_load_inline(WVa
         return w_wire_field_load_invalid(wire);
     const WValue *rec = &g_wire_arena.base[off];
     uint64_t hdr = rec[0];
+    if (__builtin_expect((hdr & W_WIRE_HDR_PACKED) != 0, 1)) {
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        uint32_t extra_count = (uint32_t)(hdr & 0xFFFFu);
+        uint16_t kind = (uint16_t)w_wire_kind(wire);
+        const WValue *syms = g_wire_schema_syms[kind];
+        if (__builtin_expect(fixed_count <= 4, 1)) {
+            if (fixed_count > 0 && syms[0] == sym) return rec[1];
+            if (fixed_count > 1 && syms[1] == sym) return rec[2];
+            if (fixed_count > 2 && syms[2] == sym) return rec[3];
+            if (fixed_count > 3 && syms[3] == sym) return rec[4];
+        } else {
+            _Atomic uint64_t *slot = w_wire_field_cache_slot(kind, sym);
+            uint64_t entry = atomic_load_explicit(slot, memory_order_relaxed);
+            uint32_t cidx = (uint16_t)(entry >> 16);
+            if (__builtin_expect(cidx < fixed_count && syms[cidx] == sym, 1))
+                return rec[1u + cidx];
+            for (uint32_t i = 0; i < fixed_count; i++) {
+                if (syms[i] == sym) {
+                    atomic_store_explicit(slot, w_wire_cache_pack(kind, (uint16_t)i, sym), memory_order_relaxed);
+                    return rec[1u + i];
+                }
+            }
+        }
+        if (__builtin_expect(extra_count == 0 && (hdr & W_WIRE_HDR_OVERFLOW) == 0, 1))
+            return missing_val;
+        const WValue *epairs = rec + 1u + fixed_count;
+        for (uint32_t i = 0; i < extra_count; i++) {
+            if (epairs[i * 2u] == sym) return epairs[i * 2u + 1u];
+        }
+        if (hdr & W_WIRE_HDR_OVERFLOW)
+            return w_wire_ovf_load((uint32_t)off, sym, missing_val);
+        return missing_val;
+    }
     uint32_t count = (uint32_t)hdr;
     uint32_t cap = (uint32_t)(hdr >> 32);
     if (__builtin_expect(off + 1u + (uint64_t)cap * 2u > cursor, 0))
@@ -15150,12 +15479,35 @@ WValue w_wire_field_load_nil(WValue wire, WValue sym) {
 
 int64_t w_wire_field_count(WValue wire) {
     uint64_t off = w_wire_checked_offset(wire);
-    return (int64_t)w_wire_record_count(off);
+    uint64_t hdr = g_wire_arena.base[off];
+    if (hdr & W_WIRE_HDR_PACKED) {
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        uint32_t extra_count = (uint32_t)(hdr & 0xFFFFu);
+        uint32_t ovf = (hdr & W_WIRE_HDR_OVERFLOW) ? w_wire_ovf_count_for((uint32_t)off) : 0u;
+        return (int64_t)(fixed_count + extra_count + ovf);
+    }
+    return (int64_t)(uint32_t)hdr;
 }
 
 WValue w_wire_field_symbol_at(WValue wire, int64_t index) {
     uint64_t off = w_wire_checked_offset(wire);
-    uint32_t count = w_wire_record_count(off);
+    uint64_t hdr = g_wire_arena.base[off];
+    if (hdr & W_WIRE_HDR_PACKED) {
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        uint32_t extra_count = (uint32_t)(hdr & 0xFFFFu);
+        if (index < 0) die("w_wire_field_symbol_at: negative index");
+        uint32_t idx = (uint32_t)index;
+        if (idx < fixed_count)
+            return g_wire_schema_syms[w_wire_kind(wire)][idx];
+        if (idx < fixed_count + extra_count)
+            return g_wire_arena.base[off + 1u + fixed_count + (idx - fixed_count) * 2u];
+        if (hdr & W_WIRE_HDR_OVERFLOW) {
+            const WWireOvfNode *nd = w_wire_ovf_nth((uint32_t)off, idx - fixed_count - extra_count);
+            if (nd) return nd->sym;
+        }
+        die("w_wire_field_symbol_at: index exceeds packed record count");
+    }
+    uint32_t count = (uint32_t)hdr;
     if (index < 0 || (uint64_t)index >= count)
         die("w_wire_field_symbol_at: index exceeds record count");
     return g_wire_arena.base[off + 1 + (uint32_t)index * 2];
@@ -15163,7 +15515,23 @@ WValue w_wire_field_symbol_at(WValue wire, int64_t index) {
 
 WValue w_wire_field_value_at(WValue wire, int64_t index) {
     uint64_t off = w_wire_checked_offset(wire);
-    uint32_t count = w_wire_record_count(off);
+    uint64_t hdr = g_wire_arena.base[off];
+    if (hdr & W_WIRE_HDR_PACKED) {
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        uint32_t extra_count = (uint32_t)(hdr & 0xFFFFu);
+        if (index < 0) die("w_wire_field_value_at: negative index");
+        uint32_t idx = (uint32_t)index;
+        if (idx < fixed_count)
+            return g_wire_arena.base[off + 1u + idx];
+        if (idx < fixed_count + extra_count)
+            return g_wire_arena.base[off + 1u + fixed_count + (idx - fixed_count) * 2u + 1u];
+        if (hdr & W_WIRE_HDR_OVERFLOW) {
+            const WWireOvfNode *nd = w_wire_ovf_nth((uint32_t)off, idx - fixed_count - extra_count);
+            if (nd) return nd->val;
+        }
+        die("w_wire_field_value_at: index exceeds packed record count");
+    }
+    uint32_t count = (uint32_t)hdr;
     if (index < 0 || (uint64_t)index >= count)
         die("w_wire_field_value_at: index exceeds record count");
     return g_wire_arena.base[off + 2 + (uint32_t)index * 2];
@@ -15171,10 +15539,48 @@ WValue w_wire_field_value_at(WValue wire, int64_t index) {
 
 WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     uint64_t off = w_wire_checked_offset(wire);
+    WValue *rec = &g_wire_arena.base[off];
+    uint64_t hdr = rec[0];
+    if (__builtin_expect((hdr & W_WIRE_HDR_PACKED) != 0, 1)) {
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        uint32_t extra_count = (uint32_t)(hdr & 0xFFFFu);
+        uint32_t extra_cap = (uint32_t)((hdr >> 32) & 0xFFFFu);
+        uint16_t kind = (uint16_t)w_wire_kind(wire);
+        const WValue *syms = g_wire_schema_syms[kind];
+        for (uint32_t i = 0; i < fixed_count; i++) {
+            if (syms[i] == sym) {
+                if ((g_wire_kind_schemas[kind].sequence_mask & (1u << i)) && w_is_array(value))
+                    value = w_wire_sequence_from_array(value);
+                /* w_wire_sequence_from_array may realloc g_wire_arena.base */
+                g_wire_arena.base[off + 1u + i] = value;
+                return value;
+            }
+        }
+        value = w_wire_canonical_field_value(wire, sym, value);
+        rec = &g_wire_arena.base[off];
+        WValue *epairs = rec + 1u + fixed_count;
+        for (uint32_t i = 0; i < extra_count; i++) {
+            if (epairs[i * 2u] == sym) {
+                epairs[i * 2u + 1u] = value;
+                return value;
+            }
+        }
+        if (extra_count < extra_cap) {
+            epairs[extra_count * 2u] = sym;
+            epairs[extra_count * 2u + 1u] = value;
+            rec[0] = w_wire_packed_header(fixed_count, extra_count + 1u, extra_cap, (hdr & W_WIRE_HDR_OVERFLOW) != 0);
+            return value;
+        }
+        w_wire_ovf_store((uint32_t)off, sym, value);
+        rec[0] = hdr | W_WIRE_HDR_OVERFLOW;
+        return value;
+    }
     value = w_wire_canonical_field_value(wire, sym, value);
-    uint32_t count = w_wire_record_count(off);
-    uint32_t cap = w_wire_record_capacity(off);
-    WValue *pairs = &g_wire_arena.base[off + 1];
+    /* w_wire_canonical_field_value may realloc g_wire_arena.base */
+    rec = &g_wire_arena.base[off];
+    uint32_t count = (uint32_t)rec[0];
+    uint32_t cap = (uint32_t)(rec[0] >> 32);
+    WValue *pairs = rec + 1;
     if (__builtin_expect(count <= 4, 1)) {
         if (count > 0 && pairs[0] == sym) { pairs[1] = value; return value; }
         if (count > 1 && pairs[2] == sym) { pairs[3] = value; return value; }
@@ -15243,6 +15649,7 @@ int64_t w_wire_store_reset(int64_t reserved) {
     g_wire_arena.cursor = keep;
     g_wire_arena.generation++;
     if (g_wire_arena.generation == 0) g_wire_arena.generation = 1;
+    w_wire_ovf_reset(keep);
     /* Symbol handles can be reused for different names after an arena reset.
      * Keep schema-shaped entries within one generation only. */
     memset(g_wire_field_cache, 0, sizeof(g_wire_field_cache));
@@ -15265,8 +15672,40 @@ WValue w_wire_clone(WValue wire) {
         return clone;
     }
     uint64_t src = w_wire_checked_offset(wire);
-    uint32_t count = w_wire_record_count(src);
-    uint32_t capacity = w_wire_record_capacity(src);
+    uint64_t hdr = g_wire_arena.base[src];
+    if (hdr & W_WIRE_HDR_PACKED) {
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        uint32_t extra_count = (uint32_t)(hdr & 0xFFFFu);
+        uint32_t extra_cap = (uint32_t)((hdr >> 32) & 0xFFFFu);
+        int has_ovf = (hdr & W_WIRE_HDR_OVERFLOW) != 0;
+        uint32_t ovf_n = has_ovf ? w_wire_ovf_count_for((uint32_t)src) : 0u;
+        uint32_t dst_extra_cap = extra_cap;
+        if (extra_count + ovf_n > dst_extra_cap) dst_extra_cap = extra_count + ovf_n;
+        uint32_t dst_off = w_wire_packed_alloc_raw(w_wire_kind(wire), fixed_count, dst_extra_cap);
+        uint64_t copy_words = (uint64_t)fixed_count + (uint64_t)extra_count * 2u;
+        if (copy_words > 0) {
+            memcpy(g_wire_arena.base + dst_off + 1u,
+                   g_wire_arena.base + src + 1u,
+                   (size_t)copy_words * sizeof(WValue));
+        }
+        uint32_t total_extra = extra_count;
+        if (ovf_n > 0) {
+            WValue *ep = g_wire_arena.base + dst_off + 1u + fixed_count;
+            for (uint32_t idx = g_wire_ovf_buckets[(uint32_t)src & (W_WIRE_OVF_BUCKETS - 1u)]; idx != 0; ) {
+                const WWireOvfNode *nd = &g_wire_ovf_nodes[idx - 1u];
+                if (nd->off == (uint32_t)src) {
+                    ep[total_extra * 2u] = nd->sym;
+                    ep[total_extra * 2u + 1u] = nd->val;
+                    total_extra++;
+                }
+                idx = nd->next;
+            }
+        }
+        g_wire_arena.base[dst_off] = w_wire_packed_header(fixed_count, total_extra, dst_extra_cap, 0);
+        return w_box_wire(w_wire_kind(wire), dst_off);
+    }
+    uint32_t count = (uint32_t)hdr;
+    uint32_t capacity = (uint32_t)(hdr >> 32);
     WValue clone = w_wire_alloc_reserve(w_wire_kind(wire), count, capacity - count);
     for (uint32_t i = 0; i < count; i++) {
         w_wire_field_store_at(clone, i,
@@ -15291,10 +15730,49 @@ static inline int w_is_percent_temp_str(WValue v) {
 
 static _Thread_local WValue tl_wire_temp_operands_arr = W_NIL;
 
+static inline int w_wire_temp_operand_collect_val(WValue value, WValue out, WArray *arr, WValue sym_value) {
+    if (value == W_NIL) return 1;
+    if (w_is_wire_sequence(value)) {
+        uint64_t seq_off = w_wire_sequence_checked_offset(value);
+        if (seq_off == 0) return 1;
+        uint32_t seq_count = w_wire_record_count(seq_off);
+        const WValue *items = &g_wire_arena.base[seq_off + 1u];
+        for (uint32_t si = 0; si < seq_count; si++) {
+            WValue item = items[si];
+            if (w_is_percent_temp_str(item)) {
+                if (__builtin_expect(arr->size < arr->cap, 1)) {
+                    arr->slots[arr->size++] = item;
+                } else {
+                    w_array_push(out, item);
+                }
+            } else if (w_is_hash(item)) {
+                WValue iv = w_hash_get(item, sym_value);
+                if (w_is_percent_temp_str(iv)) {
+                    if (__builtin_expect(arr->size < arr->cap, 1)) {
+                        arr->slots[arr->size++] = iv;
+                    } else {
+                        w_array_push(out, iv);
+                    }
+                }
+            } else if (w_is_array(item) || w_is_small_array(item) || w_is_big_array(item)) {
+                return 0;
+            }
+        }
+    } else if (w_is_percent_temp_str(value)) {
+        if (__builtin_expect(arr->size < arr->cap, 1)) {
+            arr->slots[arr->size++] = value;
+        } else {
+            w_array_push(out, value);
+        }
+    } else if (w_is_array(value) || w_is_hash(value) || w_is_small_array(value) || w_is_big_array(value)) {
+        return 0;
+    }
+    return 1;
+}
+
 WValue w_wire_temp_operands(WValue wire) {
     uint64_t off = w_wire_checked_offset(wire);
-    uint32_t count = w_wire_record_count(off);
-    const WValue *pairs = &g_wire_arena.base[off + 1u];
+    uint64_t hdr = g_wire_arena.base[off];
 
     WValue out = tl_wire_temp_operands_arr;
     WArray *arr;
@@ -15317,45 +15795,43 @@ WValue w_wire_temp_operands(WValue wire) {
         ((uint64_t)'l' << 20) | ((uint64_t)'u' << 28) |
         ((uint64_t)'e' << 36);
 
-    for (uint32_t fi = 0; fi < count; fi++) {
-        WValue sym = pairs[fi * 2u];
-        WValue value = pairs[fi * 2u + 1u];
-        if (sym == sym_temp || value == W_NIL) continue;
-        if (w_is_wire_sequence(value)) {
-            uint64_t seq_off = w_wire_sequence_checked_offset(value);
-            if (seq_off == 0) continue;
-            uint32_t seq_count = w_wire_record_count(seq_off);
-            const WValue *items = &g_wire_arena.base[seq_off + 1u];
-            for (uint32_t si = 0; si < seq_count; si++) {
-                WValue item = items[si];
-                if (w_is_percent_temp_str(item)) {
-                    if (__builtin_expect(arr->size < arr->cap, 1)) {
-                        arr->slots[arr->size++] = item;
-                    } else {
-                        w_array_push(out, item);
-                    }
-                } else if (w_is_hash(item)) {
-                    WValue iv = w_hash_get(item, sym_value);
-                    if (w_is_percent_temp_str(iv)) {
-                        if (__builtin_expect(arr->size < arr->cap, 1)) {
-                            arr->slots[arr->size++] = iv;
-                        } else {
-                            w_array_push(out, iv);
-                        }
-                    }
-                } else if (w_is_array(item) || w_is_small_array(item) || w_is_big_array(item)) {
-                    return W_NIL;
-                }
-            }
-        } else if (w_is_percent_temp_str(value)) {
-            if (__builtin_expect(arr->size < arr->cap, 1)) {
-                arr->slots[arr->size++] = value;
-            } else {
-                w_array_push(out, value);
-            }
-        } else if (w_is_array(value) || w_is_hash(value) || w_is_small_array(value) || w_is_big_array(value)) {
-            return W_NIL;
+    if (__builtin_expect((hdr & W_WIRE_HDR_PACKED) != 0, 1)) {
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        uint32_t extra_count = (uint32_t)(hdr & 0xFFFFu);
+        uint8_t temp_slot = g_wire_kind_schemas[w_wire_kind(wire)].temp_slot;
+        const WValue *vals = &g_wire_arena.base[off + 1u];
+        for (uint32_t fi = 0; fi < fixed_count; fi++) {
+            if (fi == temp_slot) continue;
+            if (!w_wire_temp_operand_collect_val(vals[fi], out, arr, sym_value))
+                return W_NIL;
         }
+        if (extra_count > 0) {
+            const WValue *epairs = vals + fixed_count;
+            for (uint32_t ei = 0; ei < extra_count; ei++) {
+                if (epairs[ei * 2u] == sym_temp) continue;
+                if (!w_wire_temp_operand_collect_val(epairs[ei * 2u + 1u], out, arr, sym_value))
+                    return W_NIL;
+            }
+        }
+        if (hdr & W_WIRE_HDR_OVERFLOW) {
+            for (uint32_t idx = g_wire_ovf_buckets[(uint32_t)off & (W_WIRE_OVF_BUCKETS - 1u)]; idx != 0; ) {
+                const WWireOvfNode *nd = &g_wire_ovf_nodes[idx - 1u];
+                if (nd->off == (uint32_t)off && nd->sym != sym_temp) {
+                    if (!w_wire_temp_operand_collect_val(nd->val, out, arr, sym_value))
+                        return W_NIL;
+                }
+                idx = nd->next;
+            }
+        }
+        return out;
+    }
+
+    uint32_t count = (uint32_t)hdr;
+    const WValue *pairs = &g_wire_arena.base[off + 1u];
+    for (uint32_t fi = 0; fi < count; fi++) {
+        if (pairs[fi * 2u] == sym_temp) continue;
+        if (!w_wire_temp_operand_collect_val(pairs[fi * 2u + 1u], out, arr, sym_value))
+            return W_NIL;
     }
     return out;
 }
@@ -28360,6 +28836,30 @@ WValue w_i64_concat_str(int64_t n, WValue b, WValue own_b) {
     return r;
 }
 
+__attribute__((noinline, cold))
+static WValue w_str_concat_any_slow(WValue a, WValue b, WValue own_a) {
+    WValue s = w_to_s(b);
+    return own_a ? w_str_concat_own(a, s, 1) : w_str_concat(a, s);
+}
+
+WValue w_str_concat_any(WValue a, WValue b, WValue own_a) {
+    if (w_is_string(b))
+        return own_a ? w_str_concat_own(a, b, 1) : w_str_concat(a, b);
+    if (w_is_int(b))
+        return w_str_concat_i64(a, w_as_int(b), own_a);
+    if (w_is_symbol(b)) {
+        WValue sym_s = b & ~(WValue)1;
+        return own_a ? w_str_concat_own(a, sym_s, 1) : w_str_concat(a, sym_s);
+    }
+    if (w_is_nil(b))
+        return a;
+    if (w_is_bool(b)) {
+        WValue bs = w_string(b == W_TRUE ? "true" : "false");
+        return own_a ? w_str_concat_own(a, bs, 1) : w_str_concat(a, bs);
+    }
+    return w_str_concat_any_slow(a, b, own_a);
+}
+
 WValue w_str_concat_int_wv(WValue a, WValue b_int, WValue own_a) {
     if (w_is_int(b_int))
         return w_str_concat_i64(a, w_as_int(b_int), own_a);
@@ -30983,10 +31483,110 @@ WValue w_wire_apply_subst(WValue inst, WValue subst) {
         return inst;
     }
     uint64_t src_off = w_wire_checked_offset(inst);
-    uint32_t count = w_wire_record_count(src_off);
+    uint64_t hdr = g_wire_arena.base[src_off];
     WValue result = inst;
     uint64_t res_off = src_off;
     int cloned = 0;
+
+    if (__builtin_expect((hdr & W_WIRE_HDR_PACKED) != 0, 1)) {
+        const WWireKindSchema *sc = &g_wire_kind_schemas[kind];
+        uint32_t smask = sc->subst_scalar_mask;
+        uint32_t qmask = sc->subst_seq_mask;
+        uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+        uint32_t extra_count = (uint32_t)(hdr & 0xFFFFu);
+        if (__builtin_expect(smask == 0 && qmask == 0 && extra_count == 0 && !(hdr & W_WIRE_HDR_OVERFLOW), 0))
+            return inst;
+        for (uint32_t m = smask; m; m &= m - 1u) {
+            uint32_t fi = (uint32_t)__builtin_ctz(m);
+            WValue val = g_wire_arena.base[src_off + 1u + fi];
+            if (val == W_NIL) continue;
+            int64_t d = w_hash_probe(hash, val);
+            if (d >= 0) {
+                WValue rep = hash->values[d];
+                if (rep != W_NIL) {
+                    if (!cloned) {
+                        result = w_wire_clone(inst);
+                        res_off = w_wire_offset(result);
+                        cloned = 1;
+                    }
+                    g_wire_arena.base[res_off + 1u + fi] = rep;
+                }
+            }
+        }
+        for (uint32_t m = qmask; m; m &= m - 1u) {
+            uint32_t fi = (uint32_t)__builtin_ctz(m);
+            WValue val = g_wire_arena.base[src_off + 1u + fi];
+            if (val == W_NIL || !w_is_wire_sequence(val)) continue;
+            uint64_t seq_off = w_wire_sequence_checked_offset(val);
+            if (seq_off == 0) continue;
+            uint32_t seq_count = w_wire_record_count(seq_off);
+            uint32_t step = (kind == 124u) ? 2u : 1u;
+            WValue new_seq = W_NIL;
+            uint64_t new_seq_off = 0;
+            for (uint32_t si = 0; si < seq_count; si += step) {
+                WValue item = g_wire_arena.base[seq_off + 1u + si];
+                int64_t d = w_hash_probe(hash, item);
+                if (d >= 0) {
+                    WValue rep = hash->values[d];
+                    if (rep != W_NIL) {
+                        if (!cloned) {
+                            result = w_wire_clone(inst);
+                            res_off = w_wire_offset(result);
+                            cloned = 1;
+                        }
+                        if (new_seq == W_NIL) {
+                            new_seq = w_wire_sequence_alloc(seq_count);
+                            new_seq_off = w_wire_offset(new_seq);
+                            memcpy(g_wire_arena.base + new_seq_off + 1u,
+                                   g_wire_arena.base + seq_off + 1u,
+                                   (size_t)seq_count * sizeof(WValue));
+                        }
+                        g_wire_arena.base[new_seq_off + 1u + si] = rep;
+                    }
+                }
+            }
+            if (new_seq != W_NIL) {
+                g_wire_arena.base[res_off + 1u + fi] = new_seq;
+            }
+        }
+        /* Rare late extra/overflow pairs on packed records */
+        if (__builtin_expect(extra_count > 0 || (hdr & W_WIRE_HDR_OVERFLOW) != 0, 0)) {
+            for (uint32_t ei = 0; ei < extra_count; ei++) {
+                WValue sym = g_wire_arena.base[src_off + 1u + fixed_count + ei * 2u];
+                WValue val = g_wire_arena.base[src_off + 1u + fixed_count + ei * 2u + 1u];
+                if (val == W_NIL || !w_wire_subst_scalar_sym_p(sym, kind)) continue;
+                int64_t d = w_hash_probe(hash, val);
+                if (d >= 0 && hash->values[d] != W_NIL) {
+                    if (!cloned) {
+                        result = w_wire_clone(inst);
+                        res_off = w_wire_offset(result);
+                        cloned = 1;
+                    }
+                    g_wire_arena.base[res_off + 1u + fixed_count + ei * 2u + 1u] = hash->values[d];
+                }
+            }
+            if (hdr & W_WIRE_HDR_OVERFLOW) {
+                for (uint32_t idx = g_wire_ovf_buckets[(uint32_t)src_off & (W_WIRE_OVF_BUCKETS - 1u)]; idx != 0; ) {
+                    const WWireOvfNode *nd = &g_wire_ovf_nodes[idx - 1u];
+                    if (nd->off == (uint32_t)src_off && nd->val != W_NIL && w_wire_subst_scalar_sym_p(nd->sym, kind)) {
+                        int64_t d = w_hash_probe(hash, nd->val);
+                        if (d >= 0 && hash->values[d] != W_NIL) {
+                            if (!cloned) {
+                                result = w_wire_clone(inst);
+                                res_off = w_wire_offset(result);
+                                cloned = 1;
+                            }
+                            w_wire_field_store(result, nd->sym, hash->values[d]);
+                        }
+                    }
+                    idx = nd->next;
+                }
+            }
+        }
+        return result;
+    }
+
+    uint32_t count = (uint32_t)hdr;
 
     for (uint32_t fi = 0; fi < count; fi++) {
         WValue sym = g_wire_arena.base[src_off + 1u + fi * 2u];
@@ -31117,6 +31717,16 @@ WValue w_hash_new(void) {
     w_allocprof(W_ALLOCPROF_HASH, (long long)sizeof(WHash));
     WHash *hash = calloc(1, sizeof(WHash));
     w_hash_allocate_storage(hash, 8);
+    return w_box_ptr(hash, W_SUBTAG_HASH);
+}
+
+static WValue w_hash_new_with_cap(uint32_t expected_count) {
+    int64_t cap = 8;
+    int64_t need = ((int64_t)expected_count + 1) * 4;
+    while (cap * 3 <= need && cap < (1LL << 28)) cap *= 2;
+    w_allocprof(W_ALLOCPROF_HASH, (long long)sizeof(WHash));
+    WHash *hash = calloc(1, sizeof(WHash));
+    w_hash_allocate_storage(hash, cap);
     return w_box_ptr(hash, W_SUBTAG_HASH);
 }
 
@@ -34481,7 +35091,7 @@ WValue __w_cache_write(WValue path_val, WValue value) {
  * is an ordinary cache miss.
  */
 
-#define W_CORE_GRAPH_VERSION UINT32_C(2)
+#define W_CORE_GRAPH_VERSION ((UINT32_C(3) << 24) | (W_WIRE_SCHEMA_FINGERPRINT & UINT32_C(0x00FFFFFF)))
 #define W_CORE_GRAPH_HEADER_SIZE 32u
 #define W_CORE_GRAPH_MAX_BYTES ((size_t)1024 * 1024 * 1024)
 #define W_CORE_GRAPH_MAX_DEPTH 256u
@@ -34501,7 +35111,8 @@ enum WCoreGraphTag {
     W_CORE_GRAPH_AST_INTERN = 9,
     W_CORE_GRAPH_AST_NODE = 10,
     W_CORE_GRAPH_AST_BODY = 11,
-    W_CORE_GRAPH_BIGINT = 12
+    W_CORE_GRAPH_BIGINT = 12,
+    W_CORE_GRAPH_WIRE_PACKED = 13
 };
 
 enum WCoreGraphRefKind {
@@ -34535,6 +35146,18 @@ static void w_core_graph_writer_fail(WCoreGraphWriter *w, const char *reason) {
     if (!w->reason) w->reason = reason;
 }
 
+enum {
+    W_CORE_GRAPH_SYM_CACHE_SIZE = 1024,
+    W_CORE_GRAPH_STR_CACHE_SIZE = 2048
+};
+
+typedef struct {
+    const char *bytes;
+    uint32_t len;
+    uint64_t hash;
+    WValue val;
+} WCoreGraphTextSlot;
+
 typedef struct {
     const uint8_t *data;
     size_t size;
@@ -34545,6 +35168,8 @@ typedef struct {
     size_t ref_cap;
     int loc_old_file_id;
     int loc_new_file_id;
+    WCoreGraphTextSlot *sym_cache;
+    WCoreGraphTextSlot *str_cache;
 } WCoreGraphReader;
 
 static uint64_t w_core_graph_mix(uintptr_t identity, uint8_t kind) {
@@ -34932,8 +35557,49 @@ static void w_core_graph_write_value(WCoreGraphWriter *w, WValue value,
         }
 
         uint64_t off = w_wire_checked_offset(value);
-        uint32_t count = w_wire_record_count(off);
-        uint32_t capacity = w_wire_record_capacity(off);
+        uint64_t hdr = g_wire_arena.base[off];
+        if (hdr & W_WIRE_HDR_PACKED) {
+            uint32_t fixed_count = (uint32_t)((hdr >> 16) & 0xFFFFu);
+            uint32_t extra_count = (uint32_t)(hdr & 0xFFFFu);
+            uint32_t extra_cap = (uint32_t)((hdr >> 32) & 0xFFFFu);
+            uint32_t ovf_n = (hdr & W_WIRE_HDR_OVERFLOW) ? w_wire_ovf_count_for((uint32_t)off) : 0u;
+            uint32_t total_extra = extra_count + ovf_n;
+            if (total_extra > UINT16_MAX) {
+                w_core_graph_writer_fail(w, "packed WIRE record exceeds format limit");
+                return;
+            }
+            w_core_graph_put_u8(w, W_CORE_GRAPH_WIRE_PACKED);
+            w_core_graph_put_u32(w, id);
+            w_core_graph_put_u16(w, (uint16_t)w_wire_kind(value));
+            w_core_graph_put_u16(w, (uint16_t)fixed_count);
+            w_core_graph_put_u16(w, (uint16_t)total_extra);
+            w_core_graph_put_u16(w, (uint16_t)(total_extra > extra_cap ? total_extra : extra_cap));
+            for (uint32_t i = 0; i < fixed_count; i++) {
+                w_core_graph_write_value(w, g_wire_arena.base[off + 1u + i], depth + 1);
+                if (w->failed) return;
+            }
+            for (uint32_t i = 0; i < extra_count; i++) {
+                w_core_graph_write_value(w, g_wire_arena.base[off + 1u + fixed_count + i * 2u], depth + 1);
+                if (w->failed) return;
+                w_core_graph_write_value(w, g_wire_arena.base[off + 1u + fixed_count + i * 2u + 1u], depth + 1);
+                if (w->failed) return;
+            }
+            if (ovf_n > 0) {
+                for (uint32_t idx = g_wire_ovf_buckets[(uint32_t)off & (W_WIRE_OVF_BUCKETS - 1u)]; idx != 0; ) {
+                    const WWireOvfNode *nd = &g_wire_ovf_nodes[idx - 1u];
+                    if (nd->off == (uint32_t)off) {
+                        w_core_graph_write_value(w, nd->sym, depth + 1);
+                        if (w->failed) return;
+                        w_core_graph_write_value(w, nd->val, depth + 1);
+                        if (w->failed) return;
+                    }
+                    idx = nd->next;
+                }
+            }
+            return;
+        }
+        uint32_t count = (uint32_t)hdr;
+        uint32_t capacity = (uint32_t)(hdr >> 32);
         if (count > UINT16_MAX || capacity > UINT16_MAX) {
             w_core_graph_writer_fail(w, "WIRE record exceeds format limit");
             return;
@@ -34986,8 +35652,8 @@ static void w_core_graph_write_value(WCoreGraphWriter *w, WValue value,
     w_core_graph_put_u64(w, (uint64_t)value);
 }
 
-static int w_core_graph_reader_take(WCoreGraphReader *r, void *dst, size_t n) {
-    if (r->failed || r->off > r->size || n > r->size - r->off) {
+static inline int w_core_graph_reader_take(WCoreGraphReader *r, void *dst, size_t n) {
+    if (__builtin_expect(r->failed || r->off > r->size || n > r->size - r->off, 0)) {
         r->failed = 1;
         return 0;
     }
@@ -34996,39 +35662,54 @@ static int w_core_graph_reader_take(WCoreGraphReader *r, void *dst, size_t n) {
     return 1;
 }
 
-static uint8_t w_core_graph_get_u8(WCoreGraphReader *r) {
-    uint8_t value = 0;
-    w_core_graph_reader_take(r, &value, 1);
-    return value;
+static inline uint8_t w_core_graph_get_u8(WCoreGraphReader *r) {
+    if (__builtin_expect(r->failed || r->off >= r->size, 0)) {
+        r->failed = 1;
+        return 0;
+    }
+    return r->data[r->off++];
 }
 
-static uint16_t w_core_graph_get_u16(WCoreGraphReader *r) {
-    uint8_t in[2] = {0};
-    if (!w_core_graph_reader_take(r, in, sizeof(in))) return 0;
-    return (uint16_t)in[0] | ((uint16_t)in[1] << 8);
+static inline uint16_t w_core_graph_get_u16(WCoreGraphReader *r) {
+    if (__builtin_expect(r->failed || r->size - r->off < 2, 0)) {
+        r->failed = 1;
+        return 0;
+    }
+    const uint8_t *p = r->data + r->off;
+    r->off += 2;
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
 
-static uint32_t w_core_graph_load_u32(const uint8_t *src) {
-    return (uint32_t)src[0] | ((uint32_t)src[1] << 8) |
-           ((uint32_t)src[2] << 16) | ((uint32_t)src[3] << 24);
+static inline uint32_t w_core_graph_load_u32(const uint8_t *src) {
+    uint32_t v;
+    memcpy(&v, src, sizeof(v));
+    return v;
 }
 
-static uint64_t w_core_graph_load_u64(const uint8_t *src) {
-    uint64_t value = 0;
-    for (unsigned i = 0; i < 8; i++) value |= (uint64_t)src[i] << (i * 8);
-    return value;
+static inline uint64_t w_core_graph_load_u64(const uint8_t *src) {
+    uint64_t v;
+    memcpy(&v, src, sizeof(v));
+    return v;
 }
 
-static uint32_t w_core_graph_get_u32(WCoreGraphReader *r) {
-    uint8_t in[4] = {0};
-    if (!w_core_graph_reader_take(r, in, sizeof(in))) return 0;
-    return w_core_graph_load_u32(in);
+static inline uint32_t w_core_graph_get_u32(WCoreGraphReader *r) {
+    if (__builtin_expect(r->failed || r->size - r->off < 4, 0)) {
+        r->failed = 1;
+        return 0;
+    }
+    uint32_t v = w_core_graph_load_u32(r->data + r->off);
+    r->off += 4;
+    return v;
 }
 
-static uint64_t w_core_graph_get_u64(WCoreGraphReader *r) {
-    uint8_t in[8] = {0};
-    if (!w_core_graph_reader_take(r, in, sizeof(in))) return 0;
-    return w_core_graph_load_u64(in);
+static inline uint64_t w_core_graph_get_u64(WCoreGraphReader *r) {
+    if (__builtin_expect(r->failed || r->size - r->off < 8, 0)) {
+        r->failed = 1;
+        return 0;
+    }
+    uint64_t v = w_core_graph_load_u64(r->data + r->off);
+    r->off += 8;
+    return v;
 }
 
 static int w_core_graph_define_ref(WCoreGraphReader *r, uint32_t id, WValue value) {
@@ -35086,16 +35767,41 @@ static WValue w_core_graph_read_value(WCoreGraphReader *r, unsigned depth) {
         }
         const char *bytes = (const char *)(r->data + r->off);
         r->off += len;
-        if (tag == W_CORE_GRAPH_STRING) return w_string_n(bytes, len);
-        char *name = (char *)malloc((size_t)len + 1);
-        if (!name) {
-            r->failed = 1;
-            return W_NIL;
+        if (tag == W_CORE_GRAPH_STRING) {
+            if (len <= 5) return w_box_inline_str(bytes, len);
+            if (r->str_cache && len <= 128) {
+                uint64_t h = w_hash_wyhash((const uint8_t *)bytes, len);
+                WCoreGraphTextSlot *slot = &r->str_cache[h & (W_CORE_GRAPH_STR_CACHE_SIZE - 1)];
+                if (slot->bytes && slot->len == len && slot->hash == h &&
+                    memcmp(slot->bytes, bytes, len) == 0)
+                    return slot->val;
+                WValue sv = w_string_n(bytes, len);
+                slot->bytes = bytes;
+                slot->len = len;
+                slot->hash = h;
+                slot->val = sv;
+                return sv;
+            }
+            return w_string_n(bytes, len);
         }
-        memcpy(name, bytes, len);
-        name[len] = '\0';
-        WValue symbol = w_symbol(name);
-        free(name);
+        if (len <= 5)
+            return w_box_symbol_from_str(w_box_inline_str(bytes, len));
+        if (r->sym_cache) {
+            uint64_t h = w_hash_wyhash((const uint8_t *)bytes, len);
+            WCoreGraphTextSlot *slot = &r->sym_cache[h & (W_CORE_GRAPH_SYM_CACHE_SIZE - 1)];
+            if (slot->bytes && slot->len == len && slot->hash == h &&
+                memcmp(slot->bytes, bytes, len) == 0)
+                return slot->val;
+            WValue symbol = w_box_symbol_from_str(w_string_n(bytes, len));
+            if (w_is_slab_sym(symbol))
+                symbol = w_box_slab_sym(w_as_slab_index(symbol));
+            slot->bytes = bytes;
+            slot->len = len;
+            slot->hash = h;
+            slot->val = symbol;
+            return symbol;
+        }
+        WValue symbol = w_box_symbol_from_str(w_string_n(bytes, len));
         /* Emitted symbol literals use the slab's canonical identity with the
          * optional cached-length bits clear.  Runtime construction fills
          * those bits; Hash equality ignores them, but WIRE field lookup is an
@@ -35189,7 +35895,7 @@ static WValue w_core_graph_read_value(WCoreGraphReader *r, unsigned depth) {
             r->failed = 1;
             return W_NIL;
         }
-        WValue value = w_hash_new();
+        WValue value = w_hash_new_with_cap(count);
         if (!w_core_graph_define_ref(r, id, value)) return W_NIL;
         for (uint32_t i = 0; i < count; i++) {
             WValue key = w_core_graph_read_value(r, depth + 1);
@@ -35293,6 +35999,41 @@ static WValue w_core_graph_read_value(WCoreGraphReader *r, unsigned depth) {
             if (r->failed) return W_NIL;
             g_wire_arena.base[off + 1 + i] = item;
         }
+        return value;
+    }
+    if (tag == W_CORE_GRAPH_WIRE_PACKED) {
+        uint16_t kind = w_core_graph_get_u16(r);
+        uint16_t fixed_count = w_core_graph_get_u16(r);
+        uint16_t extra_count = w_core_graph_get_u16(r);
+        uint16_t extra_cap = w_core_graph_get_u16(r);
+        if (r->failed || kind == 0 || kind >= W_WIRE_SCHEMA_MAX_KIND ||
+            !g_wire_kind_schemas[kind].is_schema ||
+            g_wire_kind_schemas[kind].fixed_count != fixed_count ||
+            extra_cap < extra_count || extra_cap > 2048 || r->off > r->size ||
+            (size_t)fixed_count + (size_t)extra_count * 2u > r->size - r->off) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        uint32_t off = w_wire_packed_alloc_raw(kind, fixed_count, extra_cap);
+        WValue value = w_box_wire(kind, off);
+        if (!w_core_graph_define_ref(r, id, value)) return W_NIL;
+        for (uint16_t i = 0; i < fixed_count; i++) {
+            WValue item = w_core_graph_read_value(r, depth + 1);
+            if (r->failed) return W_NIL;
+            /* Note: nested read_value may realloc g_wire_arena.base, so re-index by off */
+            g_wire_arena.base[off + 1u + i] = item;
+        }
+        for (uint16_t i = 0; i < extra_count; i++) {
+            WValue symbol = w_core_graph_read_value(r, depth + 1);
+            WValue item = w_core_graph_read_value(r, depth + 1);
+            if (r->failed || !w_is_symbol(symbol)) {
+                r->failed = 1;
+                return W_NIL;
+            }
+            g_wire_arena.base[off + 1u + fixed_count + i * 2u] = symbol;
+            g_wire_arena.base[off + 1u + fixed_count + i * 2u + 1u] = item;
+        }
+        g_wire_arena.base[off] = w_wire_packed_header(fixed_count, extra_count, extra_cap, 0);
         return value;
     }
     if (tag == W_CORE_GRAPH_WIRE) {
@@ -35423,8 +36164,14 @@ static WValue w_core_cache_read_impl(WValue path_val, int old_file_id,
         .loc_old_file_id = old_file_id,
         .loc_new_file_id = new_file_id
     };
+    if (size >= 4096) {
+        reader.sym_cache = (WCoreGraphTextSlot *)calloc(W_CORE_GRAPH_SYM_CACHE_SIZE, sizeof(WCoreGraphTextSlot));
+        reader.str_cache = (WCoreGraphTextSlot *)calloc(W_CORE_GRAPH_STR_CACHE_SIZE, sizeof(WCoreGraphTextSlot));
+    }
     WValue value = w_core_graph_read_value(&reader, 0);
     if (reader.failed || reader.off != reader.size) value = W_NIL;
+    free(reader.sym_cache);
+    free(reader.str_cache);
     free(reader.refs);
     if (mapped) munmap(data, size); else free(data);
     return value;
@@ -40593,6 +41340,193 @@ WValue w_fast_to_s(WValue recv, WInlineCache *cache) {
     return w_fast_to_s_fallback(recv, cache);
 }
 
+__attribute__((noinline, cold))
+static WValue w_fast_has_key_fallback(WValue recv, WValue key, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached_1_any(recv, WN_has_key_q, key, cache);
+}
+
+WValue w_fast_has_key(WValue recv, WValue key, WInlineCache *cache) {
+    if (__builtin_expect(w_is_hash(recv), 1)) return w_hash_has_key(recv, key);
+    return w_fast_has_key_fallback(recv, key, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_keys_fallback(WValue recv, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached_0(recv, WN_keys, cache);
+}
+
+WValue w_fast_keys(WValue recv, WInlineCache *cache) {
+    if (__builtin_expect(w_is_hash(recv), 1)) return w_hash_keys(recv);
+    return w_fast_keys_fallback(recv, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_empty_fallback(WValue recv, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached_0(recv, WN_empty_q, cache);
+}
+
+WValue w_fast_empty(WValue recv, WInlineCache *cache) {
+    if (__builtin_expect(w_is_array(recv), 1))
+        return w_as_array(recv)->size == 0 ? W_TRUE : W_FALSE;
+    if (__builtin_expect(w_is_hash(recv), 1))
+        return ((WHash *)w_as_ptr(recv))->count == 0 ? W_TRUE : W_FALSE;
+    if (__builtin_expect(w_is_string(recv), 1)) {
+        size_t mode = (size_t)((recv >> 1) & 7);
+        if (mode <= 5) return mode == 0 ? W_TRUE : W_FALSE;
+        char _b[6]; const char *s; size_t slen;
+        w_str_data(recv, _b, &s, &slen);
+        return slen == 0 ? W_TRUE : W_FALSE;
+    }
+    return w_fast_empty_fallback(recv, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_starts_with_fallback(WValue recv, WValue prefix, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached_1_any(recv, WN_starts_with_q, prefix, cache);
+}
+
+WValue w_fast_starts_with(WValue recv, WValue prefix, WInlineCache *cache) {
+    if (__builtin_expect(w_is_string(recv) && w_is_string(prefix), 1)) {
+        size_t rmode = (size_t)((recv >> 1) & 7);
+        size_t pmode = (size_t)((prefix >> 1) & 7);
+        if (pmode == 0) return W_TRUE;
+        if (rmode <= 5) {
+            if (pmode > rmode) return W_FALSE;
+            uint64_t mask = (UINT64_C(1) << (8 * pmode)) - 1;
+            return ((((recv ^ prefix) >> 4) & mask) == 0) ? W_TRUE : W_FALSE;
+        }
+        char _rb[6], _pb[6];
+        const char *sd, *pd;
+        size_t slen, plen;
+        w_str_data(recv, _rb, &sd, &slen);
+        w_str_data(prefix, _pb, &pd, &plen);
+        if (plen > slen) return W_FALSE;
+        return memcmp(sd, pd, plen) == 0 ? W_TRUE : W_FALSE;
+    }
+    return w_fast_starts_with_fallback(recv, prefix, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_ends_with_fallback(WValue recv, WValue suffix, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached_1_any(recv, WN_ends_with_q, suffix, cache);
+}
+
+WValue w_fast_ends_with(WValue recv, WValue suffix, WInlineCache *cache) {
+    if (__builtin_expect(w_is_string(recv) && w_is_string(suffix), 1)) {
+        size_t rmode = (size_t)((recv >> 1) & 7);
+        size_t smode = (size_t)((suffix >> 1) & 7);
+        if (smode == 0) return W_TRUE;
+        if (rmode <= 5) {
+            if (smode > rmode) return W_FALSE;
+            uint64_t mask = (UINT64_C(1) << (8 * smode)) - 1;
+            return ((((recv >> (4 + 8 * (rmode - smode))) ^ (suffix >> 4)) & mask) == 0) ? W_TRUE : W_FALSE;
+        }
+        char _rb[6], _sb[6];
+        const char *sd, *pd;
+        size_t slen, plen;
+        w_str_data(recv, _rb, &sd, &slen);
+        w_str_data(suffix, _sb, &pd, &plen);
+        if (plen > slen) return W_FALSE;
+        return memcmp(sd + slen - plen, pd, plen) == 0 ? W_TRUE : W_FALSE;
+    }
+    return w_fast_ends_with_fallback(recv, suffix, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_slice2_fallback(WValue recv, WValue start_v, WValue len_v, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached_2_any(recv, WN_slice, start_v, len_v, cache);
+}
+
+WValue w_fast_slice2(WValue recv, WValue start_v, WValue len_v, WInlineCache *cache) {
+    if (__builtin_expect(w_is_string(recv) && w_is_int(start_v) && w_is_int(len_v), 1))
+        return w_string_slice_raw(recv, w_as_int(start_v), w_as_int(len_v));
+    if (__builtin_expect(w_is_array(recv) && w_is_int(start_v) && w_is_int(len_v), 1))
+        return w_array_view(recv, start_v, len_v);
+    return w_fast_slice2_fallback(recv, start_v, len_v, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_byte_at_fallback(WValue recv, WValue idx_v, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached_1_any(recv, WN_byte_at, idx_v, cache);
+}
+
+WValue w_fast_byte_at(WValue recv, WValue idx_v, WInlineCache *cache) {
+    if (__builtin_expect(w_is_string(recv) && w_is_int(idx_v), 1)) {
+        size_t mode = (size_t)((recv >> 1) & 7);
+        int64_t i = w_as_int(idx_v);
+        if (mode <= 5) {
+            if (i < 0) i += (int64_t)mode;
+            if ((uint64_t)i >= mode) return W_NIL;
+            return W_TAG_INT | ((recv >> (4 + 8 * i)) & 0xFFULL);
+        }
+        char _b[6]; const char *s; size_t slen;
+        w_str_data(recv, _b, &s, &slen);
+        if (i < 0) i += (int64_t)slen;
+        if (i < 0 || (size_t)i >= slen) return W_NIL;
+        return W_TAG_INT | (uint64_t)(uint8_t)s[i];
+    }
+    return w_fast_byte_at_fallback(recv, idx_v, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_strip_fallback(WValue recv, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached_0(recv, WN_strip, cache);
+}
+
+WValue w_fast_strip(WValue recv, WInlineCache *cache) {
+    if (__builtin_expect(w_is_string(recv), 1))
+        return w_string_trim_ascii(recv, 1, 1);
+    return w_fast_strip_fallback(recv, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_index_fallback(WValue recv, WValue arg, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached_1_any(recv, WN_index, arg, cache);
+}
+
+WValue w_fast_index(WValue recv, WValue arg, WInlineCache *cache) {
+    if (__builtin_expect(w_is_string(recv) && w_is_string(arg), 1))
+        return w_string_index(recv, arg, W_NIL);
+    if (__builtin_expect(w_is_array(recv), 1))
+        return w_ic_array_find_index(recv, &arg, 1);
+    return w_fast_index_fallback(recv, arg, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_abs_fallback(WValue recv, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached_0(recv, WN_abs, cache);
+}
+
+WValue w_fast_abs(WValue recv, WInlineCache *cache) {
+    if (__builtin_expect(w_is_int(recv), 1)) {
+        int64_t x = w_as_int(recv);
+        return x < 0 ? w_box_int_checked(-x) : recv;
+    }
+    if (__builtin_expect(w_is_double(recv), 1))
+        return w_box_double(fabs(w_as_double(recv)));
+    return w_fast_abs_fallback(recv, cache);
+}
+
 /* Direct-call string builtins (bypass method dispatch) */
 
 WValue w_string_count(WValue recv, WValue needle_v) {
@@ -41657,6 +42591,18 @@ W_BRIDGE_STUB WValue w_gfx_metric(WValue window, WValue which) {
 }
 W_BRIDGE_STUB WValue w_gfx_set_title(WValue window, WValue title) {
     (void)window; (void)title;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_window_drag(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_window_zoom(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_fit_full_height(WValue window) {
+    (void)window;
     return w_gfx_unavailable();
 }
 W_BRIDGE_STUB WValue w_gfx_focus(WValue window) {

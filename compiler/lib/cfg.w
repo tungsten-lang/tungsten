@@ -15,8 +15,8 @@ use wire
     instrs = func[:blocks][bi][:instructions]
     ii = 0
     while ii < instrs.size()
-      op = wire_kind(instrs[ii])
-      if op in (:add_i48_checked :sub_i48_checked :mul_i48_checked)
+      kid = ccall_nobox("w_wire_kind_extern", instrs[ii]) ## i64
+      if kid == WIRE_KIND_ADD_I48_CHECKED || kid == WIRE_KIND_SUB_I48_CHECKED || kid == WIRE_KIND_MUL_I48_CHECKED
         return true
       ii += 1
     bi += 1
@@ -37,7 +37,8 @@ use wire
     instrs = func[:blocks][bi][:instructions]
     ii = 0
     while ii < instrs.size()
-      if wire_kind(instrs[ii]) == :setjmp
+      kid = ccall_nobox("w_wire_kind_extern", instrs[ii]) ## i64
+      if kid == WIRE_KIND_SETJMP
         return true
       ii += 1
     bi += 1
@@ -70,27 +71,27 @@ use wire
     instrs = blocks[i][:instructions]
     if instrs.size() > 0
       last = instrs[instrs.size() - 1]
-      op = wire_kind(last)
-      if op == :br
-        target = label_map[wire_get(last, :label)]
+      kid = ccall_nobox("w_wire_kind_extern", last) ## i64
+      if kid == WIRE_KIND_BR
+        target = label_map[ccall_rawargs("w_wire_slot_load", last, WIRE_SLOT_BR_LABEL)]
         if target != nil
           succs[i].push(target)
           preds[target].push(i)
-      elsif op == :cond_br
-        then_idx = label_map[wire_get(last, :then_label)]
-        else_idx = label_map[wire_get(last, :else_label)]
+      elsif kid == WIRE_KIND_COND_BR
+        then_idx = label_map[ccall_rawargs("w_wire_slot_load", last, WIRE_SLOT_COND_BR_THEN_LABEL)]
+        else_idx = label_map[ccall_rawargs("w_wire_slot_load", last, WIRE_SLOT_COND_BR_ELSE_LABEL)]
         if then_idx != nil
           succs[i].push(then_idx)
           preds[then_idx].push(i)
         if else_idx != nil
           succs[i].push(else_idx)
           preds[else_idx].push(i)
-      elsif op == :switch_i64
-        default_idx = label_map[wire_get(last, :default_label)]
+      elsif kid == WIRE_KIND_SWITCH_I64
+        default_idx = label_map[ccall_rawargs("w_wire_slot_load", last, WIRE_SLOT_SWITCH_I64_DEFAULT_LABEL)]
         if default_idx != nil
           succs[i].push(default_idx)
           preds[default_idx].push(i)
-        cases = wire_get(last, :cases)
+        cases = ccall_rawargs("w_wire_slot_load", last, WIRE_SLOT_SWITCH_I64_CASES)
         ci = 0
         while ci < wire_sequence_size(cases)
           target_idx = label_map[wire_sequence_get(cases, ci)[:label]]
@@ -416,39 +417,56 @@ use wire
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      op = wire_kind(inst)
-      if op != :store_i64 && op != :load_i64 && op != :store_double && op != :load_double && op != :store_float && op != :load_float && op != :store_i128 && op != :load_i128
-        if op == :call_direct_i64 || op == :call_direct_void || op == :call_method_i64 || op == :call_direct_ptr || op == :call_direct_i128 || op == :memo_call1_i64 || op == :memo_call2_i64
-          # Call args: if a slot pointer is passed, it's address-taken
-          args = wire_get(inst, :args)
-          if args != nil
-            ai = 0
-            while ai < wire_sequence_size(args)
-              arg = wire_sequence_get(args, ai)
-              if type(arg) == "String" && arg.byte_at(1) == 118 && promotable[arg] == true
-                promotable[arg] = false
-              ai += 1
-        elsif op == :br || op == :cond_br || op == :switch_i64 || op == :ret_i64 || op == :ret_void || op == :string_i64 || op == :symbol_i64 || op == :call_loc_set_col
-          ii += 1
-          next
-        elsif op == :setjmp || op == :add_i48_checked || op == :sub_i48_checked || op == :mul_i48_checked
-          return {}
-        elsif op == :ptr_to_i64
-          val = wire_get(inst, :value)
-          if promotable[val] == true
-            promotable[val] = false
-        elsif op == :store_ptr
-          dest = wire_get(inst, :dest)
-          if promotable[dest] == true
-            promotable[dest] = false
-        elsif op == :load_ptr
-          ptr = wire_get(inst, :ptr)
-          if promotable[ptr] == true
-            promotable[ptr] = false
-        elsif op == :call_direct_i64_ptr1 || op == :call_direct_void_ptr1
-          arg = wire_get(inst, :arg)
-          if promotable[arg] == true
-            promotable[arg] = false
+      kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+      case kid
+      when WIRE_KIND_STORE_I64, WIRE_KIND_LOAD_I64, WIRE_KIND_STORE_DOUBLE, WIRE_KIND_LOAD_DOUBLE, WIRE_KIND_STORE_FLOAT, WIRE_KIND_LOAD_FLOAT, WIRE_KIND_STORE_I128, WIRE_KIND_LOAD_I128, WIRE_KIND_BR, WIRE_KIND_COND_BR, WIRE_KIND_SWITCH_I64, WIRE_KIND_RET_I64, WIRE_KIND_RET_VOID, WIRE_KIND_STRING_I64, WIRE_KIND_SYMBOL_I64, WIRE_KIND_CALL_LOC_SET_COL
+        ii += 1
+        next
+      when WIRE_KIND_CALL_DIRECT_I64
+        args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_ARGS)
+        if args != nil
+          ai = 0
+          while ai < wire_sequence_size(args)
+            arg = wire_sequence_get(args, ai)
+            if type(arg) == "String" && arg.byte_at(1) == 118 && promotable[arg] == true
+              promotable[arg] = false
+            ai += 1
+      when WIRE_KIND_CALL_DIRECT_VOID, WIRE_KIND_CALL_DIRECT_PTR, WIRE_KIND_CALL_METHOD_I64
+        args = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_VOID_ARGS)
+        if args != nil
+          ai = 0
+          while ai < wire_sequence_size(args)
+            arg = wire_sequence_get(args, ai)
+            if type(arg) == "String" && arg.byte_at(1) == 118 && promotable[arg] == true
+              promotable[arg] = false
+            ai += 1
+      when WIRE_KIND_CALL_DIRECT_I128, WIRE_KIND_MEMO_CALL1_I64, WIRE_KIND_MEMO_CALL2_I64
+        args = wire_get(inst, :args)
+        if args != nil
+          ai = 0
+          while ai < wire_sequence_size(args)
+            arg = wire_sequence_get(args, ai)
+            if type(arg) == "String" && arg.byte_at(1) == 118 && promotable[arg] == true
+              promotable[arg] = false
+            ai += 1
+      when WIRE_KIND_SETJMP, WIRE_KIND_ADD_I48_CHECKED, WIRE_KIND_SUB_I48_CHECKED, WIRE_KIND_MUL_I48_CHECKED
+        return {}
+      when WIRE_KIND_PTR_TO_I64
+        val = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_PTR_TO_I64_VALUE)
+        if promotable[val] == true
+          promotable[val] = false
+      when WIRE_KIND_STORE_PTR
+        dest = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_PTR_DEST)
+        if promotable[dest] == true
+          promotable[dest] = false
+      when WIRE_KIND_LOAD_PTR
+        ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_PTR_PTR)
+        if promotable[ptr] == true
+          promotable[ptr] = false
+      when WIRE_KIND_CALL_DIRECT_I64_PTR1, WIRE_KIND_CALL_DIRECT_VOID_PTR1
+        arg = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_CALL_DIRECT_I64_PTR1_ARG)
+        if promotable[arg] == true
+          promotable[arg] = false
       ii += 1
     bi += 1
 
@@ -473,9 +491,9 @@ use wire
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      op = wire_kind(inst)
-      if op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128
-        ptr = wire_get(inst, :ptr)
+      kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+      if kid == WIRE_KIND_STORE_I64 || kid == WIRE_KIND_STORE_DOUBLE || kid == WIRE_KIND_STORE_FLOAT || kid == WIRE_KIND_STORE_I128
+        ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_PTR)
         if promotable[ptr] != nil && last_def[ptr] != bi
           last_def[ptr] = bi
           if defs[ptr] == nil
@@ -499,9 +517,9 @@ use wire
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      op = wire_kind(inst)
-      if op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128
-        ptr = wire_get(inst, :ptr)
+      kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+      if kid == WIRE_KIND_STORE_I64 || kid == WIRE_KIND_STORE_DOUBLE || kid == WIRE_KIND_STORE_FLOAT || kid == WIRE_KIND_STORE_I128
+        ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_PTR)
         if promotable[ptr] != nil && last_def[ptr] != bi
           last_def[ptr] = bi
           if defs[ptr] == nil
@@ -509,8 +527,8 @@ use wire
           defs[ptr].push(bi)
           if bi > 0
             has_non_entry_def = true
-      elsif op == :load_i64 || op == :load_double || op == :load_float || op == :load_i128
-        ptr = wire_get(inst, :ptr)
+      elsif kid == WIRE_KIND_LOAD_I64 || kid == WIRE_KIND_LOAD_DOUBLE || kid == WIRE_KIND_LOAD_FLOAT || kid == WIRE_KIND_LOAD_I128
+        ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_PTR)
         if promotable[ptr] != nil && last_def[ptr] != bi && last_ue[ptr] != bi
           last_ue[ptr] = bi
           if ue_loads[ptr] == nil
@@ -620,16 +638,23 @@ use wire
     inst = instrs[ii]
     if subst_count > 0
       inst = apply_subst(inst, subst, subst_count)
-    op = wire_kind(inst)
-    if (op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128) && promotable[wire_get(inst, :ptr)] != nil
-      current_val[wire_get(inst, :ptr)] = wire_get(inst, :value)
-    elsif (op == :load_i64 || op == :load_double || op == :load_float || op == :load_i128) && promotable[wire_get(inst, :ptr)] != nil
-      ptr = wire_get(inst, :ptr)
-      val = current_val[ptr]
-      if val == nil
-        val = ssa_default_val_for_ptr(func, promotable, ptr)
-      subst[wire_get(inst, :temp)] = val
-      subst_count += 1
+    kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+    if kid == WIRE_KIND_STORE_I64 || kid == WIRE_KIND_STORE_DOUBLE || kid == WIRE_KIND_STORE_FLOAT || kid == WIRE_KIND_STORE_I128
+      ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_PTR)
+      if promotable[ptr] != nil
+        current_val[ptr] = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_VALUE)
+      else
+        new_instrs.push(inst)
+    elsif kid == WIRE_KIND_LOAD_I64 || kid == WIRE_KIND_LOAD_DOUBLE || kid == WIRE_KIND_LOAD_FLOAT || kid == WIRE_KIND_LOAD_I128
+      ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_PTR)
+      if promotable[ptr] != nil
+        val = current_val[ptr]
+        if val == nil
+          val = ssa_default_val_for_ptr(func, promotable, ptr)
+        subst[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_TEMP)] = val
+        subst_count += 1
+      else
+        new_instrs.push(inst)
     else
       new_instrs.push(inst)
     ii += 1
@@ -761,22 +786,29 @@ use wire
       # Apply pending substitutions to this instruction
       if subst_count > 0
         inst = wire_try_fold_box_call(func, apply_subst(inst, subst, subst_count))
-      op = wire_kind(inst)
+      kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
 
-      if (op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128) && promotable[wire_get(inst, :ptr)] != nil
-        # Store to promotable var: push new definition, skip instruction
-        ptr = wire_get(inst, :ptr)
-        current_def[ptr].push(wire_get(inst, :value))
-        def_trail.push(ptr)
-      elsif (op == :load_i64 || op == :load_double || op == :load_float || op == :load_i128) && promotable[wire_get(inst, :ptr)] != nil
-        # Load from promotable var: substitute directly, skip instruction
-        ptr = wire_get(inst, :ptr)
-        def_stack = current_def[ptr]
-        if def_stack.size() > 0
-          subst[wire_get(inst, :temp)] = def_stack[def_stack.size() - 1]
+      if kid == WIRE_KIND_STORE_I64 || kid == WIRE_KIND_STORE_DOUBLE || kid == WIRE_KIND_STORE_FLOAT || kid == WIRE_KIND_STORE_I128
+        ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_PTR)
+        if promotable[ptr] != nil
+          # Store to promotable var: push new definition, skip instruction
+          current_def[ptr].push(ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_VALUE))
+          def_trail.push(ptr)
         else
-          subst[wire_get(inst, :temp)] = ssa_default_val_for_ptr(func, promotable, ptr)
-        subst_count += 1
+          new_instrs.push(inst)
+      elsif kid == WIRE_KIND_LOAD_I64 || kid == WIRE_KIND_LOAD_DOUBLE || kid == WIRE_KIND_LOAD_FLOAT || kid == WIRE_KIND_LOAD_I128
+        ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_PTR)
+        if promotable[ptr] != nil
+          # Load from promotable var: substitute directly, skip instruction
+          def_stack = current_def[ptr]
+          lt = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_TEMP)
+          if def_stack.size() > 0
+            subst[lt] = def_stack[def_stack.size() - 1]
+          else
+            subst[lt] = ssa_default_val_for_ptr(func, promotable, ptr)
+          subst_count += 1
+        else
+          new_instrs.push(inst)
       else
         new_instrs.push(inst)
       ii += 1
@@ -839,16 +871,23 @@ use wire
         inst = instrs[ii]
         if u_subst_count > 0
           inst = wire_try_fold_box_call(func, apply_subst(inst, u_subst, u_subst_count))
-        op = wire_kind(inst)
-        if (op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128) && promotable[wire_get(inst, :ptr)] != nil
-          local_defs[wire_get(inst, :ptr)] = wire_get(inst, :value)
-        elsif (op == :load_i64 || op == :load_double || op == :load_float || op == :load_i128) && promotable[wire_get(inst, :ptr)] != nil
-          ptr = wire_get(inst, :ptr)
-          val = local_defs[ptr]
-          if val == nil
-            val = ssa_default_val_for_ptr(func, promotable, ptr)
-          u_subst[wire_get(inst, :temp)] = val
-          u_subst_count += 1
+        kid = ccall_nobox("w_wire_kind_extern", inst) ## i64
+        if kid == WIRE_KIND_STORE_I64 || kid == WIRE_KIND_STORE_DOUBLE || kid == WIRE_KIND_STORE_FLOAT || kid == WIRE_KIND_STORE_I128
+          ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_PTR)
+          if promotable[ptr] != nil
+            local_defs[ptr] = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_STORE_I64_VALUE)
+          else
+            new_instrs.push(inst)
+        elsif kid == WIRE_KIND_LOAD_I64 || kid == WIRE_KIND_LOAD_DOUBLE || kid == WIRE_KIND_LOAD_FLOAT || kid == WIRE_KIND_LOAD_I128
+          ptr = ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_PTR)
+          if promotable[ptr] != nil
+            val = local_defs[ptr]
+            if val == nil
+              val = ssa_default_val_for_ptr(func, promotable, ptr)
+            u_subst[ccall_rawargs("w_wire_slot_load", inst, WIRE_SLOT_LOAD_I64_TEMP)] = val
+            u_subst_count += 1
+          else
+            new_instrs.push(inst)
         else
           new_instrs.push(inst)
         ii += 1

@@ -1,6 +1,7 @@
 #include "tc.h"
 #define W_AST_SCHEMA_INCLUDE_NAMES 1
 #include "ast_schema_generated.h"
+#include "wire_schema_table.h"
 #include "w_lexchar_cache.c"
 
 #include <ctype.h>
@@ -247,6 +248,7 @@ static TcValue SYM_COL = W_NIL;
 static TcValue SYM_OP = W_NIL;
 static TcValue SYM_TYPE = W_NIL;
 static TcValue SYM_BLOCKS = W_NIL;
+static TcValue SYM_INSTRUCTIONS = W_NIL;
 static TcValue SYM_NEXT_TEMP = W_NIL;
 static TcValue SYM_I64 = W_NIL;
 static TcValue SYM_RAW_I64 = W_NIL;
@@ -271,6 +273,7 @@ static TcValue TYPE_STR_OBJECT = W_NIL;
 
 static TcValue g_ast_kind_sym[W_AST_KIND_MAX + 1];
 static TcValue g_ast_field_sym[W_AST_KIND_MAX + 1][10];
+static TcValue g_vm_wire_field_sym[W_WIRE_SCHEMA_MAX_KIND][W_WIRE_SCHEMA_MAX_FIELDS];
 static const char *g_ast_kind_hash_keys[512];
 static uint16_t g_ast_kind_hash_ids[512];
 static TcValue g_temp_strs[1024];
@@ -334,6 +337,7 @@ static int intern_builtin_names(TcError *err) {
       !intern_sym_const("op", 2, &SYM_OP) ||
       !intern_sym_const("type", 4, &SYM_TYPE) ||
       !intern_sym_const("blocks", 6, &SYM_BLOCKS) ||
+      !intern_sym_const("instructions", 12, &SYM_INSTRUCTIONS) ||
       !intern_sym_const("next_temp", 9, &SYM_NEXT_TEMP) ||
       !intern_sym_const("i64", 3, &SYM_I64) ||
       !intern_sym_const("raw_i64", 7, &SYM_RAW_I64) ||
@@ -404,6 +408,19 @@ static int intern_builtin_names(TcError *err) {
         const char *f_intern = tc_intern(fname, flen);
         if (!f_intern) return 0;
         g_ast_field_sym[k][fi] = tc_box_symbol_bytes(f_intern, flen, 0);
+      }
+    }
+  }
+
+  for (int k = 1; k < W_WIRE_SCHEMA_MAX_KIND; k++) {
+    if (!g_wire_kind_schemas[k].is_schema) continue;
+    for (uint8_t fi = 0; fi < g_wire_kind_schemas[k].fixed_count; fi++) {
+      const char *fname = g_wire_kind_schemas[k].field_names[fi];
+      if (fname) {
+        size_t flen = strlen(fname);
+        const char *f_intern = tc_intern(fname, flen);
+        if (!f_intern) return 0;
+        g_vm_wire_field_sym[k][fi] = tc_box_symbol_bytes(f_intern, flen, 0);
       }
     }
   }
@@ -3322,6 +3339,9 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
     [TC_OP_IS_MACHINE_INT64_TYPE] = &&L_IS_MACHINE_INT64_TYPE,
     [TC_OP_STRING_FIRST_BYTE]     = &&L_STRING_FIRST_BYTE,
     [TC_OP_WIRE_TEMP_OPERANDS]    = &&L_WIRE_TEMP_OPERANDS,
+    [TC_OP_WIRE_PACKED]           = &&L_WIRE_PACKED,
+    [TC_OP_WIRE_FUNC_PUSH_INST]   = &&L_WIRE_FUNC_PUSH_INST,
+    [TC_OP_WIRE_SLOT_LOAD]        = &&L_WIRE_SLOT_LOAD,
     [TC_OP_DESTRUCTURE]           = &&L_DESTRUCTURE,
   };
 
@@ -4025,6 +4045,73 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
       L_WIRE_TEMP_OPERANDS: {
         TcValue out = W_NIL;
         if (!tc_wire_temp_operands(tos, &out, err)) goto cleanup_fail;
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_WIRE_PACKED: {
+        uint32_t n = read_u32_at(&chunk->code[vm.ip]);
+        vm.ip += 4;
+        size_t base = vm.sp - ((size_t)n + 1);
+        TcValue k_v = vm.stack[base];
+        int64_t kind = value_is_int(k_v) ? value_as_int(k_v) : (int64_t)k_v;
+        if (kind <= 0 || kind >= W_WIRE_SCHEMA_MAX_KIND ||
+            !g_wire_kind_schemas[kind].is_schema ||
+            g_wire_kind_schemas[kind].fixed_count != n) {
+          tc_error_set(err, "w_wire_packed: invalid kind or field count");
+          goto cleanup_fail;
+        }
+        WValue handle = w_wire_alloc_reserve(
+            kind, (int64_t)n,
+            g_wire_kind_schemas[kind].extra_cap > 6
+                ? (int64_t)g_wire_kind_schemas[kind].extra_cap
+                : 6);
+        for (uint32_t i = 0; i < n; i++) {
+          w_wire_field_store_at(handle, (int64_t)i, g_vm_wire_field_sym[kind][i],
+                                vm.stack[base + 1 + i]);
+        }
+        vm.sp = base + 1;
+        vm.stack[base] = (tos = handle);
+        NEXT_FAST();
+      }
+      L_WIRE_FUNC_PUSH_INST: {
+        TcValue inst = tos;
+        TcValue f = vm.stack[vm.sp - 2];
+        vm.sp--;
+        TcValue blocks_v = W_NIL;
+        if (w_is_wire(f)) {
+          blocks_v = w_wire_field_load(f, SYM_BLOCKS);
+        } else if (tc_kind(f) == TC_VAL_HASH && tc_as_hash(f)) {
+          blocks_v = hash_get_value(tc_as_hash(f), SYM_BLOCKS);
+        }
+        TcValue out = W_NIL;
+        if (tc_kind(blocks_v) == TC_VAL_ARRAY && tc_as_array(blocks_v) &&
+            tc_as_array(blocks_v)->size > 0) {
+          TcRuntimeArray *ba = tc_as_array(blocks_v);
+          TcValue blk = ba->slots[ba->start + ba->size - 1];
+          TcValue instrs_v = W_NIL;
+          if (w_is_wire(blk)) {
+            instrs_v = w_wire_field_load(blk, SYM_INSTRUCTIONS);
+          } else if (tc_kind(blk) == TC_VAL_HASH && tc_as_hash(blk)) {
+            instrs_v = hash_get_value(tc_as_hash(blk), SYM_INSTRUCTIONS);
+          }
+          if (tc_kind(instrs_v) == TC_VAL_ARRAY && tc_as_array(instrs_v)) {
+            TcRuntimeArray *ia = tc_as_array(instrs_v);
+            if (!runtime_array_ensure_cap(ia, (size_t)ia->start + (size_t)ia->size + 1, err)) goto cleanup_fail;
+            ia->slots[ia->start + ia->size++] = inst;
+            out = instrs_v;
+          }
+        }
+        vm.stack[vm.sp - 1] = (tos = out);
+        NEXT_FAST();
+      }
+      L_WIRE_SLOT_LOAD: {
+        int64_t idx = value_is_int(tos) ? value_as_int(tos) : (int64_t)tos;
+        WValue wire = vm.stack[vm.sp - 2];
+        vm.sp--;
+        TcValue out = W_NIL;
+        if (w_is_wire(wire) && idx >= 0 && idx < w_wire_field_count(wire)) {
+          out = w_wire_field_value_at(wire, idx);
+        }
         vm.stack[vm.sp - 1] = (tos = out);
         NEXT_FAST();
       }

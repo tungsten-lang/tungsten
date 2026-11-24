@@ -62,15 +62,33 @@
     return :load_i128
   :load_i64
 
+-> emit_machine_load(wfn, t, ptr, temp)
+  if is_machine_int128_type(t)
+    emit_wire_load_i128(wfn, ptr, temp)
+  else
+    emit_wire_load_i64(wfn, ptr, temp)
+
 -> machine_store_op(t)
   if is_machine_int128_type(t)
     return :store_i128
   :store_i64
 
+-> emit_machine_store(wfn, t, ptr, value)
+  if is_machine_int128_type(t)
+    emit_wire_store_i128(wfn, ptr, value)
+  else
+    emit_wire_store_i64(wfn, ptr, value)
+
 -> machine_cmp_op(t)
   if is_machine_int128_type(t)
     return :icmp_i128
   :icmp_i64
+
+-> emit_machine_cmp(wfn, t, lhs, pred, rhs, temp)
+  if is_machine_int128_type(t)
+    emit_wire_icmp_i128(wfn, lhs, pred, rhs, temp)
+  else
+    emit_wire_icmp_i64(wfn, lhs, pred, rhs, temp)
 
 -> machine_box_fn(t)
   case t
@@ -107,10 +125,126 @@
     return :call_direct_i128
   :call_direct_i64
 
+-> emit_machine_call_return(wfn, t, arg_types, args, name, temp)
+  if is_machine_int128_type(t)
+    emit_wire_call_direct_i128(wfn, arg_types, args, nil, name, temp)
+  else
+    emit_wire_call_direct_i64(wfn, arg_types, args, nil, nil, name, nil, nil, temp)
+
 -> machine_int_to_i128_ext_op(from_type)
   if is_u64_type(from_type)
     return :zext_i64_i128
   :sext_i64_i128
+
+-> emit_machine_int_to_i128_ext(wfn, from_type, temp, value)
+  if is_u64_type(from_type)
+    emit_wire_zext_i64_i128(wfn, temp, value)
+  else
+    emit_wire_sext_i64_i128(wfn, temp, value)
+
+-> emit_wire_int_binop(wfn, op, lhs, rhs, temp)
+  case op
+  when :add_i64
+    emit_wire_add_i64(wfn, lhs, rhs, temp)
+  when :sub_i64
+    emit_wire_sub_i64(wfn, lhs, rhs, temp)
+  when :mul_i64
+    emit_wire_mul_i64(wfn, lhs, rhs, temp)
+  when :sdiv_i64
+    emit_wire_sdiv_i64(wfn, lhs, rhs, temp)
+  when :udiv_i64
+    emit_wire_udiv_i64(wfn, lhs, rhs, temp)
+  when :srem_i64
+    emit_wire_srem_i64(wfn, lhs, rhs, temp)
+  when :urem_i64
+    emit_wire_urem_i64(wfn, lhs, rhs, temp)
+  when :and_i64
+    emit_wire_and_i64(wfn, lhs, rhs, temp)
+  when :or_i64
+    emit_wire_or_i64(wfn, lhs, rhs, temp)
+  when :xor_i64
+    emit_wire_xor_i64(wfn, lhs, rhs, temp)
+  when :shl_i64
+    emit_wire_shl_i64(wfn, lhs, rhs, temp)
+  when :ashr_i64
+    emit_wire_ashr_i64(wfn, lhs, rhs, temp)
+  when :lshr_i64
+    emit_wire_lshr_i64(wfn, lhs, rhs, temp)
+  when :add_i128
+    emit_wire_add_i128(wfn, lhs, rhs, temp)
+  when :sub_i128
+    emit_wire_sub_i128(wfn, lhs, rhs, temp)
+  when :mul_i128
+    emit_wire_mul_i128(wfn, lhs, rhs, temp)
+  when :sdiv_i128
+    emit_wire_sdiv_i128(wfn, lhs, rhs, temp)
+  when :udiv_i128
+    emit_wire_udiv_i128(wfn, lhs, rhs, temp)
+  when :srem_i128
+    emit_wire_srem_i128(wfn, lhs, rhs, temp)
+  when :urem_i128
+    emit_wire_urem_i128(wfn, lhs, rhs, temp)
+  when :and_i128
+    emit_wire_and_i128(wfn, lhs, rhs, temp)
+  when :or_i128
+    emit_wire_or_i128(wfn, lhs, rhs, temp)
+  when :xor_i128
+    emit_wire_xor_i128(wfn, lhs, rhs, temp)
+  when :shl_i128
+    emit_wire_shl_i128(wfn, lhs, rhs, temp)
+  when :ashr_i128
+    emit_wire_ashr_i128(wfn, lhs, rhs, temp)
+  else
+    emit_wire_dynamic_3(wfn, op, :lhs, lhs, :rhs, rhs, :temp, temp)
+
+-> emit_wire_float_binop(wfn, op, fp_flags, lhs, rhs, temp)
+  case op
+  when :fadd_f64
+    emit_wire_fadd_f64(wfn, fp_flags, lhs, rhs, temp)
+  when :fsub_f64
+    emit_wire_fsub_f64(wfn, fp_flags, lhs, rhs, temp)
+  when :fmul_f64
+    emit_wire_fmul_f64(wfn, fp_flags, lhs, rhs, temp)
+  when :fdiv_f64
+    emit_wire_fdiv_f64(wfn, fp_flags, lhs, rhs, temp)
+  when :frem_f64
+    emit_wire_frem_f64(wfn, fp_flags, lhs, rhs, temp)
+  else
+    emit_wire_dynamic_4(wfn, op, :fp_flags, fp_flags, :lhs, lhs, :rhs, rhs, :temp, temp)
+
+-> emit_machine_int_to_f64(wfn, type, temp, value)
+  case type
+  when :u128
+    emit_wire_uitofp_i128_f64(wfn, temp, value)
+  when :i128
+    emit_wire_sitofp_i128_f64(wfn, temp, value)
+  when :u64
+    emit_wire_uitofp_i64_f64(wfn, temp, value)
+  else
+    emit_wire_sitofp_i64_f64(wfn, temp, value)
+
+-> emit_f64_to_machine_int(wfn, type, temp, value)
+  case type
+  when :u128
+    emit_wire_fptoui_f64_i128(wfn, temp, value)
+  when :i128
+    emit_wire_fptosi_f64_i128(wfn, temp, value)
+  when :u64
+    emit_wire_fptoui_f64_i64(wfn, temp, value)
+  else
+    emit_wire_fptosi_f64_i64(wfn, temp, value)
+
+-> emit_float_load(wfn, t, ptr, temp)
+  if t in (:f32 :raw_f32)
+    emit_wire_load_float(wfn, ptr, temp)
+  else
+    emit_wire_load_double(wfn, ptr, temp)
+
+-> emit_float_store(wfn, t, ptr, value)
+  if t in (:f32 :raw_f32)
+    emit_wire_store_float(wfn, ptr, value)
+  else
+    emit_wire_store_double(wfn, ptr, value)
 
 -> machine_int_op(type, op)
   wide = is_machine_int128_type(type)
@@ -294,7 +428,7 @@
     if is_machine_int128_type(from_type)
       return value
     temp = next_temp(wfn)
-    emit_wire_dynamic_2(wfn, machine_int_to_i128_ext_op(from_type), :temp, temp, :value, value)
+    emit_machine_int_to_i128_ext(wfn, from_type, temp, value)
     return temp
   if is_machine_int128_type(from_type)
     temp = next_temp(wfn)
@@ -386,7 +520,7 @@
     wfn = ctx[:func]
     raw = ensure_raw_f64(wfn, lower_expression(ctx, node))
     converted = next_temp(wfn)
-    emit_wire_dynamic_2(wfn, f64_to_machine_int_op(type), :temp, converted, :value, raw)
+    emit_f64_to_machine_int(wfn, type, converted, raw)
     return converted
   # Negative literals are represented as unary MINUS over an Int node. Keep
   # that operand in the same raw context too; otherwise a large tag constant
@@ -401,7 +535,7 @@
     wfn = ctx[:func]
     operand = lower_machine_int_expression(ctx, node.operand, type)
     temp = next_temp(wfn)
-    emit_wire_dynamic_3(wfn, machine_int_op(type, :MINUS), :lhs, "0", :rhs, operand, :temp, temp)
+    emit_wire_int_binop(wfn, machine_int_op(type, :MINUS), "0", operand, temp)
     return temp
   # An explicit machine-int context applies to the WHOLE expression tree,
   # not only its outermost result.  Falling through to lower_expression here
@@ -456,7 +590,7 @@
       lhs = lower_machine_int_expression(ctx, node.left, type)
       rhs = lower_machine_int_expression(ctx, node.right, type)
       temp = next_temp(wfn)
-      emit_wire_dynamic_3(wfn, int_op, :lhs, lhs, :rhs, rhs, :temp, temp)
+      emit_wire_int_binop(wfn, int_op, lhs, rhs, temp)
       return temp
   # Carry-primitive intrinsic: `mulhi(a, b)` = high 64 bits of the unsigned
   # 64x64->128 product. Lowers to a single UMULH (arm64) / MULX (x86). It's a
@@ -887,7 +1021,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # garbage. :raw_i64 is the safe, correct shape.
     if int_op != nil
       result_raw = next_temp(wfn)
-      emit_wire_dynamic_3(wfn, int_op, :lhs, cur_raw, :rhs, rhs_raw, :temp, result_raw)
+      emit_wire_int_binop(wfn, int_op, cur_raw, rhs_raw, result_raw)
       emit_wire_store_i64(wfn, raw_slot, result_raw)
       return typed_value(:raw_i64, result_raw)
 
@@ -907,7 +1041,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     machine_type = ctx[:var_types][name]
     ptr = ensure_var_slot(wfn, name, machine_slot_type(machine_type))
     cur_raw = next_temp(wfn)
-    emit_wire_dynamic_2(wfn, machine_load_op(machine_type), :ptr, ptr, :temp, cur_raw)
+    emit_machine_load(wfn, machine_type, ptr, cur_raw)
 
     rhs_raw = lower_machine_int_expression(ctx, node.value, machine_type)
 
@@ -917,8 +1051,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
     if int_op != nil
       result_raw = next_temp(wfn)
-      emit_wire_dynamic_3(wfn, int_op, :lhs, cur_raw, :rhs, rhs_raw, :temp, result_raw)
-      emit_wire_dynamic_2(wfn, machine_store_op(machine_type), :ptr, ptr, :value, result_raw)
+      emit_wire_int_binop(wfn, int_op, cur_raw, rhs_raw, result_raw)
+      emit_machine_store(wfn, machine_type, ptr, result_raw)
       return typed_value(raw_machine_value_type(machine_type), result_raw)
 
     cur_boxed = ensure_i64_value(wfn, typed_value(raw_machine_value_type(machine_type), cur_raw))
@@ -928,16 +1062,16 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       result = next_temp(wfn)
       emit_wire_call_direct_i64(wfn, nil, [cur_boxed, rhs_reg], nil, nil, rt_op, nil, nil, result)
       result_raw = ensure_raw_machine_int(wfn, typed_value(:i64, result), machine_type, machine_type)
-      emit_wire_dynamic_2(wfn, machine_store_op(machine_type), :ptr, ptr, :value, result_raw)
+      emit_machine_store(wfn, machine_type, ptr, result_raw)
       return typed_value(raw_machine_value_type(machine_type), result_raw)
-    emit_wire_dynamic_2(wfn, machine_store_op(machine_type), :ptr, ptr, :value, rhs_raw)
+    emit_machine_store(wfn, machine_type, ptr, rhs_raw)
     return typed_value(raw_machine_value_type(machine_type), rhs_raw)
 
   if is_machine_float_type(ctx[:var_types][name])
     float_type = ctx[:var_types][name]
     ptr = ensure_var_slot(wfn, name, float_slot_type(float_type))
     cur_raw = next_temp(wfn)
-    emit_wire_dynamic_2(wfn, float_load_op(float_type), :ptr, ptr, :temp, cur_raw)
+    emit_float_load(wfn, float_type, ptr, cur_raw)
 
     rhs = lower_expression(ctx, node.value)
     # A Decimal RHS (bare `3.5` parses as a Decimal, so `f64var += 3.5`) is
@@ -963,7 +1097,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         emit_wire_fpext_f32_f64(wfn, rhs64_wide, rhs_raw)
         rhs64 = rhs64_wide
       result_raw = next_temp(wfn)
-      emit_wire_dynamic_3(wfn, float_op, :lhs, lhs64, :rhs, rhs64, :temp, result_raw)
+      emit_wire_float_binop(wfn, float_op, nil, lhs64, rhs64, result_raw)
       store_raw = result_raw
       if float_type in (:f32 :raw_f32)
         store_raw = next_temp(wfn)
@@ -986,7 +1120,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       result_raw = ensure_raw_f64(wfn, typed_value(:i64, result))
       emit_wire_store_double(wfn, ptr, result_raw)
       return typed_value(:raw_f64, result_raw)
-    emit_wire_dynamic_2(wfn, float_store_op(float_type), :ptr, ptr, :value, rhs_raw)
+    emit_float_store(wfn, float_type, ptr, rhs_raw)
     return typed_value(raw_float_value_type(float_type), rhs_raw)
 
   # Read current value: check binding first, then var slot
@@ -1072,7 +1206,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     cur_raw = ensure_raw_i64(wfn, typed_value(:i64, cur))
     rhs_raw = ensure_raw_i64(wfn, rhs)
     result_raw = next_temp(wfn)
-    emit_wire_dynamic_3(wfn, int_op, :lhs, cur_raw, :rhs, rhs_raw, :temp, result_raw)
+    emit_wire_int_binop(wfn, int_op, cur_raw, rhs_raw, result_raw)
     result_tv = typed_value(:raw_i64, result_raw)
     boxed_reg = ensure_i64_value(wfn, result_tv)
     if ptr != nil
@@ -1081,20 +1215,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       ctx[:bindings][name] = boxed_reg
     return result_tv
   if ovf_ca_mode == :trap && op in (:PLUS :MINUS :STAR) && is_integer_like_type(lt) && is_integer_like_type(vt)
-    guarded_ca_op = op == :PLUS ? :add_i48_guarded : (op == :MINUS ? :sub_i48_guarded : :mul_i48_guarded)
-    rt_ca_fn = op == :PLUS ? "w_add" : (op == :MINUS ? "w_sub" : "w_mul")
     ca_block_id = lowering_next_block_id(ctx, 4)
     result_temp = next_temp(wfn)
-    ca_guarded = wire_make_dynamic_6(
-      guarded_ca_op,
-      :block_id, ca_block_id,
-      :lhs, cur,
-      :rhs, rhs_reg,
-      :rt_fallback, rt_ca_fn,
-      :temp, result_temp,
-      :trap, true
-    )
-    emit_instruction(wfn, ca_guarded)
+    if op == :PLUS
+      emit_wire_add_i48_guarded(wfn, ca_block_id, cur, rhs_reg, "w_add", result_temp, true)
+    elsif op == :MINUS
+      emit_wire_sub_i48_guarded(wfn, ca_block_id, cur, rhs_reg, "w_sub", result_temp, true)
+    else
+      emit_wire_mul_i48_guarded(wfn, ca_block_id, cur, rhs_reg, "w_mul", result_temp, true)
     if ptr != nil
       emit_wire_store_i64(wfn, ptr, result_temp)
     else
@@ -1169,7 +1297,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     cur_raw = nanunbox_int_emit(wfn, cur)
     rhs_raw = nanunbox_int_emit(wfn, rhs_reg)
     result = next_temp(wfn)
-    emit_wire_dynamic_3(wfn, int_op, :lhs, cur_raw, :rhs, rhs_raw, :temp, result)
+    emit_wire_int_binop(wfn, int_op, cur_raw, rhs_raw, result)
     boxed = nanbox_int_emit(wfn, result)
     boxed_reg = boxed[:value]
     if ptr != nil
@@ -1184,7 +1312,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     cur_raw = ensure_raw_f64(wfn, typed_value(:i64, cur))
     rhs_raw = ensure_raw_f64(wfn, rhs)
     result = next_temp(wfn)
-    emit_wire_dynamic_3(wfn, float_op, :lhs, cur_raw, :rhs, rhs_raw, :temp, result)
+    emit_wire_float_binop(wfn, float_op, nil, cur_raw, rhs_raw, result)
     boxed = typed_value(:raw_f64, result)
     boxed_reg = boxed[:value]
     if ptr != nil
@@ -2433,14 +2561,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       lhs_raw = lower_machine_int_expression(ctx, node.left, machine_type)
       rhs_raw = lower_machine_int_expression(ctx, node.right, machine_type)
       temp = next_temp(wfn)
-      emit_wire_dynamic_3(wfn, int_op, :lhs, lhs_raw, :rhs, rhs_raw, :temp, temp)
+      emit_wire_int_binop(wfn, int_op, lhs_raw, rhs_raw, temp)
       return typed_value(raw_machine_value_type(machine_type), temp)
 
     if cmp_pred != nil
       lhs_raw = lower_machine_int_expression(ctx, node.left, machine_type)
       rhs_raw = lower_machine_int_expression(ctx, node.right, machine_type)
       temp = next_temp(wfn)
-      emit_wire_dynamic_4(wfn, machine_cmp_op(machine_type), :lhs, lhs_raw, :pred, cmp_pred, :rhs, rhs_raw, :temp, temp)
+      emit_machine_cmp(wfn, machine_type, lhs_raw, cmp_pred, rhs_raw, temp)
       return typed_value(:i1, temp)
 
   lhs_unboxed = node.left != nil && ast_kind(node.left) == :var && ctx[:unboxed_vars][node.left.name] != nil
@@ -2490,7 +2618,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rhs_raw = ensure_raw_int(wfn, rhs)
       temp = next_temp(wfn)
       if int_op != nil
-        emit_wire_dynamic_3(wfn, int_op, :lhs, lhs_raw, :rhs, rhs_raw, :temp, temp)
+        emit_wire_int_binop(wfn, int_op, lhs_raw, rhs_raw, temp)
         return typed_value(:raw_i64, temp)
       emit_wire_icmp_i64(wfn, lhs_raw, cmp_pred, rhs_raw, temp)
       return typed_value(:i1, temp)
@@ -2516,7 +2644,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         lhs_raw = ensure_raw_i64(wfn, lhs)
         rhs_raw = ensure_raw_i64(wfn, rhs)
         temp = next_temp(wfn)
-        emit_wire_dynamic_3(wfn, int_op, :lhs, lhs_raw, :rhs, rhs_raw, :temp, temp)
+        emit_wire_int_binop(wfn, int_op, lhs_raw, rhs_raw, temp)
         return typed_value(:raw_i64, temp)
       guarded_op = nil
       rt_fn = nil
@@ -2548,18 +2676,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       # fallback, which auto-promotes to BigInt. The `:trap` key is added ONLY
       # in trap mode, so the promote/default guarded instruction is byte-
       # identical to before this feature (no codegen drift on the fast path).
-      guarded_inst = wire_make_dynamic_6(
-        guarded_op,
-        :block_id, block_id,
-        :lhs, lhs_reg,
-        :rhs, rhs_reg,
-        :rt_fallback, rt_fn,
-        :temp, temp,
-        :trap, nil
-      )
-      if ovf_mode == :trap
-        wire_set(guarded_inst, :trap, true)
-      emit_instruction(wfn, guarded_inst)
+      trap_flag = ovf_mode == :trap ? true : nil
+      if guarded_op == :add_i48_guarded
+        emit_wire_add_i48_guarded(wfn, block_id, lhs_reg, rhs_reg, rt_fn, temp, trap_flag)
+      elsif guarded_op == :sub_i48_guarded
+        emit_wire_sub_i48_guarded(wfn, block_id, lhs_reg, rhs_reg, rt_fn, temp, trap_flag)
+      else
+        emit_wire_mul_i48_guarded(wfn, block_id, lhs_reg, rhs_reg, rt_fn, temp, trap_flag)
       return typed_value(:i64, temp)
 
     # Non-overflowing int ops (div, mod, bitwise): inline without check.
@@ -2586,7 +2709,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       lhs_raw = ensure_raw_int(wfn, lhs)
       rhs_raw = ensure_raw_int(wfn, rhs)
       temp = next_temp(wfn)
-      emit_wire_dynamic_3(wfn, int_op, :lhs, lhs_raw, :rhs, rhs_raw, :temp, temp)
+      emit_wire_int_binop(wfn, int_op, lhs_raw, rhs_raw, temp)
       return typed_value(:raw_int, temp)
 
     # Comparisons: inline icmp, return as i1 (avoids box/unbox when used in branch).
@@ -2674,7 +2797,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rhs_raw = ensure_raw_f64(wfn, rhs)
       temp = next_temp(wfn)
       inst_flags = float_inst_flags(ctx)
-      emit_wire_dynamic_4(wfn, float_op, :fp_flags, inst_flags, :lhs, lhs_raw, :rhs, rhs_raw, :temp, temp)
+      emit_wire_float_binop(wfn, float_op, inst_flags, lhs_raw, rhs_raw, temp)
       return typed_value(:raw_f64, temp)
 
     if fcmp_pred != nil
@@ -2715,19 +2838,19 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       else
         lhs_raw = ensure_raw_machine_int(wfn, lhs, lt, lt)
         lhs_f = next_temp(wfn)
-        emit_wire_dynamic_2(wfn, machine_int_to_f64_op(lt), :temp, lhs_f, :value, lhs_raw)
+        emit_machine_int_to_f64(wfn, lt, lhs_f, lhs_raw)
 
       if rt_flt
         rhs_f = ensure_raw_f64(wfn, rhs)
       else
         rhs_raw = ensure_raw_machine_int(wfn, rhs, rt, rt)
         rhs_f = next_temp(wfn)
-        emit_wire_dynamic_2(wfn, machine_int_to_f64_op(rt), :temp, rhs_f, :value, rhs_raw)
+        emit_machine_int_to_f64(wfn, rt, rhs_f, rhs_raw)
 
       if float_op != nil
         temp = next_temp(wfn)
         inst_flags = float_inst_flags(ctx)
-        emit_wire_dynamic_4(wfn, float_op, :fp_flags, inst_flags, :lhs, lhs_f, :rhs, rhs_f, :temp, temp)
+        emit_wire_float_binop(wfn, float_op, inst_flags, lhs_f, rhs_f, temp)
         return typed_value(:raw_f64, temp)
 
       if fcmp_pred != nil
@@ -3254,7 +3377,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       emit_wire_fpext_f32_f64(wfn, extended, raw)
       raw = extended
     converted = next_temp(wfn)
-    emit_wire_dynamic_2(wfn, f64_to_machine_int_op(type), :temp, converted, :value, raw)
+    emit_f64_to_machine_int(wfn, type, converted, raw)
     return converted
   boxed = ensure_i64_value(wfn, tv)
   # No nanunbox shortcut for `:int`-inferred values: `:int` means "may have
@@ -3264,7 +3387,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # of the defined low-64 wrap. The runtime unbox (w_to_i64 family) gives
   # the same value for inline ints and the defined truncation for BigInts.
   temp = next_temp(wfn)
-  emit_wire_dynamic_4(wfn, machine_call_return_op(type), :arg_types, ["i64"], :args, [boxed], :name, machine_unbox_fn(type), :temp, temp)
+  emit_machine_call_return(wfn, type, ["i64"], [boxed], machine_unbox_fn(type), temp)
   temp
 
 -> nanunbox_int_emit(wfn, boxed_reg)
@@ -3301,7 +3424,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   src_type = raw_machine_source_type(tv)
   if src_type != nil && tv[:type] in (:raw_int :raw_i64 :raw_u64 :raw_i128 :raw_u128 :char)
     temp = next_temp(wfn)
-    emit_wire_dynamic_2(wfn, machine_int_to_f64_op(src_type), :temp, temp, :value, tv[:value])
+    emit_machine_int_to_f64(wfn, src_type, temp, tv[:value])
     return temp
   # Fallback: a boxed WValue (`:i64`) whose concrete numeric kind isn't known at
   # compile time — a boxed double, a Decimal literal (bare `3.5` parses as a
@@ -3741,7 +3864,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       while i < elements.size()
         rhs_raw = lower_machine_int_expression(ctx, elements[i], machine_type)
         cmp = next_temp(ctx[:func])
-        emit_wire_dynamic_4(ctx[:func], machine_cmp_op(machine_type), :lhs, lhs_raw, :pred, "eq", :rhs, rhs_raw, :temp, cmp)
+        emit_machine_cmp(ctx[:func], machine_type, lhs_raw, "eq", rhs_raw, cmp)
         if acc == nil
           acc = cmp
         else
@@ -4086,7 +4209,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       emit_wire_select_i64(wfn, is_zero, overflow_result, result, "0")
       return fuse_ew_narrow_int(wfn, result, spec[:odt])
     temp = next_temp(wfn)
-    emit_wire_dynamic_3(wfn, iop, :lhs, l, :rhs, r, :temp, temp)
+    emit_wire_int_binop(wfn, iop, l, r, temp)
     return fuse_ew_narrow_int(wfn, temp, spec[:odt])
   fop = :fadd_f64
   if spec[:op] == :DOT_MINUS
@@ -4096,7 +4219,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   elsif spec[:op] == :DOT_SLASH
     fop = :fdiv_f64
   temp = next_temp(wfn)
-  emit_wire_dynamic_4(wfn, fop, :fp_flags, float_inst_flags(ctx), :lhs, l, :rhs, r, :temp, temp)
+  emit_wire_float_binop(wfn, fop, float_inst_flags(ctx), l, r, temp)
   temp
 
 # Emit the [lo, hi) element loop into ctx[:func]. arrs[k][:base] must hold
@@ -4272,8 +4395,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   sj = 0
   while sj < scls.size()
     raw = next_temp(wfn2)
-    scalar_load = mode == :int ? :load_i64_at : :load_f64_at
-    emit_wire_dynamic_3(wfn2, scalar_load, :index, (1 + arrs.size() + sj).to_s(), :ptr, blk_ptr, :temp, raw)
+    idx_s = (1 + arrs.size() + sj).to_s()
+    if mode == :int
+      emit_wire_load_i64_at(wfn2, idx_s, blk_ptr, raw)
+    else
+      emit_wire_load_f64_at(wfn2, idx_s, blk_ptr, raw)
     scls[sj][:raw] = raw
     sj += 1
   out_base = next_temp(wfn2)
@@ -4555,4 +4681,4 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return false
   if wire_get(last_inst, :temp) != reg
     return false
-  wire_get(last_inst, :name) in ("w_int_to_s" "w_string_repeat" "w_str_concat" "w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own" "w_str_add_rhs" "w_str_add_rhs_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str")
+  wire_get(last_inst, :name) in ("w_int_to_s" "w_string_repeat" "w_str_concat" "w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own" "w_str_add_rhs" "w_str_add_rhs_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str" "w_str_concat_any")

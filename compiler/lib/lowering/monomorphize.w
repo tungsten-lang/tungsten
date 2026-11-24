@@ -560,6 +560,296 @@
     mod[:core_prepass_snapshot][:ivar_types] = clone_two_level_hash(core_it)
     mod[:core_prepass_snapshot][:ivar_conflicts] = clone_two_level_hash(core_ic)
   collect_exact_source_ivar_types(mod)
+  collect_confirmed_typed_array_ivars(mod, ivar_types, ivar_conflicts)
+
+# Return true when `node` may return from the constructor or expose `self`
+# (a `self` reference, a call on `self`, a bare call to an instance method of
+# `cname`, or a closure/goroutine that could capture `self`). Used to prove
+# that an ivar assignment in `new` runs before any method can read the ivar.
+-> ctor_expr_may_return_or_observe_self?(node, cname, mod)
+  if node == nil
+    return false
+  if type(node) == "Array"
+    ai = 0
+    while ai < node.size()
+      if ctor_expr_may_return_or_observe_self?(node[ai], cname, mod)
+        return true
+      ai += 1
+    return false
+  if !is_ast_node?(node)
+    return false
+  k = ast_kind(node)
+  if k in (:return :return_nil :self_ref :block :go :super_call :yield)
+    return true
+  if k == :call
+    recv = node.receiver
+    if recv == nil
+      if class_has_instance_method?(mod, cname, node.name)
+        return true
+    elsif is_ast_node?(recv) && ast_kind(recv) == :self_ref
+      return true
+  children = ast_children(node)
+  ci = 0
+  while ci < children.size()
+    if ctor_expr_may_return_or_observe_self?(children[ci], cname, mod)
+      return true
+    ci += 1
+  false
+
+# Walk top-level statements of a constructor body and record every ivar name
+# guaranteed to be assigned before any `return` or `self`-observing operation.
+# Returns false when scanning halted due to `return` or `self` observation.
+-> collect_ctor_guaranteed_ivars(stmts, cname, mod, assigned)
+  if stmts == nil
+    return true
+  i = 0
+  n = stmts.size()
+  while i < n
+    st = stmts[i]
+    if is_ast_node?(st)
+      sk = ast_kind(st)
+      if sk == :assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :ivar
+        if ctor_expr_may_return_or_observe_self?(st.value, cname, mod)
+          return false
+        assigned[st.target.name] = true
+      elsif sk == :raise
+        # A raise aborts construction; the object is never returned.
+        nil
+      elsif sk in (:return :return_nil)
+        return false
+      elsif sk == :if
+        if ctor_expr_may_return_or_observe_self?(st.condition, cname, mod)
+          return false
+        tb = st.then_body
+        eb = st.else_body
+        elsifs = st.elsif_clauses
+        if (elsifs == nil || elsifs.size() == 0) && tb != nil && eb != nil && eb.size() > 0
+          t_set = {}
+          e_set = {}
+          t_ok = collect_ctor_guaranteed_ivars(tb, cname, mod, t_set)
+          e_ok = collect_ctor_guaranteed_ivars(eb, cname, mod, e_set)
+          if !t_ok || !e_ok
+            return false
+          tkeys = t_set.keys()
+          ti = 0
+          while ti < tkeys.size()
+            tk = tkeys[ti]
+            if e_set[tk] == true
+              assigned[tk] = true
+            ti += 1
+        else
+          if ctor_expr_may_return_or_observe_self?(st, cname, mod)
+            return false
+      else
+        if ctor_expr_may_return_or_observe_self?(st, cname, mod)
+          return false
+    i += 1
+  true
+
+# Record any ivar written via compound_assign or multi_assign (which bypasses
+# walk_ivar_assigns's simple `:assign` check).
+-> collect_unsafe_ivar_writes(node, cname, unsafe)
+  if node == nil
+    return nil
+  if is_ast_node?(node)
+    nt = ast_kind(node)
+    if nt == :compound_assign && node.target != nil && is_ast_node?(node.target) && ast_kind(node.target) == :ivar
+      unsafe[cname + "#" + node.target.name] = true
+    elsif nt == :multi_assign
+      targets = node.targets
+      if targets != nil
+        ti = 0
+        while ti < targets.size()
+          t = targets[ti]
+          if is_ast_node?(t) && ast_kind(t) == :ivar
+            unsafe[cname + "#" + t.name] = true
+          ti += 1
+    children = ast_children(node)
+    ci = 0
+    while ci < children.size()
+      collect_unsafe_ivar_writes(children[ci], cname, unsafe)
+      ci += 1
+  elsif type(node) == "Array"
+    ai = 0
+    while ai < node.size()
+      collect_unsafe_ivar_writes(node[ai], cname, unsafe)
+      ai += 1
+  nil
+
+# Sound subset of `mod[:ivar_types]`: ivars that are provably non-nil typed
+# arrays of a single concrete element width in every non-constructor method
+# of a sealed (no superclass/subclass, no custom static `.new`) class.
+# Requires:
+#   1. No inheritance edge on `cname` and no static `.new` override;
+#   2. Every write in `cname` agrees on one concrete `is_typed_array_type?`
+#      (no conflicts, no untyped writes, no compound/multi-assign writes);
+#   3. Every `new` constructor of `cname` unconditionally initializes the ivar
+#      (via a typed `@ivar` param or straight-line assignment) before any
+#      `return` or `self`-observing operation.
+-> collect_confirmed_typed_array_ivars(mod, ivar_types, ivar_conflicts)
+  core_prepass = mod[:incremental_core_cache_hit] == true && mod[:incremental_core_cache_entry] != nil ? mod[:incremental_core_cache_entry][:core_prepass] : nil
+  confirmed = core_prepass != nil && core_prepass[:confirmed_typed_array_ivars] != nil ? clone_two_level_hash(core_prepass[:confirmed_typed_array_ivars]) : {}
+  skip_core_methods = core_prepass != nil && core_prepass[:confirmed_typed_array_ivars] != nil
+  inheritance_classes = {}
+  super_names = mod[:class_super_names]
+  if super_names != nil
+    child_names = super_names.keys()
+    si = 0
+    while si < child_names.size()
+      child_name = child_names[si]
+      super_name = super_names[child_name]
+      if super_name != nil
+        inheritance_classes[child_name] = true
+        inheritance_classes[super_name] = true
+      si += 1
+
+  # Identify only classes that actually have at least one concrete typed-array
+  # ivar candidate before scanning method bodies or constructors. Programs
+  # without typed-array ivars (e.g. the compiler itself) skip the AST walk.
+  candidate_classes = {}
+  it_cnames = ivar_types.keys()
+  iti = 0
+  while iti < it_cnames.size()
+    cn = it_cnames[iti]
+    if inheritance_classes[cn] != true && mod[:class_static_new][cn] == nil && known_static_method_for(mod, cn + ".new") == nil
+      c_ivars = ivar_types[cn]
+      if c_ivars != nil && c_ivars.size() > 0
+        ik = c_ivars.keys()
+        ii = 0
+        while ii < ik.size()
+          tv = c_ivars[ik[ii]]
+          if tv != nil && is_typed_array_type?(tv) && !(tv in (:typed_array :typed_array_bool))
+            candidate_classes[cn] = true
+            break
+          ii += 1
+    iti += 1
+
+  # Gather per-class constructor ASTs and unsafe ivar writes only for candidate classes.
+  ctors_by_class = {}
+  seen_ctor_ast = {}
+  unsafe_writes = {}
+  if candidate_classes.size() > 0
+    ast_keys = mod[:class_method_asts].keys()
+    prev_cname = nil
+    prev_ast = nil
+    ki = 0
+    while ki < ast_keys.size()
+      key = ast_keys[ki]
+      dot_idx = key.index(".")
+      cname = key.slice(0, dot_idx)
+      if candidate_classes[cname] == true
+        mname = key.slice(dot_idx + 1, key.size() - dot_idx - 1)
+        method_ast = mod[:class_method_asts][key]
+        if !(skip_core_methods && definition_from_core?(method_ast))
+          if !(cname == prev_cname && method_ast == prev_ast)
+            prev_cname = cname
+            prev_ast = method_ast
+            mparams = method_ast.params
+            if mparams != nil
+              mptypes = method_ast.param_types
+              mphints = method_ast.type_hints
+              mpi = 0
+              while mpi < mparams.size()
+                mp = mparams[mpi]
+                if is_ast_node?(mp) && mp.ivar_assign == true
+                  mdecl = (mptypes != nil && mpi < mptypes.size()) ? mptypes[mpi] : nil
+                  if mdecl == nil && mphints != nil
+                    mdecl = mphints[mp.name]
+                  if mdecl == nil || array_hint_element_type(mdecl) == nil
+                    unsafe_writes[cname + "#@" + mp.name] = true
+                mpi += 1
+            collect_unsafe_ivar_writes(method_ast.body, cname, unsafe_writes)
+          if mname == "new" || mname.starts_with?("new/")
+            if seen_ctor_ast[method_ast] != true
+              seen_ctor_ast[method_ast] = true
+              list = ctors_by_class[cname]
+              if list == nil
+                list = []
+                ctors_by_class[cname] = list
+              list.push(method_ast)
+      ki += 1
+
+  untyped = mod[:ivar_untyped_writes]
+  if untyped == nil
+    untyped = {}
+
+  # Clear any Core-cached entry if a user class later inherited from it.
+  if inheritance_classes.size() > 0
+    ik = inheritance_classes.keys()
+    ii = 0
+    while ii < ik.size()
+      if confirmed[ik[ii]] != nil
+        confirmed[ik[ii]] = nil
+      ii += 1
+
+  cnames = ctors_by_class.keys()
+  ci = 0
+  while ci < cnames.size()
+    cname = cnames[ci]
+    class_ivars = ivar_types[cname]
+    if class_ivars != nil && inheritance_classes[cname] != true && mod[:class_static_new][cname] == nil && known_static_method_for(mod, cname + ".new") == nil
+      ctors = ctors_by_class[cname]
+      if ctors != nil && ctors.size() > 0
+        # Intersect guaranteed ivars across all constructors of `cname`.
+        guaranteed = nil
+        cti = 0
+        while cti < ctors.size()
+          ctor_ast = ctors[cti]
+          c_set = {}
+          # Typed `@ivar` binding params are initialized on constructor entry.
+          cparams = ctor_ast.params
+          cptypes = ctor_ast.param_types
+          cphints = ctor_ast.type_hints
+          if cparams != nil && (cptypes != nil || cphints != nil)
+            pi = 0
+            while pi < cparams.size()
+              p = cparams[pi]
+              if is_ast_node?(p) && p.ivar_assign == true
+                decl = (cptypes != nil && pi < cptypes.size()) ? cptypes[pi] : nil
+                if decl == nil && cphints != nil
+                  decl = cphints[p.name]
+                if decl != nil && array_hint_element_type(decl) != nil
+                  c_set["@" + p.name] = true
+              pi += 1
+          collect_ctor_guaranteed_ivars(ctor_ast.body, cname, mod, c_set)
+          if guaranteed == nil
+            guaranteed = c_set
+          else
+            gkeys = guaranteed.keys()
+            gi = 0
+            while gi < gkeys.size()
+              if c_set[gkeys[gi]] != true
+                guaranteed[gkeys[gi]] = nil
+              gi += 1
+          cti += 1
+        if guaranteed != nil
+          gkeys = guaranteed.keys()
+          gi = 0
+          while gi < gkeys.size()
+            iname = gkeys[gi]
+            if guaranteed[iname] == true
+              t = class_ivars[iname]
+              if t != nil && is_typed_array_type?(t) && !(t in (:typed_array :typed_array_bool))
+                if (ivar_conflicts[cname] == nil || ivar_conflicts[cname][iname] != true) && untyped[cname + "#" + iname] != true && unsafe_writes[cname + "#" + iname] != true
+                  if confirmed[cname] == nil
+                    confirmed[cname] = {}
+                  confirmed[cname][iname] = t
+            gi += 1
+    ci += 1
+
+  mod[:confirmed_typed_array_ivars] = confirmed
+  if mod[:incremental_core_cache_status] == :miss && mod[:core_prepass_snapshot] != nil
+    core_ct = {}
+    ckeys = mod[:known_classes].keys()
+    ci = 0
+    while ci < ckeys.size()
+      cn = ckeys[ci]
+      cnode = mod[:known_classes][cn]
+      if cnode != nil && is_ast_node?(cnode) && definition_from_core?(cnode) && confirmed[cn] != nil
+        core_ct[cn] = confirmed[cn]
+      ci += 1
+    mod[:core_prepass_snapshot][:confirmed_typed_array_ivars] = clone_two_level_hash(core_ct)
+  nil
 
 # Return the fully-qualified class name when `node` constructs an ordinary
 # source WObject whose runtime class is exact. Runtime-backed classes, packed
@@ -721,6 +1011,17 @@
       record_exact_source_ivar_write(cname, node.target.name, nil, exact_types, conflicts)
     elsif nt == :multi_assign
       invalidate_exact_source_ivar_targets(node.targets, cname, exact_types, conflicts)
+    if ccall_nobox("w_is_node_extern", node) == 1
+      kid = ccall_nobox("w_node_kind_extern", node)
+      if kid != nil && kid >= 1 && kid <= KIND_MAX
+        offsets = slab_child_offsets_table[kid]
+        if offsets != nil
+          ci = 0
+          n_off = offsets.size()
+          while ci < n_off
+            walk_exact_source_ivar_writes(ccall_nobox("w_node_field_load", node, offsets[ci]), cname, exact_types, conflicts, mod)
+            ci += 1
+      return nil
     children = ast_children(node)
     ci = 0
     while ci < children.size()
@@ -925,6 +1226,17 @@
           ivar_conflicts[cname][iname] = true
         else
           ivar_types[cname][iname] = itype
+    if ccall_nobox("w_is_node_extern", node) == 1
+      kid = ccall_nobox("w_node_kind_extern", node)
+      if kid != nil && kid >= 1 && kid <= KIND_MAX
+        offsets = slab_child_offsets_table[kid]
+        if offsets != nil
+          ci = 0
+          n_off = offsets.size()
+          while ci < n_off
+            walk_ivar_assigns(ccall_nobox("w_node_field_load", node, offsets[ci]), cname, ivar_types, ivar_conflicts, mod)
+            ci += 1
+      return nil
     children = ast_children(node)
     ci = 0
     while ci < children.size()

@@ -367,7 +367,8 @@ use target
                 elsif ckind == :binop
                   ml = wire_inline_map_operand(cand[:l_idx], cand[:lhs], args)
                   mr = wire_inline_map_operand(cand[:r_idx], cand[:rhs], args)
-                  instrs[ii] = wire_make_dynamic_3(cand[:op], :lhs, ml, :rhs, mr, :temp, temp)
+                  bkid = ccall_nobox("w_numeric_to_i64", wire_kind_id(cand[:op]))
+                  instrs[ii] = ccall_rawargs("w_wire_packed_3", bkid, ml, mr, temp)
                   inlined += 1
                 elsif ckind == :ivar_get_idx
                   msr = wire_inline_map_operand(cand[:sr_idx], cand[:self_reg], args)
@@ -411,13 +412,36 @@ use target
     return true
   wire_sequence_size(atypes) == 1 && wire_sequence_get(atypes, 0) == "i64"
 
+-> wire_decimal_in_range?(s, lo, hi)
+  if s == nil || type(s) != "String"
+    return false
+  n = s.size()
+  if n == 0 || n > 19
+    return false
+  start = 0
+  if s.byte_at(0) == 45
+    if n == 1
+      return false
+    start = 1
+  i = start
+  while i < n
+    b = s.byte_at(i)
+    if b < 48 || b > 57
+      return false
+    i += 1
+  v = s.to_i()
+  v >= lo && v <= hi
+
 -> wire_elim_box_unbox_roundtrips_fn(func)
   blocks = func[:blocks]
   n_blocks = blocks.size()
   i64_box_src = {}
   u64_box_src = {}
   f64_box_src = {}
+  proven_i48 = {}
+  proven_u47 = {}
   box_count = 0
+  int_box_count = 0
   bi = 0
   while bi < n_blocks
     instrs = blocks[bi][:instructions]
@@ -426,19 +450,70 @@ use target
     while ii < n_instrs
       inst = instrs[ii]
       op = wire_kind(inst)
-      if op == :call_direct_i64
+      if op == :sext_i32_i64 || op == :sext_i16_i64 || op == :sext_i8_i64
+        t = wire_get(inst, :temp)
+        if t != nil
+          proven_i48[t] = true
+      elsif op == :zext_i32_i64 || op == :zext_i16_i64 || op == :zext_i8_i64 || op == :zext_i1_i64 || op == :array_size_raw || op == :ta_size_raw || op == :ta_cap_raw || op == :ctpop_i64 || op == :cttz_i64 || op == :ctlz_i64
+        t = wire_get(inst, :temp)
+        if t != nil
+          proven_i48[t] = true
+          proven_u47[t] = true
+      elsif op == :and_i64
+        t = wire_get(inst, :temp)
+        if t != nil
+          lv = wire_get(inst, :left)
+          rv = wire_get(inst, :right)
+          if wire_decimal_in_range?(lv, 0, 140737488355327) || wire_decimal_in_range?(rv, 0, 140737488355327)
+            proven_i48[t] = true
+            proven_u47[t] = true
+      elsif op == :lshr_i64
+        t = wire_get(inst, :temp)
+        if t != nil && wire_decimal_in_range?(wire_get(inst, :right), 17, 63)
+          proven_i48[t] = true
+          proven_u47[t] = true
+      elsif op == :ashr_i64
+        t = wire_get(inst, :temp)
+        if t != nil && wire_decimal_in_range?(wire_get(inst, :right), 16, 63)
+          proven_i48[t] = true
+      elsif op == :select_i64
+        t = wire_get(inst, :temp)
+        if t != nil
+          tv = wire_get(inst, :then_val)
+          fv = wire_get(inst, :else_val)
+          t_u47 = proven_u47[tv] == true || wire_decimal_in_range?(tv, 0, 140737488355327)
+          f_u47 = proven_u47[fv] == true || wire_decimal_in_range?(fv, 0, 140737488355327)
+          if t_u47 && f_u47
+            proven_i48[t] = true
+            proven_u47[t] = true
+          elsif (proven_i48[tv] == true || is_i48_decimal_literal?(tv, true)) && (proven_i48[fv] == true || is_i48_decimal_literal?(fv, true))
+            proven_i48[t] = true
+      elsif op == :call_direct_i64
         nm = wire_get(inst, :name)
-        if nm != nil && (nm == "__w_int_fast" || nm == "w_u64") && wire_i64_arg1_types?(wire_get(inst, :arg_types)) && wire_get(inst, :src_line) == nil
-          args = wire_get(inst, :args)
-          if args != nil && wire_sequence_size(args) == 1
+        if nm != nil
+          if (nm == "__w_string_byte_length_fast" || nm == "w_node_kind_extern") && wire_get(inst, :src_line) == nil
             t = wire_get(inst, :temp)
-            a0 = wire_sequence_get(args, 0)
-            if t != nil && a0 != nil
-              if nm == "__w_int_fast"
-                i64_box_src[t] = a0
-              else
-                u64_box_src[t] = a0
-              box_count += 1
+            if t != nil
+              proven_i48[t] = true
+              proven_u47[t] = true
+          elsif (nm == "__w_int_fast" || nm == "w_u64") && wire_i64_arg1_types?(wire_get(inst, :arg_types)) && wire_get(inst, :src_line) == nil
+            args = wire_get(inst, :args)
+            if args != nil && wire_sequence_size(args) == 1
+              t = wire_get(inst, :temp)
+              a0 = wire_sequence_get(args, 0)
+              if t != nil && a0 != nil
+                if nm == "__w_int_fast"
+                  i64_box_src[t] = a0
+                else
+                  u64_box_src[t] = a0
+                box_count += 1
+                int_box_count += 1
+      elsif op == :nanbox_int
+        t = wire_get(inst, :temp)
+        raw = wire_get(inst, :raw)
+        if t != nil && raw != nil && (proven_i48[raw] == true || is_i48_decimal_literal?(raw, true))
+          i64_box_src[t] = raw
+          box_count += 1
       elsif op == :nanbox_float
         t = wire_get(inst, :temp)
         raw = wire_get(inst, :raw)
@@ -496,53 +571,78 @@ use target
     if new_instrs != nil
       blocks[bi][:instructions] = new_instrs
     bi += 1
-  if eliminated == 0
-    return 0
 
-  resolved = resolve_subst_chains(subst)
-  rcount = resolved.size()
-  live_boxes = {}
-  bi = 0
-  while bi < n_blocks
-    instrs = blocks[bi][:instructions]
-    n_instrs = instrs.size()
-    ii = 0
-    while ii < n_instrs
-      inst = wire_try_fold_box_call(func, apply_subst(instrs[ii], resolved, rcount))
-      instrs[ii] = inst
-      wire_mark_used_temps(inst, cand_boxes, live_boxes)
-      ii += 1
-    bi += 1
-
-  # Remove any box instruction whose temp now has zero remaining uses.
-  if live_boxes.size() < cand_boxes.size()
+  if eliminated > 0
+    resolved = resolve_subst_chains(subst)
+    rcount = resolved.size()
+    live_boxes = {}
     bi = 0
     while bi < n_blocks
       instrs = blocks[bi][:instructions]
       n_instrs = instrs.size()
-      new_instrs = nil
+      ii = 0
+      while ii < n_instrs
+        inst = wire_try_fold_box_call(func, apply_subst(instrs[ii], resolved, rcount))
+        instrs[ii] = inst
+        wire_mark_used_temps(inst, cand_boxes, live_boxes)
+        ii += 1
+      bi += 1
+
+    # Remove any box instruction whose temp now has zero remaining uses.
+    if live_boxes.size() < cand_boxes.size()
+      bi = 0
+      while bi < n_blocks
+        instrs = blocks[bi][:instructions]
+        n_instrs = instrs.size()
+        new_instrs = nil
+        ii = 0
+        while ii < n_instrs
+          inst = instrs[ii]
+          op = wire_kind(inst)
+          dead_box = false
+          if op == :call_direct_i64 || op == :nanbox_float || op == :nanbox_int
+            t = wire_get(inst, :temp)
+            if t != nil && cand_boxes[t] == true && live_boxes[t] != true
+              dead_box = true
+              eliminated += 1
+          if dead_box
+            if new_instrs == nil
+              new_instrs = []
+              ci = 0
+              while ci < ii
+                new_instrs.push(instrs[ci])
+                ci += 1
+          elsif new_instrs != nil
+            new_instrs.push(inst)
+          ii += 1
+        if new_instrs != nil
+          blocks[bi][:instructions] = new_instrs
+        bi += 1
+
+  # Narrow remaining `__w_int_fast` / `w_u64` calls whose operand is provably
+  # within signed 48-bit range directly to `:nanbox_int` (zero branch, zero
+  # BigInt slow path, and invisible to `int_temp_release`).
+  if int_box_count > 0 && proven_i48.size() > 0
+    bi = 0
+    while bi < n_blocks
+      instrs = blocks[bi][:instructions]
+      n_instrs = instrs.size()
       ii = 0
       while ii < n_instrs
         inst = instrs[ii]
-        op = wire_kind(inst)
-        dead_box = false
-        if op == :call_direct_i64 || op == :nanbox_float
-          t = wire_get(inst, :temp)
-          if t != nil && cand_boxes[t] == true && live_boxes[t] != true
-            dead_box = true
-            eliminated += 1
-        if dead_box
-          if new_instrs == nil
-            new_instrs = []
-            ci = 0
-            while ci < ii
-              new_instrs.push(instrs[ci])
-              ci += 1
-        elsif new_instrs != nil
-          new_instrs.push(inst)
+        if wire_kind(inst) == :call_direct_i64 && wire_i64_arg1_types?(wire_get(inst, :arg_types)) && wire_get(inst, :src_line) == nil
+          nm = wire_get(inst, :name)
+          if nm == "__w_int_fast" || nm == "w_u64"
+            args = wire_get(inst, :args)
+            if args != nil && wire_sequence_size(args) == 1
+              a0 = wire_sequence_get(args, 0)
+              ok = nm == "__w_int_fast" ? proven_i48[a0] == true : proven_u47[a0] == true
+              if ok
+                t = wire_get(inst, :temp)
+                if t != nil
+                  instrs[ii] = wire_make_nanbox_int(a0, t, next_temp(func))
+                  eliminated += 1
         ii += 1
-      if new_instrs != nil
-        blocks[bi][:instructions] = new_instrs
       bi += 1
   eliminated
 

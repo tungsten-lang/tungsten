@@ -1592,6 +1592,8 @@ int_temp_reader_map = init_int_temp_reader_map()
   defs = {}
   uses = {}
   known_int = {}
+  known_nonneg_i48 = {}
+  known_non_int = {}
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
@@ -1606,6 +1608,17 @@ int_temp_reader_map = init_int_temp_reader_map()
         defs[t] = loc
         if k == :nanbox_int
           known_int[t] = true
+          raw_s = wire_get(inst, :raw)
+          if type(raw_s) == "String" && raw_s.size() > 0
+            c0 = raw_s.byte_at(0)
+            if c0 >= 48 && c0 <= 57
+              known_nonneg_i48[t] = true
+        elsif k == :string_i64 || k == :symbol_i64
+          known_non_int[t] = true
+        elsif k == :call_direct_i64
+          dnm = wire_get(inst, :name)
+          if dnm in ("w_string" "w_str_concat" "w_str_concat_own" "w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_add_rhs" "w_str_add_rhs_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str" "w_int_to_s" "w_string_repeat" "w_strbuf_new" "w_strbuf_append" "w_strbuf_append_any" "w_array_new" "w_array_new_empty" "w_array_new_uninit_sized" "w_hash_new")
+            known_non_int[t] = true
       refs = loop_release_operands(inst)
       if refs == nil
         if env("TUNGSTEN_INT_TEMP_RELEASE_DEBUG") == "1"
@@ -1634,13 +1647,33 @@ int_temp_reader_map = init_int_temp_reader_map()
     witnesses = []
     # A fresh-returning callee sealed its result (int_fresh_returns) and a
     # parsed or literal BigInt is new, so only an arithmetic helper's
-    # operands are witnesses.
+    # operands are witnesses. Skip ops whose result is provably never a BigInt
+    # (string/container operands, `&` with a non-negative i48 mask, or bitwise
+    # ops on two inline i48 ints).
     if wire_kind(tinst) == :call_direct_i64 && int_temp_arith?(wire_get(tinst, :name))
+      tname = wire_get(tinst, :name)
       targs = wire_get(tinst, :args)
+      has_non_int_arg = false
+      has_nonneg_i48_arg = false
+      all_i48_args = wire_sequence_size(targs) > 0
       wi = 0
       while wi < wire_sequence_size(targs)
-        witnesses.push(wire_sequence_get(targs, wi))
+        ta = wire_sequence_get(targs, wi)
+        witnesses.push(ta)
+        if known_non_int[ta] == true || (type(ta) == "String" && ta.starts_with?("u0xfff9"))
+          has_non_int_arg = true
+        is_i48_lit = type(ta) == "String" && ta.starts_with?("u0xfffa")
+        if known_nonneg_i48[ta] == true || (is_i48_lit && ta.size() >= 8 && ta.byte_at(7) >= 48 && ta.byte_at(7) <= 55)
+          has_nonneg_i48_arg = true
+        if known_int[ta] != true && !is_i48_lit
+          all_i48_args = false
         wi += 1
+      if has_non_int_arg
+        next
+      if has_nonneg_i48_arg && (tname == "__w_band_fast" || tname == "w_bit_and")
+        next
+      if all_i48_args && tname in ("__w_band_fast" "__w_bor_fast" "__w_bxor_fast" "w_bit_and" "w_bit_or" "w_bit_xor")
+        next
     last = tix
     ok = true
     tuses = uses[t]

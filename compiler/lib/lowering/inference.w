@@ -367,13 +367,17 @@
       return :float
     if node.op == :CROSS_PRODUCT && is_typed_array_type?(lt) && is_typed_array_type?(rt)
       return lt
-    if node.op == :LSHIFT && lt == :string_buffer && rt == :string
+    if node.op == :LSHIFT && lt == :string_buffer
       return :string_buffer
+    if node.op == :LSHIFT && lt == :array
+      return :array
     if node.op == :LSHIFT && lt == :string
       return :string
     # Concatenation result is text — keeps the :string fact flowing so a
     # following .size()/+ takes the direct routes instead of IC dispatch.
-    if node.op == :PLUS && lt == :string && rt == :string
+    # Strict String `+` either returns text or raises TypeError, so a known
+    # :string LHS guarantees a :string result for chained concats too.
+    if node.op == :PLUS && lt == :string
       return :string
     # `String * Int` repeats — a text result. Typing it keeps the :string
     # fact flowing (a following `+`/.size takes the direct routes) and lets

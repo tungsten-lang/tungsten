@@ -18,7 +18,7 @@
     return nil
 
   kind = ast_kind(value)
-  if kind in (:int :string :symbol :bool :nil_val :float :ivar :cvar :gvar :self_ref :break :next)
+  if kind in (:int :string :symbol :bool :nil_val :nil_lit :return_nil :float :char :ivar :cvar :gvar :self_ref :break :next :param)
     return nil
   if kind in (:var :class_ref)
     name = value.name
@@ -34,8 +34,12 @@
   nested = in_nested
   if kind in (:fn_def :method_def :class_def :module_def :trait_def :block)
     nested = true
-  elsif kind == :call && value.receiver == nil && value.name == "argv"
-    index[:uses_argv] = true
+  elsif kind == :call
+    if value.receiver == nil
+      if value.name == "argv"
+        index[:uses_argv] = true
+    elsif value.name == "new" && value.type_args != nil && ast_kind(value.receiver) == :class_ref && value.receiver.name == "SmallArray"
+      index[:has_smallarray_generic] = true
 
   if ccall_nobox("w_is_node_extern", value) == 1
     kid = ccall_nobox("w_node_kind_extern", value)
@@ -76,7 +80,8 @@
     runtime_class_names: {},
     extern_var_refs: {},
     builtin_class_names: {},
-    uses_argv: false
+    uses_argv: false,
+    has_smallarray_generic: false
   }
   i = 0
   while i < expressions.size()

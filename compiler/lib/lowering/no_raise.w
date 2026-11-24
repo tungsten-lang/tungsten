@@ -194,7 +194,9 @@
 -> infer_no_raise_fixed_point(mod, expressions, ordered_class_exprs)
   if mod[:method_tables_locked] != true && mod[:auto_closed_world_devirt] != true
     return nil
-  collected = collect_return_class_definitions(mod, expressions, ordered_class_exprs)
+  collected = mod[:return_class_collected]
+  if collected == nil
+    collected = collect_return_class_definitions(mod, expressions, ordered_class_exprs)
   definitions = collected[:definitions]
   keys = definitions.keys()
   candidates = {}

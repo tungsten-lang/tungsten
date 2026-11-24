@@ -171,7 +171,7 @@ escape_derive_fields = [:value, :boxed, :raw, :arr, :base, :ptr, :lhs, :rhs]
 # handed to one of these is consumed, never merely read.
 -> init_escape_consuming_builtins_map()
   m = {}
-  names = ["w_str_concat_free_lhs", "w_str_concat_free_rhs", "w_str_concat_own", "w_str_concat_i64", "w_i64_concat_str", "w_str_concat_int_wv", "w_int_wv_concat_str"]
+  names = ["w_str_concat_free_lhs", "w_str_concat_free_rhs", "w_str_concat_own", "w_str_add_rhs_own", "w_str_concat_i64", "w_i64_concat_str", "w_str_concat_int_wv", "w_int_wv_concat_str"]
   i = 0
   while i < names.size()
     m[names[i]] = true

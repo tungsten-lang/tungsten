@@ -228,6 +228,19 @@ use target
     return wire_sequence_get(args, idx)
   lit_val
 
+-> wire_leaf_all_i64_params?(func)
+  ptypes = func[:param_types]
+  if ptypes == nil
+    return true
+  i = 0
+  n = ptypes.size()
+  while i < n
+    pt = ptypes[i]
+    if pt != nil && pt != "i64"
+      return false
+    i += 1
+  true
+
 -> wire_inline_tiny_leaves(mod)
   fns = mod[:functions]
   n_fns = fns.size()
@@ -235,7 +248,7 @@ use target
   fi = 0
   while fi < n_fns
     func = fns[fi]
-    if func[:incremental_core_frozen] != true && func[:return_type] == "i64" && (func[:extra_params] == nil || func[:extra_params].size() == 0) && func[:noinline] != true && func[:blocks].size() == 1
+    if func[:return_type] == "i64" && (func[:extra_params] == nil || func[:extra_params].size() == 0) && func[:noinline] != true && func[:is_memoized] != true && func[:blocks].size() == 1 && wire_leaf_all_i64_params?(func)
       params = func[:params]
       n_params = params.size()
       param_regs = []
@@ -262,11 +275,66 @@ use target
             r_idx = wire_leaf_param_index(rhs, param_regs)
             if l_idx >= -1 && r_idx >= -1
               candidates[func[:name]] = {kind: :binop, arity: n_params, op: k0, l_idx: l_idx, lhs: lhs, r_idx: r_idx, rhs: rhs}
-          elsif k0 in (:w_int_inline :unbox_int_fast)
+          elsif k0 == :ivar_get_idx
+            sr = wire_get(op0, :self_reg)
+            off = wire_get(op0, :offset)
+            sr_idx = wire_leaf_param_index(sr, param_regs)
+            if sr_idx >= -1 && off != nil
+              candidates[func[:name]] = {kind: :ivar_get_idx, arity: n_params, sr_idx: sr_idx, self_reg: sr, offset: off}
+          elsif k0 == :ivar_set_idx
+            sr = wire_get(op0, :self_reg)
+            v0 = wire_get(op0, :value)
+            off = wire_get(op0, :offset)
+            sr_idx = wire_leaf_param_index(sr, param_regs)
+            v_idx = wire_leaf_param_index(v0, param_regs)
+            if sr_idx >= -1 && v_idx >= -1 && off != nil
+              candidates[func[:name]] = {kind: :ivar_set_idx, arity: n_params, sr_idx: sr_idx, self_reg: sr, v_idx: v_idx, val: v0, offset: off}
+          elsif k0 == :nanbox_int
+            raw = wire_get(op0, :raw)
+            r_idx = wire_leaf_param_index(raw, param_regs)
+            if r_idx >= -1
+              candidates[func[:name]] = {kind: :nanbox_int, arity: n_params, r_idx: r_idx, raw: raw}
+          elsif k0 == :nanunbox_int
+            boxed = wire_get(op0, :boxed)
+            b_idx = wire_leaf_param_index(boxed, param_regs)
+            if b_idx >= -1
+              candidates[func[:name]] = {kind: :nanunbox_int, arity: n_params, b_idx: b_idx, boxed: boxed}
+          elsif k0 in (:ta_size_raw :ta_cap_raw :zext_i1_i64 :zext_i32_i64 :zext_i16_i64 :ctpop_i64 :cttz_i64)
             v0 = wire_get(op0, :value)
             v_idx = wire_leaf_param_index(v0, param_regs)
             if v_idx >= -1
               candidates[func[:name]] = {kind: :unop, arity: n_params, op: k0, v_idx: v_idx, val: v0}
+          elsif k0 == :call_direct_i64
+            inner_name = wire_get(op0, :name)
+            inner_args = wire_get(op0, :args)
+            is_core = func[:incremental_core_candidate] == true || func[:incremental_core_frozen] == true
+            is_rt = inner_name != nil && (inner_name.starts_with?("w_") || inner_name.starts_with?("__w_"))
+            if inner_name != nil && inner_name != func[:name] && wire_get(op0, :call_conv) == nil && inner_args != nil && (!is_core || is_rt)
+              a_idxs = []
+              a_lits = []
+              all_ok = true
+              ai = 0
+              na = wire_sequence_size(inner_args)
+              while ai < na
+                av = wire_sequence_get(inner_args, ai)
+                aidx = wire_leaf_param_index(av, param_regs)
+                if aidx < -1
+                  all_ok = false
+                  break
+                a_idxs.push(aidx)
+                a_lits.push(av)
+                ai += 1
+              if all_ok
+                raw_atypes = wire_get(op0, :arg_types)
+                atypes = nil
+                if raw_atypes != nil
+                  atypes = []
+                  ti = 0
+                  nt = wire_sequence_size(raw_atypes)
+                  while ti < nt
+                    atypes.push(wire_sequence_get(raw_atypes, ti))
+                    ti += 1
+                candidates[func[:name]] = {kind: :call_direct, arity: n_params, inner_name: inner_name, arg_idxs: a_idxs, arg_lits: a_lits, arg_types: atypes}
     fi += 1
   if candidates.size() == 0
     return 0
@@ -301,14 +369,194 @@ use target
                   mr = wire_inline_map_operand(cand[:r_idx], cand[:rhs], args)
                   instrs[ii] = wire_make_dynamic_3(cand[:op], :lhs, ml, :rhs, mr, :temp, temp)
                   inlined += 1
+                elsif ckind == :ivar_get_idx
+                  msr = wire_inline_map_operand(cand[:sr_idx], cand[:self_reg], args)
+                  instrs[ii] = wire_make_ivar_get_idx(cand[:offset], msr, temp)
+                  inlined += 1
+                elsif ckind == :ivar_set_idx
+                  msr = wire_inline_map_operand(cand[:sr_idx], cand[:self_reg], args)
+                  mv = wire_inline_map_operand(cand[:v_idx], cand[:val], args)
+                  instrs[ii] = wire_make_ivar_set_idx(cand[:offset], msr, temp, mv)
+                  inlined += 1
+                elsif ckind == :nanbox_int
+                  mr = wire_inline_map_operand(cand[:r_idx], cand[:raw], args)
+                  instrs[ii] = wire_make_nanbox_int(mr, temp, next_temp(func))
+                  inlined += 1
+                elsif ckind == :nanunbox_int
+                  mb = wire_inline_map_operand(cand[:b_idx], cand[:boxed], args)
+                  instrs[ii] = wire_make_nanunbox_int(mb, temp, next_temp(func))
+                  inlined += 1
                 elsif ckind == :unop
                   mv = wire_inline_map_operand(cand[:v_idx], cand[:val], args)
                   instrs[ii] = wire_make_dynamic_2(cand[:op], :temp, temp, :value, mv)
+                  inlined += 1
+                elsif ckind == :call_direct
+                  a_idxs = cand[:arg_idxs]
+                  a_lits = cand[:arg_lits]
+                  na = a_idxs.size()
+                  mapped_args = []
+                  ai = 0
+                  while ai < na
+                    mapped_args.push(wire_inline_map_operand(a_idxs[ai], a_lits[ai], args))
+                    ai += 1
+                  instrs[ii] = wire_make_call_direct_i64(cand[:arg_types], mapped_args, nil, wire_get(inst, :loc_site_id), cand[:inner_name], wire_get(inst, :src_col), wire_get(inst, :src_line), temp)
                   inlined += 1
           ii += 1
         bi += 1
     fi += 1
   inlined
+
+-> wire_i64_arg1_types?(atypes)
+  if atypes == nil
+    return true
+  wire_sequence_size(atypes) == 1 && wire_sequence_get(atypes, 0) == "i64"
+
+-> wire_elim_box_unbox_roundtrips_fn(func)
+  blocks = func[:blocks]
+  n_blocks = blocks.size()
+  i64_box_src = {}
+  u64_box_src = {}
+  f64_box_src = {}
+  box_count = 0
+  bi = 0
+  while bi < n_blocks
+    instrs = blocks[bi][:instructions]
+    n_instrs = instrs.size()
+    ii = 0
+    while ii < n_instrs
+      inst = instrs[ii]
+      op = wire_kind(inst)
+      if op == :call_direct_i64
+        nm = wire_get(inst, :name)
+        if nm != nil && (nm == "__w_int_fast" || nm == "w_u64") && wire_i64_arg1_types?(wire_get(inst, :arg_types)) && wire_get(inst, :src_line) == nil
+          args = wire_get(inst, :args)
+          if args != nil && wire_sequence_size(args) == 1
+            t = wire_get(inst, :temp)
+            a0 = wire_sequence_get(args, 0)
+            if t != nil && a0 != nil
+              if nm == "__w_int_fast"
+                i64_box_src[t] = a0
+              else
+                u64_box_src[t] = a0
+              box_count += 1
+      elsif op == :nanbox_float
+        t = wire_get(inst, :temp)
+        raw = wire_get(inst, :raw)
+        if t != nil && raw != nil
+          f64_box_src[t] = raw
+          box_count += 1
+      ii += 1
+    bi += 1
+  if box_count == 0
+    return 0
+
+  subst = {}
+  cand_boxes = {}
+  eliminated = 0
+  bi = 0
+  while bi < n_blocks
+    instrs = blocks[bi][:instructions]
+    n_instrs = instrs.size()
+    new_instrs = nil
+    ii = 0
+    while ii < n_instrs
+      inst = instrs[ii]
+      op = wire_kind(inst)
+      drop = false
+      if op == :call_direct_i64
+        nm = wire_get(inst, :name)
+        if nm != nil && (nm == "__w_to_i64_fast" || nm == "w_to_i64" || nm == "__w_cast_i64_fast" || nm == "w_cast_i64" || nm == "w_to_u64" || nm == "w_cast_u64") && wire_i64_arg1_types?(wire_get(inst, :arg_types)) && wire_get(inst, :src_line) == nil
+          args = wire_get(inst, :args)
+          if args != nil && wire_sequence_size(args) == 1
+            a0 = wire_sequence_get(args, 0)
+            src = (nm == "w_to_u64" || nm == "w_cast_u64") ? u64_box_src[a0] : i64_box_src[a0]
+            if src != nil
+              subst[wire_get(inst, :temp)] = src
+              cand_boxes[a0] = true
+              drop = true
+              eliminated += 1
+      elsif op == :nanunbox_float
+        b0 = wire_get(inst, :boxed)
+        src = f64_box_src[b0]
+        if src != nil
+          subst[wire_get(inst, :temp)] = src
+          cand_boxes[b0] = true
+          drop = true
+          eliminated += 1
+      if drop
+        if new_instrs == nil
+          new_instrs = []
+          ci = 0
+          while ci < ii
+            new_instrs.push(instrs[ci])
+            ci += 1
+      elsif new_instrs != nil
+        new_instrs.push(inst)
+      ii += 1
+    if new_instrs != nil
+      blocks[bi][:instructions] = new_instrs
+    bi += 1
+  if eliminated == 0
+    return 0
+
+  resolved = resolve_subst_chains(subst)
+  rcount = resolved.size()
+  live_boxes = {}
+  bi = 0
+  while bi < n_blocks
+    instrs = blocks[bi][:instructions]
+    n_instrs = instrs.size()
+    ii = 0
+    while ii < n_instrs
+      inst = wire_try_fold_box_call(func, apply_subst(instrs[ii], resolved, rcount))
+      instrs[ii] = inst
+      wire_mark_used_temps(inst, cand_boxes, live_boxes)
+      ii += 1
+    bi += 1
+
+  # Remove any box instruction whose temp now has zero remaining uses.
+  if live_boxes.size() < cand_boxes.size()
+    bi = 0
+    while bi < n_blocks
+      instrs = blocks[bi][:instructions]
+      n_instrs = instrs.size()
+      new_instrs = nil
+      ii = 0
+      while ii < n_instrs
+        inst = instrs[ii]
+        op = wire_kind(inst)
+        dead_box = false
+        if op == :call_direct_i64 || op == :nanbox_float
+          t = wire_get(inst, :temp)
+          if t != nil && cand_boxes[t] == true && live_boxes[t] != true
+            dead_box = true
+            eliminated += 1
+        if dead_box
+          if new_instrs == nil
+            new_instrs = []
+            ci = 0
+            while ci < ii
+              new_instrs.push(instrs[ci])
+              ci += 1
+        elsif new_instrs != nil
+          new_instrs.push(inst)
+        ii += 1
+      if new_instrs != nil
+        blocks[bi][:instructions] = new_instrs
+      bi += 1
+  eliminated
+
+-> wire_elim_box_unbox_roundtrips(mod)
+  fns = mod[:functions]
+  n_fns = fns.size()
+  total = 0
+  fi = 0
+  while fi < n_fns
+    func = fns[fi]
+    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
+      total += wire_elim_box_unbox_roundtrips_fn(func)
+    fi += 1
+  total
 
 -> compile(ast, source_path, verbose = false, frame_pointers = false, sidemap_path = nil, release_mode = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false, source_manifest = nil)
   compile_started_at = clock()
@@ -382,6 +630,8 @@ use target
     write_file(ssa_report, ssa_converted.sort().join("\n") + "\n")
   if (release_mode && env("TUNGSTEN_WIRE_INLINE") != "0") || env("TUNGSTEN_WIRE_INLINE") == "1"
     mod[:wire_inlined_calls] = wire_inline_tiny_leaves(mod)
+  if env("TUNGSTEN_BOX_ELIM") != "0"
+    mod[:wire_box_roundtrips_eliminated] = wire_elim_box_unbox_roundtrips(mod)
   t_cfg = clock() - cfg_started_at
 
   # Escape summaries first: ownership consults mod[:fn_escs] to avoid

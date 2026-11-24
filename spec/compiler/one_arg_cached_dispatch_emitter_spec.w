@@ -77,6 +77,12 @@ check("runtime declaration",
       decls.include?("declare i64 @w_method_call_cached_1(i64, i64, i64, ptr)"))
 check("argc-two runtime declaration",
       decls.include?("declare i64 @w_method_call_cached_2(i64, i64, i64, i64, ptr)"))
+check("argc-one-any runtime declaration",
+      decls.include?("declare i64 @w_method_call_cached_1_any(i64, i64, i64, ptr)"))
+check("argc-two-any runtime declaration",
+      decls.include?("declare i64 @w_method_call_cached_2_any(i64, i64, i64, i64, ptr)"))
+check("argc-three-any runtime declaration",
+      decls.include?("declare i64 @w_method_call_cached_3_any(i64, i64, i64, i64, i64, ptr)"))
 
 # Static slab WValues carry only identity. Runtime aliases may cache length,
 # and the runtime masks that optional field for equality and hashing.
@@ -93,12 +99,12 @@ check("zero declaration selection",
       zero_fns.size() == 1 && zero_fns[0] == "w_method_call_cached_0")
 check("one declaration selection",
       one_fns.size() == 1 && one_fns[0] == "w_method_call_cached_1")
-check("unproven argc-one declaration stays generic",
-      generic_one_fns.size() == 1 && generic_one_fns[0] == "w_method_call_cached")
+check("unproven argc-one declaration uses register-passing any helper",
+      generic_one_fns.size() == 1 && generic_one_fns[0] == "w_method_call_cached_1_any")
 check("two declaration selection",
       two_fns.size() == 1 && two_fns[0] == "w_method_call_cached_2")
-check("unproven argc-two declaration stays generic",
-      generic_two_fns.size() == 1 && generic_two_fns[0] == "w_method_call_cached")
+check("unproven argc-two declaration uses register-passing any helper",
+      generic_two_fns.size() == 1 && generic_two_fns[0] == "w_method_call_cached_2_any")
 
 one_ir = render_instruction(one_inst, nil, {}, nil, "")
 check("argc-one helper call", one_ir.include?("@w_method_call_cached_1("))
@@ -109,9 +115,9 @@ check("argc-one first-store count zero", !one_ir.include?("store i64"))
 check("argc-one scratch reference count zero", !one_ir.include?("%__mcall_args"))
 
 generic_one_ir = render_instruction(generic_one_inst, nil, {}, nil, "")
-check("unproven argc-one stays generic", generic_one_ir.include?("@w_method_call_cached("))
-check("unproven argc-one omits helper", !generic_one_ir.include?("@w_method_call_cached_1("))
-check("unproven argc-one retains store", generic_one_ir.include?("store i64 %arg"))
+check("unproven argc-one uses _1_any", generic_one_ir.include?("@w_method_call_cached_1_any("))
+check("unproven argc-one omits source helper", !generic_one_ir.include?("@w_method_call_cached_1("))
+check("unproven argc-one avoids stack spill", !generic_one_ir.include?("%__mcall_args"))
 
 two_ir = render_instruction(two_inst, nil, {}, nil, "")
 check("argc-two helper call", two_ir.include?("@w_method_call_cached_2("))
@@ -121,10 +127,43 @@ check("argc-two stores zero", !two_ir.include?("store i64"))
 check("argc-two scratch reference zero", !two_ir.include?("%__mcall_args"))
 
 generic_two_ir = render_instruction(generic_two_inst, nil, {}, nil, "")
-check("unproven argc-two stays generic", generic_two_ir.include?("@w_method_call_cached("))
-check("unproven argc-two omits helper", !generic_two_ir.include?("@w_method_call_cached_2("))
-check("unproven argc-two first store retained", generic_two_ir.include?("store i64 %arg0"))
-check("unproven argc-two second store retained", generic_two_ir.include?("store i64 %arg1"))
+check("unproven argc-two uses _2_any", generic_two_ir.include?("@w_method_call_cached_2_any("))
+check("unproven argc-two omits source helper", !generic_two_ir.include?("@w_method_call_cached_2("))
+check("unproven argc-two avoids stack spill", !generic_two_ir.include?("%__mcall_args"))
+
+generic_three_inst = wire_instruction({
+  op: :call_method_i64,
+  temp: "%three_any",
+  temp_args_val: "%three_any.args",
+  receiver: "%recv",
+  method_name_val: "%name",
+  args: ["%a0", "%a1", "%a2"],
+  scalar_source_argc1: false,
+  scalar_source_argc2: false,
+  ic_id: 16,
+  src_line: nil,
+  src_col: nil
+})
+generic_three_ir = render_instruction(generic_three_inst, nil, {}, nil, "")
+check("argc-three uses _3_any", generic_three_ir.include?("@w_method_call_cached_3_any("))
+check("argc-three avoids stack spill", !generic_three_ir.include?("%__mcall_args"))
+
+generic_four_inst = wire_instruction({
+  op: :call_method_i64,
+  temp: "%four_any",
+  temp_args_val: "%four_any.args",
+  receiver: "%recv",
+  method_name_val: "%name",
+  args: ["%a0", "%a1", "%a2", "%a3"],
+  scalar_source_argc1: false,
+  scalar_source_argc2: false,
+  ic_id: 17,
+  src_line: nil,
+  src_col: nil
+})
+generic_four_ir = render_instruction(generic_four_inst, nil, {}, nil, "")
+check("argc-four uses generic vector helper", generic_four_ir.include?("@w_method_call_cached("))
+check("argc-four stores args in scratch array", generic_four_ir.include?("store i64 %a0, ptr %__mcall_args"))
 
 one_function = {
   name: "one_only",

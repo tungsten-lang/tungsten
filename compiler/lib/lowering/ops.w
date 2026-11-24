@@ -2204,8 +2204,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_wire_call_method_i64(wfn, [rhs_reg], nil, nil, nil, nil, ic_id, method_name_val, lhs_reg, nil, nil, node.col, node.line, temp, temp_args_val)
     return typed_value(:i64, temp)
 
-  # StringBuffer#<<(string): static typed receiver dispatch. This avoids the
-  # generic `w_bit_shl` path and its runtime method/operator checks.
+  # StringBuffer#<<: static typed receiver dispatch. Avoids __w_shl_fast /
+  # w_bit_shl and lets chained appends stay :string_buffer.
   if op == :LSHIFT && lt == :string_buffer && rt == :string
     lhs = lower_expression(ctx, node.left)
     rhs = lower_expression(ctx, node.right)
@@ -2213,6 +2213,25 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     rhs_reg = ensure_i64_value(wfn, rhs)
     temp = next_temp(wfn)
     emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_strbuf_append", nil, nil, temp)
+    return typed_value(:i64, temp)
+
+  if op == :LSHIFT && lt == :string_buffer && core_operator_untouched?(ctx[:mod], "StringBuffer", "<<")
+    lhs = lower_expression(ctx, node.left)
+    rhs = lower_expression(ctx, node.right)
+    lhs_reg = ensure_i64_value(wfn, lhs)
+    rhs_reg = ensure_i64_value(wfn, rhs)
+    temp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_strbuf_append_any", nil, nil, temp)
+    return typed_value(:i64, temp)
+
+  # Array#<<: in-place push returning the array itself.
+  if op == :LSHIFT && lt == :array && core_operator_untouched?(ctx[:mod], "Array", "<<")
+    lhs = lower_expression(ctx, node.left)
+    rhs = lower_expression(ctx, node.right)
+    lhs_reg = ensure_i64_value(wfn, lhs)
+    rhs_reg = ensure_i64_value(wfn, rhs)
+    temp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_array_push", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # String#<< mutates at the language level. Runtime strings are immutable
@@ -2225,6 +2244,18 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     temp = next_temp(wfn)
     emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_str_append", nil, nil, temp)
     return rebind_local_i64(ctx, node.left.name, temp, :string)
+
+  # Unknown-receiver `x << str` (e.g. an untyped StringBuffer parameter):
+  # RHS is statically :string so integer shift is impossible. Bypass
+  # __w_shl_fast (dead int-tag IR + bogus int_temp_release) and w_to_s.
+  if op == :LSHIFT && rt == :string && lt != :string && core_operator_untouched?(ctx[:mod], "StringBuffer", "<<") && core_operator_untouched?(ctx[:mod], "Array", "<<") && core_operator_untouched?(ctx[:mod], "String", "<<")
+    lhs = lower_expression(ctx, node.left)
+    rhs = lower_expression(ctx, node.right)
+    lhs_reg = ensure_i64_value(wfn, lhs)
+    rhs_reg = ensure_i64_value(wfn, rhs)
+    temp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_fast_append_str", nil, nil, temp)
+    return typed_value(:i64, temp)
 
   # String * Int: statically text × integer → direct w_string_repeat (the
   # runtime the `.repeat(n)` method route already uses). The generic path
@@ -2305,6 +2336,32 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       if li != nil && wire_kind(li) == :call_direct_i64 && wire_get(li, :name) == "w_int_to_s" && wire_get(li, :temp) == rhs_reg
         cname = "w_str_concat_free_rhs"
     emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, cname, nil, nil, temp)
+    return typed_value(:i64, temp)
+
+  # One-sided String `+`: the pair cannot be two inline ints, so bypass
+  # __w_add_fast (dead int-tag IR + bogus int_temp_release) and w_add's
+  # 15-branch numeric waterfall. Preserves exact slow-path semantics for
+  # Char/Rope/WObject#+/TypeError.
+  if op == :PLUS && lt == :string && rt != :string && core_operator_untouched?(ctx[:mod], "String", "+")
+    lhs = lower_expression(ctx, node.left)
+    lhs_reg = ensure_i64_value(wfn, lhs)
+    lhs_last = last_emitted_instruction(wfn)
+    rhs = lower_expression(ctx, node.right)
+    rhs_reg = ensure_i64_value(wfn, rhs)
+    temp = next_temp(wfn)
+    cname = "w_str_add_rhs"
+    if env("TUNGSTEN_FREE") != "0" && fresh_string_operand?(node.left, lhs_last, lhs_reg)
+      cname = "w_str_add_rhs_own"
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, cname, nil, nil, temp)
+    return typed_value(:i64, temp)
+
+  if op == :PLUS && lt != :string && rt == :string && core_operator_untouched?(ctx[:mod], "String", "+")
+    lhs = lower_expression(ctx, node.left)
+    rhs = lower_expression(ctx, node.right)
+    lhs_reg = ensure_i64_value(wfn, lhs)
+    rhs_reg = ensure_i64_value(wfn, rhs)
+    temp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_str_add_lhs", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Untyped shift-left must keep arbitrary-precision semantics. Integer
@@ -4498,4 +4555,4 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return false
   if wire_get(last_inst, :temp) != reg
     return false
-  wire_get(last_inst, :name) in ("w_int_to_s" "w_string_repeat" "w_str_concat" "w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str")
+  wire_get(last_inst, :name) in ("w_int_to_s" "w_string_repeat" "w_str_concat" "w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own" "w_str_add_rhs" "w_str_add_rhs_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str")

@@ -549,6 +549,19 @@
     "cvar_key",
     "temp"
   ],
+  "load_double": [
+    "ptr",
+    "temp"
+  ],
+  "load_f64_at": [
+    "index",
+    "ptr",
+    "temp"
+  ],
+  "load_float": [
+    "ptr",
+    "temp"
+  ],
   "load_global": [
     "name",
     "temp",
@@ -849,6 +862,10 @@
     "value"
   ],
   "ta_data_addr": [
+    "temp",
+    "value"
+  ],
+  "ta_f64_elems_ptr": [
     "temp",
     "value"
   ],

@@ -760,7 +760,7 @@ use wire
       inst = instrs[ii]
       # Apply pending substitutions to this instruction
       if subst_count > 0
-        inst = apply_subst(inst, subst, subst_count)
+        inst = wire_try_fold_box_call(func, apply_subst(inst, subst, subst_count))
       op = wire_kind(inst)
 
       if (op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128) && promotable[wire_get(inst, :ptr)] != nil
@@ -838,7 +838,7 @@ use wire
       while ii < instrs.size()
         inst = instrs[ii]
         if u_subst_count > 0
-          inst = apply_subst(inst, u_subst, u_subst_count)
+          inst = wire_try_fold_box_call(func, apply_subst(inst, u_subst, u_subst_count))
         op = wire_kind(inst)
         if (op == :store_i64 || op == :store_double || op == :store_float || op == :store_i128) && promotable[wire_get(inst, :ptr)] != nil
           local_defs[wire_get(inst, :ptr)] = wire_get(inst, :value)

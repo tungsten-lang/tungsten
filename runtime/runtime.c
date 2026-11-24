@@ -28177,6 +28177,44 @@ WValue w_str_concat_free_lhs(WValue a, WValue b) {
     return r;
 }
 
+__attribute__((noinline, cold))
+static WValue w_str_add_slow(WValue a, WValue b) {
+    return w_add(a, b);
+}
+
+WValue w_str_add_rhs(WValue a, WValue b) {
+    if (__builtin_expect(w_is_string(a) && w_is_string(b), 1))
+        return w_str_concat(a, b);
+    return w_str_add_slow(a, b);
+}
+
+WValue w_str_add_rhs_own(WValue a, WValue b) {
+    if (__builtin_expect((w_is_string(a) || w_is_rope(a)) && (w_is_string(b) || w_is_rope(b)), 1))
+        return w_str_concat_own(a, b, 1);
+    return w_str_add_slow(a, b);
+}
+
+WValue w_str_add_lhs(WValue a, WValue b) {
+    if (__builtin_expect(w_is_string(a) && w_is_string(b), 1))
+        return w_str_concat(a, b);
+    return w_str_add_slow(a, b);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_append_str_slow(WValue a, WValue b) {
+    return w_bit_shl(a, b);
+}
+
+WValue w_fast_append_str(WValue a, WValue b) {
+    if (__builtin_expect(w_is_strbuf(a) && (w_is_string(b) || w_is_rope(b)), 1))
+        return w_strbuf_append(a, b);
+    if (w_is_array(a)) {
+        w_array_push(a, b);
+        return a;
+    }
+    return w_fast_append_str_slow(a, b);
+}
+
 WValue w_int_to_s(WValue r);
 void w_value_free(WValue v);
 
@@ -30842,6 +30880,28 @@ static inline int w_wire_asm_subst_kind_p(uint32_t kind) {
     return (kind >= 11u && kind <= 22u && kind != 13u) || (kind >= 198u && kind <= 202u);
 }
 
+static inline int w_wire_is_fields_sym(WValue sym) {
+    if (!w_is_symbol(sym)) return 0;
+    size_t mode = (sym >> 1) & 7;
+    if (mode <= 5) return 0;
+    char inline_buf[6];
+    const char *s = NULL;
+    size_t len = 0;
+    w_str_data(sym, inline_buf, &s, &len);
+    return len == 6 && memcmp(s, "fields", 6) == 0;
+}
+
+static inline int w_wire_is_incoming_sym(WValue sym) {
+    if (!w_is_symbol(sym)) return 0;
+    size_t mode = (sym >> 1) & 7;
+    if (mode <= 5) return 0;
+    char inline_buf[6];
+    const char *s = NULL;
+    size_t len = 0;
+    w_str_data(sym, inline_buf, &s, &len);
+    return len == 8 && memcmp(s, "incoming", 8) == 0;
+}
+
 static inline int w_wire_subst_scalar_sym_p(WValue sym, uint32_t kind) {
     if (!w_is_symbol(sym)) return 0;
     size_t mode = (sym >> 1) & 7;
@@ -30859,6 +30919,11 @@ static inline int w_wire_subst_scalar_sym_p(WValue sym, uint32_t kind) {
         case W_ISYM5('t','a','b','l','e'):
         case W_ISYM3('a','r','r'):
         case W_ISYM3('i','d','x'):
+        case W_ISYM3('a','r','g'):
+        case W_ISYM4('d','e','s','t'):
+        case W_ISYM4('b','a','s','e'):
+        case W_ISYM3('c','a','p'):
+        case W_ISYM4('n','o','d','e'):
             return 1;
         case W_ISYM3('v','a','l'):
             return kind == 32u || kind == 204u;
@@ -30898,6 +30963,8 @@ static inline int w_wire_subst_scalar_sym_p(WValue sym, uint32_t kind) {
         return memcmp(s, "class_temp", 10) == 0;
     case 12:
         return memcmp(s, "captures_ptr", 12) == 0;
+    case 15:
+        return memcmp(s, "method_name_val", 15) == 0;
     default:
         return 0;
     }
@@ -30926,14 +30993,17 @@ WValue w_wire_apply_subst(WValue inst, WValue subst) {
         WValue val = g_wire_arena.base[src_off + 2u + fi * 2u];
         if (val == W_NIL) continue;
 
-        if (sym == W_ISYM4('a','r','g','s') || sym == W_ISYM1('s')) {
+        if (sym == W_ISYM4('a','r','g','s') || sym == W_ISYM1('s') ||
+            (kind == 141u && w_wire_is_fields_sym(sym)) ||
+            (kind == 124u && w_wire_is_incoming_sym(sym))) {
             if (!w_is_wire_sequence(val)) continue;
             uint64_t seq_off = w_wire_sequence_checked_offset(val);
             if (seq_off == 0) continue;
             uint32_t seq_count = w_wire_record_count(seq_off);
+            uint32_t step = (kind == 124u) ? 2u : 1u;
             WValue new_seq = W_NIL;
             uint64_t new_seq_off = 0;
-            for (uint32_t si = 0; si < seq_count; si++) {
+            for (uint32_t si = 0; si < seq_count; si += step) {
                 WValue item = g_wire_arena.base[seq_off + 1u + si];
                 int64_t d = w_hash_probe(hash, item);
                 if (d >= 0) {
@@ -40221,6 +40291,97 @@ WValue w_method_call_cached_2(WValue recv, WValue name, WValue arg0,
         }
     }
     return w_method_call_cached_2_compat(recv, name, arg0, arg1, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_method_call_cached_1_any_slow(
+        WValue recv, WValue name, WValue arg0, WInlineCache *cache) {
+    return w_method_call_cached(recv, name, &arg0, 1, cache);
+}
+
+inline
+WValue w_method_call_cached_1_any(WValue recv, WValue name, WValue arg0,
+                                  WInlineCache *cache) {
+    if (__builtin_expect(w_is_rope(recv), 0))
+        return w_method_call_cached_1_any_slow(recv, name, arg0, cache);
+    uint64_t key = w_dispatch_key_inline(recv);
+    uint64_t tk = atomic_load_explicit(&cache->type_key, memory_order_acquire);
+    void *fn = atomic_load_explicit(&cache->fn_ptr, memory_order_relaxed);
+    int32_t car = atomic_load_explicit(&cache->arity, memory_order_relaxed);
+    if (__builtin_expect(key != 0 && key == tk && fn != NULL &&
+            key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+        if (__builtin_expect(car == 1, 1))
+            return ((WValue(*)(WValue, WValue))fn)(recv, arg0);
+        if (car == -1)
+            return ((WValue(*)(WValue, WValue*, int))fn)(recv, &arg0, 1);
+        if (car == -3)
+            return w_construct_cached(recv, fn, 1, &arg0);
+    }
+    return w_method_call_cached_1_any_slow(recv, name, arg0, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_method_call_cached_2_any_slow(
+        WValue recv, WValue name, WValue arg0, WValue arg1, WInlineCache *cache) {
+    WValue args[2] = {arg0, arg1};
+    return w_method_call_cached(recv, name, args, 2, cache);
+}
+
+inline
+WValue w_method_call_cached_2_any(WValue recv, WValue name, WValue arg0,
+                                  WValue arg1, WInlineCache *cache) {
+    if (__builtin_expect(w_is_rope(recv), 0))
+        return w_method_call_cached_2_any_slow(recv, name, arg0, arg1, cache);
+    uint64_t key = w_dispatch_key_inline(recv);
+    uint64_t tk = atomic_load_explicit(&cache->type_key, memory_order_acquire);
+    void *fn = atomic_load_explicit(&cache->fn_ptr, memory_order_relaxed);
+    int32_t car = atomic_load_explicit(&cache->arity, memory_order_relaxed);
+    if (__builtin_expect(key != 0 && key == tk && fn != NULL &&
+            key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+        if (__builtin_expect(car == 2, 1))
+            return ((WValue(*)(WValue, WValue, WValue))fn)(recv, arg0, arg1);
+        if (car == -1) {
+            WValue args[2] = {arg0, arg1};
+            return ((WValue(*)(WValue, WValue*, int))fn)(recv, args, 2);
+        }
+        if (car == -4) {
+            WValue args[2] = {arg0, arg1};
+            return w_construct_cached(recv, fn, 2, args);
+        }
+    }
+    return w_method_call_cached_2_any_slow(recv, name, arg0, arg1, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_method_call_cached_3_any_slow(
+        WValue recv, WValue name, WValue arg0, WValue arg1, WValue arg2, WInlineCache *cache) {
+    WValue args[3] = {arg0, arg1, arg2};
+    return w_method_call_cached(recv, name, args, 3, cache);
+}
+
+inline
+WValue w_method_call_cached_3_any(WValue recv, WValue name, WValue arg0,
+                                  WValue arg1, WValue arg2, WInlineCache *cache) {
+    if (__builtin_expect(w_is_rope(recv), 0))
+        return w_method_call_cached_3_any_slow(recv, name, arg0, arg1, arg2, cache);
+    uint64_t key = w_dispatch_key_inline(recv);
+    uint64_t tk = atomic_load_explicit(&cache->type_key, memory_order_acquire);
+    void *fn = atomic_load_explicit(&cache->fn_ptr, memory_order_relaxed);
+    int32_t car = atomic_load_explicit(&cache->arity, memory_order_relaxed);
+    if (__builtin_expect(key != 0 && key == tk && fn != NULL &&
+            key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
+        if (__builtin_expect(car == 3, 1))
+            return ((WValue(*)(WValue, WValue, WValue, WValue))fn)(recv, arg0, arg1, arg2);
+        if (car == -1) {
+            WValue args[3] = {arg0, arg1, arg2};
+            return ((WValue(*)(WValue, WValue*, int))fn)(recv, args, 3);
+        }
+        if (car == -5) {
+            WValue args[3] = {arg0, arg1, arg2};
+            return w_construct_cached(recv, fn, 3, args);
+        }
+    }
+    return w_method_call_cached_3_any_slow(recv, name, arg0, arg1, arg2, cache);
 }
 
 __attribute__((noinline, cold))

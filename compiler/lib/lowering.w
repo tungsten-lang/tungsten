@@ -1019,17 +1019,19 @@ use lowering/definitions
   # Generic class monomorphization runs BEFORE the main expressions walk
   # so specialized classes are visible to every downstream pass.
   monomorphize_generics(ast, mod)
-  # Desugar `SmallArray<T, N>.new` → `SmallArray.new(:T, N)`. Always runs (unlike
-  # monomorphize_generics, which early-returns when no user generic templates
-  # exist), so a program using SmallArray<T,N> without any user generics is still
-  # rewritten. Must precede the stack-promote / escape analysis so it sees the
-  # canonical constructor.
-  rewrite_smallarray_generic_ctors(ast)
 
   program_index = nil
   if env("TUNGSTEN_PROGRAM_INDEX") != "0"
     program_index = build_program_index(ast.expressions, mod)
+    # Desugar `SmallArray<T, N>.new` → `T[N]` only when the program index
+    # actually observed a `SmallArray<...>.new` call (avoids a redundant
+    # whole-AST walk on the 99.9% of programs that don't use that sugar).
+    if program_index[:has_smallarray_generic] == true
+      rewrite_smallarray_generic_ctors(ast)
+      program_index = build_program_index(ast.expressions, mod)
     mod[:program_index] = program_index
+  else
+    rewrite_smallarray_generic_ctors(ast)
 
   # PROTECT_THE_CORE turns Core ownership into an optimization boundary. Core
   # registration and SCC return inference run before user declarations exist,

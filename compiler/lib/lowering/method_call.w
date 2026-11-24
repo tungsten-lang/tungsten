@@ -1040,7 +1040,7 @@
       if sroa_info != nil
         temp = next_temp(wfn)
         if sroa_info[:op] == :load_double
-          emit_wire_dynamic_2(wfn, :load_double, :ptr, sroa_info[:slot], :temp, temp)
+          emit_wire_load_double(wfn, sroa_info[:slot], temp)
         else
           emit_wire_load_i64(wfn, sroa_info[:slot], temp)
         return typed_value(sroa_info[:type], temp)

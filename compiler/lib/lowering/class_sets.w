@@ -554,7 +554,15 @@
     deps = {}
     definition = definitions[key]
     return_class_collect_dependency_calls(mod, definition[:node], definition[:class_name], deps)
-    graph[key] = deps.keys()
+    raw_edges = deps.keys()
+    filtered = []
+    ri = 0
+    while ri < raw_edges.size()
+      to = raw_edges[ri]
+      if definitions[to] != nil
+        filtered.push(to)
+      ri += 1
+    graph[key] = filtered
     reverse[key] = []
     i += 1
   i = 0
@@ -595,6 +603,7 @@
   if mod[:method_tables_locked] != true && mod[:auto_closed_world_devirt] != true
     return nil
   collected = collect_return_class_definitions(mod, expressions, ordered_class_exprs)
+  mod[:return_class_collected] = collected
   definitions = collected[:definitions]
   mod[:return_class_set_workers] = collected[:workers]
   core_prepass = mod[:incremental_core_cache_hit] == true && mod[:incremental_core_cache_entry] != nil ? mod[:incremental_core_cache_entry][:core_prepass] : nil
@@ -608,7 +617,18 @@
       mod[:return_class_sets][rk] = cached_rcs[rk]
       ri += 1
     core_seeded = true
-  components = return_class_scc_plan(mod, definitions)
+  plan_defs = definitions
+  if core_seeded
+    plan_defs = {}
+    dkeys = definitions.keys()
+    di = 0
+    while di < dkeys.size()
+      dk = dkeys[di]
+      ddef = definitions[dk]
+      if ddef != nil && !definition_from_core?(ddef[:node])
+        plan_defs[dk] = ddef
+      di += 1
+  components = return_class_scc_plan(mod, plan_defs)
   ci = 0
   while ci < components.size()
     component = components[ci]

@@ -1049,6 +1049,34 @@
 -> emit_wire_load_cvar(f, cvar_key, temp)
   current_block(f)[:instructions].push(wire_make_load_cvar(cvar_key, temp))
 
+-> wire_make_load_double(ptr, temp)
+  handle = ccall_rawargs("w_wire_alloc", 224, 2)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :ptr, ptr)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
+  handle
+
+-> emit_wire_load_double(f, ptr, temp)
+  current_block(f)[:instructions].push(wire_make_load_double(ptr, temp))
+
+-> wire_make_load_f64_at(index, ptr, temp)
+  handle = ccall_rawargs("w_wire_alloc", 226, 3)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :index, index)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :ptr, ptr)
+  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
+  handle
+
+-> emit_wire_load_f64_at(f, index, ptr, temp)
+  current_block(f)[:instructions].push(wire_make_load_f64_at(index, ptr, temp))
+
+-> wire_make_load_float(ptr, temp)
+  handle = ccall_rawargs("w_wire_alloc", 227, 2)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :ptr, ptr)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
+  handle
+
+-> emit_wire_load_float(f, ptr, temp)
+  current_block(f)[:instructions].push(wire_make_load_float(ptr, temp))
+
 -> wire_make_load_global(name, temp, type)
   handle = ccall_rawargs("w_wire_alloc", 98, 3)
   ccall_nobox("w_wire_field_store_at", handle, 0, :name, name)
@@ -1672,6 +1700,15 @@
 
 -> emit_wire_ta_data_addr(f, temp, value)
   current_block(f)[:instructions].push(wire_make_ta_data_addr(temp, value))
+
+-> wire_make_ta_f64_elems_ptr(temp, value)
+  handle = ccall_rawargs("w_wire_alloc", 254, 2)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
+  handle
+
+-> emit_wire_ta_f64_elems_ptr(f, temp, value)
+  current_block(f)[:instructions].push(wire_make_ta_f64_elems_ptr(temp, value))
 
 -> wire_make_ta_size_raw(temp, value)
   handle = ccall_rawargs("w_wire_alloc", 161, 2)

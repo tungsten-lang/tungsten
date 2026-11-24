@@ -831,6 +831,12 @@ function_emit_cache_state = {
       runtime_fns.push("w_method_call_cached_1")
     elsif scalar_source_two_call?(inst)
       runtime_fns.push("w_method_call_cached_2")
+    elsif argc == 1
+      runtime_fns.push("w_method_call_cached_1_any")
+    elsif argc == 2
+      runtime_fns.push("w_method_call_cached_2_any")
+    elsif argc == 3
+      runtime_fns.push("w_method_call_cached_3_any")
     else
       runtime_fns.push("w_method_call_cached")
     if wire_get(inst, :devirt_fn) != nil

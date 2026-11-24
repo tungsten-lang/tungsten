@@ -2683,6 +2683,20 @@ WValue w_strbuf_append(WValue buf, WValue str) {
     return buf;
 }
 
+__attribute__((noinline, cold))
+static WValue w_strbuf_append_any_slow(WValue buf, WValue val) {
+    return w_bit_shl(buf, val);
+}
+
+WValue w_strbuf_append_any(WValue buf, WValue val) {
+    if (__builtin_expect(w_is_strbuf(buf), 1)) {
+        if (__builtin_expect(w_is_string(val) || w_is_rope(val), 1))
+            return w_strbuf_append(buf, val);
+        return w_strbuf_append(buf, w_to_s(val));
+    }
+    return w_strbuf_append_any_slow(buf, val);
+}
+
 /* Convert buffer contents to an immutable WValue string. */
 WValue w_strbuf_to_s(WValue buf) {
     WStrBuf *sb = (WStrBuf *)w_as_ptr(buf);

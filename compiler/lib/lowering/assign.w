@@ -953,7 +953,11 @@
     if !hint_retype_safe
       raw_val = lower_machine_int_expression(ctx, node.value, target_type)
       boxed_tmp = next_temp(wfn)
-      emit_wire_call_direct_i64(wfn, nil, [raw_val], nil, nil, machine_box_fn(target_type), nil, nil, boxed_tmp)
+      box_fn = machine_box_fn(target_type)
+      if (box_fn == "__w_int_fast" && is_i48_decimal_literal?(raw_val, true)) || (box_fn == "w_u64" && is_i48_decimal_literal?(raw_val, false))
+        emit_wire_nanbox_int(wfn, raw_val, boxed_tmp, next_temp(wfn))
+      else
+        emit_wire_call_direct_i64(wfn, nil, [raw_val], nil, nil, box_fn, nil, nil, boxed_tmp)
       # Round-4 fix (2026-07-22): stamp :bigint, NOT :int. boxed_tmp above is
       # machine_box_fn(:u64) = w_u64(...), a real BIGNUM box for values past
       # 2^48. A :int stamp routes later machine-context reads through the
@@ -1148,7 +1152,7 @@
       ctx[:var_types][name] = :f32
       ctx[:bindings][name] = nil
       ptr = ensure_var_slot(wfn, name, "float")
-      emit_wire_dynamic_2(wfn, :store_float, :ptr, ptr, :value, raw_val)
+      emit_wire_store_float(wfn, ptr, raw_val)
       if wfn[:name] == "main"
         ctx[:mod][:top_level_vars][name] = true
         ctx[:mod][:top_level_var_types][name] = nil
@@ -1226,7 +1230,10 @@
     sty = wfn[:var_slot_types][name]
     if sty == "float" || sty == "double"
       fraw = sty == "float" ? ensure_raw_f32(wfn, val) : ensure_raw_f64(wfn, val)
-      emit_wire_dynamic_2(wfn, sty == "float" ? :store_float : :store_double, :ptr, ptr, :value, fraw)
+      if sty == "float"
+        emit_wire_store_float(wfn, ptr, fraw)
+      else
+        emit_wire_store_double(wfn, ptr, fraw)
       if wfn[:name] == "main"
         ctx[:mod][:top_level_vars][name] = true
         ctx[:mod][:top_level_var_types][name] = nil

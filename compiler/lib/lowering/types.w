@@ -668,29 +668,36 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
 -> memo_impurity_call_targets(call, maps)
   name = call.name
   if name == nil || name == "ccall" || call.receiver != nil
-    return []
+    return nil
   maps[:top][name]
 
 -> memo_impurity_collect_reverse_edges(mod, record, node, maps, reverse)
   if node == nil
     return nil
   if type(node) == "Array"
+    n_node = node.size()
     i = 0
-    while i < node.size()
+    while i < n_node
       memo_impurity_collect_reverse_edges(mod, record, node[i], maps, reverse)
       i += 1
     return nil
   if !is_ast_node?(node)
     return nil
   kind = ast_kind(node)
+  if kind in (:int :string :symbol :bool :nil_val :nil_lit :return_nil :float :char :ivar :cvar :gvar :self_ref :class_ref :break :next :param)
+    return nil
   if kind == :call
     targets = memo_impurity_call_targets(node, maps)
-    memo_impurity_add_reverse_edges(mod, maps[:records], reverse, targets, record[:key])
+    if targets != nil
+      memo_impurity_add_reverse_edges(mod, maps[:records], reverse, targets, record[:key])
   elsif kind == :var
     # A bare zero-argument source call parses as Var. lower_var redirects it
     # to a matching known top-level function, so include the same name edge.
     # Local/parameter shadowing can over-declassify, but cannot hide impurity.
-    memo_impurity_add_reverse_edges(mod, maps[:records], reverse, maps[:top][node.name], record[:key])
+    vtargets = maps[:top][node.name]
+    if vtargets != nil
+      memo_impurity_add_reverse_edges(mod, maps[:records], reverse, vtargets, record[:key])
+    return nil
 
   # A nested definition owns its own calls; do not attribute them to the
   # enclosing function.
@@ -738,6 +745,30 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   collected = memo_impurity_collect_records(expressions)
   records = collected[:records]
   order = collected[:order]
+  stable_core = mod[:protect_core] == true && mod[:core_reuse_contract] == :stable
+  has_non_core_fn = false
+  if stable_core
+    i = 0
+    n_ord = order.size()
+    while i < n_ord
+      rec = records[order[i]]
+      if rec[:memo_key] != nil && rec[:core_owned] != true
+        has_non_core_fn = true
+        break
+      i += 1
+  if stable_core && !has_non_core_fn
+    # Protected Core functions cannot call user functions (`crosses_protected_core`),
+    # and there are no user `fn` definitions to memoize. Restrict the scan to
+    # Core records only.
+    core_order = []
+    i = 0
+    n_ord = order.size()
+    while i < n_ord
+      k = order[i]
+      if records[k][:core_owned] == true
+        core_order.push(k)
+      i += 1
+    order = core_order
   maps = memo_impurity_candidate_maps(records, order)
   reverse = {}
   impure = {}
@@ -748,7 +779,13 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     key = order[i]
     record = records[key]
     node = record[:node]
-    if fn_body_calls_impure_ccall?(node.body)
+    direct_impure = false
+    if record[:memo_key] != nil
+      # register_top_level_defs already computed calls_impure_ccall for :fn_def
+      direct_impure = node.calls_impure_ccall == true
+    else
+      direct_impure = fn_body_calls_impure_ccall?(node.body)
+    if direct_impure
       impure[key] = true
       queue.push(key)
     memo_impurity_collect_reverse_edges(mod, record, node.body, maps, reverse)

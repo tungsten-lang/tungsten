@@ -1043,6 +1043,10 @@ WValue w_gte(WValue a, WValue b);
 
 /* ---- String ---- */
 WValue w_str_concat(WValue a, WValue b);
+WValue w_str_add_rhs(WValue a, WValue b);
+WValue w_str_add_rhs_own(WValue a, WValue b);
+WValue w_str_add_lhs(WValue a, WValue b);
+WValue w_fast_append_str(WValue a, WValue b);
 WValue w_str_concat_i64(WValue a, int64_t n, WValue own_a);
 WValue w_i64_concat_str(int64_t n, WValue b, WValue own_b);
 WValue w_str_concat_int_wv(WValue a, WValue b_int, WValue own_a);
@@ -1444,6 +1448,9 @@ WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc
 WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache);
 WValue w_method_call_cached_1(WValue recv, WValue name, WValue arg, WInlineCache *cache);
 WValue w_method_call_cached_2(WValue recv, WValue name, WValue arg0, WValue arg1, WInlineCache *cache);
+WValue w_method_call_cached_1_any(WValue recv, WValue name, WValue arg0, WInlineCache *cache);
+WValue w_method_call_cached_2_any(WValue recv, WValue name, WValue arg0, WValue arg1, WInlineCache *cache);
+WValue w_method_call_cached_3_any(WValue recv, WValue name, WValue arg0, WValue arg1, WValue arg2, WInlineCache *cache);
 WValue w_fast_sym_get(WValue recv, WValue sym, WInlineCache *cache);
 WValue w_fast_sym_set(WValue recv, WValue sym, WValue val, WInlineCache *cache);
 WValue w_fast_idx_get(WValue recv, WValue key, WInlineCache *cache);
@@ -2641,6 +2648,7 @@ WValue w_strbuf_reuse_or_new(WValue *slot, int64_t cap);
 WValue w_strbuf_recycle_or_new(int64_t cap);
 void   w_strbuf_recycle(WValue v);
 WValue w_strbuf_append(WValue buf, WValue str);
+WValue w_strbuf_append_any(WValue buf, WValue val);
 WValue w_strbuf_to_s(WValue buf);
 
 /* WStrBuf promoted to its own subtag (W_SUBTAG_STRBUF). */

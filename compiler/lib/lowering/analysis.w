@@ -2404,6 +2404,19 @@ promote_scan_state = {filter: nil, def_filter: nil, skip_defs: false}
     i += 1
   nil
 
+-> pi_walk_list(list, local, candidates, mod, enclosing_fn)
+  n = list.size()
+  i = 0
+  while i < n
+    elt = list[i]
+    if elt != nil
+      if is_ast_node?(elt)
+        pi_walk(elt, local, candidates, mod, enclosing_fn)
+      elsif type(elt) == "Array"
+        pi_walk_list(elt, local, candidates, mod, enclosing_fn)
+    i += 1
+  nil
+
 -> pi_walk(node, local, candidates, mod, enclosing_fn = nil)
   if node == nil || !is_ast_node?(node)
     return nil
@@ -2418,11 +2431,14 @@ promote_scan_state = {filter: nil, def_filter: nil, skip_defs: false}
   if k == :symbol
     sv = ast_get(node, :value)
     if sv != nil
-      sv_s = sv.to_s()
-      if candidates[sv_s] != nil
-        mod[:param_infer_bailed][sv_s] = true
+      if candidates[sv] != nil
+        mod[:param_infer_bailed][sv] = true
+      else
+        sv_s = sv.to_s()
+        if candidates[sv_s] != nil
+          mod[:param_infer_bailed][sv_s] = true
     return nil
-  if k in (:int :string :bool :nil_val :float :ivar :cvar :gvar :self_ref :class_ref :break :next :param)
+  if k in (:int :string :bool :nil_val :nil_lit :return_nil :float :char :ivar :cvar :gvar :self_ref :class_ref :break :next :param)
     return nil
   # Nested def: fresh scope, params unknown (they shadow any outer name).
   if k in (:fn_def :method_def)
@@ -2494,8 +2510,26 @@ promote_scan_state = {filter: nil, def_filter: nil, skip_defs: false}
       else
         local.delete(pname)
       return nil
-  # Recurse into every child (args, receiver, bodies, …) — completeness is
-  # required so no call site or value-reference is missed.
+  # Recurse into every child directly via slab offsets when packed (zero
+  # temporary ast_children Array allocation per AST node).
+  if ccall_nobox("w_is_node_extern", node) == 1
+    kid = ccall_nobox("w_node_kind_extern", node)
+    if kid == nil || kid < 1 || kid > KIND_MAX
+      return nil
+    offsets = slab_child_offsets_table[kid]
+    if offsets == nil
+      return nil
+    n_off = offsets.size()
+    i = 0
+    while i < n_off
+      v = ccall_nobox("w_node_field_load", node, offsets[i])
+      if v != nil
+        if is_ast_node?(v)
+          pi_walk(v, local, candidates, mod, enclosing_fn)
+        elsif type(v) == "Array"
+          pi_walk_list(v, local, candidates, mod, enclosing_fn)
+      i += 1
+    return nil
   kids = ast_children(node)
   n_kids = kids.size()
   ki = 0

@@ -642,6 +642,37 @@ wire_var_slot_names = build_wire_var_slot_names()
   ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
   handle
 
+-> is_i48_decimal_literal?(s, signed = true)
+  if s == nil
+    return false
+  n = s.size()
+  if n == 0 || n > 16
+    return false
+  i = 0
+  neg = false
+  b0 = s.byte_at(0)
+  if b0 == 45
+    if !signed || n == 1
+      return false
+    neg = true
+    i = 1
+  elsif b0 < 48 || b0 > 57
+    return false
+  while i < n
+    b = s.byte_at(i)
+    if b < 48 || b > 57
+      return false
+    i += 1
+  digits = neg ? n - 1 : n
+  if digits <= 14
+    return true
+  if digits > 15
+    return false
+  iv = s.to_i()
+  if signed
+    return iv >= -140737488355328 && iv <= 140737488355327
+  iv >= 0 && iv <= 140737488355327
+
 -> ensure_i64_value(f, tv)
   if tv[:type] == :i64
     return tv[:value]
@@ -658,14 +689,25 @@ wire_var_slot_names = build_wire_var_slot_names()
     temp = next_temp(f)
     emit_wire_nanbox_int(f, tv[:value], temp, temp_masked)
     return temp
-  # raw_i64 -> i64: box via the inline-fast wrapper (fitting values box
-  # inline; only >i48 values call w_int for BigInt promotion)
+  # raw_i64 -> i64: fold decimal literals that fit in signed i48 straight to
+  # nanbox_int (constant-folded at emit time); runtime values box via the
+  # inline-fast wrapper (fitting values box inline; >i48 promotes to BigInt).
   if tv[:type] == :raw_i64
+    if is_i48_decimal_literal?(tv[:value], true)
+      temp_masked = next_temp(f)
+      temp = next_temp(f)
+      emit_wire_nanbox_int(f, tv[:value], temp, temp_masked)
+      return temp
     temp = next_temp(f)
     emit_wire_call_direct_i64(f, nil, [tv[:value]], nil, nil, "__w_int_fast", nil, nil, temp)
     return temp
-  # raw_u64 -> i64: box via unsigned runtime bridge
+  # raw_u64 -> i64: fold non-negative i48-fitting literals; otherwise unsigned bridge
   if tv[:type] == :raw_u64
+    if is_i48_decimal_literal?(tv[:value], false)
+      temp_masked = next_temp(f)
+      temp = next_temp(f)
+      emit_wire_nanbox_int(f, tv[:value], temp, temp_masked)
+      return temp
     temp = next_temp(f)
     emit_wire_call_direct_i64(f, nil, [tv[:value]], nil, nil, "w_u64", nil, nil, temp)
     return temp
@@ -783,20 +825,125 @@ wire_var_slot_names = build_wire_var_slot_names()
 # pruning on each function after lowering. These are block-local passes that
 # clean up the store/load/alloca patterns inherent in non-SSA variable slots.
 
+-> wire_slot_store_type(op)
+  if op == :store_i64
+    return :i64
+  if op == :store_double
+    return :f64
+  if op == :store_float
+    return :f32
+  if op == :store_i128
+    return :i128
+  nil
+
+-> wire_slot_load_type(op)
+  if op == :load_i64
+    return :i64
+  if op == :load_double
+    return :f64
+  if op == :load_float
+    return :f32
+  if op == :load_i128
+    return :i128
+  nil
+
+-> wire_is_call_op?(op)
+  op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_method_i64 :call_indirect_i64 :memo_call0_i64 :memo_call1_i64 :memo_call2_i64 :call_reuse_or_new_array :call_reuse_or_new_hash :call_reuse_or_new_typed :call_reuse_or_new_strbuf :call_reuse_and_drain_or_new_hash :call_recycle_or_new_array :call_recycle_or_new_hash :call_recycle_or_new_typed :call_recycle_or_new_strbuf :call_recycle_array :call_recycle_hash :call_recycle_typed :call_recycle_strbuf)
+
+-> wire_collect_fn_escape_and_setjmp(f)
+  fn_escaped = {}
+  fn_has_setjmp = false
+  heap_slots = f[:heap_slot_names]
+  if heap_slots != nil && f[:var_slots] != nil
+    hnames = heap_slots.keys()
+    hi = 0
+    while hi < hnames.size()
+      if heap_slots[hnames[hi]] == true
+        hp = f[:var_slots][hnames[hi]]
+        if hp != nil
+          fn_escaped[hp] = true
+      hi += 1
+  bi = 0
+  blocks = f[:blocks]
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      op = wire_kind(inst)
+      if op == :ptr_to_i64
+        v = wire_get(inst, :value)
+        if v != nil
+          fn_escaped[v] = true
+      elsif op == :setjmp
+        fn_has_setjmp = true
+        b = wire_get(inst, :buf)
+        if b != nil
+          fn_escaped[b] = true
+      elsif op == :call_direct_i64_ptr1 || op == :call_direct_void_ptr1
+        a = wire_get(inst, :arg)
+        if a != nil
+          fn_escaped[a] = true
+      elsif op == :store_ptr
+        d = wire_get(inst, :dest)
+        if d != nil
+          fn_escaped[d] = true
+      elsif op == :gep_array
+        gb = wire_get(inst, :base)
+        if gb != nil
+          fn_escaped[gb] = true
+      elsif op == :call_direct_i64 || op == :call_direct_void || op == :call_direct_ptr || op == :call_direct_i128
+        args = wire_get(inst, :args)
+        if args != nil
+          ai = 0
+          nargs = wire_sequence_size(args)
+          while ai < nargs
+            arg = wire_sequence_get(args, ai)
+            if arg != nil && arg.starts_with?("%v")
+              fn_escaped[arg] = true
+            ai += 1
+      ii += 1
+    bi += 1
+  {escaped: fn_escaped, has_setjmp: fn_has_setjmp}
+
+-> wire_try_fold_box_call(f, inst)
+  if wire_kind(inst) != :call_direct_i64
+    return inst
+  nm = wire_get(inst, :name)
+  if nm != "__w_int_fast" && nm != "w_u64"
+    return inst
+  if wire_get(inst, :arg_types) != nil || wire_get(inst, :src_line) != nil
+    return inst
+  args = wire_get(inst, :args)
+  if args == nil || wire_sequence_size(args) != 1
+    return inst
+  a0 = wire_sequence_get(args, 0)
+  if !is_i48_decimal_literal?(a0, nm == "__w_int_fast")
+    return inst
+  temp = wire_get(inst, :temp)
+  tm = f != nil ? next_temp(f) : (temp + ".m")
+  wire_make_nanbox_int(a0, temp, tm)
+
 -> optimize_function(f)
-  # Pass 1: Store-load forwarding within each basic block. A forwarded
-  # load's temp can be USED in a later block (e.g. the fused-pipeline loop
-  # body reads a receiver hoisted from the entry block via a raw-text
-  # array_get_inline). cse_block only rewrites uses within its own block,
-  # so those cross-block uses would dangle once the load is eliminated.
-  # Accumulate every forwarding substitution into a function-wide map and
-  # reapply it to all blocks below. Sound: the forwarded value is a store
-  # earlier in the eliminated load's block, so it dominates the load —
+  # Precompute function-wide address-escaped slots and setjmp presence so
+  # block-local CSE can safely retain unescaped local `%v*` slots across
+  # calls (and DSE can stay conservative around raising calls under setjmp).
+  fn_info = wire_collect_fn_escape_and_setjmp(f)
+  fn_escaped = fn_info[:escaped]
+  fn_has_setjmp = fn_info[:has_setjmp]
+
+  # Pass 1: Store-load and load-load forwarding within each basic block. A
+  # forwarded load's temp can be USED in a later block (e.g. the fused-pipeline
+  # loop body reads a receiver hoisted from the entry block via a raw-text
+  # array_get_inline). cse_block only rewrites uses within its own block, so
+  # those cross-block uses would dangle once the load is eliminated. Accumulate
+  # every forwarding substitution into a function-wide map and reapply it to
+  # all blocks below. Sound: the forwarded value dominates the eliminated load,
   # hence dominates any block the load's temp reaches in valid SSA.
   global_subst = {}
   i = 0
   while i < f[:blocks].size()
-    cse_block(f[:blocks][i], global_subst)
+    cse_block(f[:blocks][i], global_subst, fn_escaped, fn_has_setjmp, f)
     i += 1
 
   # Reapply the accumulated substitutions function-wide so cross-block uses
@@ -810,14 +957,14 @@ wire_var_slot_names = build_wire_var_slot_names()
       instrs = f[:blocks][bi][:instructions]
       ii = 0
       while ii < instrs.size()
-        instrs[ii] = apply_subst(instrs[ii], resolved, rcount)
+        instrs[ii] = wire_try_fold_box_call(f, apply_subst(instrs[ii], resolved, rcount))
         ii += 1
       bi += 1
 
   # Pass 2: Dead store elimination within each basic block
   i = 0
   while i < f[:blocks].size()
-    dead_store_elim(f[:blocks][i])
+    dead_store_elim(f[:blocks][i], fn_escaped, fn_has_setjmp)
     i += 1
 
   # Pass 3: Dead alloca pruning (function-wide)
@@ -842,14 +989,18 @@ wire_var_slot_names = build_wire_var_slot_names()
     ki += 1
   resolved
 
-# -- Pass 1: Store-load forwarding (CSE) --
-# Within a single basic block, track known values after store_i64 instructions.
-# When a load_i64 reads from a slot with a known value, eliminate the load and
-# substitute the known value into all subsequent uses of the load's temp.
+# -- Pass 1: Store-load and load-load forwarding (CSE) --
+# Within a single basic block, track known values and their slot types after
+# store_* and load_* instructions. When a load_* reads from a slot with a
+# matching-type known value, eliminate the load and substitute the known value
+# into all subsequent uses of the load's temp. Unescaped local stack slots
+# (`%v*` not in fn_escaped) survive calls when the function has no setjmp.
 
--> cse_block(block, global_subst = nil)
+-> cse_block(block, global_subst = nil, fn_escaped = nil, fn_has_setjmp = false, f = nil)
   known = {}
+  known_type = {}
   has_known = false
+  has_non_slot_known = false
   escaped = {}
   subst = {}
   subst_count = 0
@@ -860,22 +1011,32 @@ wire_var_slot_names = build_wire_var_slot_names()
   while i < instrs.size()
     inst = instrs[i]
     if subst_count > 0
-      inst = apply_subst(inst, subst, subst_count)
+      inst = wire_try_fold_box_call(f, apply_subst(inst, subst, subst_count))
     op = wire_kind(inst)
 
-    if op in (:store_i64 :store_i128 :store_float :store_double)
+    st_type = wire_slot_store_type(op)
+    if st_type != nil
       ptr = wire_get(inst, :ptr)
-      if escaped[ptr] != true
+      is_esc = escaped[ptr] == true || (fn_escaped != nil && fn_escaped[ptr] == true)
+      if !is_esc
         known[ptr] = wire_get(inst, :value)
+        known_type[ptr] = st_type
         has_known = true
+        if !ptr.starts_with?("%v")
+          has_non_slot_known = true
       elsif has_known
         known[ptr] = nil
+        known_type[ptr] = nil
       new_instrs.push(inst)
-    elsif op in (:load_i64 :load_i128 :load_float :load_double)
-      if has_known
-        kv = known[wire_get(inst, :ptr)]
+    else
+      ld_type = wire_slot_load_type(op)
+      if ld_type != nil
+        ptr = wire_get(inst, :ptr)
+        kv = nil
+        if has_known && known_type[ptr] == ld_type
+          kv = known[ptr]
         if kv != nil
-          # Value is known — record substitution, skip the load
+          # Value is known with matching slot type — record substitution, skip the load
           temp = wire_get(inst, :temp)
           subst[temp] = kv
           subst_count += 1
@@ -886,32 +1047,82 @@ wire_var_slot_names = build_wire_var_slot_names()
             global_subst[temp] = kv
         else
           new_instrs.push(inst)
+          # Load-load CSE: remember this loaded value for later same-BB loads
+          # from the same unescaped slot.
+          is_esc = escaped[ptr] == true || (fn_escaped != nil && fn_escaped[ptr] == true)
+          if !is_esc
+            known[ptr] = wire_get(inst, :temp)
+            known_type[ptr] = ld_type
+            has_known = true
+            if !ptr.starts_with?("%v")
+              has_non_slot_known = true
+      elsif op == :ptr_to_i64
+        # Address-of escape: any pointer whose address is taken can be
+        # mutated through aliasing (closures, callee, indirect store). Mark
+        # the slot as escaped and drop all known values so subsequent loads
+        # always re-fetch from memory.
+        escaped[wire_get(inst, :value)] = true
+        if has_known
+          known = {}
+          known_type = {}
+          has_known = false
+          has_non_slot_known = false
+        new_instrs.push(inst)
+      elsif has_known && (op == :store_ptr || wire_is_call_op?(op))
+        if fn_has_setjmp || fn_escaped == nil
+          # Conservative under setjmp (or standalone cse_block without fn_escaped):
+          # drop all known values across calls.
+          known = {}
+          known_type = {}
+          has_known = false
+          has_non_slot_known = false
+        elsif has_non_slot_known
+          # Unescaped local `%v*` slots cannot be aliased by callees or indirect
+          # stores; drop only non-slot pointers.
+          kkeys = known.keys()
+          ki = 0
+          kept = false
+          while ki < kkeys.size()
+            kp = kkeys[ki]
+            if known[kp] != nil
+              if !kp.starts_with?("%v")
+                known[kp] = nil
+                known_type[kp] = nil
+              else
+                kept = true
+            ki += 1
+          has_known = kept
+          has_non_slot_known = false
+        new_instrs.push(inst)
       else
         new_instrs.push(inst)
-    elsif op == :ptr_to_i64
-      # Address-of escape: any pointer whose address is taken can be
-      # mutated through aliasing (closures, callee, indirect store). Mark
-      # the slot as escaped and drop all known values so subsequent loads
-      # always re-fetch from memory.
-      escaped[wire_get(inst, :value)] = true
-      if has_known
-        known = {}
-        has_known = false
-      new_instrs.push(inst)
-    elsif has_known && op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_method_i64 :call_indirect_i64 :memo_call0_i64 :memo_call1_i64 :memo_call2_i64 :call_reuse_or_new_array :call_reuse_or_new_hash :call_reuse_or_new_typed :call_reuse_or_new_strbuf :call_reuse_and_drain_or_new_hash :call_recycle_or_new_array :call_recycle_or_new_hash :call_recycle_or_new_typed :call_recycle_or_new_strbuf :call_recycle_array :call_recycle_hash :call_recycle_typed :call_recycle_strbuf)
-      # Calls may mutate any escaped slot. Drop known values so subsequent
-      # loads observe writes performed by the callee or its closures.
-      known = {}
-      has_known = false
-      new_instrs.push(inst)
-    else
-      new_instrs.push(inst)
     i += 1
 
   block[:instructions] = new_instrs
 
 # Apply temp substitutions to an instruction's input operands.
 # Clones lazily only if a substitution is actually needed.
+
+-> wire_mark_used_temps(inst, targets, live)
+  fc = wire_field_count(inst)
+  fi = 0
+  while fi < fc
+    sym = wire_field_symbol_at(inst, fi)
+    if !(sym in (:temp :temp_masked :temp_shl :temp_bits :temp_ptr :temp_args_val :arg_types :cases))
+      val = wire_field_value_at(inst, fi)
+      if val != nil
+        if wire_sequence_field?(sym)
+          sn = wire_sequence_size(val)
+          si = 0
+          while si < sn
+            elt = wire_sequence_get(val, si)
+            if elt != nil && targets[elt] == true
+              live[elt] = true
+            si += 1
+        elsif targets[val] == true
+          live[val] = true
+    fi += 1
+  nil
 
 -> clone_inst(inst)
   if ccall_nobox("w_is_wire_extern", inst) == 1
@@ -1008,6 +1219,37 @@ wire_var_slot_names = build_wire_var_slot_names()
         wire_set(result, :value, rep)
         return result
     return inst
+  if op == :phi_ssa
+    inc = wire_get(inst, :incoming)
+    if inc != nil
+      result = inst
+      cloned = false
+      new_inc = nil
+      n_inc = wire_sequence_size(inc)
+      ii = 0
+      while ii < n_inc
+        val = wire_sequence_get(inc, ii)
+        rep = subst[val]
+        if rep != nil
+          if cloned == false
+            result = clone_inst(inst)
+            cloned = true
+          if new_inc == nil
+            new_inc = []
+            ci = 0
+            while ci < ii
+              new_inc.push(wire_sequence_get(inc, ci))
+              ci += 1
+          new_inc.push(rep)
+          new_inc.push(wire_sequence_get(inc, ii + 1))
+        elsif new_inc != nil
+          new_inc.push(val)
+          new_inc.push(wire_sequence_get(inc, ii + 1))
+        ii += 2
+      if new_inc != nil
+        wire_set(result, :incoming, wire_sequence(new_inc))
+      return result
+    return inst
   if op == :call_method_i64
     result = inst
     cloned = false
@@ -1018,6 +1260,14 @@ wire_var_slot_names = build_wire_var_slot_names()
         result = clone_inst(inst)
         cloned = true
         wire_set(result, :receiver, rep)
+    val = wire_get(inst, :method_name_val)
+    if val != nil
+      rep = subst[val]
+      if rep != nil
+        if cloned == false
+          result = clone_inst(inst)
+          cloned = true
+        wire_set(result, :method_name_val, rep)
     args = wire_get(inst, :args)
     if args != nil
       new_args = nil
@@ -1318,6 +1568,78 @@ wire_var_slot_names = build_wire_var_slot_names()
         result = clone_inst(inst)
         cloned = true
       result[:idx] = rep
+  val = wire_get(inst, :arg)
+  if val != nil
+    rep = subst[val]
+    if rep != nil
+      if cloned == false
+        result = clone_inst(inst)
+        cloned = true
+      wire_set(result, :arg, rep)
+  val = wire_get(inst, :dest)
+  if val != nil
+    rep = subst[val]
+    if rep != nil
+      if cloned == false
+        result = clone_inst(inst)
+        cloned = true
+      wire_set(result, :dest, rep)
+  val = wire_get(inst, :base)
+  if val != nil
+    rep = subst[val]
+    if rep != nil
+      if cloned == false
+        result = clone_inst(inst)
+        cloned = true
+      wire_set(result, :base, rep)
+  val = wire_get(inst, :cap)
+  if val != nil
+    rep = subst[val]
+    if rep != nil
+      if cloned == false
+        result = clone_inst(inst)
+        cloned = true
+      wire_set(result, :cap, rep)
+  val = wire_get(inst, :node)
+  if val != nil
+    rep = subst[val]
+    if rep != nil
+      if cloned == false
+        result = clone_inst(inst)
+        cloned = true
+      wire_set(result, :node, rep)
+  val = wire_get(inst, :method_name_val)
+  if val != nil
+    rep = subst[val]
+    if rep != nil
+      if cloned == false
+        result = clone_inst(inst)
+        cloned = true
+      wire_set(result, :method_name_val, rep)
+  if op == :slab_alloc_init
+    farr = wire_get(inst, :fields)
+    if farr != nil
+      new_farr = nil
+      fi = 0
+      while fi < wire_sequence_size(farr)
+        fv = wire_sequence_get(farr, fi)
+        rep = subst[fv]
+        if rep != nil
+          if cloned == false
+            result = clone_inst(inst)
+            cloned = true
+          if new_farr == nil
+            new_farr = []
+            ci = 0
+            while ci < fi
+              new_farr.push(wire_sequence_get(farr, ci))
+              ci += 1
+          new_farr.push(rep)
+        elsif new_farr != nil
+          new_farr.push(fv)
+        fi += 1
+      if new_farr != nil
+        wire_set(result, :fields, wire_sequence(new_farr))
   if op == :bool_array_set_inline || op == :bool_array_set_byte_inline
     val = wire_get(inst, :val)
     if val != nil
@@ -1401,14 +1723,15 @@ wire_var_slot_names = build_wire_var_slot_names()
 # Forward pass: if two stores target the same slot with no intervening load,
 # the first store is dead (overwritten before read).
 
--> dead_store_elim(block)
+-> dead_store_elim(block, fn_escaped = nil, fn_has_setjmp = false)
   prev_store = {}
   dead_set = {}
   has_dead = false
   # Slots whose address has been taken (ptr_to_i64) may be loaded later
   # through a captured inttoptr — e.g. `i = 0; each { use i }; i = 1`.
   # DSE must not kill stores to escaped slots: the intervening use is
-  # invisible as a load_i64 of the slot itself.
+  # invisible as a load_i64 of the slot itself. Under setjmp, a raising
+  # call can jump to rescue and read a slot stored before the call.
   escaped = {}
 
   i = 0
@@ -1419,7 +1742,8 @@ wire_var_slot_names = build_wire_var_slot_names()
     if op in (:store_i64 :store_i128 :store_float :store_double)
       ptr = wire_get(inst, :ptr)
       prev = prev_store[ptr]
-      if prev != nil && escaped[ptr] != true
+      is_esc = escaped[ptr] == true || (fn_escaped != nil && fn_escaped[ptr] == true)
+      if prev != nil && !is_esc
         dead_set[prev] = true
         has_dead = true
       prev_store[ptr] = i
@@ -1430,6 +1754,8 @@ wire_var_slot_names = build_wire_var_slot_names()
       val = wire_get(inst, :value)
       escaped[val] = true
       prev_store[val] = nil
+    elsif fn_has_setjmp && wire_is_call_op?(op)
+      prev_store = {}
     i += 1
 
   if !has_dead

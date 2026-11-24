@@ -588,6 +588,12 @@
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
     elsif scalar_source_two_call?(inst)
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_2(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_sequence_get(args, 0) + ", i64 " + wire_sequence_get(args, 1) + ic_arg + ")"
+    elsif argc == 1
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1_any(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
+    elsif argc == 2
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_2_any(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_sequence_get(args, 0) + ", i64 " + wire_sequence_get(args, 1) + ic_arg + ")"
+    elsif argc == 3
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_3_any(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_sequence_get(args, 0) + ", i64 " + wire_sequence_get(args, 1) + ", i64 " + wire_sequence_get(args, 2) + ic_arg + ")"
     else
       stack_arr = "%__mcall_args"
       i = 0

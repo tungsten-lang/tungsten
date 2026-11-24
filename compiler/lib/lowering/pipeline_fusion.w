@@ -129,7 +129,7 @@
 -> pipeline_bind_cur(ctx, wfn, name, tval)
   if tval[:type] == :raw_f64
     ptr = ensure_var_slot(wfn, name)
-    emit_wire_dynamic_2(wfn, :store_double, :value, tval[:value], :ptr, ptr)
+    emit_wire_store_double(wfn, ptr, tval[:value])
     ctx[:bindings][name] = nil
     ctx[:var_types][name] = :f64
     return tval[:value]
@@ -171,7 +171,7 @@
     wfn[:var_slot_types][bp_name] = p_slot_type
     ctx[:bindings][bp_name] = nil
     if is_f64
-      emit_wire_dynamic_2(wfn, :store_double, :value, cur_reg, :ptr, p_ptr)
+      emit_wire_store_double(wfn, p_ptr, cur_reg)
       ctx[:var_types][bp_name] = :f64
     else
       emit_wire_store_i64(wfn, p_ptr, cur_reg)
@@ -477,7 +477,7 @@
       # argument as the elementwise fuser's hoisted header decode).
       raw_f64_source = true
       raw_f64_base = next_temp(wfn)
-      emit_wire_dynamic_2(wfn, :ta_f64_elems_ptr, :value, receiver_reg, :temp, raw_f64_base)
+      emit_wire_ta_f64_elems_ptr(wfn, raw_f64_base, receiver_reg)
 
   # Filter-free take(n): clamp the iteration bound to min(count, n). Every
   # iteration produces exactly one element, so n iterations yield n
@@ -564,7 +564,7 @@
   elsif raw_f64_source
     # Raw double read — no boxing. idx_raw indexes from the hoisted elems
     # base (which already folds in the array's start offset).
-    emit_wire_dynamic_3(wfn, :load_f64_at, :index, idx_raw, :ptr, raw_f64_base, :temp, elem)
+    emit_wire_load_f64_at(wfn, idx_raw, raw_f64_base, elem)
     elem_raw_f64 = true
   elsif base_static_type == :array
     idx_boxed = nanbox_int_emit(wfn, idx_raw)
@@ -659,7 +659,7 @@
       seed_one = lower_expression(ctx, Tungsten:AST:Int.new(1))
       emit_wire_store_i64(wfn, acc_ptr3, ensure_i64_value(wfn, seed_one))
     elsif acc_raw
-      emit_wire_dynamic_2(wfn, :store_double, :value, cur_reg, :ptr, acc_ptr3)
+      emit_wire_store_double(wfn, acc_ptr3, cur_reg)
     else
       emit_wire_store_i64(wfn, acc_ptr3, pipeline_boxed_cur(ctx, wfn, cur_name, cur_reg))
     emit_wire_store_i64(wfn, seen_ptr3, w_true.to_s())
@@ -673,11 +673,11 @@
       cur_raw_reg = ensure_raw_f64(wfn, lower_expression(ctx, Tungsten:AST:Var.new(cur_name)))
       comb_temp = next_temp(wfn)
       emit_wire_call_libm_f64(wfn, acc_raw_reg, intrinsic, cur_raw_reg, comb_temp, nil)
-      emit_wire_dynamic_2(wfn, :store_double, :value, comb_temp, :ptr, acc_ptr3)
+      emit_wire_store_double(wfn, acc_ptr3, comb_temp)
     elsif acc_raw
       comb_val = lower_expression(ctx, pipeline_reduce_node(terminal, acc_name, cur_name))
       comb_raw = ensure_raw_f64(wfn, comb_val)
-      emit_wire_dynamic_2(wfn, :store_double, :value, comb_raw, :ptr, acc_ptr3)
+      emit_wire_store_double(wfn, acc_ptr3, comb_raw)
     else
       comb_val = lower_expression(ctx, pipeline_reduce_node(terminal, acc_name, cur_name))
       comb_reg = ensure_i64_value(wfn, comb_val)
@@ -713,7 +713,7 @@
       # Box the raw accumulator once at the boundary. An empty source never
       # seeded the slot (it still holds the init_acc bits stored at setup), so
       # select on the seen flag to preserve the empty-source contract.
-      emit_wire_dynamic_2(wfn, :load_double, :ptr, ensure_var_slot(wfn, acc_name), :temp, result)
+      emit_wire_load_double(wfn, ensure_var_slot(wfn, acc_name), result)
       boxed_tv = nanbox_float_emit(wfn, result)
       seen_exit = next_temp(wfn)
       emit_wire_load_i64(wfn, ensure_var_slot(wfn, seen_name), seen_exit)

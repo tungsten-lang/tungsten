@@ -36,8 +36,9 @@
     known_fns[mod[:functions][fi][:name]] = true
     fi += 1
   # Single fused pre-scan: verify WIRE direct-call contracts, collect foreign
-  # declarations + used runtime functions, collect IC/call-site metadata, and
-  # record `.lchs` inline method dispatches for link-feature gating.
+  # declarations + used runtime functions, collect IC/call-site metadata +
+  # per-function IC layouts for emit-cache lookup, and record `.lchs` inline
+  # method dispatches for link-feature gating.
   wire_contracts = {}
   collect_sites = mod[:enhanced_stacktraces] != false
   cs_sites = []
@@ -50,11 +51,13 @@
   max_ascope_slots = 0
   max_ewscope_sites = 0
   uses_g_ast_store = false
+  nfns_pre = mod[:functions].size()
+  prescanned_ic_layouts = Array.new(nfns_pre)
   # Verbatim `ll <<~IR` bodies, concatenated: their `@name(` call targets are
   # invisible to the instruction scan below (see embedded_ir_calls?).
   embedded_ir_text = StringBuffer(256)
   fi = 0
-  while fi < mod[:functions].size()
+  while fi < nfns_pre
     wfunc = mod[:functions][fi]
     wfunc_orig_name = wfunc[:original_name]
     if wfunc_orig_name == nil
@@ -64,27 +67,30 @@
       wfunc_path = "<unknown>"
     if wfunc[:embedded_ll] != nil
       embedded_ir_text << wfunc[:embedded_ll]
+    wfunc_check_contract = wfunc[:incremental_core_frozen] != true
+    ic_layout_buf = nil
     bi = 0
-    while bi < wfunc[:blocks].size()
-      blk = wfunc[:blocks][bi]
+    wblocks = wfunc[:blocks]
+    nwblocks = wblocks.size()
+    while bi < nwblocks
+      blk = wblocks[bi]
       instrs = blk[:instructions]
+      ninstrs_b = instrs.size()
       ii = 0
-      while ii < instrs.size()
+      while ii < ninstrs_b
         inst = instrs[ii]
         op = wire_kind(inst)
-        if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop
+        if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop || op == :load_class || op == :class_store || op == :load_global || op == :store_global || op == :load_cvar || op == :store_cvar || op == :ivar_get_idx || op == :ivar_set_idx || op == :gep_array || op == :alloca_array || op == :ptr_to_i64 || op == :i64_to_ptr || op == :load_ptr || op == :store_ptr || op == :and_i64 || op == :or_i64 || op == :xor_i64 || op == :shl_i64 || op == :ashr_i64 || op == :lshr_i64 || op == :mul_i64 || op == :sdiv_i64 || op == :udiv_i64 || op == :srem_i64 || op == :urem_i64 || op == :not_i1 || op == :and_i1 || op == :or_i1 || op == :select_i64 || op == :icmp_ne_zero || op == :icmp_ne_i64 || op == :zext_i1_i64 || op == :trunc_i64_i32 || op == :phi_i64 || op == :phi_i1 || op == :unreachable || op == :ret_i32 || op == :array_size_raw || op == :ta_size_raw || op == :ta_cap_raw || op == :load_double || op == :store_double || op == :load_float || op == :store_float || op == :nanbox_float || op == :nanunbox_float || op == :null_ptr
           ii += 1
           next
-        if wfunc[:incremental_core_frozen] != true
-          wire_contract_error = check_wire_inst_call_contract(mod, wire_contracts, wfunc_orig_name, inst)
-          if wire_contract_error != nil
-            << "error: " + wire_contract_error
-            exit(1)
-        if collect_sites
-          record_call_site_for_inst(inst, wfunc[:name], wfunc_path, cs_sites, cs_files, cs_file_list, emit_blockaddress_sites)
-        if op == :call_method_i64 && !saw_lchs_mcall && wire_get(inst, :method_name_val) == lchs_mcall_lit
-          saw_lchs_mcall = true
         if op == :call_direct_i64
+          if wfunc_check_contract
+            wire_contract_error = check_wire_inst_call_contract(mod, wire_contracts, wfunc_orig_name, inst)
+            if wire_contract_error != nil
+              << "error: " + wire_contract_error
+              exit(1)
+          if collect_sites && emit_blockaddress_sites
+            record_call_site_for_inst(inst, wfunc[:name], wfunc_path, cs_sites, cs_files, cs_file_list, emit_blockaddress_sites)
           iname = wire_get(inst, :name)
           if iname != nil
             used_runtime_fns[iname] = true
@@ -101,7 +107,59 @@
               ccall_needed[iname] = wire_sequence_size(wire_get(inst, :args))
           ii += 1
           next
+        if op == :call_method_i64
+          if ic_layout_buf == nil
+            ic_layout_buf = StringBuffer(32)
+          ic_layout_buf << wire_get(inst, :ic_id).to_s()
+          ic_layout_buf << ","
+          if collect_sites
+            record_call_site_for_inst(inst, wfunc[:name], wfunc_path, cs_sites, cs_files, cs_file_list, emit_blockaddress_sites)
+          if !saw_lchs_mcall && wire_get(inst, :method_name_val) == lchs_mcall_lit
+            saw_lchs_mcall = true
+          margs = wire_get(inst, :args)
+          margc = margs != nil ? wire_sequence_size(margs) : 0
+          if fast_size_call?(inst)
+            used_runtime_fns["w_fast_size"] = true
+          elsif fast_to_s_call?(inst)
+            used_runtime_fns["w_fast_to_s"] = true
+          elsif margc == 0
+            used_runtime_fns["w_method_call_cached_0"] = true
+          elsif sym_idx_get_call?(inst)
+            used_runtime_fns["w_fast_sym_get"] = true
+          elsif sym_idx_set_call?(inst)
+            used_runtime_fns["w_fast_sym_set"] = true
+          elsif fast_idx_get_call?(inst)
+            used_runtime_fns["w_fast_idx_get"] = true
+          elsif fast_idx_set_call?(inst)
+            used_runtime_fns["w_fast_idx_set"] = true
+          elsif fast_push_call?(inst)
+            used_runtime_fns["w_fast_push"] = true
+          elsif scalar_source_one_call?(inst)
+            used_runtime_fns["w_method_call_cached_1"] = true
+          elsif scalar_source_two_call?(inst)
+            used_runtime_fns["w_method_call_cached_2"] = true
+          elsif margc == 1
+            used_runtime_fns["w_method_call_cached_1_any"] = true
+          elsif margc == 2
+            used_runtime_fns["w_method_call_cached_2_any"] = true
+          elsif margc == 3
+            used_runtime_fns["w_method_call_cached_3_any"] = true
+          else
+            used_runtime_fns["w_method_call_cached"] = true
+          if wire_get(inst, :devirt_fn) != nil
+            used_runtime_fns["__w_guard_class"] = true
+          if wire_get(inst, :construct_fn) != nil
+            used_runtime_fns[wire_get(inst, :construct_recycle) == true ? "w_object_recycle_or_new" : "w_object_new"] = true
+          ii += 1
+          next
         if op == :call_direct_void
+          if wfunc_check_contract
+            wire_contract_error = check_wire_inst_call_contract(mod, wire_contracts, wfunc_orig_name, inst)
+            if wire_contract_error != nil
+              << "error: " + wire_contract_error
+              exit(1)
+          if collect_sites && emit_blockaddress_sites
+            record_call_site_for_inst(inst, wfunc[:name], wfunc_path, cs_sites, cs_files, cs_file_list, emit_blockaddress_sites)
           iname = wire_get(inst, :name)
           if iname != nil
             used_runtime_fns[iname] = true
@@ -124,12 +182,29 @@
           used_runtime_fns["w_value_free"] = true
           ii += 1
           next
+        if op == :closure_new
+          used_runtime_fns["w_closure_new_a"] = true
+          ii += 1
+          next
+        if op == :puts_i64
+          used_runtime_fns["w_puts"] = true
+          ii += 1
+          next
+        if op == :print_i64
+          used_runtime_fns["w_print"] = true
+          ii += 1
+          next
         if op == :slab_alloc_init
           uses_g_ast_store = true
           used_runtime_fns["w_node_alloc"] = true
           used_runtime_fns["w_ast_freeze_if_array"] = true
           ii += 1
           next
+        if wfunc_check_contract && (op == :call_direct_i128 || op == :call_direct_ptr || op == :call_direct_i64_ptr1 || op == :call_direct_void_ptr1)
+          wire_contract_error = check_wire_inst_call_contract(mod, wire_contracts, wfunc_orig_name, inst)
+          if wire_contract_error != nil
+            << "error: " + wire_contract_error
+            exit(1)
         if op in (:typed_array_get_inline :typed_array_set_inline :typed_array_compound_op_inline :typed_array_load_u64 :typed_array_store_u64)
           ascope = wire_get(inst, :ascope)
           if ascope != nil && ascope + 1 > max_ascope_slots
@@ -148,6 +223,7 @@
             ri += 1
         ii += 1
       bi += 1
+    prescanned_ic_layouts[fi] = ic_layout_buf != nil ? ic_layout_buf.to_s() : ""
     # Heap capture cells are materialized at render time (entry-block slot
     # emission), not as WIRE instructions, so the scan above cannot see them.
     if wfunc[:heap_slot_names] != nil
@@ -316,7 +392,6 @@
 
   used_ptr_ids = {}
   attr_groups = {ids: {}, texts: []}
-  fn_out = StringBuffer(4096)
   apply_fastcc_plan(mod)
   function_emit_hits_start = function_emit_cache_state[:hits]
   function_emit_misses_start = function_emit_cache_state[:misses]
@@ -359,7 +434,7 @@
       if selected_emit_bucket != nil
         if f_cur[:embedded_ll] == nil && f_cur[:embedded_asm] == nil
           function_attr_group_id(attr_groups, base_attr_text)
-        layout = function_emit_cache_ic_layout(f_cur)
+        layout = prescanned_ic_layouts[i]
         layouts[i] = layout
         cached_entry = selected_emit_bucket[:functions][f_cur[:name]]
         if cached_entry != nil && cached_entry[:name] == f_cur[:name] && cached_entry[:ic_layout] == layout
@@ -437,6 +512,14 @@
         function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + 1
         rendered_fn_texts[i] = emit_function(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, emit_blockaddress_sites)
         i += 1
+  total_fn_bytes = 4096
+  i = 0
+  while i < nfns_emit
+    rtxt = rendered_fn_texts[i]
+    if rtxt != nil
+      total_fn_bytes += rtxt.size() + 1
+    i += 1
+  fn_out = StringBuffer(total_fn_bytes)
   i = 0
   while i < nfns_emit
     fn_out << rendered_fn_texts[i]
@@ -1410,7 +1493,7 @@
         args = wire_get(inst, :args)
         if args != nil
           argc = wire_sequence_size(args)
-          if argc > max_mcall_argc && !scalar_source_call?(inst) && !sym_idx_call?(inst) && !fast_builtin_call?(inst)
+          if argc >= 4 && argc > max_mcall_argc && !scalar_source_call?(inst) && !sym_idx_call?(inst) && !fast_builtin_call?(inst)
             max_mcall_argc = argc
       hidden = hidden_exit_label_for_inst(inst, arm64_target, emit_blockaddress_sites)
       if hidden != nil

@@ -57,7 +57,7 @@ say "building the self-hosted compiler (stage 1 = stage 2 byte-identity is check
 # project, not the compiler. --strict makes a stage-identity mismatch a build
 # failure (exit 1, the new compiler is not installed), and this script stops
 # there instead of linking a compiler that did not reproduce itself.
-( cd "$TUNGSTEN_HOME" && bin/tungsten bootstrap --release --native --strict ) ||
+( cd "$TUNGSTEN_HOME" && bin/tungsten bootstrap --release --strict ) ||
   fail "the compiler build failed (see above)"
 
 # --- link --------------------------------------------------------------------

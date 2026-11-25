@@ -484,6 +484,7 @@ TUNGSTEN_W = ROOT + "/" + compiler_dir_name + "/tungsten.w"
 
 if array_contains?(args, "--help") || array_contains?(args, "-h")
   << "Usage: tungsten build \[options]"
+  << "       tungsten install \[options]   (equivalent to `tungsten build --install`)"
   << ""
   << "Bootstrap the self-hosted Tungsten compiler and (on --release) build bit entry points."
   << "Default bootstrap: implementations/c (the C bytecode VM)."
@@ -502,12 +503,12 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
   << "              Implied when CI is set and by --install, --pgo, --target, and --portable."
   << "  --no-bits   Skip compiling bit entry points on --release builds"
   << "  --release   -O3, full LTO, no dev checks, reduced runtime metadata, and build bits"
-  << "  --install   Build (--release --native + bits), tick VERSION, and install to TUNGSTEN_HOME"
+  << "  --install   Build (--release + bits), tick VERSION, and install to TUNGSTEN_HOME"
   << "  --debug     Include debug symbols, safety checks, and runtime metadata"
   << "  --no-debug  Omit debug symbols and development checks (release default)"
-  << "  --cpu CPU   Target CPU (v1/v2/v3/v4/native aliases accepted)"
-  << "  --native    Shorthand for --cpu native"
-  << "  --target T  Build an artifact for target triple T"
+  << "  --cpu CPU   Target CPU (v1/v2/v3/v4/native aliases accepted; default: \[build] cpu or native)"
+  << "  --native    Shorthand for --cpu native (default for host builds; overrides \[build] cpu)"
+  << "  --target T  Build for target triple T (overrides default native CPU; combine with --cpu)"
   << "  --portable  Build x86-64-v2 and x86-64-v3 release artifacts"
   << "  --fast      Enable fast, non-IEEE floating-point optimization"
   << "  -h, --help  Show this help"
@@ -664,7 +665,6 @@ pgo_build = array_contains?(args, "--pgo")
 force_build = array_contains?(args, "--force")
 skip_bits_requested = array_contains?(args, "--no-bits")
 install_requested = array_contains?(args, "--install")
-install_only = array_contains?(args, "--install-only")
 strict_requested = array_contains?(args, "--strict")
 
 # -0 (Spinel stage0) only makes sense in Spinel mode. Auto-promote.
@@ -816,14 +816,18 @@ strict_identity = strict_identity_reason != ""
     exit(1)
   eputs("    " + DIM + "installing stage 2 anyway (local build); CI, --strict, --install, --pgo and release artifacts fail here" + RESET)
 
-# resolve_cpu(cpu:, native:, configured:) — no target: passed, so a host
-# CPU always resolves (build.rb behavior; the cross target is handled by
-# blanking cpu/native above the call).
+# Host CPU always resolves for the host stages; when --target is set, an
+# explicit --cpu belongs to that target instead of overriding the host.
 explicit_cpu = nil
-if target_triple == "" && cpu_name != nil
-  explicit_cpu = normalize_cpu(cpu_name)
-  if explicit_cpu == nil
+target_cpu_name = nil
+if cpu_name != nil
+  normalized_cpu = normalize_cpu(cpu_name)
+  if normalized_cpu == nil
     die("invalid CPU name: " + cpu_name)
+  if target_triple == ""
+    explicit_cpu = normalized_cpu
+  else
+    target_cpu_name = normalized_cpu
 if target_triple == "" && native_mode
   if explicit_cpu != nil && explicit_cpu != "native"
     die("--native conflicts with --cpu " + explicit_cpu)
@@ -1093,23 +1097,23 @@ BUILD_PROFILE_PATH = CHECKOUT_STATE_DIR + "/compiler-build.profile"
 
 -> verify_last_build_installable
   if !executable?(COMPILER_BIN)
-    eputs(RED + "tungsten install: no compiler at " + COMPILER_BIN + " — run `bin/tungsten build --release --native` or `bin/tungsten build --install`" + RESET)
+    eputs(RED + "tungsten install: no compiler at " + COMPILER_BIN + " — run `bin/tungsten build --release` or `bin/tungsten install`" + RESET)
     exit(1)
   profile_text = read_file(BUILD_PROFILE_PATH)
   if profile_text == nil
-    eputs(RED + "tungsten install: no build profile for " + COMPILER_BIN + " — run `bin/tungsten build --release --native` first, or `bin/tungsten build --install`" + RESET)
+    eputs(RED + "tungsten install: no build profile for " + COMPILER_BIN + " — run `bin/tungsten build --release` first, or `bin/tungsten install`" + RESET)
     exit(1)
   recorded_sha = profile_field(profile_text, "compiler_sha256")
   installable = profile_field(profile_text, "installable")
   verified = profile_field(profile_text, "verified")
   if recorded_sha != file_sha(COMPILER_BIN)
-    eputs(RED + "tungsten install: " + COMPILER_BIN + " does not match the last recorded build — run `bin/tungsten build --release --native` first, or `bin/tungsten build --install`" + RESET)
+    eputs(RED + "tungsten install: " + COMPILER_BIN + " does not match the last recorded build — run `bin/tungsten build --release` first, or `bin/tungsten install`" + RESET)
     exit(1)
   if verified != "1"
     eputs(RED + "tungsten install: last compiler build failed stage 1 == stage 2 verification and cannot be installed" + RESET)
     exit(1)
   if installable != "1"
-    eputs(RED + "tungsten install: last build at " + COMPILER_BIN + " is a dev build (not --release --native with bits) — run `bin/tungsten build --release --native` first, or `bin/tungsten build --install`" + RESET)
+    eputs(RED + "tungsten install: last build at " + COMPILER_BIN + " is a dev build (not --release with bits) — run `bin/tungsten build --release` first, or `bin/tungsten install`" + RESET)
     exit(1)
   true
 
@@ -1187,33 +1191,42 @@ BUILD_PROFILE_PATH = CHECKOUT_STATE_DIR + "/compiler-build.profile"
     << "    " + GREEN + "linked" + RESET + "    " + tungsten_bin + "/wit -> " + tungsten_home + "/bin/wit"
   true
 
-if install_only
-  install_to_system_location()
-  << ""
-  exit(0)
-
 # ── Runtime archive ─────────────────────────────────────────────
 
 << ""
 # what to build from the current directory (before any work: another checkout builds itself, and nothing is built where
 # there is nothing to build)
 TARGET_CWD = capture("pwd -P").strip
-target = {kind: "self", dir: ROOT}
-if !install_requested && !install_only
-  target = build_target(TARGET_CWD, ROOT)
+target = build_target(TARGET_CWD, ROOT)
+if install_requested
+  if target[:kind] == "bit"
+    die("tungsten install must be run from the Tungsten repository root")
+  elsif target[:kind] == "none"
+    target = {kind: "self", dir: ROOT}
 if array_contains?(args, "--which")
   << target[:kind] + " " + target[:dir]
   exit(target[:kind] == "none" ? 1 : 0)
 if target[:kind] == "none"
   die(build_target_none_message(TARGET_CWD))
 if target[:kind] == "checkout"
-  # another checkout builds itself, with its own CLI and compiler
-  delegated = shq(target[:dir] + "/bin/tungsten") + " build"
+  # another checkout builds (or installs) itself, with its own CLI and compiler
   original = argv()
-  di = 0
-  while di < original.size
-    delegated = delegated + " " + shq(original[di])
-    di = di + 1
+  if install_requested
+    delegated = shq(target[:dir] + "/bin/tungsten") + " install"
+    dropped_install = false
+    di = 0
+    while di < original.size
+      if !dropped_install && original[di] == "--install"
+        dropped_install = true
+      else
+        delegated = delegated + " " + shq(original[di])
+      di = di + 1
+  else
+    delegated = shq(target[:dir] + "/bin/tungsten") + " build"
+    di = 0
+    while di < original.size
+      delegated = delegated + " " + shq(original[di])
+      di = di + 1
   << DIM + "tungsten build: " + target[:dir] + " is a Tungsten checkout: building it with its own bin/tungsten" + RESET
   exit(sh("cd " + shq(target[:dir]) + " && " + delegated))
 
@@ -1912,7 +1925,7 @@ CWD = capture("pwd -P").strip
 bit_root_found = target[:kind] == "bit" ? target[:dir] : find_bit_root(CWD)
 bit_only = bit_root_found != nil && bit_root_found != ROOT
 if install_requested && bit_only
-  die("tungsten build --install must be run from the Tungsten repository root")
+  die("tungsten install must be run from the Tungsten repository root")
 skip_bits = skip_bits_requested || (!bit_only && (!release_mode || stage0_only || stage1_only || stage2_only))
 host_native_cpu = host_cpu_name == "native" || (cpu_name == nil && host_cpu_name == configured_cpu())
 installable_build = !bit_only && release_mode && !debug_enabled && host_native_cpu && target_triple == "" && !portable_mode && !stage0_only && !stage1_only && !stage2_only && !skip_bits
@@ -2643,21 +2656,22 @@ if !bit_only
 artifact_targets = []
 artifact_cpus = []
 artifact_release_flags = []
-if portable_mode
-  portable_target = target_triple != "" ? target_triple : (IS_DARWIN ? "x86_64-apple-macos" : "x86_64-unknown-linux-gnu")
-  if !portable_target.starts_with?("x86_64-") && !portable_target.starts_with?("x86_64_")
-    eputs("--portable is the x86-64 release set; target must be an x86_64 triple")
-    exit(1)
-  artifact_targets.push(portable_target)
-  artifact_cpus.push("x86-64-v2")
-  artifact_release_flags.push("1")
-  artifact_targets.push(portable_target)
-  artifact_cpus.push("x86-64-v3")
-  artifact_release_flags.push("1")
-elsif target_triple != ""
-  artifact_targets.push(target_triple)
-  artifact_cpus.push(cpu_name == nil ? "" : cpu_name)
-  artifact_release_flags.push(release_mode ? "1" : "0")
+if !bit_only
+  if portable_mode
+    portable_target = target_triple != "" ? target_triple : (IS_DARWIN ? "x86_64-apple-macos" : "x86_64-unknown-linux-gnu")
+    if !portable_target.starts_with?("x86_64-") && !portable_target.starts_with?("x86_64_")
+      eputs("--portable is the x86-64 release set; target must be an x86_64 triple")
+      exit(1)
+    artifact_targets.push(portable_target)
+    artifact_cpus.push("x86-64-v2")
+    artifact_release_flags.push("1")
+    artifact_targets.push(portable_target)
+    artifact_cpus.push("x86-64-v3")
+    artifact_release_flags.push("1")
+  elsif target_triple != ""
+    artifact_targets.push(target_triple)
+    artifact_cpus.push(target_cpu_name == nil ? "" : target_cpu_name)
+    artifact_release_flags.push(release_mode ? "1" : "0")
 
 -> sanitize_target_label(target)
   out = ""
@@ -2897,6 +2911,27 @@ if !stage0_only && !stage1_only && !bit_only
 
 # ── Bits ────────────────────────────────────────────────────────
 
+bit_cross_target = bit_only && target_triple != ""
+bit_darwin_target = bit_cross_target ? (str_has?(target_triple, "apple") || str_has?(target_triple, "darwin")) : IS_DARWIN
+bit_program_flags = program_flags
+bit_march_flags = march_flags
+if bit_cross_target
+  bit_program_flags = []
+  if release_mode
+    bit_program_flags.push("--release")
+  bit_program_flags.push("--target")
+  bit_program_flags.push(target_triple)
+  if target_cpu_name != nil
+    bit_program_flags.push("--cpu")
+    bit_program_flags.push(target_cpu_name)
+  if target_sysroot != ""
+    bit_program_flags.push("--sysroot")
+    bit_program_flags.push(target_sysroot)
+  bit_program_flags.push(debug_enabled ? "--debug" : "--no-debug")
+  if fast_mode
+    bit_program_flags.push("--fast")
+  bit_march_flags = target_cpu_name == nil ? [] : march(target_cpu_name, target_triple)
+
 bit_clang_opt = env_or_empty("TUNGSTEN_BITS_CLANG_OPT")
 if bit_clang_opt == ""
   bit_clang_opt = release_mode ? "-O3" : "-O0"
@@ -2905,9 +2940,9 @@ if fast_mode && !array_contains?(split_ws(bit_clang_opt), "-ffast-math")
 link_flags = []
 link_flags.push(bit_clang_opt)
 link_flags.push(debug_enabled ? "-g" : "-DNDEBUG")
-link_flags = link_flags + march_flags
+link_flags = link_flags + bit_march_flags
 link_flags.push(lto_flag)
-if IS_DARWIN
+if bit_darwin_target
   link_flags.push("-Wl,-dead_strip")
 else
   link_flags.push("-fuse-ld=lld")
@@ -2929,10 +2964,12 @@ while i < runtime_dependency_files.size
 # see their sources too, or a bridge-only edit incorrectly skips compilation.
 companion_roots = [RUNTIME_DIR]
 companion_tree_key = tree_sha(companion_roots)
+BIT_CROSS_TARGET = bit_cross_target
+BIT_DARWIN_TARGET = bit_darwin_target
 BIT_CLANG_OPT = bit_clang_opt
 BIT_LINK_FLAGS = link_flags
 BIT_LINK_LIBS = link_libs
-PROGRAM_FLAGS = program_flags
+PROGRAM_FLAGS = bit_program_flags
 RELEASE_MODE = release_mode
 DEBUG_REQUESTED = debug_requested
 NO_DEBUG_REQUESTED = no_debug_requested
@@ -3057,7 +3094,7 @@ bit_file_sha_memo = {}
     buf << "info-plist:" + Digest.sha256(info_plist_text) + "\n"
   buf << probe_env_kv
   buf << "\n"
-  buf << env_or_empty("TUNGSTEN_MARCH_ARGS")
+  buf << (BIT_CROSS_TARGET ? env_or_empty("TUNGSTEN_TARGET_MARCH_ARGS") : env_or_empty("TUNGSTEN_MARCH_ARGS"))
   buf << "\n"
   buf << PLATFORM
   buf << "\n"
@@ -3212,7 +3249,8 @@ bit_file_sha_memo = {}
 -> bit_compile_command(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile, log_path, extra_env = "", info_plist_path = "")
   includes = bitfile_includes(this_bit_root)
   plist_flag = info_plist_path == "" ? "" : " --info-plist " + shq(info_plist_path)
-  common_env = probe_env_prefix + toolchain_prefix + extra_env + "TUNGSTEN_CLANG_OPT=" + shq(bit_clang_opt_arg) + " TUNGSTEN_INCREMENTAL=0 TUNGSTEN_LINK_CACHE=1 TUNGSTEN_DEPFILE=" + shq(depfile) + " "
+  cross_march_env = BIT_CROSS_TARGET ? "TUNGSTEN_MARCH_ARGS='' " : ""
+  common_env = probe_env_prefix + toolchain_prefix + cross_march_env + extra_env + "TUNGSTEN_CLANG_OPT=" + shq(bit_clang_opt_arg) + " TUNGSTEN_INCREMENTAL=0 TUNGSTEN_LINK_CACHE=1 TUNGSTEN_DEPFILE=" + shq(depfile) + " "
   sh_ok("rm -f " + shq(depfile))
   if bit_inside_toolchain?(this_bit_root)
     build_env = common_env + "BIT_HOME=bits "
@@ -3439,7 +3477,7 @@ bit_file_sha_memo = {}
 # The Info.plist to embed in the executable <name> of a bit, or "" when no `app` line names it (or off macOS). Running
 # the bare executable then shows the app's name in the menu bar, as bin/<Name>.app does (2026-11-21).
 -> bit_app_info_plist(bit_path, name)
-  if !IS_DARWIN
+  if !BIT_DARWIN_TARGET
     return ""
   apps = bit_apps(bit_path)
   i = 0
@@ -3463,7 +3501,7 @@ bit_file_sha_memo = {}
 # PNG with sips + iconutil), Contents/Resources/<basename> for each `resources:` path (mirrored with rsync), signed ad hoc. The app links the system frameworks it uses (AppKit, Metal, QuartzCore, …), which
 # need no copying; nothing else is embedded.
 -> bundle_app(bit_root, app)
-  if !IS_DARWIN
+  if !IS_DARWIN || !BIT_DARWIN_TARGET
     << "    " + DIM + "skip" + RESET + "    " + app[:name] + ".app " + DIM + "(macOS only)" + RESET
     return true
   t_app = clock_ms()

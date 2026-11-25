@@ -41,7 +41,7 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
       puts "test compiler 1"
       exit
     end
-    File.open(ENV.fetch("FAKE_BUILD_LOG"), "a") { |f| f.puts(JSON.generate(argv: ARGV, clang_opt: ENV["TUNGSTEN_CLANG_OPT"])) }
+    File.open(ENV.fetch("FAKE_BUILD_LOG"), "a") { |f| f.puts(JSON.generate(argv: ARGV, clang_opt: ENV["TUNGSTEN_CLANG_OPT"], march_args: ENV["TUNGSTEN_MARCH_ARGS"])) }
     output = ARGV.fetch(ARGV.index("--out") + 1)
     FileUtils.mkdir_p(File.dirname(output))
     File.write(output, "#!/bin/sh\nexit 0\n")
@@ -78,11 +78,15 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
   write_manifest = lambda do |flags|
     File.write(manifest, %(executable "hot", source: "lib/main.w", profile: "release", native: true, cflags: "#{flags}"\nexecutable "ordinary", source: "lib/main.w"\n))
   end
-  run = lambda do |arguments = [], overrides = {}, where = package|
+  run_raw = lambda do |arguments = [], overrides = {}, where = package|
     before = File.exist?(log) ? File.readlines(log).size : 0
     out, status = Open3.capture2e(environment.merge(overrides), driver, *arguments, chdir: where)
     raise "driver failed: #{arguments.inspect}\n#{out}" unless status.success?
     records = File.exist?(log) ? File.readlines(log).drop(before).map { |line| JSON.parse(line) } : []
+    [records, out]
+  end
+  run = lambda do |arguments = [], overrides = {}, where = package|
+    records, = run_raw.call(arguments, overrides, where)
     records.select { |entry| entry["argv"].include?(File.join(where, "lib/main.w")) }
   end
   hot = lambda do |records|
@@ -171,10 +175,35 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
   raise "explicit release/CPU lost" unless Shellwords.split(entry["clang_opt"]) == %w[-O3 -fno-omit-frame-pointer] && entry["argv"].include?("generic") && !entry["argv"].include?("--native")
   entry = hot.call(run.call([], "TUNGSTEN_BITS_CLANG_OPT" => "-O2 -g"))
   raise "environment override lost" unless entry["clang_opt"] == "-O2 -g"
-  %w[--portable --target].each do |mode|
-    args = mode == "--portable" ? [mode] : [mode, "aarch64-linux-gnu"]
-    entry = hot.call(run.call(args))
-    raise "manifest native leaked into #{mode}" if entry["argv"].include?("--native")
+  portable_all, = run_raw.call(["--portable"])
+  raise "bit --portable triggered compiler release artifacts" if portable_all.any? { |item| item["argv"].include?("compiler/tungsten.w") }
+  entry = hot.call(portable_all.select { |item| item["argv"].include?(File.join(package, "lib/main.w")) })
+  raise "manifest native leaked into --portable" if entry["argv"].include?("--native")
+
+  target_all, = run_raw.call(["--target", "aarch64-linux-gnu"])
+  raise "bit --target triggered compiler release artifacts" if target_all.any? { |item| item["argv"].include?("compiler/tungsten.w") }
+  target_records = target_all.select { |item| item["argv"].include?(File.join(package, "lib/main.w")) }
+  raise "expected both bit executables for --target" unless target_records.size == 2
+  target_records.each do |item|
+    argv = item["argv"]
+    raise "bit --target lost --target flag: #{argv.inspect}" unless argv.each_cons(2).include?(["--target", "aarch64-linux-gnu"])
+    raise "bit --target leaked --native: #{argv.inspect}" if argv.include?("--native")
+    raise "bit --target leaked host --cpu: #{argv.inspect}" if argv.include?("--cpu")
+    raise "bit --target leaked host TUNGSTEN_MARCH_ARGS: #{item["march_args"].inspect}" unless item["march_args"].to_s.empty?
   end
-  puts "PASS actual build driver: scoped defaults, flags, explicit overrides, target/portable suppression, and cache hits/invalidation"
+  raise "repeated bit --target missed cache" unless run.call(["--target", "aarch64-linux-gnu"]).empty?
+  raise "host build collided with cross --target cache" unless run.call.empty?
+
+  cross_cpu_records = run.call(["--target", "x86_64-unknown-linux-gnu", "--cpu", "v3", "--sysroot", "/fixture/sysroot"])
+  entry = hot.call(cross_cpu_records)
+  argv = entry["argv"]
+  raise "bit --target --cpu --sysroot flags wrong: #{argv.inspect}" unless argv.each_cons(2).include?(["--target", "x86_64-unknown-linux-gnu"]) &&
+                                                                             argv.each_cons(2).include?(["--cpu", "x86-64-v3"]) &&
+                                                                             argv.each_cons(2).include?(["--sysroot", "/fixture/sysroot"]) &&
+                                                                             !argv.include?("--native") &&
+                                                                             entry["march_args"].to_s.empty?
+
+  conflict_out, conflict_status = Open3.capture2e(environment, driver, "--target", "aarch64-linux-gnu", "--native", chdir: package)
+  raise "bit --target --native was accepted" if conflict_status.success? || !conflict_out.include?("--target cannot be combined with --native")
+  puts "PASS actual build driver: scoped defaults, flags, explicit overrides, cross --target, and cache hits/invalidation"
 end

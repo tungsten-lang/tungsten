@@ -210,11 +210,10 @@ case "$1" in
   install)
     shift
     if [ ! -x "$COMPILER" ]; then
-      echo "tungsten install: no compiler at bin/tungsten-compiler — run bin/tungsten build --install first" >&2
-      exit 1
+      exec bash "$ROOT/bin/commands/bootstrap.sh" --install "$@"
     fi
     tungsten_compile_build_driver install
-    exec "$ROOT/bin/commands/build" --install-only "$@"
+    exec "$ROOT/bin/commands/build" --install "$@"
     ;;
   # bench: Tungsten primitive-op velocity baseline (bin/commands/bench.w).
   # `--suite` switches to the cross-language algorithm suite (bench-suite.w).

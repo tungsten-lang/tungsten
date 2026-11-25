@@ -222,6 +222,53 @@ Dir.mktmpdir("tungsten-stage-identity-") do |directory|
              status.success? && portable.size == 2 &&
              portable.all? { |dir| images_for.call(records, dir, File.basename(File.dirname(dir)), File.basename(dir)) },
              out + "\n" + records.inspect)
+
+  # --install builds a verified release compiler, ticks VERSION, syncs to TUNGSTEN_HOME, and links bin/tungsten.
+  FileUtils.rm_rf(home)
+  FileUtils.mkdir_p(home)
+  File.write(File.join(root, "VERSION"), "2026.01.01\n")
+  out, status, = run.call(["--install"])
+  installed_home = File.join(home, ".tungsten")
+  check.call("--install builds, verifies, ticks VERSION, and installs to TUNGSTEN_HOME",
+             status.success? && out.include?("VERIFIED") && out.include?("==> Install: system toolchain") &&
+             File.executable?(File.join(installed_home, "bin/tungsten-compiler")) &&
+             File.read(profile).include?("installable=1") &&
+             File.read(File.join(root, "VERSION")).strip != "2026.01.01" &&
+             File.symlink?(File.join(home, "bin/tungsten")),
+             out)
+
+  # bin/tungsten install routes to build --install when a compiler exists, and bootstrap.sh --install when it does not.
+  wrapper_root = File.join(directory, "wrapper-root")
+  wrapper_log = File.join(directory, "wrapper.log")
+  FileUtils.mkdir_p(File.join(wrapper_root, "bin/commands"))
+  FileUtils.cp(File.expand_path("../bin/tungsten", __dir__), File.join(wrapper_root, "bin/tungsten"))
+  FileUtils.chmod(0o755, File.join(wrapper_root, "bin/tungsten"))
+  FileUtils.cp(File.expand_path("../bin/commands/config.sh", __dir__), File.join(wrapper_root, "bin/commands/config.sh"))
+  File.write(File.join(wrapper_root, "VERSION"), "2026.01.01\n")
+  File.write(File.join(wrapper_root, "bin/commands/build.w"), "# stub\n")
+  File.write(File.join(wrapper_root, "bin/commands/bootstrap.sh"), <<~SH)
+    #!/usr/bin/env bash
+    printf 'bootstrap %s\n' "$*" > #{wrapper_log.inspect}
+  SH
+  FileUtils.chmod(0o755, File.join(wrapper_root, "bin/commands/bootstrap.sh"))
+  wrapper_env = environment.merge("TUNGSTEN_ROOT" => nil)
+
+  out, status = Open3.capture2e(wrapper_env, File.join(wrapper_root, "bin/tungsten"), "install", "--pgo", chdir: wrapper_root)
+  check.call("bin/tungsten install bootstraps with --install when no compiler exists",
+             status.success? && File.exist?(wrapper_log) && File.read(wrapper_log).strip == "bootstrap --install --pgo",
+             out + "\n" + (File.exist?(wrapper_log) ? File.read(wrapper_log) : "missing log"))
+
+  FileUtils.rm_f(wrapper_log)
+  write_tool(File.join(wrapper_root, "bin/tungsten-compiler"), "exit 0\n")
+  write_tool(File.join(wrapper_root, "bin/commands/build"), <<~RUBY)
+    File.write(#{wrapper_log.inspect}, "build " + ARGV.join(" ") + "\\n")
+  RUBY
+  future = Time.now + 5
+  File.utime(future, future, File.join(wrapper_root, "bin/commands/build"))
+  out, status = Open3.capture2e(wrapper_env, File.join(wrapper_root, "bin/tungsten"), "install", "--pgo", chdir: wrapper_root)
+  check.call("bin/tungsten install invokes build --install when a compiler exists",
+             status.success? && File.exist?(wrapper_log) && File.read(wrapper_log).strip == "build --install --pgo",
+             out + "\n" + (File.exist?(wrapper_log) ? File.read(wrapper_log) : "missing log"))
 end
 
 puts "self-host build contracts: #{passed} checks passed"

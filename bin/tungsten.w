@@ -503,7 +503,9 @@ when "build"
   run_command_w_status("bin/commands/build.w", tool_argv_after_command("build"))
 
 when "install"
-  run_command_w_status("bin/commands/build.w", ["--install-only"] + tool_argv_after_command("install"))
+  if !executable_file?(COMPILER)
+    run_bootstrap(["--install"] + tool_argv_after_command("install"))
+  run_command_w_status("bin/commands/build.w", ["--install"] + tool_argv_after_command("install"))
 
 when "fmt"
   run_command_w("bin/commands/fmt.w", tool_argv_after_command("fmt"))

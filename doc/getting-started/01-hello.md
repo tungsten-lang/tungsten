@@ -114,7 +114,7 @@ bin/tungsten -o hello hello.w
 ./hello
 
 # Optimized release build (full LTO)
-bin/tungsten -o hello --release --native hello.w
+bin/tungsten -o hello --release hello.w
 ```
 
 All snippets in this tutorial work directly with `bin/tungsten file.w`.

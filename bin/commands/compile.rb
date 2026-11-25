@@ -379,9 +379,9 @@ parser = OptionParser.new do |opts|
   opts.separator "    --dev            -O0 edit/test build with development checks"
   opts.separator "    --debug          Include symbols, safety checks, and runtime metadata"
   opts.separator "    --no-debug       Omit debug symbols and development checks"
-  opts.separator "    --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)"
-  opts.separator "    --native         Shorthand for --cpu native"
-  opts.separator "    --target TRIPLE  Generate code for a different target triple"
+  opts.separator "    --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted; default: native)"
+  opts.separator "    --native         Shorthand for --cpu native (default for host builds)"
+  opts.separator "    --target TRIPLE  Generate code for a different target triple (overrides native CPU)"
   opts.separator "    --fast           Enable fast, non-IEEE floating-point"
 
   opts.on "-v", "Print version, enable verbose mode" do

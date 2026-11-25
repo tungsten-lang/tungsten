@@ -102,7 +102,7 @@ excerpts use `:ping_pong` and play forward and backward without inventing
 intermediate geometry. Ordinary `:loop` includes every retained frame.
 The raymarched flower performs 130 outer steps with seven octaves per fragment;
 its 136×102 default can evaluate up to 164,105,760 octave bodies before the
-window opens. Compile that full preset with `--release --native` rather than
+window opens. Compile that full preset with `--release` rather than
 `--dev`; pass `--window-smoke` for its faster 16×12, three-frame window check.
 
 `AnimationPointPreview` is the pure rasterizer and works in headless

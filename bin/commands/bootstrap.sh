@@ -29,6 +29,7 @@ DEBUG_REQUESTED=0
 NO_DEBUG_REQUESTED=0
 NO_BITS=0
 STRICT=0
+INSTALL=0
 CPU_ARG=""
 TARGET_TRIPLE=""
 TARGET_SYSROOT=""
@@ -48,6 +49,7 @@ while [ "$#" -gt 0 ]; do
     --no-debug) NO_DEBUG_REQUESTED=1 ;;
     --no-bits) NO_BITS=1 ;;
     --strict) STRICT=1 ;;
+    --install) INSTALL=1 ;;
     --native) CPU_ARG=native ;;
     --cpu|--target|--sysroot)
       [ "$#" -ge 2 ] || { printf 'error: %s requires a value\n' "$1" >&2; exit 1; }
@@ -74,14 +76,15 @@ Options:
   --force          Ignore cached bootstrap artifacts
   --no-bits        Skip compiling bit entry points in the chained build
   --release        -O3, full LTO, no dev checks, reduced metadata
+  --install        Build (--release + bits), tick VERSION, and install to TUNGSTEN_HOME
   --pgo            Train and profile-optimize the installed/release compiler
   --strict         Fail when stage 1 and stage 2 emit different LLVM IR
-                   (implied when CI is set and by --pgo, --target, --portable)
+                   (implied when CI is set and by --install, --pgo, --target, --portable)
   --debug          Include symbols, safety checks, and runtime metadata
   --no-debug       Omit debug symbols and development checks
-  --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)
-  --native         Shorthand for --cpu native
-  --target TRIPLE  Build an artifact for another target
+  --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted; default: [build] cpu or native)
+  --native         Shorthand for --cpu native (default for host builds; overrides [build] cpu)
+  --target TRIPLE  Build an artifact for another target (overrides default native CPU)
   --portable       Build x86-64-v2 and x86-64-v3 release artifacts
 EOF
       exit 0
@@ -90,6 +93,13 @@ EOF
   esac
   shift
 done
+
+normalize_cpu() {
+  case "$1" in
+    v1|v2|v3|v4) printf 'x86-64-%s' "$1" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
 
 if [ "$DEBUG_REQUESTED" -eq 1 ] && [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then
   printf 'error: --debug and --no-debug are mutually exclusive\n' >&2
@@ -107,6 +117,30 @@ if [ -n "$TARGET_SYSROOT" ] && [ -z "$TARGET_TRIPLE" ]; then
   printf 'error: --sysroot requires --target\n' >&2
   exit 1
 fi
+if [ "$INSTALL" -eq 1 ]; then
+  if [ "$DEBUG_REQUESTED" -eq 1 ]; then
+    printf 'error: --install requires an optimized release build and cannot be combined with --debug\n' >&2
+    exit 1
+  fi
+  if [ "$NO_BITS" -eq 1 ]; then
+    printf 'error: --install requires building bit entry points and cannot be combined with --no-bits\n' >&2
+    exit 1
+  fi
+  if [ "$PORTABLE" -eq 1 ] || [ -n "$TARGET_TRIPLE" ]; then
+    printf 'error: --install installs a host-native compiler and cannot be combined with --portable or --target\n' >&2
+    exit 1
+  fi
+  if [ -n "$CPU_ARG" ]; then
+    norm_cpu="$(normalize_cpu "$CPU_ARG")"
+    norm_cfg="$(normalize_cpu "${TUNGSTEN_CPU:-}")"
+    if [ "$norm_cpu" != native ] && [ "$norm_cpu" != "$norm_cfg" ]; then
+      printf 'error: --install requires a host-native CPU (cannot be combined with --cpu %s)\n' "$CPU_ARG" >&2
+      exit 1
+    fi
+  fi
+  RELEASE=1
+  STRICT=1
+fi
 if [ "$RELEASE" -eq 1 ] || [ "$PORTABLE" -eq 1 ]; then
   DEBUG_ENABLED=0
 else
@@ -114,13 +148,6 @@ else
 fi
 if [ "$DEBUG_REQUESTED" -eq 1 ]; then DEBUG_ENABLED=1; fi
 if [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then DEBUG_ENABLED=0; fi
-
-normalize_cpu() {
-  case "$1" in
-    v1|v2|v3|v4) printf 'x86-64-%s' "$1" ;;
-    *) printf '%s' "$1" ;;
-  esac
-}
 
 if [ -n "$TARGET_TRIPLE" ]; then
   HOST_CPU="$(normalize_cpu "${TUNGSTEN_CPU:-native}")"
@@ -648,6 +675,7 @@ if [ "$DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--debug); fi
 if [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--no-debug); fi
 if [ "$NO_BITS" -eq 1 ]; then build_flags+=(--no-bits); fi
 if [ "$STRICT" -eq 1 ]; then build_flags+=(--strict); fi
+if [ "$INSTALL" -eq 1 ]; then build_flags+=(--install); fi
 if [ -n "$CPU_ARG" ]; then build_flags+=(--cpu "$CPU_ARG"); fi
 if [ -n "$TARGET_TRIPLE" ]; then build_flags+=(--target "$TARGET_TRIPLE"); fi
 if [ -n "$TARGET_SYSROOT" ]; then build_flags+=(--sysroot "$TARGET_SYSROOT"); fi

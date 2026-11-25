@@ -54,8 +54,9 @@ COMMANDS
                          --strict, --install, --pgo, --target, --portable, or
                          when CI is set. --target and --portable also build
                          each artifact's repl and metal compiler images.
-    install              Install the last verified --release --native build and
-                         its bits to TUNGSTEN_HOME, ticking VERSION.
+    install              Build a verified --release compiler and bits
+                         (bootstrapping first if needed), tick VERSION, and
+                         install to TUNGSTEN_HOME (same as `build --install`).
     release [VERSION]    Run the root gate, tag, and push a native GitHub
                          release matrix.
     gpu-bench            Emit, compile, dispatch, verify, and time the baseline
@@ -100,9 +101,10 @@ COMMANDS
     bootstrap chains into the full `tungsten build` pipeline. compile,
     compile-batch, check, run, console, start, new, fmt, lint, sandbox,
     explain, forge, flame, fire, profile, bit, ai, and symbolicate use the
-    compiled CLI (bin/tungsten.w) when present. `build` and `install` are
-    driven by the Tungsten orchestrator (bin/commands/build.w) and require an
-    existing compiler.
+    compiled CLI (bin/tungsten.w) when present. `build` is driven by the
+    Tungsten orchestrator (bin/commands/build.w) and requires an existing
+    compiler; `install` runs `build --install` (or `bootstrap --install` when
+    no compiler exists yet).
 
     The REPL is started with `tungsten console` or the `wit` binary — not
     `tungsten --repl`.
@@ -221,14 +223,16 @@ OPTIONS
         --cpu CPU
         Optimize for a CPU or ISA group. v1, v2, v3, v4, and native are
         shorthand; LLVM CPU names such as apple-m5 are also accepted.
+        Host builds default to [build] cpu from ~/.tungsten/config, or native.
 
         --native
-        Shorthand for --cpu native. Local builds use [build] cpu from
-        ~/.tungsten/config, or native when it is absent.
+        Shorthand for --cpu native (already the default for host builds unless
+        [build] cpu or TUNGSTEN_CPU is set).
 
         --target TRIPLE
-        Generate code for another target triple. It can be combined with
-        --cpu: the output runs on TRIPLE and is optimized for that CPU variant.
+        Generate code for another target triple, overriding the default native
+        CPU with clang's target baseline. Combine with --cpu to optimize for
+        a specific target CPU variant.
 
         --info-plist PATH
         Embed the Info.plist at PATH in the executable as its Mach-O

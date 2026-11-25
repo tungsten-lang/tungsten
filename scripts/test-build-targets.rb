@@ -134,9 +134,18 @@ Dir.mktmpdir("tungsten-build-targets-") do |directory|
   check.call("nothing to build is an error", status.exitstatus == 1, out)
   check.call("the error says what it looked for", out.include?("nothing to build in #{empty}") && out.include?("Bitfile") && out.include?("compiler/tungsten.w"), out)
 
+  File.write(log, "")
   out, status = run.call(other, ["--release", "--no-bits"])
   called = File.exist?(log) ? File.read(log).strip : ""
   check.call("another checkout builds itself through its own bin/tungsten", status.success? && called == "#{other} build --release --no-bits", out + "\n" + called)
+
+  File.write(log, "")
+  out, status = run.call(other, ["--install", "--pgo"])
+  called = File.exist?(log) ? File.read(log).strip : ""
+  check.call("another checkout installs itself through its own bin/tungsten install", status.success? && called == "#{other} install --pgo", out + "\n" + called)
+
+  out, status = run.call(package, ["--install"])
+  check.call("--install inside a bit is rejected before building", status.exitstatus == 1 && out.include?("must be run from the Tungsten repository root") && !out.include?("==> Runtime"), out)
 
   out, status = run.call(package)
   bundle = File.join(package, "bin/Demo.app/Contents")
@@ -159,6 +168,10 @@ Dir.mktmpdir("tungsten-build-targets-") do |directory|
   out, status = run.call(package)
   plist = File.read(File.join(bundle, "Info.plist"))
   check.call("a Bitfile build: is the CFBundleVersion", status.success? && plist.include?("<key>CFBundleVersion</key><string>77</string>") && plist.include?("<key>CFBundleShortVersionString</key><string>1.2</string>"), plist)
+
+  FileUtils.rm_rf(File.join(package, "bin/Demo.app"))
+  out, status = run.call(package, ["--target", "aarch64-linux-gnu"])
+  check.call("cross --target linux bit skips macOS .app bundling", status.success? && out.include?("Demo.app") && out.include?("macOS only") && !File.exist?(File.join(package, "bin/Demo.app")), out)
 
   # tungsten_main: the Tungsten main a project needs. The fake root becomes a git checkout: c1 (2026-01-01), a side branch's
   # commit (2026-01-02, never merged) and c2 (2099-01-01, after the fake compiler's file time) on the checked-out branch.

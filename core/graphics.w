@@ -173,6 +173,7 @@ GFX_HIDDEN    = 2   # never shown or activated (specs, headless runs)
 GFX_BGRA      = 4   # BGRA8 layer: present CoreGraphics/cairo-order pixels as they are
 GFX_KEEP_OPEN = 8   # close button and Quit post GFX_EV_CLOSE; gfx_close closes
 GFX_DROP_FILES = 16 # file URL drops on this window post GFX_EV_OPEN to it
+GFX_TITLEBAR_UNIFIED = 32 # macOS full-size content view with transparent compact unified titlebar
 
 # Event kinds (e[:kind]).
 GFX_EV_NONE       = 0
@@ -260,6 +261,18 @@ GFX_CURSOR_RESIZE_UD   = 7
 
 -> gfx_set_title(window, title)
   ccall("w_gfx_set_title", window, title)
+
+# Start a native OS window drag from the last mouse-down (unified titlebar background).
+-> gfx_window_drag(window)
+  ccall("w_gfx_window_drag", window)
+
+# Toggle window zoom (double-click on unified titlebar background).
+-> gfx_window_zoom(window)
+  ccall("w_gfx_window_zoom", window)
+
+# Expand the window to the full visible height of its screen, centered horizontally.
+-> gfx_fit_full_height(window)
+  ccall("w_gfx_fit_full_height", window)
 
 # Bring a document window forward and route menus/open requests to it.
 # Hidden windows stay hidden; a GFX_EV_FOCUS with id 1 is queued for checks.

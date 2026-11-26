@@ -5,6 +5,7 @@
   auto :Base64,       "base64"
   auto :BigArray,     "big_array"
   auto :BitOps,       "bit_ops"
+  auto :Brotli,       "brotli"
   auto :BlankSlate,   "blank_slate"
   auto :Boolean,      "boolean"
   auto :True,         "boolean"

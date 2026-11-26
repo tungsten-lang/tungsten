@@ -81,7 +81,7 @@ enum {
 enum { GFX_MOD_SHIFT = 1, GFX_MOD_CTRL = 2, GFX_MOD_ALT = 4, GFX_MOD_CMD = 8,
        GFX_MOD_CAPS = 16, GFX_MOD_FN = 32 };
 
-enum { GFX_HIDPI = 1, GFX_HIDDEN = 2, GFX_BGRA = 4, GFX_KEEP_OPEN = 8, GFX_DROP_FILES = 16 };
+enum { GFX_HIDPI = 1, GFX_HIDDEN = 2, GFX_BGRA = 4, GFX_KEEP_OPEN = 8, GFX_DROP_FILES = 16, GFX_TITLEBAR_UNIFIED = 32 };
 
 /* the menu event ids of the standard items the runtime makes (Settings..., <App> Help) */
 enum { GFX_MENU_SETTINGS = -2, GFX_MENU_HELP = -3 };
@@ -200,6 +200,7 @@ static BOOL gfx_drop_received(NSView *view, NSArray *urls);
 @interface TungstenView : NSView
 @property (nonatomic, assign) GfxInput *input;
 @property (nonatomic, retain) NSTrackingArea *hoverTracking;
+@property (nonatomic, retain) NSEvent *lastMouseDown;
 @end
 
 @implementation TungstenView
@@ -231,6 +232,7 @@ static BOOL gfx_drop_received(NSView *view, NSArray *urls);
 - (void)dealloc {
     if (_hoverTracking) [self removeTrackingArea:_hoverTracking];
     [_hoverTracking release];
+    [_lastMouseDown release];
     [super dealloc];
 }
 - (void)mouseEntered:(NSEvent *)ev {
@@ -343,7 +345,7 @@ static BOOL gfx_drop_received(NSView *view, NSArray *urls);
     if (self.input) { self.input->mouse_dx += [ev deltaX]; self.input->mouse_dy += [ev deltaY]; }
     [self gfxMouse:ev kind:GFX_EV_MOUSE_DRAG button:(int)[ev buttonNumber]];
 }
-- (void)mouseDown:(NSEvent *)ev        { [self gfxMouse:ev kind:GFX_EV_MOUSE_DOWN button:0]; }
+- (void)mouseDown:(NSEvent *)ev        { self.lastMouseDown = ev; [self gfxMouse:ev kind:GFX_EV_MOUSE_DOWN button:0]; }
 - (void)mouseUp:(NSEvent *)ev          { [self gfxMouse:ev kind:GFX_EV_MOUSE_UP button:0]; }
 - (void)rightMouseDown:(NSEvent *)ev   { [self gfxMouse:ev kind:GFX_EV_MOUSE_DOWN button:1]; }
 - (void)rightMouseUp:(NSEvent *)ev     { [self gfxMouse:ev kind:GFX_EV_MOUSE_UP button:1]; }
@@ -688,11 +690,21 @@ static WValue gfx_open(WValue device_v, WValue title_v, int w, int h, int flags,
                                   NSWindowStyleMaskClosable |
                                   NSWindowStyleMaskMiniaturizable |
                                   NSWindowStyleMaskResizable;
+        if (flags & GFX_TITLEBAR_UNIFIED) style |= NSWindowStyleMaskFullSizeContentView;
         NSWindow *win = [[NSWindow alloc] initWithContentRect:frame
                                                     styleMask:style
                                                       backing:NSBackingStoreBuffered
                                                         defer:NO];
         [win setTitle:gfx_string(title_v)];
+        if (flags & GFX_TITLEBAR_UNIFIED) {
+            [win setTitlebarAppearsTransparent:YES];
+            [win setTitleVisibility:NSWindowTitleHidden];
+            NSToolbar *tb = [[[NSToolbar alloc] initWithIdentifier:@"TungstenUnifiedToolbar"] autorelease];
+            [win setToolbar:tb];
+            if (@available(macOS 11.0, *)) {
+                [win setToolbarStyle:NSWindowToolbarStyleUnifiedCompact];
+            }
+        }
         [win center];
         /* the handle keeps the window: a closed window stays a valid object
          * (calls on it after a close are harmless, never a freed pointer) */
@@ -950,6 +962,42 @@ WValue w_gfx_set_title(WValue window_v, WValue title_v) {
     WGfxWindow *gw = gfx_window_arg(window_v, "gfx.set_title");
     gfx_require_main_thread("gfx.set_title");
     [(NSWindow *)gw->window setTitle:gfx_string(title_v)];
+    return W_NIL;
+}
+
+WValue w_gfx_window_drag(WValue window_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.window_drag");
+    gfx_require_main_thread("gfx.window_drag");
+    if (gw->closed || !gw->window || !gw->view) return W_NIL;
+    TungstenView *view = (TungstenView *)gw->view;
+    NSEvent *ev = view.lastMouseDown;
+    if (ev) [(NSWindow *)gw->window performWindowDragWithEvent:ev];
+    return W_NIL;
+}
+
+WValue w_gfx_window_zoom(WValue window_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.window_zoom");
+    gfx_require_main_thread("gfx.window_zoom");
+    if (gw->closed || !gw->window) return W_NIL;
+    [(NSWindow *)gw->window performZoom:nil];
+    return W_NIL;
+}
+
+WValue w_gfx_fit_full_height(WValue window_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.fit_full_height");
+    gfx_require_main_thread("gfx.fit_full_height");
+    if (gw->closed || !gw->window || (gw->flags & GFX_HIDDEN)) return W_NIL;
+    NSWindow *win = (NSWindow *)gw->window;
+    NSScreen *scr = [win screen] ?: [NSScreen mainScreen];
+    if (!scr) return W_NIL;
+    NSRect vf = [scr visibleFrame];
+    NSRect cur = [win frame];
+    CGFloat w = cur.size.width > vf.size.width ? vf.size.width : cur.size.width;
+    CGFloat x = vf.origin.x + floor((vf.size.width - w) * 0.5);
+    NSRect next = NSMakeRect(x, vf.origin.y, w, vf.size.height);
+    [win setFrame:next display:YES];
+    gfx_fit_drawable(gw);
+    gfx_push_resize(gw);
     return W_NIL;
 }
 

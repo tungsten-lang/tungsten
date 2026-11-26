@@ -32566,6 +32566,27 @@
       ]
     },
     {
+      "symbol": "w_gfx_fit_full_height",
+      "native": {
+        "symbol": "w_gfx_fit_full_height",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.c"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "w_gfx_focus",
       "native": {
         "symbol": "w_gfx_focus",
@@ -33692,6 +33713,27 @@
       ]
     },
     {
+      "symbol": "w_gfx_window_drag",
+      "native": {
+        "symbol": "w_gfx_window_drag",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.c"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "w_gfx_window_new",
       "native": {
         "symbol": "w_gfx_window_new",
@@ -33755,6 +33797,27 @@
           }
         ],
         "arity": 5,
+        "source": "runtime/runtime.c"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gfx_window_zoom",
+      "native": {
+        "symbol": "w_gfx_window_zoom",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
         "source": "runtime/runtime.c"
       },
       "call_modes": [

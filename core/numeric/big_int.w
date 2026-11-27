@@ -40,6 +40,7 @@ use core/numeric/big_int/mul_and_prime
 # limb in SSA and performs one new load and one store.
 fn __bigint_shl_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   ll <<~IR
+    ; tungsten:alwaysinline
     entry:
       %rq = inttoptr i64 %rp to ptr
       %sq = inttoptr i64 %sp to ptr
@@ -283,7 +284,7 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
               __bigint_add1_8_raw($value ## i64, other$value ## i64)
             )
         if an > 8 && an <= 4096
-          wide_n = __bigint_effective_size_raw($value ## i64) ## i64
+          wide_n = an ## i64
           result = ccall_rawargs("w_bigint_alloc_hot", wide_n) ## BigInt
           mask_wide = 140737488355312 ## i64
           rp_wide = (result$value & mask_wide) + 16 ## i64
@@ -429,7 +430,7 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
         # suffix retains C's tuned overlap-copy helper through an inlinable raw
         # boundary.  Allocation and shrink normalization remain in C order.
         if an > 8 && an <= 4096
-          wide_n = __bigint_effective_size_raw($value ## i64) ## i64
+          wide_n = an ## i64
           result = ccall_rawargs("w_bigint_alloc_hot", wide_n) ## BigInt
           mask_wide = 140737488355312 ## i64
           rp_wide = (result$value & mask_wide) + 16 ## i64
@@ -729,7 +730,18 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     bn = other$size ## i64
     if ((other$value >> 47) & 1) == 1
       bn = 0 - bn
-    if an < 2 || bn < 2 || an > 4096 || bn > 4096 || $value == other$value
+    if $value == other$value
+      return ccall("w_bit_and", self, other)
+    if an == 1 && bn == 1
+      w = ($limbs[0] ## u64) & (other$limbs[0] ## u64)
+      if w <= 140737488355327
+        int_tag = -1688849860263936 ## i64
+        return wvalue_from_bits((int_tag | w) ## i64)
+      r1 = ccall_rawargs("w_bigint_alloc_hot", 1) ## BigInt
+      r1$limbs[0] = w
+      r1$size = 1
+      return r1
+    if an < 2 || bn < 2 || an > 4096 || bn > 4096
       return ccall("w_bit_and", self, other)
 
     n = an ## i64
@@ -742,6 +754,9 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     result = ccall_rawargs("w_bigint_alloc_hot", n) ## BigInt
     rp = (result$value & mask) + 16 ## i64
     __bigint_bw_and(rp, pa, pb, n)
+    if raw_load_u64(rp, (n - 1) * 8) != 0
+      result$size = n
+      return result
     ccall("w_bigint_seal_raw", result, n)
 
   -> &(other)(Number)
@@ -870,7 +885,15 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     bn = other$size ## i64
     if ((other$value >> 47) & 1) == 1
       bn = 0 - bn
-    if an < 2 || bn < 2 || an > 4096 || bn > 4096 || $value == other$value
+    if $value == other$value
+      return ccall("w_bit_or", self, other)
+    if an == 1 && bn == 1
+      w = ($limbs[0] ## u64) | (other$limbs[0] ## u64)
+      r1 = ccall_rawargs("w_bigint_alloc_hot", 1) ## BigInt
+      r1$limbs[0] = w
+      r1$size = 1
+      return r1
+    if an < 2 || bn < 2 || an > 4096 || bn > 4096
       return ccall("w_bit_or", self, other)
 
     mask = 140737488355312 ## i64
@@ -1037,7 +1060,18 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     bn = other$size ## i64
     if ((other$value >> 47) & 1) == 1
       bn = 0 - bn
-    if an < 2 || bn < 2 || an > 4096 || bn > 4096 || $value == other$value
+    if $value == other$value
+      return ccall("w_bit_xor", self, other)
+    if an == 1 && bn == 1
+      w = ($limbs[0] ## u64) ^ (other$limbs[0] ## u64)
+      if w <= 140737488355327
+        int_tag = -1688849860263936 ## i64
+        return wvalue_from_bits((int_tag | w) ## i64)
+      r1 = ccall_rawargs("w_bigint_alloc_hot", 1) ## BigInt
+      r1$limbs[0] = w
+      r1$size = 1
+      return r1
+    if an < 2 || bn < 2 || an > 4096 || bn > 4096
       return ccall("w_bit_xor", self, other)
 
     mask = 140737488355312 ## i64
@@ -1057,6 +1091,9 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     result = ccall_rawargs("w_bigint_alloc_hot", ln) ## BigInt
     rp = (result$value & mask) + 16 ## i64
     __bigint_bw_xor_uneq(rp, lp, ln, sp, sn)
+    if raw_load_u64(rp, (ln - 1) * 8) != 0
+      result$size = ln
+      return result
     ccall("w_bigint_seal_raw", result, ln)
 
   -> ^(other)(Number)
@@ -1170,6 +1207,36 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     k = (k_payload - ((k_payload >> 47) << 48)) ## i64
     if k == 0
       return ccall("w_bigint_mark_shared_value", self)
+    if k > 0 && k < 64 && (($value >> 47) & 1) == 0
+      pos_n = $size ## i64
+      if pos_n == 1
+        w0 = $limbs[0] ## u64
+        lo = (w0 << k) ## u64
+        hi = __bigint_shr_u64(w0, 64 - k) ## u64
+        out1 = hi != 0 ? 2 : 1
+        r1 = ccall_rawargs("w_bigint_alloc_hot", out1) ## BigInt
+        r1$limbs[0] = lo
+        if hi != 0
+          r1$limbs[1] = hi
+        r1$size = out1
+        return r1
+      if pos_n >= 65 && pos_n <= 512
+        top_src = $limbs[pos_n - 1] ## u64
+        carry = __bigint_shr_u64(top_src, 64 - k) ## u64
+        outn = pos_n ## i64
+        if carry != 0
+          outn = outn + 1 ## i64
+        result = ccall_rawargs("w_bigint_alloc_hot", outn) ## BigInt
+        mask = 140737488355312 ## i64
+        sp = (($value & mask) + 16) ## i64
+        rp = ((result$value & mask) + 16) ## i64
+        __bigint_shl_positive_funnel(
+          rp ## i64, sp ## i64, pos_n ## i64, k ## i64
+        )
+        if carry != 0
+          result$limbs[pos_n] = carry
+        result$size = outn
+        return result
     if k < 0
       raw_size = $size ## i64
       n = raw_size ## i64

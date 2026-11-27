@@ -1,0 +1,10 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-cinder"
+version     "0.1.0"
+summary     "Pure-Tungsten native machine-code backend, JIT, and Mach-O/ELF64 object compiler"
+description "Cinder is Tungsten's self-contained native code generation backend and Clang alternative. It compiles both WIRE IR (for sub-20us in-process ARM64 and x86_64 JIT execution with NEON/SSE2/AVX2 auto-vectorization) and Tungsten's emitted LLVM IR subset (.ll) directly into native relocatable Mach-O 64-bit and ELF64 object files and executables without invoking clang, opt, llc, or an external assembler."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]
+
+executable  "cinder", source: "bin/cinder.w"

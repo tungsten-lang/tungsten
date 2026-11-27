@@ -48,8 +48,12 @@ if args.size() == 0
   << "  --target TRIPLE  Generate code for a different target triple"
   << "  --fast, -fast    Fast FP: FMA + reassociation + reciprocals + nnan/ninf"
   << "  --strict-math    Strict IEEE 754: no FMA, no contraction"
+  << "  -O0..-O3, -Ofast Optimization level override"
+  << "  -f<pass>, -fno-<pass>, --opt-passes=..., --print-passes"
+  << "                   Enable/disable individual optimization passes (e.g. -finline, -fno-inline)"
   << "  --ll             Write LLVM IR (.ll) next to the binary"
   << "  --emit-ll        Write LLVM IR and skip native linking"
+  << "  --cinder         Compile and link natively via Cinder instead of clang"
   << "  -j, --jobs N     Parallel compile-batch workers (default: auto)"
   << "  --ast            Print the AST and exit"
   << "  --canonical-ast  Print a stable machine-readable AST and exit"
@@ -87,6 +91,7 @@ full_lto       = false
 frame_pointers = false
 keep_ll        = false
 emit_ll_only   = false
+cinder_mode    = env("TUNGSTEN_BACKEND") == "cinder"
 batch_jobs     = 0
 batch_worker_dir = nil
 batch_link_worker = false
@@ -115,6 +120,8 @@ debug_enabled   = false
 dev_mode        = false
 fast_mode       = false
 math_mode       = :precise
+opt_level_override = ""
+extra_opt_flags = []
 # Incremental-cache channel out of emit_ir (mutated, never reassigned —
 # fn-body assignment to a top-level var would shadow, not write).
 g_incremental  = {manifest: nil, core_cache_context_ready: false, target_cache_context_ready: false}
@@ -238,8 +245,35 @@ while i < args.size()
   elsif arg == "--fast" || arg == "-fast"
     fast_mode = true
     math_mode = :fast
+  elsif arg == "-ffast-math"
+    fast_mode = true
+    math_mode = :fast
+    extra_opt_flags.push(arg)
+  elsif arg == "-fno-fast-math"
+    fast_mode = false
+    math_mode = :precise
+    extra_opt_flags.push(arg)
   elsif arg == "--strict-math"
     math_mode = :strict
+  elsif arg in ("-O0" "-O1" "-O2" "-O3" "-Ofast" "-O")
+    opt_level_override = arg == "-O" ? "-O2" : arg
+    if arg == "-Ofast"
+      fast_mode = true
+      math_mode = :fast
+  elsif arg == "--no-frame-pointers" || arg == "-fomit-frame-pointer"
+    frame_pointers = false
+    extra_opt_flags.push(arg)
+  elsif arg == "-fno-omit-frame-pointer"
+    frame_pointers = true
+    extra_opt_flags.push(arg)
+  elsif arg == "--print-passes"
+    extra_opt_flags.push(arg)
+  elsif arg.starts_with?("--opt-passes=")
+    pass_spec = arg.slice(13, arg.size() - 13)
+    if pass_spec != ""
+      extra_opt_flags.push(arg)
+  elsif arg.starts_with?("-f") && arg.size() > 2 && cpu_name_safe?(arg.slice(2, arg.size() - 2))
+    extra_opt_flags.push(arg)
   elsif arg == "--runtime"
     i += 1
     runtime_archive = args[i]
@@ -270,6 +304,9 @@ while i < args.size()
     keep_ll = true
   elsif arg == "--emit-ll"
     emit_ll_only = true
+  elsif arg == "--cinder"
+    cinder_mode = true
+    ccall("w_setenv", "TUNGSTEN_BACKEND", "cinder")
   elsif arg == "--jobs" || arg == "-j"
     i += 1
     batch_jobs = args[i].to_i()

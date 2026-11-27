@@ -6,7 +6,7 @@
 
 use argon
 
-ROOT = __DIR__ + "/.."
+ROOT = File.expand_path(__DIR__ + "/..")
 VERSION = read_file(ROOT + "/VERSION").strip
 COPYRIGHT = "tungsten - Copyright (c) 2013–2026 Erik Peterson.\nTungsten is freely available under the MIT License."
 COMPILER = ROOT + "/bin/tungsten-compiler"
@@ -440,16 +440,16 @@ opts = cli.parse(argv())
 
 # ---- Handle info flags (no file needed) ----
 
-if opts.flag?("version") || opts.flag?("v")
+command = opts.command
+rest = opts.arguments
+
+if (opts.flag?("version") || opts.flag?("v")) && command == nil
   << "tungsten " + VERSION
   exit(0)
 
-if opts.flag?("copyright")
+if opts.flag?("copyright") && command == nil
   << COPYRIGHT
   exit(0)
-
-command = opts.command
-rest = opts.arguments
 
 # Global --help only when no subcommand (so `tungsten forge --help` reaches forge).
 if (opts.flag?("help") || opts.flag?("h")) && command == nil
@@ -556,6 +556,9 @@ when "bit"
 
 when "rung"
   exec_bit_binary("tungsten-rung", "rung", tool_argv_after_command("rung"))
+
+when "cinder"
+  exec_bit_binary("tungsten-cinder", "cinder", tool_argv_after_command("cinder"))
 
 when "agent-json"
   << "{\"status\":\"ok\",\"agent_support\":true,\"diagnostics_format\":\"json\",\"capabilities\":\[\"diagnostics\",\"code_frame\",\"agent_payload\",\"spirv_emitter\",\"mutate_if_unique\"\]}"

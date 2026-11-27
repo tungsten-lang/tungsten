@@ -11787,9 +11787,10 @@ WValue bigint_mul_ui_any(WValue a, uint64_t word) {
 #if BN_MUL_POWER2_FIXED
 #if !BN_MUL_N1_SMALL_STRAIGHT
             case 8:  return bigint_mul_n1_fixed8(ba->limbs, word, 0);
-#endif
+#else
             case 12:
                 return bigint_mul_n1_tiny_wide(ba->limbs, 12, word, 0, 16U);
+#endif
             case 16: return bigint_mul_n1_fixed16(ba->limbs, word, 0);
 #if BN_MUL_N1_SMALL_STRAIGHT
             case 24:
@@ -11877,8 +11878,9 @@ WValue bigint_mul_ui_any(WValue a, uint64_t word) {
 #if BN_MUL_POWER2_FIXED
 #if !BN_MUL_N1_SMALL_STRAIGHT
     case 8:  return bigint_mul_n1_fixed8(al, word, negative);
-#endif
+#else
     case 12: return bigint_mul_n1_tiny_wide(al, 12, word, negative, 16U);
+#endif
     case 16: return bigint_mul_n1_fixed16(al, word, negative);
 #if BN_MUL_N1_SMALL_STRAIGHT
     case 24: return bigint_mul_n1_tiny_wide(al, 24, word, negative, 32U);
@@ -42509,6 +42511,62 @@ W_BRIDGE_STUB WValue w_metal_dispatch1(WValue queue, WValue pipeline,
     w_raise(w_string("Metal: not available on this platform"));
     return W_NIL;
 }
+static WValue w_metal_unavailable(void) {
+    w_raise(w_string("Metal: not available on this platform"));
+    return W_NIL;
+}
+W_BRIDGE_STUB WValue w_metal_binary_archive_new(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_pipeline_for_with_int_constants(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_buffer_release(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_array_as_metal_buffer(WValue a, WValue b) { (void)a; (void)b; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_buffer_write_from_mmap(WValue a, WValue b, WValue c, WValue d, WValue e) { (void)a; (void)b; (void)c; (void)d; (void)e; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_q8_dequant_row(WValue a, WValue b, WValue c, WValue d, WValue e) { (void)a; (void)b; (void)c; (void)d; (void)e; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_q8_split_blocks(WValue a, WValue b, WValue c, WValue d, WValue e) { (void)a; (void)b; (void)c; (void)d; (void)e; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_buffer_write_bf16(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_buffer_read_bf16(WValue a, WValue b) { (void)a; (void)b; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_buffer_view(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_capture_begin(WValue a, WValue b) { (void)a; (void)b; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_capture_end(void) { return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_batch_begin(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_batch_begin_concurrent(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_batch_barrier(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_event_new(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_event_wait(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_batch_begin_concurrent_wait(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_batch_commit_async_signal(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_batch_barrier_resources(WValue a, WValue b) { (void)a; (void)b; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_program_run(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_set_threadgroup_memory(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_batch_commit(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_batch_commit_async(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_command_buffer_wait(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_batch_commit_ms(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_dispatch_n(WValue a, WValue b, WValue c, WValue d) { (void)a; (void)b; (void)c; (void)d; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_dispatch_groups(WValue a, WValue b, WValue c, WValue d, WValue e) { (void)a; (void)b; (void)c; (void)d; (void)e; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_dispatch_groups_3d(WValue a, WValue b, WValue c, WValue d, WValue e, WValue f, WValue g, WValue h, WValue i) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; (void)i; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_sync_array_from_buffer(WValue a, WValue b) { (void)a; (void)b; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_compute(WValue a, WValue b, WValue c, WValue d) { (void)a; (void)b; (void)c; (void)d; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_tensor_2d(WValue a, WValue b, WValue c, WValue d, WValue e, WValue f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_tensor_nd(WValue a, WValue b, WValue c, WValue d, WValue e) { (void)a; (void)b; (void)c; (void)d; (void)e; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_compiler_new(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_pipeline_for(WValue a, WValue b, WValue c, WValue d, WValue e, WValue f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_queue_new(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_allocator_new(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_argtable_new(WValue a, WValue b) { (void)a; (void)b; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_argtable_set_buffer(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_argtable_set_buffer_offset(WValue a, WValue b, WValue c, WValue d) { (void)a; (void)b; (void)c; (void)d; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_argtable_set_tensor(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_residency_attach(WValue a, WValue b) { (void)a; (void)b; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_batch_run(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_batch_run_chained(WValue a, WValue b, WValue c, WValue d, WValue e, WValue f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_allocator_reset(WValue a) { (void)a; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_program_exec(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal4_dispatch_groups_3d(WValue a, WValue b, WValue c, WValue d, WValue e, WValue f, WValue g, WValue h, WValue i, WValue j, WValue k, WValue l) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; (void)i; (void)j; (void)k; (void)l; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_icb_new(WValue a, WValue b) { (void)a; (void)b; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_icb_add(WValue a, WValue b, WValue c, WValue d, WValue e) { (void)a; (void)b; (void)c; (void)d; (void)e; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_icb_add_3d(WValue a, WValue b, WValue c, WValue d, WValue e, WValue f, WValue g, WValue h, WValue i) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; (void)i; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_icb_execute_segments(WValue a, WValue b, WValue c) { (void)a; (void)b; (void)c; return w_metal_unavailable(); }
+W_BRIDGE_STUB WValue w_metal_icb_execute(WValue a, WValue b) { (void)a; (void)b; return w_metal_unavailable(); }
 /* end Metal bridge stubs (weak) */
 
 /* ---- Windowed graphics weak stubs (strong on macOS in graphics.m) ----

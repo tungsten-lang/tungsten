@@ -1,0 +1,21 @@
+#!/bin/sh
+# Source-checkout entry point; cinder commands use the selected toolchain.
+#
+# Runs the tungsten-cinder executable through `tungsten cinder`, which keeps
+# bits/tungsten-cinder/bin/cinder a copy of the build store's entry for the
+# bit's sources and this compiler and execs it with the caller's arguments and
+# exit status.
+set -eu
+unset BASH_ENV
+CINDER_LAUNCHER=$0
+while [ -L "$CINDER_LAUNCHER" ]; do
+  CINDER_LAUNCHER_DIR=$(CDPATH= cd -- "$(dirname -- "$CINDER_LAUNCHER")" && pwd -P)
+  CINDER_LINK_TARGET=$(readlink "$CINDER_LAUNCHER")
+  case "$CINDER_LINK_TARGET" in
+    /*) CINDER_LAUNCHER=$CINDER_LINK_TARGET ;;
+    *) CINDER_LAUNCHER=$CINDER_LAUNCHER_DIR/$CINDER_LINK_TARGET ;;
+  esac
+done
+CINDER_TOOLCHAIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$CINDER_LAUNCHER")/.." && pwd -P)
+export TUNGSTEN_ROOT="$CINDER_TOOLCHAIN_ROOT"
+exec "$CINDER_TOOLCHAIN_ROOT/bin/tungsten" cinder "$@"

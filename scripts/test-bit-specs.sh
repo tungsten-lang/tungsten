@@ -153,7 +153,7 @@ run_one() {
         status=1
       fi
       ;;
-    bits/tungsten-argon/spec/argon_spec.w|bits/tungsten-hammer/spec/hammer_spec.w|bits/tungsten-drawille/spec/inspection_spec.w|bits/tungsten-rung/spec/rung_spec.w)
+    bits/tungsten-argon/spec/argon_spec.w|bits/tungsten-hammer/spec/hammer_spec.w|bits/tungsten-drawille/spec/inspection_spec.w|bits/tungsten-rung/spec/rung_spec.w|bits/tungsten-cinder/spec/cinder_spec.w)
       if ! run_bounded env TUNGSTEN_INCREMENTAL=0 "$TUNGSTEN" compile "$path" --out "$out" --no-lto >"$log" 2>&1; then
         status=1
       elif ! run_bounded "$out" >>"$log" 2>&1; then

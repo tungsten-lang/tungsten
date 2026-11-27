@@ -293,7 +293,7 @@ JST_TIER2_ELEMS = [500000]  # ...or once 500K total elements have been processed
 
 + JstKernelDesc
   rw :name, :kind, :fp, :sig, :ta_kinds, :ta_mults, :need_pos_n, :metal_key, :metal_msl, :metal_fn, :metal_min_n
-  rw :tier, :hits, :elems, :hash_key, :w_src, :kname, :reopt_fn
+  rw :tier, :hits, :elems, :hash_key, :w_src, :kname, :wire_fn, :reopt_fn
 
   -> new(@name, @kind, @fp, @sig)
     @ta_kinds = []
@@ -309,6 +309,7 @@ JST_TIER2_ELEMS = [500000]  # ...or once 500K total elements have been processed
     @hash_key = nil
     @w_src = nil
     @kname = "jst_k"
+    @wire_fn = nil
     @reopt_fn = nil
 
 -> jst_record_call(desc, n_elems)
@@ -332,14 +333,23 @@ JST_TIER2_ELEMS = [500000]  # ...or once 500K total elements have been processed
   return -1 if iv.to_f != v
   iv
 
-# Guard helper: verify TypedArray length satisfies per-param requirement (1 -> n, 4 -> 4*n, -2 -> n*n).
+# Guard helper: verify TypedArray length satisfies per-param requirement (1 -> n, 2 -> 2*n, 4 -> 4*n, -2 -> n*n).
 -> jst_guard_ta_len?(ta, n, mult)
   len = js_ta_length(ta)
   return false if len < 0
   return n <= len if mult == 1 || mult == nil
+  return n <= 1073741823 && n * 2 <= len if mult == 2
   return n <= 536870911 && n * 4 <= len if mult == 4
   return n <= 46340 && n * n <= len if mult == -2
   false
+
+-> jst_box_u64(rv)
+  u = rv < 0 ? ((rv ## int) + ((1 ## int) << 64)) : (rv ## int)
+  JS:BigIntValue.new(u)
+
+-> jst_unbox_u64_bits(bv)
+  uv = bv.v
+  uv >= ((1 ## int) << 63) ? ((uv - ((1 ## int) << 64)) ## i64) : (uv ## i64)
 
 # Fast dispatcher for a JstKernelDesc from JS arguments (a0, a1, a2, a3, more).
 # Returns JS_HOLE on guard mismatch (so caller transparently falls back to JS Tier 0/JIT).
@@ -466,6 +476,38 @@ JST_TIER2_ELEMS = [500000]  # ...or once 500K total elements have been processed
     return JS_HOLE if va == nil || vb == nil || vc == nil
     jst_record_call(desc, n)
     return wvalue_from_bits(jst_call4(desc.fp, wvalue_bits(va) ## i64, wvalue_bits(vb) ## i64, wvalue_bits(vc) ## i64, wvalue_bits(n) ## i64))
+  elsif sig == :jit_aaai_u || sig == :jit_aaai_i
+    return JS_HOLE if argc < 4 || !a0.is_a?(JS:TypedArray) || !a1.is_a?(JS:TypedArray) || !a2.is_a?(JS:TypedArray)
+    return JS_HOLE if a0.kind != desc.ta_kinds[0] || a1.kind != desc.ta_kinds[1] || a2.kind != desc.ta_kinds[2]
+    n = jst_guard_nonneg_int(a3)
+    return JS_HOLE if n < (desc.need_pos_n ? 1 : 0)
+    m0 = desc.ta_mults != nil ? desc.ta_mults[0] : 1
+    m1 = desc.ta_mults != nil ? desc.ta_mults[1] : 1
+    m2 = desc.ta_mults != nil ? desc.ta_mults[2] : 1
+    return JS_HOLE if !jst_guard_ta_len?(a0, n, m0) || !jst_guard_ta_len?(a1, n, m1) || !jst_guard_ta_len?(a2, n, m2)
+    va = jst_ta_view(a0)
+    vb = jst_ta_view(a1)
+    vc = jst_ta_view(a2)
+    return JS_HOLE if va == nil || vb == nil || vc == nil
+    jst_record_call(desc, n)
+    rv = jst_call4(desc.fp, wvalue_bits(va) ## i64, wvalue_bits(vb) ## i64, wvalue_bits(vc) ## i64, n ## i64)
+    return sig == :jit_aaai_u ? jst_box_u64(rv) : rv.to_f
+  elsif sig == :jit_aaui_u || sig == :jit_aaui_i
+    return JS_HOLE if argc < 4 || !a0.is_a?(JS:TypedArray) || !a1.is_a?(JS:TypedArray) || !a2.is_a?(JS:BigIntValue)
+    return JS_HOLE if a0.kind != desc.ta_kinds[0] || a1.kind != desc.ta_kinds[1]
+    return JS_HOLE if a2.v < 0 || a2.v >= ((1 ## int) << 64)
+    n = jst_guard_nonneg_int(a3)
+    return JS_HOLE if n < (desc.need_pos_n ? 1 : 0)
+    m0 = desc.ta_mults != nil ? desc.ta_mults[0] : 1
+    m1 = desc.ta_mults != nil ? desc.ta_mults[1] : 1
+    return JS_HOLE if !jst_guard_ta_len?(a0, n, m0) || !jst_guard_ta_len?(a1, n, m1)
+    vo = jst_ta_view(a0)
+    va = jst_ta_view(a1)
+    return JS_HOLE if vo == nil || va == nil
+    wb = jst_unbox_u64_bits(a2)
+    jst_record_call(desc, n)
+    rv = jst_call4(desc.fp, wvalue_bits(vo) ## i64, wvalue_bits(va) ## i64, wb, n ## i64)
+    return sig == :jit_aaui_u ? jst_box_u64(rv) : rv.to_f
   elsif sig == :jit_aaadi_i
     return JS_HOLE if argc < 5 || !a0.is_a?(JS:TypedArray) || !a1.is_a?(JS:TypedArray) || !a2.is_a?(JS:TypedArray)
     return JS_HOLE if a0.kind != desc.ta_kinds[0] || a1.kind != desc.ta_kinds[1] || a2.kind != desc.ta_kinds[2] || !js_number?(a3)
@@ -491,7 +533,7 @@ JST_TIER2_ELEMS = [500000]  # ...or once 500K total elements have been processed
     jst_record_call(desc, n)
     rv = jst_call4(desc.fp, wvalue_bits(vo) ## i64, wvalue_bits(vi) ## i64, wvalue_bits(sc) ## i64, n ## i64)
     return rv.to_f
-  elsif sig == :jit_aai_i
+  elsif sig == :jit_aai_i || sig == :jit_aai_u
     return JS_HOLE if argc < 3 || !a0.is_a?(JS:TypedArray) || !a1.is_a?(JS:TypedArray)
     return JS_HOLE if a0.kind != desc.ta_kinds[0] || a1.kind != desc.ta_kinds[1]
     n = jst_guard_nonneg_int(a2)
@@ -504,8 +546,8 @@ JST_TIER2_ELEMS = [500000]  # ...or once 500K total elements have been processed
     return JS_HOLE if vo == nil || vi == nil
     jst_record_call(desc, n)
     rv = jst_call3(desc.fp, wvalue_bits(vo) ## i64, wvalue_bits(vi) ## i64, n ## i64)
-    return rv.to_f
-  elsif sig == :jit_ai_i
+    return sig == :jit_aai_u ? jst_box_u64(rv) : rv.to_f
+  elsif sig == :jit_ai_i || sig == :jit_ai_u || sig == :jit_ai_s64
     return JS_HOLE if argc < 2 || !a0.is_a?(JS:TypedArray) || a0.kind != desc.ta_kinds[0]
     n = jst_guard_nonneg_int(a1)
     return JS_HOLE if n < 0 || n > js_ta_length(a0)
@@ -513,9 +555,12 @@ JST_TIER2_ELEMS = [500000]  # ...or once 500K total elements have been processed
     return JS_HOLE if va == nil
     jst_record_call(desc, n)
     rv = jst_call2(desc.fp, wvalue_bits(va) ## i64, n ## i64)
-    if desc.ta_kinds[0] == 10
-      u = rv < 0 ? ((rv ## int) + ((1 ## int) << 64)) : (rv ## int)
-      return JS:BigIntValue.new(u)
+    if sig == :jit_ai_u
+      return jst_box_u64(rv)
+    elsif sig == :jit_ai_s64
+      return JS:BigIntValue.new(rv ## int)
+    elsif desc.ta_kinds[0] == 10
+      return jst_box_u64(rv)
     elsif desc.ta_kinds[0] == 9
       return JS:BigIntValue.new(rv ## int)
     return rv.to_f

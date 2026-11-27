@@ -249,13 +249,12 @@ r_t0_ck = js_call(f_ck, nil, 2, arr_ck, ~131072.0, nil, nil, JS_NO_ARGS)
 must(t_res[0] == r_t0_ck && t_res[4] == r_t0_ck, "Tiered kernel result mismatch vs baseline!")
 # STRICT tier-execution assertions (Idea #2: prove the intended tiers actually ran!)
 must(JST_STATS[:t1] >= 3, "Expected >= 3 Tier 1 calls, got " + JST_STATS[:t1].to_s)
-must(JST_STATS[:t2] >= 2, "Expected >= 2 Tier 2 (-O3) calls after hot promotion, got " + JST_STATS[:t2].to_s)
-<< "  PASS Two-tier engine hook verified: Tier 1 calls=[JST_STATS[:t1]], hot Tier 2 (-O3) calls=[JST_STATS[:t2]], result=[t_res[4]] (matches Tier 0)"
+must(JST_STATS[:t2] >= 2, "Expected >= 2 Tier 2 calls after hot promotion, got " + JST_STATS[:t2].to_s)
+<< "  PASS Two-tier Cinder engine hook verified: Tier 1 calls=[JST_STATS[:t1]], hot Tier 2 calls=[JST_STATS[:t2]], result=[t_res[4]] (matches Tier 0)"
 
-# Measure Tier 1 (pure-Tungsten WIRE->ARM64) vs Tier 2 (clang -O3 -mcpu=native) runtime on 131K Int32 kernel
+# Measure Tier 1 (Cinder fast baseline) vs Tier 2 (Cinder optimizing pass pipeline) runtime on 131K Int32 kernel
 c_t1 = jst_compile_js_func(f_ck.code.node, [[:ta, 5], [:i64]], "i64", 1)
 c_t2 = jst_compile_js_func(f_ck.code.node, [[:ta, 5], [:i64]], "i64", 2)
-JST_ALLOW_CLANG[0] = false
 # Prevent auto-promotion during pure T1 timing
 c_t1[0].reopt_fn = nil
 t0 = now_us()
@@ -272,7 +271,7 @@ while ci < 10
   ci += 1
 t1 = now_us()
 ms_t2_run = (t1 - t0).to_f / ~1000.0
-<< "  Execution (131K x 10 runs): Tier 1 (trimmed opt+FastISel)=[fmt2(ms_t1_run)] ms vs Tier 2 (-O3 -mcpu=native)=[fmt2(ms_t2_run)] ms ([fmt2(ms_t1_run / ms_t2_run)]x faster after hot promotion!)"
+<< "  Execution (131K x 10 runs): Cinder Tier 1=[fmt2(ms_t1_run)] ms vs Cinder Tier 2=[fmt2(ms_t2_run)] ms ([fmt2(ms_t1_run / ms_t2_run)]x faster after hot promotion!)"
 
 # Check 64-bit FNV-1a/fmix64 hash speed vs SHA-256
 h_in = big_js.slice(0, 65536)

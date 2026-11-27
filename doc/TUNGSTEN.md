@@ -92,6 +92,7 @@ COMMANDS
     wasm                 Build or test the wasm32 interpreter target
     notes                Generate release notes from git history
     bit ...              The Bit package manager (install, new, search, ...)
+    cinder ...           Pure-Tungsten native backend, JIT, and object compiler
     rung ...             Run the Rung model-ladder improver (bits/tungsten-rung)
     ai / symbolicate / forge / flame / fire / profile
                          Additional tools
@@ -189,6 +190,11 @@ OPTIONS
 
         --ll
         Print the LLVM IR. Does not run the program.
+
+        --cinder
+        Emit native Mach-O/ELF64 object code and link directly via Cinder
+        (bits/tungsten-cinder) instead of invoking clang. Also selected by
+        TUNGSTEN_BACKEND=cinder.
 
     -n
         Causes Tungsten to assume the following loop around your

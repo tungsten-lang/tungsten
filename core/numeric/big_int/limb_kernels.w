@@ -773,6 +773,7 @@ on macos && arm64
   # first untouched limb; n+1 means carry ran off the top.
   fn __bigint_add1_wide_prefix(rp, ap, n, word) (i64 i64 i64 i64) i64
     ll <<~IR
+      ; tungsten:alwaysinline
       entry:
         %rptr = inttoptr i64 %rp to ptr
         %aptr = inttoptr i64 %ap to ptr

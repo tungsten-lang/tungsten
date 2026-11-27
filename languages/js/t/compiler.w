@@ -1,35 +1,39 @@
-# blade/jsn_t/compiler — Sound JS -> WIRE IR -> ARM64 / Tungsten Compiler & Swizzler.
+# blade/jsn_t/compiler — Sound JS -> WIRE IR -> Cinder Native Compiler & Swizzler.
 #
-# Key design principles (100% sound, fail-closed):
+# Key design principles (100% sound, fail-closed, ZERO Clang / ZERO LLVM):
 #   1. Static Purity, Sound Fixed-Point Type Inference & Static Bounds Proof:
-#      - NEVER guesses variable types from variable names! Infers :f64 / :i64 / :u64 from
-#        ALL declarations & assignments (widening to :f64 on any float arithmetic/step).
+#      - NEVER guesses variable types from variable names! Infers :f64 / :i64 / :u64 /
+#        wide 128-bit BigInt carry ranges (:u128_*, :i128_sub*) from ALL declarations &
+#        assignments, rejecting unbounded BigInt loop accumulators so they fall back cleanly
+#        to arbitrary-precision Tier-0 JS BigInt.
 #      - Rejects ALL unhandled syntax (`do_while`, expression-position `++`/`--`, unsupported
 #        compound ops like `%=`, non-monotonic/unproved array indices) — failing closed to
-#        JS Tier 0 / ARM64 JIT with 100% ECMAScript semantics (including OOB -> `undefined`/`NaN`).
+#        JS Tier 0 / JIT with 100% ECMAScript semantics (including OOB -> `undefined`/`NaN`).
 #   2. 100% Structurally Exact AST Pattern Swizzler:
 #      - Verifies every loop bound, operator, operand, and constant before swizzling into
 #        pre-compiled Tungsten / Metal GPU library kernels (ZERO false positives!).
-#   3. In-Process Zero-Shell-Out Native Compilation (`blade/wire_a64/`):
-#      - Compiles qualifying JS functions directly from AST -> WIRE IR -> MAP_JIT ARM64
-#        machine code in ~10 microseconds with ZERO `tungsten compile` / `clang` subprocesses!
-#      - Optional offline/AOT Tier-2 `clang -O3 -mcpu=native` promotion ONLY when explicitly
-#        enabled via `BLADE_JS_TUNGSTEN_CLANG=1` (for A/B benchmarking or dev builds).
+#   3. Two-Pass In-Process Cinder Native Compilation (`bits/tungsten-cinder`):
+#      - Tier 1 (`wire_compile_func_tier(wf, 1)`): blazing-fast single-pass baseline compile
+#        (~4-6 us, zero IR passes, zero `.ll`, zero subprocesses!) installed on first call.
+#      - Tier 2 (`wire_compile_func_tier(wf, 2)`): once hot (`hits >= JST_TIER2_HITS` or
+#        `elems >= JST_TIER2_ELEMS`), runs Cinder's modular optimizing pass pipeline (constant
+#        fold/hoist, slot SROA & store->load forwarding, LICM/CSE, carry canonicalization,
+#        straight-line carry-chain fusion, DCE, hardware 4x-unrolled `adcs`/`sbcs` & `umulh`
+#        carry loops, and NEON/SSE2 SIMD) and hot-swaps `desc.fp` in-place!
 
 use ./bridge
 use ../wire_a64/js_to_wire
 
 JST_ENABLED = [Env.get("BLADE_JS_TUNGSTEN", "1") != "0"]
-JST_ALLOW_CLANG = [Env.get("BLADE_JS_TUNGSTEN_CLANG", "0") == "1"]
+JST_ALLOW_CLANG = [false]   # Legacy flag kept as no-op for caller compatibility; Cinder skips Clang/LLVM 100%.
 JST_CACHE_DIR = Env.get("HOME", "/tmp") + "/Library/Caches/Blade/js-t-kernels"
-JST_COMPILED_CACHE = {}   # cache_key -> fp (i64)
+JST_COMPILED_CACHE = {}
 JST_SWIZZLED_COUNT = [0]
 JST_COMPILED_COUNT = [0]
 JST_METAL_COUNT    = [0]
 
 # Ultra-fast 4-lane parallel 64-bit hash directly over String bytes (32 bytes/iter,
 # unaligned 64-bit loads + SplitMix/XXH3-style 4-accumulator multiply-xorshift mix).
-# Beats even Apple Silicon's hardware ARMv8.2 SHA-256 instructions (~32 GB/s)!
 fn jst_hash64_raw(ptr, len) (i64 i64) i64
   ll <<~IR
     %base = inttoptr i64 %ptr to ptr
@@ -170,8 +174,12 @@ JST_ALLOWED_ASSIGN = {
 -> jst_check_expr(node, info, allow_update = false)
   return false if node == nil
   k = node.kind
-  if k == :ident || k == :num || k == :bigint || k == :true || k == :false
-    info[:has_bigint] = true if k == :bigint
+  if k == :ident || k == :num || k == :true || k == :false
+    return true
+  elsif k == :bigint
+    u = js_bigint_literal(node.str).v
+    return false if u < 0 || u >= ((1 ## int) << 64)
+    info[:has_bigint] = true
     return true
   elsif k == :unary
     op = node.str
@@ -286,20 +294,78 @@ JST_ALLOWED_ASSIGN = {
   [true, info]
 
 # ---- Sound Fixed-Point Type Inference & Static Bounds Proof ----
-# Eliminates ALL name-based type guesses AND rejects any function whose array accesses
-# cannot be statically proved in-bounds under the entry guard!
-# Type lattice: nil (unassigned) < :int (exact i64/i32) < :f64; :u64 / :i64_big for BigInt.
+# Finite BigInt range lattice for exact hardware 128-bit limb arithmetic:
+#   `:u1_big`      in [0, 1]
+#   `:u64`         in [0, 2^64 - 1]
+#   `:u128_add2`   in [0, 2*2^64 - 2]            (`a + b`)
+#   `:u128_add2_c` in [0, 2*2^64 - 1]            (`a + b + c_u1`, carry out in {0, 1}!)
+#   `:u128_add3`   in [0, 3*2^64 - 3]            (`a + b + c_u64`)
+#   `:u128_mul`    in [0, (2^64 - 1)^2]          (`a * w`)
+#   `:u128_mul1`   in [0, 2^128 - 2^64]          (`a * w + c`)
+#   `:u128_mul2`   in [0, 2^128 - 1]             (`out[i] + a * w + c` — exact max of u128!)
+#   `:i128_sub1`   in [-(2^64 - 1), 2^64 - 1]    (`a - b`, borrow in {0, 1})
+#   `:i128_sub2`   in [-2^64, 2^64 - 1]          (`a - b - b_u1`, borrow in {0, 1})
+#   `:i64_big`     signed 64-bit (`BigInt64Array` / `BigInt.asIntN(64, ...)`)
+# Any unbounded loop accumulation (`acc = acc + a[i]`, `acc = acc * 3n + 1n`) climbs out of
+# the lattice into `:bad` within <= 3 iterations and soundly falls back to Tier-0 JS BigInt!
 
 -> jst_is_int_lit?(n)
   n != nil && n.kind == :num && n.a == n.a.to_i.to_f && n.a >= ~-2147483648.0 && n.a <= ~2147483647.0
+
+-> jst_u64_like?(t)
+  t == :u1_big || t == :u64
+
+-> jst_u128_rank(t)
+  return 1 if t == :u128_add2
+  return 2 if t == :u128_add2_c
+  return 3 if t == :u128_add3
+  return 4 if t == :u128_mul
+  return 5 if t == :u128_mul1
+  return 6 if t == :u128_mul2
+  0
+
+-> jst_i128_sub?(t)
+  t == :i128_sub1 || t == :i128_sub2
+
+-> jst_any_big?(t)
+  t == :u1_big || t == :u64 || t == :i64_big || jst_u128_rank(t) > 0 || jst_i128_sub?(t)
 
 -> jst_join_type(t1, t2)
   return t2 if t1 == nil
   return t1 if t2 == nil
   return t1 if t1 == t2
-  return :bad if (t1 == :u64 || t2 == :u64) && t1 != t2
   return :bad if t1 == :bad || t2 == :bad
+  if jst_any_big?(t1) || jst_any_big?(t2)
+    return :bad if !jst_any_big?(t1) || !jst_any_big?(t2)
+    return :u64 if jst_u64_like?(t1) && jst_u64_like?(t2)
+    return :i64_big if (t1 == :i64_big && t2 == :u1_big) || (t1 == :u1_big && t2 == :i64_big)
+    r1 = jst_u128_rank(t1)
+    r2 = jst_u128_rank(t2)
+    if (r1 > 0 || jst_u64_like?(t1)) && (r2 > 0 || jst_u64_like?(t2))
+      mx = r1 > r2 ? r1 : r2
+      return :u128_add2   if mx == 1
+      return :u128_add2_c if mx == 2
+      return :u128_add3   if mx == 3
+      return :u128_mul    if mx == 4
+      return :u128_mul1   if mx == 5
+      return :u128_mul2   if mx == 6
+    if jst_i128_sub?(t1) && jst_i128_sub?(t2)
+      return :i128_sub2
+    return :bad
   :f64   # :i64 joined with :f64 widens soundly to :f64!
+
+-> jst_big_add_ty(lt, rt)
+  if jst_u64_like?(lt) && jst_u64_like?(rt)
+    return :u128_add2
+  if (lt == :u128_add2 && rt == :u1_big) || (lt == :u1_big && rt == :u128_add2)
+    return :u128_add2_c
+  if (lt == :u128_add2 && rt == :u64) || (lt == :u64 && rt == :u128_add2) || (lt == :u128_add2_c && rt == :u1_big) || (lt == :u1_big && rt == :u128_add2_c)
+    return :u128_add3
+  if (lt == :u128_mul && jst_u64_like?(rt)) || (jst_u64_like?(lt) && rt == :u128_mul)
+    return :u128_mul1
+  if (lt == :u128_mul1 && jst_u64_like?(rt)) || (jst_u64_like?(lt) && rt == :u128_mul1) || (lt == :u128_add2 && rt == :u128_mul) || (lt == :u128_mul && rt == :u128_add2) || (lt == :u128_add2_c && rt == :u128_mul) || (lt == :u128_mul && rt == :u128_add2_c)
+    return :u128_mul2
+  :bad
 
 -> jst_infer_expr_ty(n, vtypes, ta_kinds)
   return :f64 if n == nil
@@ -308,7 +374,9 @@ JST_ALLOWED_ASSIGN = {
     t = vtypes[n.str]
     return t != nil ? t : :bad
   elsif k == :bigint
-    return :u64
+    u = js_bigint_literal(n.str).v
+    return :bad if u < 0 || u >= ((1 ## int) << 64)
+    return (u == 0 || u == 1) ? :u1_big : :u64
   elsif k == :num
     return jst_is_int_lit?(n) ? :i64 : :f64
   elsif k == :true || k == :false
@@ -317,41 +385,97 @@ JST_ALLOWED_ASSIGN = {
     if n.has?(F_COMPUTED)
       tk = ta_kinds[n.a.str]
       return :bad if tk == nil
-      return :u64 if tk == 9 || tk == 10
+      return :u64 if tk == 10
+      return :i64_big if tk == 9
       return :i64 if tk == 0 || tk == 1 || tk == 2 || tk == 3 || tk == 4 || tk == 5 || tk == 6
       return :f64
     return :i64
   elsif k == :unary
     op = n.str
     return :i64 if op == "~" || op == "!"
-    return jst_infer_expr_ty(n.a, vtypes, ta_kinds)
+    if op == "-"
+      # `-(d >> 64n)` on `:i128_sub*` extracts exact borrow in {0, 1}!
+      if n.a != nil && n.a.kind == :binary && n.a.str == ">>" && jst_i128_sub?(jst_infer_expr_ty(n.a.a, vtypes, ta_kinds)) && n.a.b.kind == :bigint && n.a.b.str == "64"
+        return :u1_big
+      at = jst_infer_expr_ty(n.a, vtypes, ta_kinds)
+      return :bad if jst_any_big?(at)
+      return at
+    at = jst_infer_expr_ty(n.a, vtypes, ta_kinds)
+    return :bad if jst_any_big?(at)
+    return at
   elsif k == :binary
     op = n.str
+    # `0n - (d >> 64n)` on `:i128_sub*` extracts exact borrow in {0, 1}!
+    if op == "-" && n.a.kind == :bigint && n.a.str == "0" && n.b.kind == :binary && n.b.str == ">>" && jst_i128_sub?(jst_infer_expr_ty(n.b.a, vtypes, ta_kinds)) && n.b.b.kind == :bigint && n.b.b.str == "64"
+      return :u1_big
+    if op == "&" && n.b.kind == :bigint && n.b.str == "1" && n.a.kind == :binary && n.a.str == ">>" && jst_i128_sub?(jst_infer_expr_ty(n.a.a, vtypes, ta_kinds)) && n.a.b.kind == :bigint && n.a.b.str == "64"
+      return :u1_big
     lt = jst_infer_expr_ty(n.a, vtypes, ta_kinds)
     rt = jst_infer_expr_ty(n.b, vtypes, ta_kinds)
     return :bad if lt == :bad || rt == :bad
     if op == "==" || op == "===" || op == "!=" || op == "!==" || op == "<" || op == "<=" || op == ">" || op == ">="
+      if jst_any_big?(lt) || jst_any_big?(rt)
+        return :i64 if jst_u64_like?(lt) && jst_u64_like?(rt)
+        return :i64 if op == "<" && jst_i128_sub?(lt) && n.b.kind == :bigint && n.b.str == "0"
+        return :i64 if op == ">" && jst_i128_sub?(rt) && n.a.kind == :bigint && n.a.str == "0"
+        return :bad
       return :i64
+    if op == ">>" && (jst_any_big?(lt) || jst_any_big?(rt))
+      if n.b.kind == :bigint && js_bigint_literal(n.b.str).v == 64
+        return :u1_big if lt == :u128_add2 || lt == :u128_add2_c
+        return :u64 if jst_u128_rank(lt) > 0
+        return :bad
+      return :u64 if jst_u64_like?(lt) && jst_u64_like?(rt) && n.b.kind == :bigint && js_bigint_literal(n.b.str).v < 64
+      return :bad
     if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>" || op == ">>>"
-      if lt == :u64 || rt == :u64
-        return (lt == :u64 && rt == :u64) ? :u64 : :bad
+      if jst_any_big?(lt) || jst_any_big?(rt)
+        return :bad if op == ">>>" || !jst_any_big?(lt) || !jst_any_big?(rt)
+        if op == "<<"
+          # Left-shift on 64-bit BigInt can exceed 2^64 unless wrapped in BigInt.asUintN(64, ...)
+          return :bad
+        if op == "&" && n.b.kind == :bigint && n.b.str == "18446744073709551615" && (jst_u128_rank(lt) > 0 || jst_i128_sub?(lt) || jst_u64_like?(lt))
+          return :u64
+        if (lt == :i64_big || jst_u64_like?(lt)) && (rt == :i64_big || jst_u64_like?(rt))
+          return (lt == :i64_big || rt == :i64_big) ? :i64_big : :u64
+        return :bad
       return :i64
-    return :u64 if lt == :u64 && rt == :u64
-    return :bad if lt == :u64 || rt == :u64
+    if jst_any_big?(lt) || jst_any_big?(rt)
+      return :bad if !jst_any_big?(lt) || !jst_any_big?(rt)
+      return jst_big_add_ty(lt, rt) if op == "+"
+      if op == "*"
+        return :u128_mul if jst_u64_like?(lt) && jst_u64_like?(rt)
+        return :bad
+      if op == "-"
+        return :i128_sub1 if jst_u64_like?(lt) && jst_u64_like?(rt)
+        return :i128_sub2 if lt == :i128_sub1 && rt == :u1_big
+        return :bad
+      if op == "/"
+        return :u64 if jst_u64_like?(lt) && jst_u64_like?(rt)
+        return :bad
+      return :bad
     return :f64 if op == "/" || lt == :f64 || rt == :f64
-    # In JS, `+`, `-`, `*` on ints can overflow 32-bit into double; keep :i64 for
-    # safe loop-index / small int arithmetic (bitops/imul/loop-step/2D index checked separately).
     return :i64 if (op == "+" || op == "-") && lt == :i64 && rt == :i64
     return :i64 if op == "*" && lt == :i64 && rt == :i64 && ((n.a.kind == :ident && n.b.kind == :ident) || (jst_is_int_lit?(n.b) && n.b.a.to_i >= -256 && n.b.a.to_i <= 256) || (jst_is_int_lit?(n.a) && n.a.a.to_i >= -256 && n.a.a.to_i <= 256))
     :f64
   elsif k == :cond
+    ct = jst_infer_expr_ty(n.a, vtypes, ta_kinds)
+    return :bad if ct == :bad
     tt = jst_infer_expr_ty(n.b, vtypes, ta_kinds)
     ft = jst_infer_expr_ty(n.c, vtypes, ta_kinds)
     return jst_join_type(tt, ft)
   elsif k == :call
     cal = n.a
-    if cal.kind == :member && cal.a.kind == :ident && cal.a.str == "BigInt"
-      return :u64
+    if cal.kind == :member && cal.a.kind == :ident && cal.a.str == "BigInt" && n.list.size == 2
+      # Allow exact modular wrapping `BigInt.asUintN(64, expr)` on 64-bit or wide-128 BigInt expressions
+      arg = n.list[1]
+      if arg.kind == :binary && (arg.str == "+" || arg.str == "-" || arg.str == "*" || arg.str == "<<")
+        la_t = jst_infer_expr_ty(arg.a, vtypes, ta_kinds)
+        rb_t = jst_infer_expr_ty(arg.b, vtypes, ta_kinds)
+        if (jst_u64_like?(la_t) || la_t == :i64_big || jst_u128_rank(la_t) > 0 || jst_i128_sub?(la_t)) && (jst_u64_like?(rb_t) || rb_t == :i64_big || jst_u128_rank(rb_t) > 0)
+          return cal.b.str == "asUintN" ? :u64 : :i64_big
+      at = jst_infer_expr_ty(arg, vtypes, ta_kinds)
+      return :bad if at == :bad || !jst_any_big?(at)
+      return cal.b.str == "asUintN" ? :u64 : :i64_big
     if cal.kind == :member && cal.a.kind == :ident && cal.a.str == "Math"
       return :i64 if cal.b.str == "imul"
       return :f64
@@ -395,24 +519,37 @@ JST_ALLOWED_ASSIGN = {
             changed[0] = true
       elsif k == :expr_stmt
         e = s.a
-        if e != nil && e.kind == :assign && e.a.kind == :ident
-          nm = e.a.str
-          rt = jst_infer_expr_ty(e.b, vtypes, ta_kinds)
-          nt = rt
-          if e.str != "="
-            bop = e.str.slice(0, e.str.size - 1)
-            cur = vtypes[nm]
-            if bop == "^" || bop == "|" || bop == "&"
-              nt = (cur == :u64 || rt == :u64) ? :u64 : :i64
-            elsif bop == "/"
-              nt = :f64
-            else
-              nt = jst_join_type(cur, rt)
-          prev = vtypes[nm]
-          jt = jst_join_type(prev, nt)
-          if jt != prev
-            vtypes[nm] = jt
-            changed[0] = true
+        if e != nil && e.kind == :assign
+          if e.a.kind == :member && e.a.has?(F_COMPUTED)
+            # Also validate RHS expression type on array element stores!
+            rt_elem = jst_infer_expr_ty(e.b, vtypes, ta_kinds)
+            tk_dst = ta_kinds[e.a.a.str]
+            if rt_elem == :bad || ((tk_dst == 9 || tk_dst == 10) && !jst_any_big?(rt_elem)) || (tk_dst != 9 && tk_dst != 10 && jst_any_big?(rt_elem))
+              vtypes["__elem_bad__"] = :bad
+              changed[0] = true
+          elsif e.a.kind == :ident
+            nm = e.a.str
+            rt = jst_infer_expr_ty(e.b, vtypes, ta_kinds)
+            nt = rt
+            if e.str != "="
+              bop = e.str.slice(0, e.str.size - 1)
+              cur = vtypes[nm]
+              if bop == "^" || bop == "|" || bop == "&"
+                if jst_any_big?(cur) || jst_any_big?(rt)
+                  nt = ((cur == :i64_big || jst_u64_like?(cur)) && (rt == :i64_big || jst_u64_like?(rt))) ? ((cur == :i64_big || rt == :i64_big) ? :i64_big : :u64) : :bad
+                else
+                  nt = :i64
+              elsif bop == "/"
+                nt = (jst_any_big?(cur) || jst_any_big?(rt)) ? :bad : :f64
+              elsif jst_any_big?(cur) || jst_any_big?(rt)
+                nt = bop == "+" ? jst_big_add_ty(cur, rt) : :bad
+              else
+                nt = jst_join_type(cur, rt)
+            prev = vtypes[nm]
+            jt = jst_join_type(prev, nt)
+            if jt != prev
+              vtypes[nm] = jt
+              changed[0] = true
       elsif k == :if
         jst_infer_stmts_pass([s.b], vtypes, ta_kinds, changed) if s.b != nil
         jst_infer_stmts_pass([s.c], vtypes, ta_kinds, changed) if s.c != nil
@@ -426,7 +563,7 @@ JST_ALLOWED_ASSIGN = {
     i += 1
   nil
 
-# Helper: record per-array length requirement (`1` = n, `4` = 4*n, `-2` = n*n)
+# Helper: record per-array length requirement (`1` = n, `2` = 2*n, `4` = 4*n, `-2` = n*n)
 -> jst_record_arr_req(req_map, arr_nm, scale)
   prev = req_map[arr_nm]
   if scale == -2 || prev == -2
@@ -437,7 +574,7 @@ JST_ALLOWED_ASSIGN = {
 
 # Check that every computed array access in `node` is statically proved in-bounds under `env_bounds`!
 # `env_bounds`: var_name -> [limit_var_name, max_offset_above_idx, scale]
-#   scale: 1 -> 0 <= v < n;  4 -> 0 <= v + max_off < 4*n;  -2 -> v = i * n (0 <= i < n)
+#   scale: 1 -> 0 <= v < n;  2 -> 0 <= v < 2*n;  4 -> 0 <= v + max_off < 4*n;  -2 -> v = i * n (0 <= i < n)
 -> jst_check_bounds_expr(n, ta_kinds, env_bounds, n_param, req_map, need_pos)
   return true if n == nil
   k = n.kind
@@ -445,28 +582,41 @@ JST_ALLOWED_ASSIGN = {
     arr_nm = n.a.str
     return false if ta_kinds[arr_nm] == nil
     idx = n.b
-    # Case 1: a[i] where i is proved 0 <= i < n_param (or i < n_param*4)
+    # Case 1: a[i] where i is proved 0 <= i < n_param * scale
     if idx.kind == :ident
       bd = env_bounds[idx.str]
       if bd != nil && bd[0] == n_param && bd[2] > 0
         jst_record_arr_req(req_map, arr_nm, bd[2])
         return true
       return false
-    # Case 2: a[0] (in-bounds when n >= 1)
-    if jst_is_int_lit?(idx) && idx.a.to_i == 0
-      need_pos[0] = true
-      jst_record_arr_req(req_map, arr_nm, 1)
-      return true
+    # Case 2: a[k] for constant integer literal k >= 0 (e.g. a[0]..a[3] for u256 when k < 4 -> scale 4, k == 0 -> scale 1)
+    if jst_is_int_lit?(idx)
+      kv = idx.a.to_i
+      if kv == 0
+        need_pos[0] = true
+        jst_record_arr_req(req_map, arr_nm, 1)
+        return true
+      elsif kv >= 1 && kv <= 3
+        need_pos[0] = true
+        jst_record_arr_req(req_map, arr_nm, 4)
+        return true
+      return false
     # Case 3: a[n - 1] (in-bounds when n >= 1)
     if idx.kind == :binary && idx.str == "-" && idx.a.kind == :ident && idx.a.str == n_param && jst_is_int_lit?(idx.b) && idx.b.a.to_i == 1
       need_pos[0] = true
       jst_record_arr_req(req_map, arr_nm, 1)
       return true
-    # Case 4: a[n * n - 1] (in-bounds when n >= 1 and arr.len >= n * n)
+    # Case 4a: a[n * n - 1] (in-bounds when n >= 1 and arr.len >= n * n)
     if idx.kind == :binary && idx.str == "-" && jst_is_int_lit?(idx.b) && idx.b.a.to_i == 1 && idx.a.kind == :binary && idx.a.str == "*" && idx.a.a.kind == :ident && idx.a.a.str == n_param && idx.a.b.kind == :ident && idx.a.b.str == n_param
       need_pos[0] = true
       jst_record_arr_req(req_map, arr_nm, -2)
       return true
+    # Case 4b: a[n * 2 - 1] or a[2 * n - 1] (in-bounds when n >= 1 and arr.len >= 2 * n)
+    if idx.kind == :binary && idx.str == "-" && jst_is_int_lit?(idx.b) && idx.b.a.to_i == 1 && idx.a.kind == :binary && idx.a.str == "*"
+      if (idx.a.a.kind == :ident && idx.a.a.str == n_param && jst_is_int_lit?(idx.a.b) && idx.a.b.a.to_i == 2) || (idx.a.b.kind == :ident && idx.a.b.str == n_param && jst_is_int_lit?(idx.a.a) && idx.a.a.a.to_i == 2)
+        need_pos[0] = true
+        jst_record_arr_req(req_map, arr_nm, 2)
+        return true
     # Case 5: a[i + k] where k is integer literal 0 <= k <= bd[1]
     if idx.kind == :binary && idx.str == "+" && idx.a.kind == :ident && jst_is_int_lit?(idx.b)
       bd = env_bounds[idx.a.str]
@@ -475,12 +625,24 @@ JST_ALLOWED_ASSIGN = {
         jst_record_arr_req(req_map, arr_nm, bd[2])
         return true
       return false
-    # Case 6: a[io + k] where io = i * n (scale == -2) and 0 <= k < n (scale == 1)
+    # Case 6: a[i + j] or a[i + n] or a[io + k]:
     if idx.kind == :binary && idx.str == "+" && idx.a.kind == :ident && idx.b.kind == :ident
       ba = env_bounds[idx.a.str]
       bb = env_bounds[idx.b.str]
-      if ba != nil && bb != nil && ba[0] == n_param && bb[0] == n_param && ba[2] == -2 && bb[2] == 1
-        jst_record_arr_req(req_map, arr_nm, -2)
+      if ba != nil && bb != nil && ba[0] == n_param && bb[0] == n_param
+        if ba[2] == -2 && bb[2] == 1
+          jst_record_arr_req(req_map, arr_nm, -2)
+          return true
+        # `i + j` where 0 <= i < n and 0 <= j < n -> 0 <= i + j <= 2*n - 2 < 2*n!
+        if ba[2] == 1 && bb[2] == 1
+          jst_record_arr_req(req_map, arr_nm, 2)
+          return true
+      # `i + n` or `n + i` where 0 <= i < n -> 0 <= i + n <= 2*n - 1 < 2*n!
+      if ba != nil && ba[0] == n_param && ba[2] == 1 && idx.b.str == n_param
+        jst_record_arr_req(req_map, arr_nm, 2)
+        return true
+      if bb != nil && bb[0] == n_param && bb[2] == 1 && idx.a.str == n_param
+        jst_record_arr_req(req_map, arr_nm, 2)
         return true
     # Case 7: a[k * n + j] where 0 <= k < n and 0 <= j < n
     if idx.kind == :binary && idx.str == "+" && idx.a.kind == :binary && idx.a.str == "*" && idx.a.a.kind == :ident && idx.a.b.kind == :ident && idx.a.b.str == n_param && idx.b.kind == :ident
@@ -532,9 +694,10 @@ JST_ALLOWED_ASSIGN = {
     while i < s.list.size
       d = s.list[i]
       return false if !jst_check_bounds_expr(d.b, ta_kinds, env_bounds, n_param, req_map, need_pos)
-      # Recognize `var lim = n * 4` (for RGBA stride-4 pixel loops)
-      if d.b != nil && d.b.kind == :binary && d.b.str == "*" && d.b.a.kind == :ident && d.b.a.str == n_param && jst_is_int_lit?(d.b.b) && d.b.b.a.to_i == 4
-        scale_vars[d.a.str] = 4
+      # Recognize `var lim = n * 4` or `var lim2 = n * 2` (when immutable!)
+      if d.b != nil && !all_mut[d.a.str] && d.b.kind == :binary && d.b.str == "*" && d.b.a.kind == :ident && d.b.a.str == n_param && jst_is_int_lit?(d.b.b)
+        kv = d.b.b.a.to_i
+        scale_vars[d.a.str] = kv if kv == 2 || kv == 4
       i += 1
     return true
   elsif k == :expr_stmt
@@ -550,9 +713,6 @@ JST_ALLOWED_ASSIGN = {
   elsif k == :while
     return jst_check_bounds_expr(s.a, ta_kinds, env_bounds, n_param, req_map, need_pos) && jst_check_bounds_stmt(s.b, ta_kinds, env_bounds, n_param, scale_vars, req_map, need_pos, all_mut)
   elsif k == :for
-    # Recognize canonical in-bounds loop:
-    #   for (var/let iv = 0; iv < n_param; iv++)              -> bound [n_param, 0, 1]
-    #   for (var/let iv = 0; iv < lim; iv += 4) (lim = n*4)   -> bound [n_param, 3, 4]
     iv = nil
     init_ok = false
     if s.a != nil && s.a.kind == :var_decl && s.a.list.size == 1 && jst_is_int_lit?(s.a.list[0].b) && s.a.list[0].b.a.to_i == 0
@@ -573,6 +733,10 @@ JST_ALLOWED_ASSIGN = {
           step = s.c.b.a.to_i
         if step == 1 && s.b.b.kind == :ident && s.b.b.str == n_param
           new_bound = [n_param, 0, 1]
+        elsif step == 1 && s.b.b.kind == :ident && scale_vars[s.b.b.str] == 2
+          new_bound = [n_param, 0, 2]
+        elsif step == 1 && s.b.b.kind == :binary && s.b.b.str == "*" && s.b.b.a.kind == :ident && s.b.b.a.str == n_param && jst_is_int_lit?(s.b.b.b) && s.b.b.b.a.to_i == 2
+          new_bound = [n_param, 0, 2]
         elsif step == 4 && s.b.b.kind == :ident && scale_vars[s.b.b.str] == 4
           new_bound = [n_param, 3, 4]
         elsif step == 4 && s.b.b.kind == :binary && s.b.b.str == "*" && s.b.b.a.kind == :ident && s.b.b.a.str == n_param && jst_is_int_lit?(s.b.b.b) && s.b.b.b.a.to_i == 4
@@ -603,6 +767,8 @@ JST_ALLOWED_ASSIGN = {
     if sp[0] == :ta
       ta_kinds[nm] = sp[1]
       vtypes[nm] = :arr
+    elsif sp[0] == :u64
+      vtypes[nm] = :u64
     elsif sp[0] == :i64
       vtypes[nm] = :i64
       n_param = nm
@@ -610,17 +776,26 @@ JST_ALLOWED_ASSIGN = {
       vtypes[nm] = :f64
     i += 1
 
-  # Fixed-point type inference (max 6 iterations — converges in 2-3 passes!)
+  # Fixed-point type inference (up to 8 passes so unbounded BigInt loops climb to :bad!)
   it = 0
-  while it < 6
+  while it < 8
     changed = [false]
     jst_infer_stmts_pass(fn_node.b, vtypes, ta_kinds, changed)
     break if !changed[0]
     it += 1
 
-  # Reject if any variable reached :bad (e.g. mixed BigInt/Number or undeclared var!)
+  # Reject if not converged or any variable/store reached :bad!
+  return [false, nil, nil, false] if it >= 8
+  bad_found = false
   vtypes.each ->(k, v)
-    return [false, nil, nil, false] if v == :bad
+    bad_found = true if v == :bad
+  return [false, nil, nil, false] if bad_found
+
+  # Reject if any `return expr` tries to return an un-narrowed wide 128-bit BigInt or `:bad`!
+  ret_box = [nil]
+  jst_collect_ret_type(fn_node.b, vtypes, ta_kinds, ret_box)
+  rt_chk = ret_box[0]
+  return [false, nil, nil, false] if rt_chk == :bad || jst_u128_rank(rt_chk) > 0 || jst_i128_sub?(rt_chk)
 
   # Reject if any array access cannot be statically proved in-bounds!
   req_map = {}
@@ -640,18 +815,14 @@ JST_ALLOWED_ASSIGN = {
   [true, vtypes, req_map, false]
 
 # ---- 2. 100% Structurally Exact AST Pattern Swizzler ----
-# Every pattern below verifies the EXACT loop structure, operators, operands, and constants!
 
 -> jst_is_canonical_for?(st, limit_name, step)
   return false if st == nil || st.kind != :for
-  # Init: var/let i = 0
   return false if st.a == nil || st.a.kind != :var_decl || st.a.list.size != 1
   iv = st.a.list[0].a.str
   return false if !jst_is_int_lit?(st.a.list[0].b) || st.a.list[0].b.a.to_i != 0
-  # Cond: i < limit_name
   return false if st.b == nil || st.b.kind != :binary || st.b.str != "<" || st.b.a.kind != :ident || st.b.a.str != iv
   return false if st.b.b.kind != :ident || st.b.b.str != limit_name
-  # Update: i++ (step==1) or i += step
   if step == 1
     upd_ok = (st.c != nil && st.c.kind == :update && st.c.str == "++" && st.c.a.kind == :ident && st.c.a.str == iv) || (st.c != nil && st.c.kind == :assign && st.c.str == "+=" && st.c.a.kind == :ident && st.c.a.str == iv && jst_is_int_lit?(st.c.b) && st.c.b.a.to_i == 1)
     return false if !upd_ok
@@ -671,11 +842,7 @@ JST_ALLOWED_ASSIGN = {
   params = fn_node.list.map(->(p) p.kind == :ident ? p.str : "")
   stmts = fn_node.b
 
-  # Pattern A (Float32 Dot Product) is compiled directly by our 14us 8-wide NEON `wire_a64` backend
-  # (7x faster than scalar `tlib_dot_f32`!), so let `jst_compile_js_func` handle it directly!
-
-  # Pattern B: Exact Float32 SAXPY:
-  #   function(out, a, b, alpha, n) { for (var i = 0; i < n; i++) out[i] = alpha * a[i] + b[i]; return n; }
+  # Pattern B: Exact Float32 SAXPY (`out[i] = alpha * a[i] + b[i]`)
   if params.size == 5 && param_kinds[0] == 7 && param_kinds[1] == 7 && param_kinds[2] == 7 && stmts.size == 2
     iv = jst_is_canonical_for?(stmts[0], params[4], 1)
     if iv != false && stmts[1].kind == :return && stmts[1].a != nil && stmts[1].a.kind == :ident && stmts[1].a.str == params[4]
@@ -692,8 +859,7 @@ JST_ALLOWED_ASSIGN = {
             JST_METAL_COUNT[0] += 1
           return d
 
-  # Pattern C: Exact Float16 ReLU + Scale:
-  #   function(out, inp, scale, n) { for (var i = 0; i < n; i++) { var v = inp[i] * scale; out[i] = v > 0 ? v : 0; } return n; }
+  # Pattern C: Exact Float16 ReLU + Scale (`var v = inp[i] * scale; out[i] = v > 0 ? v : 0`)
   if params.size == 4 && param_kinds[0] == 11 && param_kinds[1] == 11 && stmts.size == 2
     iv = jst_is_canonical_for?(stmts[0], params[3], 1)
     if iv != false && stmts[1].kind == :return && stmts[1].a != nil && stmts[1].a.kind == :ident && stmts[1].a.str == params[3]
@@ -710,15 +876,7 @@ JST_ALLOWED_ASSIGN = {
               JST_SWIZZLED_COUNT[0] += 1
               return JstKernelDesc.new(jf.name, :swizzle, 0, :tlib_relu_scale_f16)
 
-  # Pattern D: Exact RGBA Luminance Grayscale (77*R + 150*G + 29*B) >> 8:
-  #   function(out, inp, npix) {
-  #     var lim = npix * 4;
-  #     for (var i = 0; i < lim; i += 4) {
-  #       var l = (inp[i] * 77 + inp[i + 1] * 150 + inp[i + 2] * 29) >> 8;
-  #       out[i] = l; out[i + 1] = l; out[i + 2] = l; out[i + 3] = inp[i + 3];
-  #     }
-  #     return npix;
-  #   }
+  # Pattern D: Exact RGBA Luminance Grayscale (`(77*R + 150*G + 29*B) >> 8`)
   if params.size == 3 && (param_kinds[0] == 1 || param_kinds[0] == 2) && (param_kinds[1] == 1 || param_kinds[1] == 2) && stmts.size == 3
     if stmts[0].kind == :var_decl && stmts[0].list.size == 1 && stmts[0].list[0].b != nil && stmts[0].list[0].b.kind == :binary && stmts[0].list[0].b.str == "*" && stmts[0].list[0].b.a.kind == :ident && stmts[0].list[0].b.a.str == params[2] && jst_is_int_lit?(stmts[0].list[0].b.b) && stmts[0].list[0].b.b.a.to_i == 4
       lim_nm = stmts[0].list[0].a.str
@@ -730,7 +888,6 @@ JST_ALLOWED_ASSIGN = {
           if l0.kind == :var_decl && l0.list.size == 1 && l0.list[0].b != nil && l0.list[0].b.kind == :binary && l0.list[0].b.str == ">>" && jst_is_int_lit?(l0.list[0].b.b) && l0.list[0].b.b.a.to_i == 8
             lnm = l0.list[0].a.str
             sum_e = l0.list[0].b.a
-            # Verify (inp[i]*77 + inp[i+1]*150) + inp[i+2]*29
             if sum_e.kind == :binary && sum_e.str == "+" && sum_e.a.kind == :binary && sum_e.a.str == "+"
               t0 = sum_e.a.a; t1 = sum_e.a.b; t2 = sum_e.b
               ok0 = t0.kind == :binary && t0.str == "*" && jst_is_arr_at?(t0.a, params[1], iv, 0) && jst_is_int_lit?(t0.b) && t0.b.a.to_i == 77
@@ -751,356 +908,25 @@ JST_ALLOWED_ASSIGN = {
                 return d
   nil
 
-# ---- 3. General JS AST -> Statically Typed Tungsten Source Emitter (Optional Offline/AOT Tier 2) ----
+# ---- 3. Two-Pass In-Process Cinder Compilation (Tier 1 Fast Baseline -> Tier 2 Hot-Swap) ----
 
-+ JstEmitter
-  rw :lines, :var_types, :param_ta_kinds, :ret_type, :fn_name, :failed
-
-  -> new(@fn_name, @param_ta_kinds, @ret_type, inferred_types)
-    @lines = []
-    @var_types = {}
-    @failed = false
-    inferred_types.each ->(k, v)
-      @var_types[k] = v == :u64 ? "u64" : (v == :i64 ? "i64" : (v == :arr ? "arr" : "f64"))
-
-  -> emit_line(ind, s)
-    pad = ""
-    i = 0
-    while i < ind
-      pad = pad + "  "
-      i += 1
-    @lines.push(pad + s)
-
-  -> expr_type(n)
-    return "f64" if n == nil
-    k = n.kind
-    if k == :ident
-      t = @var_types[n.str]
-      return t != nil ? t : "f64"
-    elsif k == :bigint
-      return "u64"
-    elsif k == :num
-      return jst_is_int_lit?(n) ? "intlit" : "f64"
-    elsif k == :member
-      if n.has?(F_COMPUTED)
-        tk = @param_ta_kinds[n.a.str]
-        if tk != nil
-          return "u64" if tk == 10
-          return "i64" if tk == 9 || tk == 5 || tk == 6 || tk == 0 || tk == 1 || tk == 2 || tk == 3 || tk == 4
-          return "f64"
-      return "i64"
-    elsif k == :binary
-      op = n.str
-      return "i64" if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>" || op == ">>>"
-      lt = expr_type(n.a)
-      rt = expr_type(n.b)
-      return "u64" if lt == "u64" || rt == "u64"
-      if op != "/" && ((lt == "i64" || lt == "intlit") && (rt == "i64" || rt == "intlit")) && (lt == "i64" || rt == "i64")
-        return "i64"
-      return "f64"
-    elsif k == :call
-      if n.a.kind == :member && n.a.a.kind == :ident && n.a.a.str == "BigInt"
-        return n.a.b.str == "asUintN" ? "u64" : "i64"
-      if n.a.kind == :member && n.a.a.kind == :ident && n.a.a.str == "Math" && n.a.b.str == "imul"
-        return "i64"
-    "f64"
-
-  -> emit_expr(n, want_type)
-    k = n.kind
-    if k == :ident
-      t = @var_types[n.str]
-      s = n.str
-      if want_type == "f64" && t == "i64"
-        return "(" + s + " ## f64)"
-      elsif want_type == "i64" && t == "f64"
-        return "(" + s + " ## i64)"
-      elsif want_type == "u64" && t == "i64"
-        return "(" + s + " ## u64)"
-      return s
-    elsif k == :num
-      v = n.a
-      if want_type == "i64"
-        return v.to_i.to_s
-      elsif want_type == "u64"
-        return "(" + v.to_i.to_s + " ## u64)"
-      s = v.to_s
-      s = s + ".0" if !s.include?(".") && !s.include?("e") && !s.include?("E")
-      return "~" + s
-    elsif k == :bigint
-      return "(" + n.str + " ## u64)"
-    elsif k == :true
-      return "1"
-    elsif k == :false
-      return "0"
-    elsif k == :member
-      if n.has?(F_COMPUTED)
-        idx = emit_expr(n.b, "i64")
-        tk = @param_ta_kinds[n.a.str]
-        acc = n.a.str + "\[" + idx + "]"
-        if want_type == "f64"
-          return acc if tk == 8
-          return "(" + acc + " ## f64)"
-        elsif want_type == "u64"
-          return acc if tk == 10
-          return "(" + acc + " ## u64)"
-        elsif want_type == "i64"
-          return acc if tk == 9
-          return "(" + acc + " ## i64)"
-        return acc
-      return n.a.str + ".size"
-    elsif k == :unary
-      op = n.str
-      if op == "-"
-        return "(0 - " + emit_expr(n.a, "i64") + ")" if want_type == "i64"
-        return "(0.0 - " + emit_expr(n.a, "f64") + ")"
-      elsif op == "~"
-        return "((" + emit_expr(n.a, "i64") + " ## i32) ^ -1) ## i64"
-      elsif op == "!"
-        return "(" + emit_expr(n.a, "i64") + " == 0)"
-      return emit_expr(n.a, want_type)
-    elsif k == :binary
-      op = n.str
-      if op == "==" || op == "===" || op == "!=" || op == "!==" || op == "<" || op == "<=" || op == ">" || op == ">="
-        wop = op == "===" ? "==" : (op == "!==" ? "!=" : op)
-        lt = expr_type(n.a)
-        rt = expr_type(n.b)
-        ct = (lt == "u64" || rt == "u64") ? "u64" : ((lt == "i64" && rt == "i64") ? "i64" : "f64")
-        return "(" + emit_expr(n.a, ct) + " " + wop + " " + emit_expr(n.b, ct) + ")"
-      elsif op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>" || op == ">>>"
-        lt = expr_type(n.a)
-        rt = expr_type(n.b)
-        if lt == "u64" || rt == "u64"
-          wop = op == ">>>" ? ">>" : op
-          return "(" + emit_expr(n.a, "u64") + " " + wop + " " + emit_expr(n.b, "u64") + ")"
-        if op == ">>>"
-          lhs = "(((" + emit_expr(n.a, "i64") + " & 4294967295) >> (" + emit_expr(n.b, "i64") + " & 31)) & 4294967295)"
-          return want_type == "f64" ? "(" + lhs + " ## f64)" : lhs
-        elsif op == "<<"
-          lhs = "((((" + emit_expr(n.a, "i64") + " << (" + emit_expr(n.b, "i64") + " & 31)) << 32) >> 32))"
-          return want_type == "f64" ? "(" + lhs + " ## f64)" : lhs
-        elsif op == ">>"
-          lhs = "((((" + emit_expr(n.a, "i64") + " << 32) >> 32) >> (" + emit_expr(n.b, "i64") + " & 31)))"
-          return want_type == "f64" ? "(" + lhs + " ## f64)" : lhs
-        else
-          lhs = "((((" + emit_expr(n.a, "i64") + " " + op + " " + emit_expr(n.b, "i64") + ") << 32) >> 32))"
-          return want_type == "f64" ? "(" + lhs + " ## f64)" : lhs
-      else
-        lt = expr_type(n.a)
-        rt = expr_type(n.b)
-        is_int_bin = (op != "/") && (lt == "i64" || lt == "intlit") && (rt == "i64" || rt == "intlit") && (lt == "i64" || rt == "i64")
-        ct = (lt == "u64" || rt == "u64") ? "u64" : ((want_type == "i64" && is_int_bin) ? "i64" : "f64")
-        res = "(" + emit_expr(n.a, ct) + " " + op + " " + emit_expr(n.b, ct) + ")"
-        if want_type == "f64" && ct != "f64"
-          return "(" + res + " ## f64)"
-        elsif want_type == "i64" && ct == "f64"
-          return "(" + res + " ## i64)"
-        return res
-    elsif k == :cond
-      return "(" + emit_expr(n.a, "bool") + " ? " + emit_expr(n.b, want_type) + " : " + emit_expr(n.c, want_type) + ")"
-    elsif k == :call
-      cal = n.a
-      if cal.kind == :member && cal.a.kind == :ident && cal.a.str == "BigInt"
-        if cal.b.str == "asUintN" && n.list.size == 2
-          return emit_expr(n.list[1], "u64")
-        if cal.b.str == "asIntN" && n.list.size == 2
-          return emit_expr(n.list[1], "i64")
-      if cal.kind == :member && cal.a.kind == :ident && cal.a.str == "Math"
-        m = cal.b.str
-        if m == "imul" && n.list.size == 2
-          r = "(((" + emit_expr(n.list[0], "i64") + " * " + emit_expr(n.list[1], "i64") + ") << 32) >> 32)"
-          return want_type == "f64" ? "(" + r + " ## f64)" : r
-        elsif m == "fround" && n.list.size == 1
-          return "((" + emit_expr(n.list[0], "f64") + " ## f32) ## f64)"
-        elsif m == "f16round" && n.list.size == 1
-          return "((" + emit_expr(n.list[0], "f64") + " ## f16) ## f64)"
-        elsif m == "sqrt" || m == "abs" || m == "floor" || m == "ceil" || m == "sin" || m == "cos"
-          return "Math." + m + "(" + emit_expr(n.list[0], "f64") + ")"
-        elsif (m == "min" || m == "max") && n.list.size == 2
-          a = emit_expr(n.list[0], "f64")
-          b = emit_expr(n.list[1], "f64")
-          cmp = m == "min" ? "<" : ">"
-          return "(" + a + " " + cmp + " " + b + " ? " + a + " : " + b + ")"
-    @failed = true
-    "0"
-
-  -> emit_store_elem(arr_name, idx_expr, rhs_node, ind)
-    tk = @param_ta_kinds[arr_name]
-    idx = emit_expr(idx_expr, "i64")
-    if tk == 2
-      if expr_type(rhs_node) == "i64"
-        emit_line(ind, "_ci = " + emit_expr(rhs_node, "i64"))
-        emit_line(ind, "_ci = 0 if _ci < 0")
-        emit_line(ind, "_ci = 255 if _ci > 255")
-        emit_line(ind, arr_name + "\[" + idx + "] = (_ci ## u8)")
-      else
-        emit_line(ind, "_cv = " + emit_expr(rhs_node, "f64"))
-        emit_line(ind, "_cv = ~0.0 if _cv < ~0.0")
-        emit_line(ind, "_cv = ~255.0 if _cv > ~255.0")
-        emit_line(ind, arr_name + "\[" + idx + "] = (_cv ## u8)")
-    elsif tk == 7
-      emit_line(ind, arr_name + "\[" + idx + "] = (" + emit_expr(rhs_node, "f64") + " ## f32)")
-    elsif tk == 8
-      emit_line(ind, arr_name + "\[" + idx + "] = " + emit_expr(rhs_node, "f64"))
-    elsif tk == 11
-      emit_line(ind, arr_name + "\[" + idx + "] = (" + emit_expr(rhs_node, "f64") + " ## f16)")
-    elsif tk == 10
-      emit_line(ind, arr_name + "\[" + idx + "] = " + emit_expr(rhs_node, "u64"))
-    elsif tk == 9
-      emit_line(ind, arr_name + "\[" + idx + "] = " + emit_expr(rhs_node, "i64"))
-    elsif tk == 5
-      emit_line(ind, arr_name + "\[" + idx + "] = (" + emit_expr(rhs_node, "i64") + " ## i32)")
-    elsif tk == 6
-      emit_line(ind, arr_name + "\[" + idx + "] = (" + emit_expr(rhs_node, "i64") + " ## u32)")
-    elsif tk == 3
-      emit_line(ind, arr_name + "\[" + idx + "] = (" + emit_expr(rhs_node, "i64") + " ## i16)")
-    elsif tk == 4
-      emit_line(ind, arr_name + "\[" + idx + "] = (" + emit_expr(rhs_node, "i64") + " ## u16)")
-    elsif tk == 0
-      emit_line(ind, arr_name + "\[" + idx + "] = (" + emit_expr(rhs_node, "i64") + " ## i8)")
-    else
-      emit_line(ind, arr_name + "\[" + idx + "] = (" + emit_expr(rhs_node, "i64") + " ## u8)")
-
-  -> emit_stmt(s, ind)
-    return nil if s == nil || @failed
-    k = s.kind
-    if k == :block
-      s.list.each ->(sub) emit_stmt(sub, ind)
-    elsif k == :var_decl
-      s.list.each ->(d)
-        nm = d.a.str
-        t = @var_types[nm] != nil ? @var_types[nm] : "f64"
-        if d.b != nil
-          emit_line(ind, nm + " = " + emit_expr(d.b, t) + " ## " + t)
-        else
-          emit_line(ind, nm + " = " + (t == "f64" ? "0.0 ## f64" : "0 ## " + t))
-    elsif k == :expr_stmt
-      e = s.a
-      if e.kind == :assign
-        if e.a.kind == :member && e.a.has?(F_COMPUTED) && e.str == "="
-          emit_store_elem(e.a.a.str, e.a.b, e.b, ind)
-        elsif e.a.kind == :ident
-          nm = e.a.str
-          t = @var_types[nm] != nil ? @var_types[nm] : "f64"
-          if e.str == "="
-            emit_line(ind, nm + " = " + emit_expr(e.b, t))
-          else
-            bop = e.str.slice(0, e.str.size - 1)
-            if bop == "+" || bop == "-" || bop == "*" || bop == "/"
-              emit_line(ind, nm + " = " + nm + " " + bop + " " + emit_expr(e.b, t))
-            elsif bop == "^" || bop == "|" || bop == "&"
-              if t == "u64"
-                emit_line(ind, nm + " = " + nm + " " + bop + " " + emit_expr(e.b, "u64"))
-              else
-                emit_line(ind, nm + " = ((" + nm + " ## i32) " + bop + " (" + emit_expr(e.b, "i64") + " ## i32)) ## i64")
-            else
-              @failed = true
-        else
-          @failed = true
-      elsif e.kind == :update
-        nm = e.a.str
-        op = e.str == "++" ? "+" : "-"
-        t = @var_types[nm] != nil ? @var_types[nm] : "f64"
-        one = t == "f64" ? "~1.0" : "1"
-        emit_line(ind, nm + " = " + nm + " " + op + " " + one)
-      else
-        @failed = true
-    elsif k == :return
-      if s.a == nil
-        emit_line(ind, @ret_type == "f64" ? "return ~0.0" : "return 0")
-      else
-        rt = @ret_type == "i64" && expr_type(s.a) == "u64" ? "(" + emit_expr(s.a, "u64") + " ## i64)" : emit_expr(s.a, @ret_type)
-        emit_line(ind, "return " + rt)
-    elsif k == :break
-      emit_line(ind, "break")
-    elsif k == :continue
-      emit_line(ind, "next")
-    elsif k == :if
-      emit_line(ind, "if " + emit_expr(s.a, "bool"))
-      emit_stmt(s.b, ind + 1)
-      if s.c != nil
-        emit_line(ind, "else")
-        emit_stmt(s.c, ind + 1)
-    elsif k == :while
-      emit_line(ind, "while " + emit_expr(s.a, "bool"))
-      emit_stmt(s.b, ind + 1)
-    elsif k == :for
-      if s.a != nil
-        if s.a.kind == :var_decl
-          emit_stmt(s.a, ind)
-        else
-          emit_stmt(JsNode.new(:expr_stmt, 0, 0, nil, s.a, nil, nil, nil, 0), ind)
-      cond = s.b != nil ? emit_expr(s.b, "bool") : "true"
-      emit_line(ind, "while " + cond)
-      emit_stmt(s.d, ind + 1)
-      if s.c != nil
-        emit_stmt(JsNode.new(:expr_stmt, 0, 0, nil, s.c, nil, nil, nil, 0), ind + 1)
-    elsif k != :empty
-      @failed = true
-    nil
-
-# Build & load a Tungsten kernel `.o` (used ONLY for explicit offline/AOT Tier-2 clang benchmarks).
--> jst_build_and_load_o(hkey, w_src, kname, tier)
-  cache_key = hkey + "-t" + tier.to_s
-  fp = JST_COMPILED_CACHE[cache_key]
-  return fp if fp != nil
-  File.mkdir_p(JST_CACHE_DIR) if !Dir.exist?(JST_CACHE_DIR)
-  base = JST_CACHE_DIR + "/" + hkey
-  o_path = base + ".t" + tier.to_s + ".o"
-  if !File.exist?(o_path)
-    tmp = base + ".tmp" + (ccall_nobox("__w_clock_ns_raw") ## i64).to_s
-    w_path = tmp + ".w"
-    ll_path = tmp + ".ll"
-    ext_ll = tmp + ".ext.ll"
-    bc_path = tmp + ".bc"
-    tmp_o = tmp + ".o"
-    File.write(w_path, w_src)
-    llvm_bin = Dir.exist?("/opt/homebrew/opt/llvm/bin") ? "/opt/homebrew/opt/llvm/bin" : "/usr/bin"
-    extract = llvm_bin + "/llvm-extract"
-    cmd = "TUNGSTEN_INCREMENTAL=0 TUNGSTEN_SHARD_CODEGEN=0 TUNGSTEN_LL_PATH=" + ll_path + " tungsten compile --emit-ll " + w_path + " -o " + tmp + ".bin >/dev/null 2>&1"
-    cmd = cmd + " && SYM=$(grep '@\"w:" + kname + "\"' " + ll_path + " | sed 's/.*@//')"
-    cmd = cmd + " && " + extract + " --recursive -func=\"$SYM\" -alias='w:" + kname + "' " + ll_path + " -S -o " + ext_ll + " 2>/dev/null"
-    cmd = cmd + " && sed -i '' -e 's/ = internal thread_local global / = internal global /' -e 's/define internal /define /' " + ext_ll
-    if tier == 1
-      opt_bin = llvm_bin + "/opt"
-      llc_bin = llvm_bin + "/llc"
-      if File.exist?(opt_bin) && File.exist?(llc_bin)
-        cmd = cmd + " && " + opt_bin + " -passes='always-inline,function(mem2reg,instcombine<no-verify-fixpoint>,simplifycfg)' " + ext_ll + " -o " + bc_path + " 2>/dev/null"
-        cmd = cmd + " && " + llc_bin + " -O0 -fast-isel -filetype=obj " + bc_path + " -o " + tmp_o + " 2>/dev/null"
-      else
-        cmd = cmd + " && " + llvm_bin + "/clang -O0 -fno-asynchronous-unwind-tables -c " + ext_ll + " -o " + tmp_o + " 2>/dev/null"
-    else
-      cmd = cmd + " && " + llvm_bin + "/clang -O3 -mcpu=native -fno-asynchronous-unwind-tables -c " + ext_ll + " -o " + tmp_o + " 2>/dev/null"
-    OS.system(cmd)
-    File.rename(tmp_o, o_path) if File.exist?(tmp_o)
-    File.rm(w_path) if File.exist?(w_path)
-    File.rm(ll_path) if File.exist?(ll_path)
-    File.rm(ll_path + ".done") if File.exist?(ll_path + ".done")
-    File.rm(ext_ll) if File.exist?(ext_ll)
-    File.rm(bc_path) if File.exist?(bc_path)
-    File.rm(tmp + ".bin.sidemap") if File.exist?(tmp + ".bin.sidemap")
-    File.rm(tmp_o) if File.exist?(tmp_o)
-    return nil if !File.exist?(o_path)
-    if tier == 1
-      JST_STATS[:t1_compile] += 1
-    else
-      JST_STATS[:t2_reopt] += 1
-  fp = ccall("w_jit_load_object", o_path, kname)
-  return nil if fp == nil
-  JST_COMPILED_CACHE[cache_key] = fp
-  JST_COMPILED_COUNT[0] += 1
-  fp
-
+# Promote a hot Tier-1 `JstKernelDesc` to Tier 2 in-process via Cinder's optimizing pass pipeline
+# and replace `desc.fp` in-place (ZERO Clang, ZERO LLVM, ZERO `.ll`!).
 -> jst_reopt_to_tier2(desc)
-  return false if !JST_ALLOW_CLANG[0] || desc.tier >= 2 || desc.hash_key == nil || desc.w_src == nil
-  fp2 = jst_build_and_load_o(desc.hash_key, desc.w_src, desc.kname, 2)
-  return false if fp2 == nil
-  desc.fp = fp2 ## i64
+  return false if desc.tier >= 2 || desc.wire_fn == nil
+  wres = wire_compile_func_tier(desc.wire_fn, 2)
+  return false if wres == nil || wres[0] == 0
+  desc.fp = wres[0] ## i64
   desc.tier = 2
+  desc.wire_fn = nil
   desc.reopt_fn = nil
+  JST_STATS[:t2_reopt] += 1
   true
 
 # Sound compile entry: verifies purity + fixed-point types + static bounds proof FIRST!
-# Default Tier 1 compiles 100% IN-PROCESS via `wire_a64` (~10 us, ZERO shell-out!).
+#   `initial_tier == 1` (default): blazing-fast single-pass Cinder baseline (~4-6 us),
+#     retains `wf` on `desc.wire_fn` so `jst_reopt_to_tier2` hot-swaps `desc.fp` once hot!
+#   `initial_tier == 2`: runs full Tier-2 optimizer immediately.
 -> jst_compile_js_func(jf, param_specs, ret_type, initial_tier = 1)
   an = jst_analyze_func(jf)
   return [nil, "", 0] if !an[0]
@@ -1112,7 +938,6 @@ JST_ALLOWED_ASSIGN = {
 
   fn_node = jf.node
   params = fn_node.list.map(->(p) p.str)
-  sig_types = []
   ta_kinds_map = {}
   ta_kinds_list = []
   ta_mults_list = []
@@ -1121,82 +946,67 @@ JST_ALLOWED_ASSIGN = {
     sp = param_specs[i]
     if sp[0] == :ta
       tk = sp[1]
-      sig_types.push(JST_KIND_TO_TYPE[tk])
       ta_kinds_map[params[i]] = tk
       ta_kinds_list.push(tk)
       rm = req_map != nil && req_map[params[i]] != nil ? req_map[params[i]] : 1
       ta_mults_list.push(rm)
-    elsif sp[0] == :i64
-      sig_types.push("i64")
-    else
-      sig_types.push("f64")
     i += 1
 
-  # Determine exact sound return type from return statements when ret_type == "auto"!
+  ret_ty_inf_box = [nil]
+  jst_collect_ret_type(fn_node.b, vtypes, ta_kinds_map, ret_ty_inf_box)
+  ret_inf = ret_ty_inf_box[0]
+  ret_is_u64 = (ret_type == "u64") || (ret_type == "auto" && jst_u64_like?(ret_inf))
+  ret_is_s64_big = (ret_type == "auto" && ret_inf == :i64_big)
   if ret_type == "auto"
-    ret_ty_inf_box = [nil]
-    jst_collect_ret_type(fn_node.b, vtypes, ta_kinds_map, ret_ty_inf_box)
-    ret_type = ret_ty_inf_box[0] == :f64 ? "f64" : "i64"
+    ret_type = ret_inf == :f64 ? "f64" : "i64"
+  elsif ret_type == "u64"
+    ret_type = "i64"
 
   # Determine dispatch signature tag
   sig = :unknown
   if param_specs.size == 3 && param_specs[0][0] == :ta && param_specs[1][0] == :ta && param_specs[2][0] == :i64
-    sig = ret_type == "f64" ? :jit_aai_d : :jit_aai_i
+    sig = ret_type == "f64" ? :jit_aai_d : (ret_is_u64 ? :jit_aai_u : :jit_aai_i)
   elsif param_specs.size == 4 && param_specs[0][0] == :f64 && param_specs[1][0] == :ta && param_specs[2][0] == :ta && param_specs[3][0] == :i64 && ret_type == "f64"
     sig = :jit_daai_d
-  elsif param_specs.size == 4 && param_specs[0][0] == :ta && param_specs[1][0] == :ta && param_specs[2][0] == :ta && param_specs[3][0] == :i64 && ret_type == "f64"
-    sig = :jit_aaai_d
+  elsif param_specs.size == 4 && param_specs[0][0] == :ta && param_specs[1][0] == :ta && param_specs[2][0] == :ta && param_specs[3][0] == :i64
+    sig = ret_type == "f64" ? :jit_aaai_d : (ret_is_u64 ? :jit_aaai_u : :jit_aaai_i)
+  elsif param_specs.size == 4 && param_specs[0][0] == :ta && param_specs[1][0] == :ta && param_specs[2][0] == :u64 && param_specs[3][0] == :i64 && ret_type != "f64"
+    sig = ret_is_u64 ? :jit_aaui_u : :jit_aaui_i
   elsif param_specs.size == 5 && param_specs[0][0] == :ta && param_specs[1][0] == :ta && param_specs[2][0] == :ta && param_specs[3][0] == :f64 && param_specs[4][0] == :i64
     sig = :jit_aaadi_i
   elsif param_specs.size == 4 && param_specs[0][0] == :ta && param_specs[1][0] == :ta && param_specs[2][0] == :f64 && param_specs[3][0] == :i64
     sig = :jit_aadi_i
   elsif param_specs.size == 2 && param_specs[0][0] == :ta && param_specs[1][0] == :i64
-    sig = ret_type == "f64" ? :jit_ai_d : :jit_ai_i
+    sig = ret_type == "f64" ? :jit_ai_d : (ret_is_u64 ? :jit_ai_u : (ret_is_s64_big ? :jit_ai_s64 : :jit_ai_i))
   elsif param_specs.size == 2 && param_specs[0][0] == :f64 && param_specs[1][0] == :f64
     sig = :jit_dd_d
   has_non1_mult = false
   ta_mults_list.each ->(m) has_non1_mult = true if m != 1
-  if sig == :unknown || (has_non1_mult && sig != :jit_aai_i && sig != :jit_aai_d && sig != :jit_daai_d && sig != :jit_aaai_d)
+  if sig == :unknown || (has_non1_mult && sig != :jit_aai_i && sig != :jit_aai_u && sig != :jit_aai_d && sig != :jit_daai_d && sig != :jit_aaai_d && sig != :jit_aaai_u && sig != :jit_aaai_i && sig != :jit_aaui_u && sig != :jit_aaui_i)
     return [nil, "", 0]
 
-  # Tier 1 IN-PROCESS path: pure-Tungsten WIRE IR -> ARM64 machine code (~10 us, ZERO shell-out!)
-  fp = nil
-  w_src = ""
-  hkey = nil
-  kname = "jst_k"
-  if initial_tier == 1
-    wres = wire_a64_compile_js_func(jf, param_specs, ret_type, vtypes)
-    if wres != nil && wres[0] != 0
-      fp = wres[0]
-      JST_STATS[:t1_compile] += 1
-      JST_COMPILED_COUNT[0] += 1
+  wf = wire_a64_lower_js_func(jf, param_specs, ret_type, vtypes)
+  return [nil, "", 0] if wf == nil
+  tier = initial_tier >= 2 ? 2 : 1
+  wres = wire_compile_func_tier(wf, tier)
+  return [nil, "", 0] if wres == nil || wres[0] == 0
 
-  # Generate Tungsten source only if clang AOT path is explicitly requested or Tier 2 requested
-  if fp == nil || (initial_tier == 1 && JST_ALLOW_CLANG[0]) || initial_tier == 2
-    em = JstEmitter.new(kname, ta_kinds_map, ret_type, vtypes)
-    header = "fn " + kname + "(" + params.join(", ") + ") (" + sig_types.join(" ") + ") " + ret_type
-    em.lines.push("# Auto-generated by Blade JS->Tungsten compiler (jsn_t)")
-    em.lines.push(header)
-    fn_node.b.each ->(s) em.emit_stmt(s, 1)
-    return [nil, "", 0] if em.failed
-    em.lines.push(ret_type == "f64" ? "  ~0.0" : "  0")
-    w_src = em.lines.join("\n") + "\n"
-    hkey = jst_hash64_hex(w_src)
-    if fp == nil && (initial_tier == 2 || JST_ALLOW_CLANG[0])
-      fp = jst_build_and_load_o(hkey, w_src, kname, initial_tier)
+  fp = wres[0] ## i64
+  if tier == 1
+    JST_STATS[:t1_compile] += 1
+  else
+    JST_STATS[:t2_reopt] += 1
+  JST_COMPILED_COUNT[0] += 1
 
-  return [nil, w_src, 0] if fp == nil
-
-  desc = JstKernelDesc.new(jf.name, :compiled, fp ## i64, sig)
+  desc = JstKernelDesc.new(jf.name, :compiled, fp, sig)
   desc.ta_kinds = ta_kinds_list
   desc.ta_mults = ta_mults_list
   desc.need_pos_n = need_pos
-  desc.tier = initial_tier
-  desc.hash_key = hkey
-  desc.w_src = w_src
-  desc.kname = kname
-  desc.reopt_fn = ->(d) jst_reopt_to_tier2(d) if initial_tier == 1 && JST_ALLOW_CLANG[0]
-  [desc, w_src, fp ## i64]
+  desc.tier = tier
+  if tier == 1
+    desc.wire_fn = wf
+    desc.reopt_fn = ->(d) jst_reopt_to_tier2(d)
+  [desc, "", fp]
 
 # Collect exact inferred return type across all `return` statements in a function body.
 -> jst_collect_ret_type(stmts, vtypes, ta_kinds, out_box)
@@ -1237,6 +1047,10 @@ JST_ALLOWED_ASSIGN = {
       has_ta = true
       specs.push([:ta, v.kind])
       pkinds.push(v.kind)
+    elsif v.is_a?(JS:BigIntValue)
+      return nil if v.v < 0 || v.v >= ((1 ## int) << 64)
+      specs.push([:u64])
+      pkinds.push(-2)
     elsif js_number?(v)
       if i == np - 1 && v == Math.floor(v) && v >= ~0.0 && v <= ~2147483647.0
         specs.push([:i64])
@@ -1260,7 +1074,11 @@ JST_ALLOWED_ASSIGN = {
     c.jst_state = -1
     return JS_HOLE
   an = jst_analyze_func(jf)
-  if !an[0] || an[1][:loops] == 0
+  if !an[0]
+    c.jst_state = -1
+    return JS_HOLE
+  # Compile loop kernels and straight-line BigInt limb chains (e.g. u256_add / u256_sub)!
+  if an[1][:loops] == 0 && !(an[1][:has_bigint] && an[1][:reads_arr])
     c.jst_state = -1
     return JS_HOLE
   inf = jst_infer_specs_and_ret(jf, an[1], argc, a0, a1, a2, a3, more)
@@ -1271,7 +1089,7 @@ JST_ALLOWED_ASSIGN = {
     c.jst_desc = sw
     c.jst_state = 1
     return jst_dispatch_kernel(sw, argc, a0, a1, a2, a3, more)
-  # 2. Sound in-process WIRE IR -> ARM64 compile (~10 us, ZERO shell-out to clang!)
+  # 2. Sound two-pass Cinder compilation: Tier 1 (~5 us) now -> Tier 2 hot-swap once hot!
   comp = jst_compile_js_func(jf, inf[0], inf[2], 1)
   if comp[0] != nil && comp[0].sig != :unknown
     c.jst_desc = comp[0]

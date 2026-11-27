@@ -232,9 +232,26 @@
   "-flto"
 
 -> profile_opt_flag
+  if opt_level_override != ""
+    return opt_level_override == "-Ofast" ? "-O3" : opt_level_override
   if dev_mode
     return "-O0"
   "-O3"
+
+-> clang_extra_pass_flags
+  return "" if extra_opt_flags.size() == 0
+  mapped = []
+  i = 0
+  while i < extra_opt_flags.size()
+    f = extra_opt_flags[i]
+    if f == "-finline" || f == "-finline-functions"
+      mapped.push("-finline-functions")
+    elsif f == "-fno-inline" || f == "-fno-inline-functions"
+      mapped.push("-fno-inline")
+    elsif f == "-funroll-loops" || f == "-fno-unroll-loops" || f == "-ffast-math" || f == "-fno-fast-math"
+      mapped.push(f)
+    i += 1
+  mapped.join(" ")
 
 # Optimization flags for the cached LTO runtime bundle. TUNGSTEN_CLANG_OPT is
 # the emitted module's flag set, and `--fast` puts -ffast-math in it; the C
@@ -326,7 +343,8 @@
   # runtime side is the cached bitcode bundle below, so the per-link cost is
   # the merged-module optimization alone. --no-lto is the one opt-out.
   # scripts/test-compile-profiles.sh pins the flags of each profile.
-  doing_lto = (release_mode || explicit_lto || full_lto) && !no_lto
+  use_cinder = cinder_mode || env("TUNGSTEN_BACKEND") == "cinder"
+  doing_lto = (release_mode || explicit_lto || full_lto) && !no_lto && !use_cinder
   full_runtime_lto = doing_lto
   # Fast native-archive link (default): reuse the cached runtime objects
   # rather than recompiling the ~28k-line runtime every build. runtime.o's weak
@@ -346,7 +364,10 @@
     # -O0 skips the expensive passes), full build 2.8x faster, produced
     # binary ~2.2x slower — the right trade for edit-test loops. Its
     # separately keyed runtime archive uses the same -O0 profile.
-    clang_opt = dev_mode ? "-O0" : "-O3"
+    clang_opt = profile_opt_flag()
+    extra_cf = clang_extra_pass_flags()
+    if extra_cf != ""
+      clang_opt = clang_opt + " " + extra_cf
 
   # The source/output-path incremental cache runs before lowering. This second
   # cache sits at the other end of the pipeline: if two builds emit identical
@@ -360,8 +381,61 @@
     link_cache_slot = link_artifact_cache_slot(ll_probe_text, runtime_objs, needs_zstd)
   if link_cache_slot != nil && link_artifact_cache_try_reuse(link_cache_slot, out_path)
     if verbose
-      << fmt_elapsed(phase_elapsed(link_started_at)) + " clang (link cache)"
+      << fmt_elapsed(phase_elapsed(link_started_at)) + (use_cinder ? " cinder (link cache)" : " clang (link cache)")
     return true
+
+  if use_cinder
+    owner_root = compiler_image_owner_root()
+    cinder_bin = owner_root + "/bits/tungsten-cinder/bin/cinder"
+    if !file?(cinder_bin)
+      cinder_bin = owner_root + "/bin/cinder"
+    cinder_cmd = StringBuffer(256)
+    cinder_cmd << "TUNGSTEN_ROOT="
+    cinder_cmd << dev_runtime_shell_quote(owner_root)
+    cinder_cmd << " "
+    cinder_cmd << dev_runtime_shell_quote(cinder_bin)
+    cinder_cmd << " compile"
+    if opt_level_override != ""
+      cinder_cmd << " "
+      cinder_cmd << dev_runtime_shell_quote(opt_level_override)
+    elsif dev_mode
+      cinder_cmd << " -O0"
+    elsif release_mode
+      cinder_cmd << " -O3"
+    if fast_mode
+      cinder_cmd << " --fast"
+    if math_mode == :strict
+      cinder_cmd << " --strict-math"
+    if debug_enabled
+      cinder_cmd << " --debug"
+    else
+      cinder_cmd << " --no-debug"
+    if frame_pointers
+      cinder_cmd << " --frame-pointers"
+    ef_i = 0
+    while ef_i < extra_opt_flags.size()
+      cinder_cmd << " "
+      cinder_cmd << dev_runtime_shell_quote(extra_opt_flags[ef_i])
+      ef_i += 1
+    if verbose
+      cinder_cmd << " -v"
+    if cross_target != ""
+      cinder_cmd << " --target "
+      cinder_cmd << dev_runtime_shell_quote(cross_target)
+    cinder_cmd << " "
+    cinder_cmd << dev_runtime_shell_quote(ll_path)
+    cinder_cmd << " -o "
+    cinder_cmd << dev_runtime_shell_quote(out_path)
+    c_res = system(cinder_cmd.to_s())
+    log_phase(verbose, "cinder", link_started_at)
+    on macos
+      if c_res == true
+        system("TUNGSTEN_PREFLIGHT=1 " + dev_runtime_shell_quote(out_path) + " </dev/null >/dev/null 2>&1 &")
+    if c_res == true && link_cache_slot != nil
+      link_artifact_cache_store(link_cache_slot, out_path)
+    if c_res == true
+      dev_runtime_renew(store_entries)
+    return c_res == true
   if runtime_objs == nil && full_runtime_lto && cross_target == ""
     runtime_objs = dev_runtime_lto_objects(compiler_image_runtime_profile, verbose, needs_zstd)
     if runtime_objs != nil
@@ -378,6 +452,8 @@
     parallel_objs = native_sharded_codegen_objects(ll_path, clang_opt, store_entries, verbose, "-flto=thin")
 
   clang_cmd = StringBuffer(0)
+  if extra_opt_flags.include?("--print-passes")
+    << "\[tungsten:clang\] opt=" + clang_opt + " debug=" + debug_enabled.to_s() + " fast=" + fast_mode.to_s() + " lto=" + full_runtime_lto.to_s()
   clang_cmd << host_c_compiler()
   clang_cmd << " "
   clang_cmd << clang_opt

@@ -1,4 +1,7 @@
 #ifndef W_RUNTIME_UNITY_INCLUDE
+#ifdef __linux__
+#define _GNU_SOURCE
+#endif
 #include "runtime_internal.h"
 #include <dirent.h>
 #include <dlfcn.h>

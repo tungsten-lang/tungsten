@@ -276,6 +276,11 @@
       # and continues through ordinary last-definition method dispatch.
       if primitive_class[:name] == "BigInt" && name == "isqrt" && args.empty?() && block == nil && m != nil && m[:file] != nil && m[:file].ends_with?("core/numeric/big_int.w")
         return ccall("bigint_isqrt_any", recv)
+      if primitive_class[:name] == "BigInt" && args.size() == 1 && block == nil && m != nil && m[:file] != nil && m[:file].ends_with?("core/numeric/big_int.w")
+        if name == "<<"
+          return ccall("w_bit_shl", recv, args[0])
+        if name == ">>"
+          return ccall("w_bit_shr", recv, args[0])
       # For names the interpreter implements as builtins, a TRAIT DEFAULT
       # must not preempt the builtin: the builtins mirror the compiled
       # engine's native IC rows and proven host semantics (Enumerable's

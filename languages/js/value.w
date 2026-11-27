@@ -53,6 +53,23 @@ JS_DEADLINE_TICKS = i64[1]
   raise JS:TimeoutError.new("Script execution timed out") if clock() > dl
   nil
 
+# Cooperative host UI event-pump hook (invoked at most every ~15ms on GUI main thread so AppKit never beachballs).
+JS_UI_PUMP_HOOK = [nil]
+JS_UI_PUMP_TICKS = i64[1]
+JS_UI_PUMP_NEXT_MS = i64[1]
+
+-> js_ui_pump_maybe
+  cb = JS_UI_PUMP_HOOK[0]
+  return nil if cb == nil
+  t = JS_UI_PUMP_TICKS[0] + 1
+  JS_UI_PUMP_TICKS[0] = t
+  return nil if (t & 2047) != 0
+  now = (ccall_nobox("__w_clock_ns_raw") ## i64) / 1000000
+  if now >= JS_UI_PUMP_NEXT_MS[0]
+    JS_UI_PUMP_NEXT_MS[0] = now + 15
+    cb.call()
+  nil
+
 # JS_THROW_LOG (JSRUN_THROWS=1 / BLADE_JS_THROWS=1): every throw is printed with its
 # stack, caught or not (finding the exception a page swallows).
 JS_THROW_LOG = [Env.get("JSRUN_THROWS", "") == "1" || Env.get("BLADE_JS_THROWS", "") == "1"]
@@ -79,12 +96,28 @@ JS_NAN = [nil]
 -> js_string?(v)
   jsr_str(wvalue_bits(v) ## i64) != 0
 
+# Immediate 8-byte WValue DOM handles (0xFFF5 | doc_id:16 | node_id:32).
+# Zero heap allocation, 1-cycle === identity, WeakMap-keyable, sparse expando/proto overrides.
+JS_DOM_HOOK = [nil]
+
+-> js_dom_handle?(v)
+  jsr_is_dom(wvalue_bits(v) ## i64) != 0
+
+-> js_make_dom_handle(doc_id, node_id)
+  wvalue_from_bits(jsr_pack_dom(doc_id ## i64, node_id ## i64))
+
+-> js_dom_doc_id(v)
+  jsr_dom_doc(wvalue_bits(v) ## i64)
+
+-> js_dom_node_id(v)
+  jsr_dom_node(wvalue_bits(v) ## i64)
+
 # A JS array: a core Array whose header carries JS_AF_ARRAY.
 -> js_array?(v)
   (jsr_aflags(wvalue_bits(v) ## i64) & JS_AF_ARRAY) != 0
 
 -> js_object?(v)
-  v.is_a?(JS:Base) || js_array?(v)
+  v.is_a?(JS:Base) || js_array?(v) || js_dom_handle?(v)
 
 + HtmlDda < JS:Base
   -> new(@shape)
@@ -304,6 +337,9 @@ JS_NAN = [nil]
 -> js_inspect(v, depth, seen = nil)
   return "'" + v + "'" if js_string?(v)
   return js_to_display(v) if !js_object?(v)
+  if js_dom_handle?(v)
+    h = JS_DOM_HOOK[0]
+    return h != nil ? h.inspect(v) : "#<DOMNode>"
   if js_array?(v)
     return "\[Array]" if depth <= 0
     parts = []

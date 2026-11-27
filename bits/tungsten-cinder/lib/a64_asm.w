@@ -374,9 +374,12 @@ use ./a64
       elsif ml == "ngc"
         rd = a64_asm_parse_reg(ops[0]); rm = a64_asm_parse_reg(ops[1])
         a.ngc_x(rd[0], rm[0])
-      elsif ml == "clz"
+      elsif ml == "clz" || ml == "ctz"
         rd = a64_asm_parse_reg(ops[0]); rn = a64_asm_parse_reg(ops[1])
-        rd[1] == :w ? a.clz_w(rd[0], rn[0]) : a.clz_x(rd[0], rn[0])
+        if ml == "clz"
+          rd[1] == :w ? a.clz_w(rd[0], rn[0]) : a.clz_x(rd[0], rn[0])
+        else
+          rd[1] == :w ? a.ctz_w(rd[0], rn[0]) : a.ctz_x(rd[0], rn[0])
       elsif ml == "add" || ml == "adds" || ml == "sub" || ml == "subs"
         rd = a64_asm_parse_reg(ops[0])
         rn = a64_asm_parse_reg(ops[1])
@@ -501,15 +504,24 @@ use ./a64
       elsif ml == "cset"
         rd = a64_asm_parse_reg(ops[0]); cc = a64_asm_parse_cc(ops[1])
         rd[1] == :w ? a.cset_w(rd[0], cc) : a.cset(rd[0], cc)
-      elsif ml == "cinc"
+      elsif ml == "cinc" || ml == "cinv" || ml == "cneg"
         rd = a64_asm_parse_reg(ops[0]); rn = a64_asm_parse_reg(ops[1]); cc = a64_asm_parse_cc(ops[2])
-        rd[1] == :w ? a.cinc_w(rd[0], rn[0], cc) : a.cinc_x(rd[0], rn[0], cc)
-      elsif ml == "csel" || ml == "csinc"
+        if ml == "cinc"
+          rd[1] == :w ? a.cinc_w(rd[0], rn[0], cc) : a.cinc_x(rd[0], rn[0], cc)
+        elsif ml == "cinv"
+          rd[1] == :w ? a.cinv_w(rd[0], rn[0], cc) : a.cinv_x(rd[0], rn[0], cc)
+        else
+          rd[1] == :w ? a.cneg_w(rd[0], rn[0], cc) : a.cneg_x(rd[0], rn[0], cc)
+      elsif ml == "csel" || ml == "csinc" || ml == "csinv" || ml == "csneg"
         rd = a64_asm_parse_reg(ops[0]); rn = a64_asm_parse_reg(ops[1]); rm = a64_asm_parse_reg(ops[2]); cc = a64_asm_parse_cc(ops[3])
         if ml == "csel"
           rd[1] == :w ? a.csel_w(rd[0], rn[0], rm[0], cc) : a.csel_x(rd[0], rn[0], rm[0], cc)
-        else
+        elsif ml == "csinc"
           rd[1] == :w ? a.csinc_w(rd[0], rn[0], rm[0], cc) : a.csinc_x(rd[0], rn[0], rm[0], cc)
+        elsif ml == "csinv"
+          rd[1] == :w ? a.csinv_w(rd[0], rn[0], rm[0], cc) : a.csinv_x(rd[0], rn[0], rm[0], cc)
+        else
+          rd[1] == :w ? a.csneg_w(rd[0], rn[0], rm[0], cc) : a.csneg_x(rd[0], rn[0], rm[0], cc)
       elsif ml == "ccmp"
         rn = a64_asm_parse_reg(ops[0]); op1 = ops[1]; nzcv = a64_asm_parse_int(ops[2]); cc = a64_asm_parse_cc(ops[3])
         if op1.starts_with?("#") || (op1.byte_at(0) >= 48 && op1.byte_at(0) <= 57)

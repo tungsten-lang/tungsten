@@ -67,7 +67,7 @@ JS_POLY_KEEP = Array.new(512, nil)
 JS_IC_SCRATCH = 0
 
 + Shape
-  rw :proto, :parent, :key, :kattrs, :count, :inline, :ibase, :index, :trans, :alt, :t0, :keys, :dict, :attrs, :nonext, :json_plan, :json_pred
+  rw :proto, :parent, :key, :kattrs, :count, :inline, :ibase, :index, :trans, :alt, :t0, :keys, :dict, :attrs, :nonext, :json_plan, :json_pred, :enum_keys
 
   -> new(@proto, @parent, @key, @kattrs, @count, @inline, @ibase)
     @index = nil
@@ -80,6 +80,7 @@ JS_IC_SCRATCH = 0
     @nonext = false
     @json_plan = nil
     @json_pred = nil
+    @enum_keys = nil
 
   # The same layout under another prototype: the keys replayed from that prototype's
   # root (a dictionary shape keeps its table and only changes its prototype).
@@ -158,6 +159,31 @@ JS_IC_SCRATCH = 0
         s = s.parent
       @keys = js_order_own_keys(out.reverse, false)
     @keys
+
+  # Cached own enumerable string keys for non-dict shapes (O(1) zero-alloc for..in & Object.keys!).
+  -> enum_str_keys
+    return JS_NO_ARGS if @count == 0
+    if @enum_keys == nil
+      kl = key_list()
+      all_es = true
+      i = 0
+      while i < kl.size
+        k = kl[i]
+        if !js_string?(k) || (attrs_of(k) & ATTR_E) == 0
+          all_es = false
+          break
+        i += 1
+      if all_es
+        @enum_keys = kl
+      else
+        out = []
+        i = 0
+        while i < kl.size
+          k = kl[i]
+          out.push(k) if js_string?(k) && (attrs_of(k) & ATTR_E) != 0
+          i += 1
+        @enum_keys = out
+    @enum_keys
 
   # The child shape adding key with attrs.
   # Compact representation:
@@ -1020,8 +1046,9 @@ fn jsr_poly_ic_get(pic, pep, ob, kb, epoch) (i64[] i64[] i64 i64 i64) i64
   ep = JS_EPOCH[0]
   r = jsr_ic_get(JS_IC, k, ob, ep)
   return wvalue_from_bits(r) if r != JSR_SLOW
-  r2 = jsr_poly_ic_get(JS_POLY_IC, JS_POLY_EP, ob, wvalue_bits(key) ## i64, ep)
-  return wvalue_from_bits(r2) if r2 != JSR_SLOW
+  if JS_IC[k] != 0
+    r2 = jsr_poly_ic_get(JS_POLY_IC, JS_POLY_EP, ob, wvalue_bits(key) ## i64, ep)
+    return wvalue_from_bits(r2) if r2 != JSR_SLOW
   js_get_miss(o, key, JS_IC, k)
 
 # The same with a cache of the caller's own (tier 0 keeps one per property node).
@@ -1030,8 +1057,9 @@ fn jsr_poly_ic_get(pic, pep, ob, kb, epoch) (i64[] i64[] i64 i64 i64) i64
   ep = JS_EPOCH[0]
   r = jsr_ic_get(ic, 0, ob, ep)
   return wvalue_from_bits(r) if r != JSR_SLOW
-  r2 = jsr_poly_ic_get(JS_POLY_IC, JS_POLY_EP, ob, wvalue_bits(key) ## i64, ep)
-  return wvalue_from_bits(r2) if r2 != JSR_SLOW
+  if ic[0] != 0
+    r2 = jsr_poly_ic_get(JS_POLY_IC, JS_POLY_EP, ob, wvalue_bits(key) ## i64, ep)
+    return wvalue_from_bits(r2) if r2 != JSR_SLOW
   js_get_miss(o, key, ic, 0)
 
 -> js_get_miss(o, key, ic, k)

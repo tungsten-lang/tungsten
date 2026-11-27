@@ -221,6 +221,10 @@ JS_GLOBAL_VARS = {}
       js_throw_type("Cannot delete property '" + js_to_display(js_key_display(k)) + "' of string") if strict
       return false
     return true
+  if js_dom_handle?(o) && JS_DOM_HOOK[0] != nil
+    ok = JS_DOM_HOOK[0].delete_own(o, k)
+    js_throw_type("Cannot delete property '" + js_to_display(js_key_display(k)) + "'") if !ok && strict
+    return ok
   return true if !o.is_a?(JS:Base)
   ok = o.delete_own(k)
   js_throw_type("Cannot delete property '" + js_to_display(js_key_display(k)) + "'") if !ok && strict
@@ -229,11 +233,12 @@ JS_GLOBAL_VARS = {}
 -> js_in(key, o)
   js_throw_type("Cannot use 'in' operator to search for a key in " + js_to_display(o)) if !js_object?(o)
   k = js_to_property_key(key)
-  return jhas_property?(o, k) if js_array?(o)
+  return jhas_property?(o, k) if js_array?(o) || js_dom_handle?(o)
   js_has_property(o, k)
 
 -> js_has_property(o, k)
   return false if o == nil
+  return jhas_property?(o, k) if js_dom_handle?(o)
   o.has_property?(k)
 
 # v instanceof f (§13.10.2): f's @@hasInstance when it is not Function.prototype's own.
@@ -286,11 +291,40 @@ JS_CODE_AT = {}
 
 # ---- for-in (§14.7.5.9 EnumerateObjectProperties) ----
 
+# Cached check: does Object.prototype have zero enumerable own properties at current JS_EPOCH?
+JS_OP_NO_ENUM_EP = [-1]
+JS_OP_NO_ENUM_OP = [nil]
+JS_OP_NO_ENUM_OK = [false]
+
+-> js_obj_proto_no_enum?(op)
+  ep = JS_EPOCH[0]
+  return JS_OP_NO_ENUM_OK[0] if JS_OP_NO_ENUM_EP[0] == ep && JS_OP_NO_ENUM_OP[0] == op
+  ok = true
+  if op != nil
+    ks = jown_keys(op)
+    i = 0
+    while i < ks.size
+      if js_string?(ks[i]) && jenumerable?(op, ks[i])
+        ok = false
+        break
+      i += 1
+    ok = false if jproto(op) != nil
+  JS_OP_NO_ENUM_EP[0] = ep
+  JS_OP_NO_ENUM_OP[0] = op
+  JS_OP_NO_ENUM_OK[0] = ok
+  ok
+
 # The string keys a for-in over v visits: own enumerable keys first, then each
 # prototype's, without duplicates (a non-enumerable own key still shadows). The loop
 # checks each key is still present before visiting it.
 -> js_for_in_keys(v)
-  return [] if js_nullish?(v)
+  return JS_NO_ARGS if js_nullish?(v)
+  # O(1) zero-allocation fast path for plain JS:Object inheriting directly from untouched Object.prototype!
+  if v.is_a?(JS:Object)
+    sh = v.shape
+    if !sh.dict
+      op = sh.proto
+      return sh.enum_str_keys() if op == nil || (op == js_realm().object_proto && js_obj_proto_no_enum?(op))
   start = js_object?(v) ? v : js_realm().wrap_primitive(v)
   out = []
   ks = jown_keys(start)

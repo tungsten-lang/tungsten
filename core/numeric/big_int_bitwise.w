@@ -588,6 +588,7 @@ fn __bigint_bw_xor2(rp, ap, bp) (i64 i64 i64) i64
 
 fn __bigint_bw_publish_size(result, size) (i64 i64) i64
   ll <<~IR
+    ; tungsten:alwaysinline
     entry:
       %ptr = and i64 %result, 140737488355327
       %szbits = add nuw nsw i64 %ptr, 4
@@ -599,6 +600,7 @@ fn __bigint_bw_publish_size(result, size) (i64 i64) i64
 
 fn __bigint_bw_and_eq(rp, ap, bp, n) (i64 i64 i64 i64) i64
   ll <<~IR
+    ; tungsten:alwaysinline
     entry:
       %rq = inttoptr i64 %rp to ptr
       %aq = inttoptr i64 %ap to ptr
@@ -725,6 +727,7 @@ fn __bigint_bw_and_eq(rp, ap, bp, n) (i64 i64 i64 i64) i64
 
 fn __bigint_bw_or_eq(rp, ap, bp, n) (i64 i64 i64 i64) i64
   ll <<~IR
+    ; tungsten:alwaysinline
     entry:
       %rq = inttoptr i64 %rp to ptr
       %aq = inttoptr i64 %ap to ptr
@@ -845,6 +848,7 @@ fn __bigint_bw_or_eq(rp, ap, bp, n) (i64 i64 i64 i64) i64
 
 fn __bigint_bw_xor_eq(rp, ap, bp, n) (i64 i64 i64 i64) i64
   ll <<~IR
+    ; tungsten:alwaysinline
     entry:
       %rq = inttoptr i64 %rp to ptr
       %aq = inttoptr i64 %ap to ptr

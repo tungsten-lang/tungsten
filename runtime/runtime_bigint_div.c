@@ -398,6 +398,18 @@ static uint64_t mag_div_wide_preinv_cached(uint64_t *quotient,
     if (d >> 63) {
         uint64_t dinv = bn_div_preinv_cached(d, cache);
 #if BN_DIV1_2WAY
+        if (!quotient && alen >= 8) {
+            uint64_t bpow_stack[9];
+            const uint64_t *bpow =
+                bn_div_preinv_bpow_cached(d, dinv, cache, bpow_stack);
+            int32_t tail = alen & 7;
+            int32_t fold_n = alen - tail;
+            uint64_t rem = bn_mod_fold_slice(a + tail, fold_n, bpow, d, dinv);
+            for (int32_t k = tail - 1; k >= 0; k--) {
+                (void)bn_div_qr_preinv(rem, a[k], d, dinv, &rem);
+            }
+            return rem;
+        }
         if (quotient && alen >= 32) {
             uint64_t bpow_stack[9];
             const uint64_t *bpow =
@@ -467,6 +479,23 @@ static uint64_t mag_div_wide_preinv_cached(uint64_t *quotient,
     unsigned rshift = 64 - shift;
     uint64_t normalized_d = d << shift;
     uint64_t dinv = bn_div_preinv_cached(normalized_d, cache);
+#if BN_DIV1_2WAY
+    if (!quotient && alen >= 16) {
+        /* Since d | (d << shift), (a mod normalized_d) mod d == a mod d with ZERO input shifting! */
+        uint64_t bpow_stack[9];
+        const uint64_t *bpow =
+            bn_div_preinv_bpow_cached(normalized_d, dinv, cache, bpow_stack);
+        int32_t tail = alen & 7;
+        int32_t fold_n = alen - tail;
+        uint64_t r_norm = bn_mod_fold_slice(a + tail, fold_n, bpow, normalized_d, dinv);
+        for (int32_t k = tail - 1; k >= 0; k--) {
+            (void)bn_div_qr_preinv(r_norm, a[k], normalized_d, dinv, &r_norm);
+        }
+        uint64_t rem_fin;
+        (void)bn_div_qr_preinv(r_norm >> rshift, r_norm << shift, normalized_d, dinv, &rem_fin);
+        return rem_fin >> shift;
+    }
+#endif
     uint64_t rem = a[alen - 1] >> rshift;
 #if BN_DIV1_2WAY
     /* Software-pipelined two-limbs-per-iteration form of the single-step
@@ -3364,9 +3393,15 @@ static WBigint *mag_divexact(const uint64_t *np, int32_t nn,
         q->size = q0 != 0 ? 1 : 0;
         return q;
     }
-    WBigint *q = bigint_alloc_raw_hot(qn);
     /* Only the low qn limbs of the shifted r and d ever matter (mod B^qn). */
     int32_t dw = dn < qn ? dn : qn;
+    if (dw >= 192 && qn >= 192) {
+        /* Subquadratic Burnikel-Ziegler / Newton-FFT division beats O(qn * dw) Jebelean schoolbook above ~192 limbs. */
+        WBigint *q_sub = NULL;
+        mag_divmod(np, nn, dp, dn, &q_sub, NULL);
+        return q_sub;
+    }
+    WBigint *q = bigint_alloc_raw_hot(qn);
     uint64_t d0v, dstack[64];
     uint64_t *dv = NULL;
     const uint64_t *dsh;

@@ -627,11 +627,29 @@ fn jp_box_dec(val, frac) (i64 i64) i64
   jb_st_u8(dst_ptr + p, 125)  # '}'
   p + 1
 
-# Return raw byte pointer of a mode-7 heap string, or 0 for inline/slab/rope strings.
+JS_SLAB_BASE_FAST = i64[1]
+
+-> jp_init_slab_fast(dummy) (i64) i64
+  js_json_init_lits()
+  b = JS_JSON_SLAB_BASE[0]
+  JS_SLAB_BASE_FAST[0] = b
+  b
+
+# Return raw byte pointer of a mode-7 heap string or mode-6 interned slab string, or 0 for inline/rope.
 -> jp_flat_str_ptr(sb) (i64) i64
   return 0 if jb_is_flat_str(sb) == 0
-  return 0 if ((sb >> 1) & 7) != 7
-  jb_mask_ptr48(sb) + 16
+  mode = (sb >> 1) & 7
+  return jb_mask_ptr48(sb) + 16 if mode == 7
+  return 0 if mode != 6
+  base = JS_SLAB_BASE_FAST[0]
+  if base == 0
+    base = jp_init_slab_fast(0)
+    return 0 if base == 0
+  slot = base + ((sb >> 4) & 16777215) * 32
+  flags = jb_ld_u8(slot)
+  return slot + 2 if (flags & 1) != 0
+  return jb_ld_i64_u(slot + 10) if (flags & 4) != 0
+  0
 
 -> jb_probe_slab_base(pb, ptr, expect_len) (i64 i64 i64) i64
   return 0 if jb_is_flat_str(pb) == 0
@@ -2484,8 +2502,13 @@ JS_JSON_BUF_POOL = [nil]
             put_null()
         elsif js_string?(el)
           put_quoted_slow(el)
-        elsif el == nil || el.is_a?(JS:Symbol) || js_callable?(el)
+        elsif el == nil || el.is_a?(JS:Symbol)
           put_null()
+        elsif js_callable?(el)
+          if el.is_a?(JS:Base) && (el.has_own?("toJSON") || el.proto != @r.function_proto || @r.function_proto.has_own?("toJSON") || @r.function_proto.proto != @r.object_proto)
+            write_slow_val(v, i.to_s, el, true)
+          else
+            put_null()
         elsif jb_is_dense_arr(wvalue_bits(el) ## i64) != 0
           write_val(el)
         else
@@ -2545,7 +2568,7 @@ JS_JSON_BUF_POOL = [nil]
           first = false
         else
           val = wvalue_from_bits(jsr_ivar(ob, iv))
-          if !val.is_a?(JS:Symbol) && !js_callable?(val)
+          if !val.is_a?(JS:Symbol) && (!js_callable?(val) || (val.is_a?(JS:Base) && (val.has_own?("toJSON") || val.proto != @r.function_proto || @r.function_proto.has_own?("toJSON") || @r.function_proto.proto != @r.object_proto)))
             if js_number?(val)
               reserve(kl + 32)
               @pos = jb_memcpy_raw(@dst_ptr, @pos ## i64, kp, kl)

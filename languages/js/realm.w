@@ -730,6 +730,8 @@ fn jsr_gcell_fast(cb) (i64) i64
 
 # A property of a value that is not a JS:Base object.
 -> js_get_prim(o, key)
+  if js_dom_handle?(o) && JS_DOM_HOOK[0] != nil
+    return JS_DOM_HOOK[0].get(o, key, o)
   if js_array?(o)
     if key.is_a?(String)
       return js_arr_len(o).to_f if key == "length"
@@ -773,6 +775,10 @@ fn jsr_gcell_fast(cb) (i64) i64
       js_ta_set_idx(o, ix, v)
       return v
   k = js_to_property_key(key)
+  if js_dom_handle?(o) && JS_DOM_HOOK[0] != nil
+    ok = JS_DOM_HOOK[0].set(o, k, v, o)
+    js_throw_type("Cannot assign to read only property '" + js_to_display(js_key_display(k)) + "' of object") if !ok && strict
+    return v
   if o.is_a?(JS:Base)
     ok = o.set(k, v, o)
     js_throw_type("Cannot assign to read only property '" + js_to_display(js_key_display(k)) + "' of object") if !ok && strict
@@ -781,6 +787,10 @@ fn jsr_gcell_fast(cb) (i64) i64
   v
 
 -> js_set_prim(o, key, v, strict = false)
+  if js_dom_handle?(o) && JS_DOM_HOOK[0] != nil
+    ok = JS_DOM_HOOK[0].set(o, key, v, o)
+    js_throw_type("Cannot assign to read only property '" + js_to_display(js_key_display(key)) + "' of object") if !ok && strict
+    return nil
   return js_array_set(o, key, v) if js_array?(o)
   js_throw_type("Cannot set properties of " + js_to_display(o) + " (setting '" + js_to_display(js_key_display(key)) + "')") if js_nullish?(o)
   r = js_realm()

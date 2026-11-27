@@ -1655,6 +1655,7 @@ use ./opt_config
   do_carry = opt_cfg == nil || (opt_cfg.pass_enabled?("carry-chains") && opt_cfg.opt_level >= 2)
   do_simd  = opt_cfg == nil || opt_cfg.pass_enabled?("simd")
   strict_fp = opt_cfg != nil && opt_cfg.strict_math
+  allow_reassoc = opt_cfg != nil && opt_cfg.fast_math && !strict_fp
 
   if do_carry
     carry_skip = wire_try_emit_carry_loop_a64(comp, cond_id, defs, c_i64)
@@ -1676,18 +1677,28 @@ use ./opt_config
   a = comp.a
   l_end = comp.blk_labels[end_id]
 
-  # Pattern 1: Float32 Dot Product / Sum-of-Squares (4-way reassociated f64 accumulators; skipped under --strict-math)
-  if !strict_fp && body.size >= 4 && body.size <= 9
+  # Pattern 1: Float32 Dot Product / Sum-of-Squares
+  #   - Default / `--strict-math`: 4x-unrolled ORDERED binary64 accumulation (100% IEEE-754 bit-exact with JS!)
+  #   - Explicit `--fast` / `-ffast-math` (without `--strict-math`): 4-way reassociated NEON accumulators
+  #     (also matches `:fmadd_f64` fused by `wire_pass_fast_math` when `--fast` is enabled!)
+  if body.size >= 3 && body.size <= 9
     st = body[body.size - 1]
     if st.op == :store_double
       acc_sl = st.imm
       fadd_ins = defs[st.a]
+      ga = nil
+      gb = nil
       if fadd_ins != nil && fadd_ins.op == :fadd_f64 && wire_is_slot_load?(fadd_ins.a, acc_sl, defs)
         fmul_ins = defs[fadd_ins.b]
         if fmul_ins != nil && fmul_ins.op == :fmul_f64
           ga = defs[fmul_ins.a]
           gb = defs[fmul_ins.b]
-          if ga != nil && gb != nil && ga.op == :typed_array_get_inline && gb.op == :typed_array_get_inline && ga.ebits == -32 && gb.ebits == -32 && wire_is_slot_load?(ga.b, idx_sl, defs) && wire_is_slot_load?(gb.b, idx_sl, defs)
+      elsif fadd_ins != nil && fadd_ins.op == :fmadd_f64 && wire_is_slot_load?(fadd_ins.c, acc_sl, defs)
+        ga = defs[fadd_ins.a]
+        gb = defs[fadd_ins.b]
+      if ga != nil && gb != nil && ga.op == :typed_array_get_inline && gb.op == :typed_array_get_inline && ga.ebits == -32 && gb.ebits == -32 && wire_is_slot_load?(ga.b, idx_sl, defs) && wire_is_slot_load?(gb.b, idx_sl, defs)
+        if true
+          if true
             pure = true
             bi = 0
             while bi < body.size - 1
@@ -1708,24 +1719,46 @@ use ./opt_config
               a.sub_r(R_X9, r_n, r_i)
               a.add_r(R_X10, r_pa, r_i, 2)
               a.add_r(R_X11, r_pb, r_i, 2)
-              a.cmp_i(R_X9, 8)
-              a.b_cond(CC_LT, l_tail)
-              a.movi_zero_16b(0); a.movi_zero_16b(1); a.movi_zero_16b(2); a.movi_zero_16b(3)
-              a.bind(l_vec)
-              a.ldp_q_post(4, 5, R_X10, 32)
-              a.ldp_q_post(6, 7, R_X11, 32)
-              a.fcvtl_2d_2s(16, 4); a.fcvtl_2d_2s(20, 6); a.fmul_2d(16, 16, 20); a.fadd_2d(0, 0, 16)
-              a.fcvtl2_2d_4s(17, 4); a.fcvtl2_2d_4s(21, 6); a.fmul_2d(17, 17, 21); a.fadd_2d(1, 1, 17)
-              a.fcvtl_2d_2s(18, 5); a.fcvtl_2d_2s(22, 7); a.fmul_2d(18, 18, 22); a.fadd_2d(2, 2, 18)
-              a.fcvtl2_2d_4s(19, 5); a.fcvtl2_2d_4s(23, 7); a.fmul_2d(19, 19, 23); a.fadd_2d(3, 3, 19)
-              a.sub_i(R_X9, R_X9, 8)
-              a.cmp_i(R_X9, 8)
-              a.b_cond(CC_GE, l_vec)
-              a.fadd_2d(0, 0, 1); a.fadd_2d(2, 2, 3); a.fadd_2d(0, 0, 2)
-              a.faddp_d(16, 0)
-              a.fadd_d(d_acc, d_acc, 16)
+              if allow_reassoc
+                a.cmp_i(R_X9, 8)
+                a.b_cond(CC_LT, l_tail)
+                a.movi_zero_16b(0); a.movi_zero_16b(1); a.movi_zero_16b(2); a.movi_zero_16b(3)
+                a.bind(l_vec)
+                a.ldp_q_post(4, 5, R_X10, 32)
+                a.ldp_q_post(6, 7, R_X11, 32)
+                a.fcvtl_2d_2s(16, 4); a.fcvtl_2d_2s(20, 6); a.fmul_2d(16, 16, 20); a.fadd_2d(0, 0, 16)
+                a.fcvtl2_2d_4s(17, 4); a.fcvtl2_2d_4s(21, 6); a.fmul_2d(17, 17, 21); a.fadd_2d(1, 1, 17)
+                a.fcvtl_2d_2s(18, 5); a.fcvtl_2d_2s(22, 7); a.fmul_2d(18, 18, 22); a.fadd_2d(2, 2, 18)
+                a.fcvtl2_2d_4s(19, 5); a.fcvtl2_2d_4s(23, 7); a.fmul_2d(19, 19, 23); a.fadd_2d(3, 3, 19)
+                a.sub_i(R_X9, R_X9, 8)
+                a.cmp_i(R_X9, 8)
+                a.b_cond(CC_GE, l_vec)
+                a.fadd_2d(0, 0, 1); a.fadd_2d(2, 2, 3); a.fadd_2d(0, 0, 2)
+                a.faddp_d(16, 0)
+                a.fadd_d(d_acc, d_acc, 16)
+              else
+                # 4x unrolled ordered binary64 accumulation (preserves exact left-to-right IEEE-754 rounding!)
+                a.cmp_i(R_X9, 4)
+                a.b_cond(CC_LT, l_tail)
+                a.bind(l_vec)
+                a.ldr_s_post(16, R_X10, 4); a.ldr_s_post(17, R_X10, 4)
+                a.ldr_s_post(18, R_X10, 4); a.ldr_s_post(19, R_X10, 4)
+                a.ldr_s_post(20, R_X11, 4); a.ldr_s_post(21, R_X11, 4)
+                a.ldr_s_post(22, R_X11, 4); a.ldr_s_post(23, R_X11, 4)
+                a.fcvt_d_s(16, 16); a.fcvt_d_s(20, 20); a.fmul_d(16, 16, 20)
+                a.fcvt_d_s(17, 17); a.fcvt_d_s(21, 21); a.fmul_d(17, 17, 21)
+                a.fcvt_d_s(18, 18); a.fcvt_d_s(22, 22); a.fmul_d(18, 18, 22)
+                a.fcvt_d_s(19, 19); a.fcvt_d_s(23, 23); a.fmul_d(19, 19, 23)
+                a.fadd_d(d_acc, d_acc, 16)
+                a.fadd_d(d_acc, d_acc, 17)
+                a.fadd_d(d_acc, d_acc, 18)
+                a.fadd_d(d_acc, d_acc, 19)
+                a.sub_i(R_X9, R_X9, 4)
+                a.cmp_i(R_X9, 4)
+                a.b_cond(CC_GE, l_vec)
               a.bind(l_tail)
-              a.cbz_x(R_X9, l_end)
+              l_fin = a.new_label
+              a.cbz_x(R_X9, l_fin)
               a.bind(l_sc)
               a.ldr_s_post(16, R_X10, 4)
               a.ldr_s_post(17, R_X11, 4)
@@ -1734,6 +1767,7 @@ use ./opt_config
               a.fadd_d(d_acc, d_acc, 16)
               a.sub_i(R_X9, R_X9, 1)
               a.cbnz_x(R_X9, l_sc)
+              a.bind(l_fin)
               wire_set_slot_fpr(comp, acc_sl, d_acc)
               wire_set_slot_gpr(comp, idx_sl, r_n)
               a.b(l_end)

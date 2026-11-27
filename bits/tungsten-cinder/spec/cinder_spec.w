@@ -716,7 +716,6 @@ describe "Cinder optimization levels (-O0..-O3), pass toggles, function inlining
     expect(cinder_verify_stage_determinism(src_path, cfg_o3, "arm64-apple-macosx14.0.0", false)).to eq(true)
     expect(cinder_verify_stage_determinism(src_path, cfg_o3, "x86_64-unknown-linux-gnu", false)).to eq(true)
     expect(cinder_verify_stage_determinism(src_path, cfg_o3, "aarch64-unknown-linux-gnu", false)).to eq(true)
-    system("rm -rf '" + CINDER_SPEC_TMP + "'")
 
   it "lowers C source (structs, pointers, __uint128_t, ctzll, memcpy) directly to WIRE and JIT-executes on ARM64 & x86_64" ->
     c_code = <<~CSRC
@@ -768,3 +767,161 @@ describe "Cinder optimization levels (-O0..-O3), pass toggles, function inlining
     mask64 = ((1 ## int) << 64) - 1
     exp_u = ((prod >> 64) ^ prod) & mask64
     expect(got_u).to eq(exp_u)
+
+describe "Cinder Cross-File Link-Time Optimization (Fat-LTO .o, .a archives, whole-program inlining & slab fusion)" ->
+  it "embeds and extracts CNDRLTO1 Fat-LTO sections in Mach-O 64, ELF64 (x86_64 & AArch64), and Unix .a archives" ->
+    lib_ir = <<~LLVM
+      @dead_table = private constant [4 x i64] [i64 11, i64 22, i64 33, i64 44], align 8
+      @live_bias  = internal constant i64 7, align 8
+
+      define internal i64 @local_step(i64 %x) #0 {
+      entry:
+        %p = getelementptr inbounds i64, ptr @live_bias, i64 0
+        %b = load i64, ptr %p, align 8
+        %r = add i64 %x, %b
+        ret i64 %r
+      }
+
+      define i64 @fast_mad(i64 %a, i64 %b, i64 %c) #0 {
+      entry:
+        %m = mul i64 %a, %b
+        %s = add i64 %m, %c
+        %t = call i64 @local_step(i64 %s)
+        ret i64 %t
+      }
+
+      define i64 @single_caller_cube_plus(i64 %v) {
+      entry:
+        %v2 = mul i64 %v, %v
+        %v3 = mul i64 %v2, %v
+        %r  = add i64 %v3, 100
+        ret i64 %r
+      }
+
+      define i64 @pure_const_magic() #1 {
+      entry:
+        ret i64 31337
+      }
+
+      define i64 @unused_library_export(i64 %x) {
+      entry:
+        %p = getelementptr inbounds [4 x i64], ptr @dead_table, i64 0, i64 2
+        %v = load i64, ptr %p, align 8
+        %r = add i64 %v, %x
+        ret i64 %r
+      }
+
+      attributes #0 = { alwaysinline nounwind }
+      attributes #1 = { noinline nounwind }
+    LLVM
+
+    main_ir = <<~LLVM
+      declare i64 @fast_mad(i64, i64, i64)
+      declare i64 @single_caller_cube_plus(i64)
+      declare i64 @pure_const_magic()
+
+      define internal i64 @local_step(i64 %x) #0 {
+      entry:
+        %r = mul i64 %x, 2
+        ret i64 %r
+      }
+
+      define i32 @main() {
+      entry:
+        %a = call i64 @fast_mad(i64 3, i64 4, i64 5)
+        %b = call i64 @single_caller_cube_plus(i64 5)
+        %c = call i64 @local_step(i64 10)
+        %k = call i64 @pure_const_magic()
+        %s1 = add i64 %a, %b
+        %s2 = add i64 %s1, %c
+        %tot = add i64 %s2, %k
+        %ok = icmp eq i64 %tot, 31606
+        %rc = select i1 %ok, i32 0, i32 42
+        ret i32 %rc
+      }
+
+      attributes #0 = { noinline nounwind }
+    LLVM
+
+    cfg_lto = CinderOptConfig.new(2)
+    cfg_lto.apply_arg("--lto")
+    cfg_lto.apply_arg("--no-debug")
+
+    macho_o = CINDER_SPEC_TMP + "/lib_macho.o"
+    elf_x64_o = CINDER_SPEC_TMP + "/lib_x64.o"
+    elf_a64_o = CINDER_SPEC_TMP + "/lib_a64.o"
+    main_ll_p = CINDER_SPEC_TMP + "/main_lto.ll"
+    ar_path = CINDER_SPEC_TMP + "/libmath_lto.a"
+    write_file(main_ll_p, main_ir)
+
+    expect(cinder_compile_ll_str_to_obj(lib_ir, macho_o, "arm64-apple-macosx14.0.0", cfg_lto, true)[0]).to eq(true)
+    expect(cinder_compile_ll_str_to_obj(lib_ir, elf_x64_o, "x86_64-unknown-linux-gnu", cfg_lto, true)[0]).to eq(true)
+    expect(cinder_compile_ll_str_to_obj(lib_ir, elf_a64_o, "aarch64-unknown-linux-gnu", cfg_lto, true)[0]).to eq(true)
+
+    expect(cinder_extract_lto_from_file(macho_o)).to eq(lib_ir)
+    expect(cinder_extract_lto_from_file(elf_x64_o)).to eq(lib_ir)
+    expect(cinder_extract_lto_from_file(elf_a64_o)).to eq(lib_ir)
+
+    host_lib_o = cinder_host_os() == "macos" ? macho_o : (cinder_host_arch() == "x86_64" ? elf_x64_o : elf_a64_o)
+    expect(system("ar rcs '" + ar_path + "' '" + host_lib_o + "'")).to eq(true)
+    ar_ext = cinder_extract_lto_from_archive(ar_path)
+    expect(ar_ext != nil && ar_ext[0].size() == 1 && ar_ext[1] == false).to eq(true)
+    expect(ar_ext[0][0]).to eq(lib_ir)
+
+    # Merge `main_ir` + `lib_ir` with Whole-Program LTO (`lto-internalize` + `ipa-sccp` + `lto-dce`)!
+    merged = cinder_lto_merge_modules([main_ir, lib_ir], true, cfg_lto)
+    # `@dead_table` is only referenced by `@unused_library_export`; once `@unused_library_export` is internalized & dead-stripped:
+    w_m = cinder_compile_ll_a64(merged, true, cfg_lto)
+    w_x = cinder_compile_ll_x64(merged, cfg_lto)
+    # Cross-file `alwaysinline` `@fast_mad`, single-caller `@single_caller_cube_plus`, `ipa-sccp` `@pure_const_magic`,
+    # and unreferenced `@unused_library_export` are ALL internalized, folded/inlined into `@main`, and stripped!
+    expect(w_m.sym_names.include?("_fast_mad")).to eq(false)
+    expect(w_m.sym_names.include?("_single_caller_cube_plus")).to eq(false)
+    expect(w_m.sym_names.include?("_pure_const_magic")).to eq(false)
+    expect(w_m.sym_names.include?("_unused_library_export")).to eq(false)
+    expect(w_x.sym_names.include?("fast_mad")).to eq(false)
+    expect(w_x.sym_names.include?("single_caller_cube_plus")).to eq(false)
+    expect(w_x.sym_names.include?("unused_library_export")).to eq(false)
+
+    # Link `main_lto.ll` + `libmath_lto.a` end-to-end into a native executable and run!
+    # Expected math: fast_mad(3,4,5) = (3*4 + 5) + 7 = 24; cube_plus(5) = 125 + 100 = 225;
+    # main local_step(10) = 20 (no collision with lib's local_step!); pure_const_magic() = 31337;
+    # sum = 24 + 225 + 20 + 31337 = 31606 -> exit code 0!
+    lto_exe = CINDER_SPEC_TMP + "/lto_merged_exe"
+    expect(cinder_compile_inputs([main_ll_p, ar_path], lto_exe, false, "", false, cfg_lto)).to eq(true)
+    expect(system("'" + lto_exe + "'")).to eq(true)
+    expect(cinder_verify_stage_determinism_multi([main_ll_p, ar_path], cfg_lto, "arm64-apple-macosx14.0.0", false)).to eq(true)
+    expect(cinder_verify_stage_determinism_multi([main_ll_p, ar_path], cfg_lto, "x86_64-unknown-linux-gnu", false)).to eq(true)
+
+  it "links multi-file .w Fat-LTO objects with fused @__static_slab and inlined BigInt hot-slot boundaries" ->
+    lib_w = CINDER_SPEC_TMP + "/lto_lib.w"
+    app_w = CINDER_SPEC_TMP + "/lto_app.w"
+    lib_o = CINDER_SPEC_TMP + "/lto_lib.o"
+    app_bin = CINDER_SPEC_TMP + "/lto_app_bin"
+
+    write_file(lib_w, "G_LIB_TAG = \"cinder-cross-lto-slab\"\n")
+    write_file(app_w, <<~WAPP
+      a = (1 << 100) + 17
+      b = (1 << 100) + 29
+      acc = 0
+      i = 0
+      while i < 8
+        s = a * b
+        acc += (s & 0xFF)
+        i += 1
+      << "app-slab-header|" + acc.to_s()
+    WAPP
+    )
+
+    cfg_full = CinderOptConfig.new(3)
+    cfg_full.apply_arg("--full-lto")
+    cfg_full.apply_arg("--no-debug")
+
+    expect(cinder_compile_inputs([lib_w], lib_o, true, "", false, cfg_full)).to eq(true)
+    expect(cinder_extract_lto_from_file(lib_o) != nil).to eq(true)
+    expect(cinder_compile_inputs([app_w, lib_o], app_bin, false, "", false, cfg_full)).to eq(true)
+
+    out = capture("'" + app_bin + "'").strip()
+    exp_low = (((1 << 100) + 17) * ((1 << 100) + 29)) & 0xFF
+    expect(out).to eq("app-slab-header|" + (exp_low * 8).to_s())
+    system("rm -rf '" + CINDER_SPEC_TMP + "'")

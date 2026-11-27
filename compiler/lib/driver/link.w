@@ -346,6 +346,7 @@
   # the merged-module optimization alone. --no-lto is the one opt-out.
   # scripts/test-compile-profiles.sh pins the flags of each profile.
   use_cinder = cinder_mode || env("TUNGSTEN_BACKEND") == "cinder"
+  cinder_lto = (release_mode || explicit_lto || full_lto) && !no_lto && use_cinder
   doing_lto = (release_mode || explicit_lto || full_lto) && !no_lto && !use_cinder
   full_runtime_lto = doing_lto
   # Fast native-archive link (default): reuse the cached runtime objects
@@ -414,6 +415,12 @@
       cinder_cmd << " --no-debug"
     if frame_pointers
       cinder_cmd << " --frame-pointers"
+    if full_lto && !no_lto
+      cinder_cmd << " --full-lto"
+    elsif cinder_lto
+      cinder_cmd << " --lto"
+    else
+      cinder_cmd << " --no-lto"
     ef_i = 0
     while ef_i < extra_opt_flags.size()
       cinder_cmd << " "

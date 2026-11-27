@@ -68,6 +68,13 @@ fn cinder_buf_call2(fp, a0, a1) (i64 i64 i64) i64
     ret i64 %r
   IR
 
+fn cinder_buf_call3(fp, a0, a1, a2) (i64 i64 i64 i64) i64
+  ll <<~IR
+    %f = inttoptr i64 %fp to ptr
+    %r = call i64 %f(i64 %a0, i64 %a1, i64 %a2)
+    ret i64 %r
+  IR
+
 fn cinder_buf_call4(fp, a0, a1, a2, a3) (i64 i64 i64 i64 i64) i64
   ll <<~IR
     %f = inttoptr i64 %fp to ptr
@@ -75,16 +82,24 @@ fn cinder_buf_call4(fp, a0, a1, a2, a3) (i64 i64 i64 i64 i64) i64
     ret i64 %r
   IR
 
-CINDER_STDIO_PTRS = i64[4]
+CINDER_STDIO_PTRS = i64[7]
+
+-> cinder_init_stdio_ptrs
+  return nil if CINDER_STDIO_PTRS[0] != 0
+  h = 0
+  on macos
+    h = -2
+  CINDER_STDIO_PTRS[1] = ccall("w_dlsym", h, "fopen") ## i64
+  CINDER_STDIO_PTRS[2] = ccall("w_dlsym", h, "fwrite") ## i64
+  CINDER_STDIO_PTRS[3] = ccall("w_dlsym", h, "fclose") ## i64
+  CINDER_STDIO_PTRS[4] = ccall("w_dlsym", h, "fseek") ## i64
+  CINDER_STDIO_PTRS[5] = ccall("w_dlsym", h, "ftell") ## i64
+  CINDER_STDIO_PTRS[6] = ccall("w_dlsym", h, "fread") ## i64
+  CINDER_STDIO_PTRS[0] = 1
+  nil
 
 -> cinder_write_raw_file(path, data_ptr, nbytes)
-  if CINDER_STDIO_PTRS[0] == 0
-    u = capture("uname -s").strip()
-    h = u == "Darwin" ? -2 : 0
-    CINDER_STDIO_PTRS[1] = ccall("w_dlsym", h, "fopen") ## i64
-    CINDER_STDIO_PTRS[2] = ccall("w_dlsym", h, "fwrite") ## i64
-    CINDER_STDIO_PTRS[3] = ccall("w_dlsym", h, "fclose") ## i64
-    CINDER_STDIO_PTRS[0] = 1
+  cinder_init_stdio_ptrs()
   p_arr = cinder_str_to_cstr_u8(path)
   m_arr = cinder_str_to_cstr_u8("wb")
   p_cstr = cinder_raw_u8_ptr(wvalue_bits(p_arr) ## i64)
@@ -96,6 +111,30 @@ CINDER_STDIO_PTRS = i64[4]
     wrote = cinder_buf_call4(CINDER_STDIO_PTRS[2], data_ptr, 1, nbytes, fp)
   rc = cinder_buf_call1(CINDER_STDIO_PTRS[3], fp) & 0xFFFFFFFF
   wrote == nbytes && rc == 0
+
+-> cinder_read_raw_file_buf(path)
+  cinder_init_stdio_ptrs()
+  p_arr = cinder_str_to_cstr_u8(path)
+  m_arr = cinder_str_to_cstr_u8("rb")
+  p_cstr = cinder_raw_u8_ptr(wvalue_bits(p_arr) ## i64)
+  mode_cstr = cinder_raw_u8_ptr(wvalue_bits(m_arr) ## i64)
+  fp = cinder_buf_call2(CINDER_STDIO_PTRS[1], p_cstr, mode_cstr)
+  return nil if fp == 0
+  cinder_buf_call3(CINDER_STDIO_PTRS[4], fp, 0, 2)
+  sz = cinder_buf_call1(CINDER_STDIO_PTRS[5], fp)
+  if sz < 0
+    cinder_buf_call1(CINDER_STDIO_PTRS[3], fp)
+    return nil
+  cinder_buf_call3(CINDER_STDIO_PTRS[4], fp, 0, 0)
+  bb = ByteBuf.new(sz + 16)
+  bb.reserve(sz + 8)
+  got = 0
+  if sz > 0
+    got = cinder_buf_call4(CINDER_STDIO_PTRS[6], bb.raw_ptr(), 1, sz, fp)
+  cinder_buf_call1(CINDER_STDIO_PTRS[3], fp)
+  return nil if got != sz
+  bb.len = sz
+  bb
 
 + ByteBuf
   rw :data, :len, :cap
@@ -191,6 +230,13 @@ CINDER_STDIO_PTRS = i64[4]
     d[off + 7] = ((v >> 56) & 0xFF) ## u8
     nil
 
+  -> read_u8(off)
+    (@data[off] ## i64) & 0xFF
+
+  -> read_u16_le(off)
+    d = @data
+    ((d[off] ## i64) & 0xFF) | (((d[off + 1] ## i64) & 0xFF) << 8)
+
   -> read_u32_le(off)
     d = @data
     b0 = (d[off] ## i64) & 0xFF
@@ -198,6 +244,17 @@ CINDER_STDIO_PTRS = i64[4]
     b2 = (d[off + 2] ## i64) & 0xFF
     b3 = (d[off + 3] ## i64) & 0xFF
     b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+
+  -> read_u64_le(off)
+    lo = read_u32_le(off)
+    hi = read_u32_le(off + 4)
+    lo | (hi << 32)
+
+  -> slice_ascii(off, n)
+    return "" if n <= 0 || off < 0 || off + n > @len
+    arr = u8[n + 1]
+    cinder_raw_memcpy(cinder_raw_u8_ptr(wvalue_bits(arr) ## i64), raw_ptr() + off, n)
+    ccall("w_string_take_byte_array", arr, n)
 
   -> put_zeros(n)
     return nil if n <= 0

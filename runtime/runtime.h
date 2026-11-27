@@ -135,11 +135,14 @@ WValue w_str_append(WValue str, WValue suffix);
  */
 
 typedef struct {
-    uint8_t *base;          /* mmap'd base address */
+    uint8_t *base;          /* mmap'd base address (or direct OS-mmap'd __TEXT,__const static slab) */
     uint32_t next_slot;     /* bump pointer — next free index (starts at 1) */
     uint32_t page_hwm;     /* highest mprotect'd byte offset from base */
     pthread_mutex_t lock;   /* thread safety for concurrent interning */
     int frozen;             /* 1 = no new slab entries; existing entries remain discoverable */
+    uint32_t static_slots;  /* number of static read-only slots when backed by __TEXT,__const */
+    uint8_t is_static_ro;   /* 1 = base points directly into read-only executable mapping */
+    uint8_t intern_built;   /* 1 = g_intern + g_slab_filter populated for static_slots */
 } WStringSlab;
 
 typedef struct {
@@ -1027,6 +1030,9 @@ WValue w_bigint_alloc_hot64_raw(void);
 WValue w_bigint_alloc_hot128_raw(void);
 WValue w_bigint_release_unfinished_raw(WValue v);
 WValue w_bigint_release_dead_raw(WValue v);
+WValue w_bigint_alloc_hot_cold(int64_t cap);
+void   w_bigint_release_dead_cold(WValue v);
+void   w_bigint_displaced_cold(uint64_t displaced, uint64_t cur_ptr);
 WValue w_bigint_finish_add(WValue v, WValue signed_size);
 WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size);
 WValue w_bigint_add1_2_finish_raw(WValue v, uint64_t carry);

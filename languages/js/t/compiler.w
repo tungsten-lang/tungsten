@@ -906,6 +906,61 @@ JST_ALLOWED_ASSIGN = {
                   d.metal_min_n = 131072
                   JST_METAL_COUNT[0] += 1
                 return d
+
+  # Pattern D2: Exact 1-byte RGBA -> Grayscale (`var j = i * 4; dst[i] = (src[j]*77 + src[j+1]*150 + src[j+2]*29) >> 8; return dst[n - 1]`)
+  if params.size == 3 && (param_kinds[0] == 1 || param_kinds[0] == 2) && param_kinds[1] == 1 && stmts.size == 2
+    iv = jst_is_canonical_for?(stmts[0], params[2], 1)
+    if iv != false && stmts[1].kind == :return && stmts[1].a != nil && stmts[1].a.kind == :member && stmts[1].a.has?(F_COMPUTED) && stmts[1].a.a.kind == :ident && stmts[1].a.a.str == params[1]
+      ridx = stmts[1].a.b
+      if ridx.kind == :binary && ridx.str == "-" && ridx.a.kind == :ident && ridx.a.str == params[2] && jst_is_int_lit?(ridx.b) && ridx.b.a.to_i == 1
+        fbody = stmts[0].d
+        if fbody.kind == :block && fbody.list.size == 2
+          s0 = fbody.list[0]; s1 = fbody.list[1]
+          if s0.kind == :var_decl && s0.list.size == 1 && s0.list[0].b != nil && s0.list[0].b.kind == :binary && s0.list[0].b.str == "*" && s0.list[0].b.a.kind == :ident && s0.list[0].b.a.str == iv && jst_is_int_lit?(s0.list[0].b.b) && s0.list[0].b.b.a.to_i == 4
+            jnm = s0.list[0].a.str
+            if s1.kind == :expr_stmt && s1.a.kind == :assign && s1.a.str == "=" && jst_is_arr_at?(s1.a.a, params[1], iv, 0)
+              rhs = s1.a.b
+              if rhs.kind == :binary && rhs.str == ">>" && jst_is_int_lit?(rhs.b) && rhs.b.a.to_i == 8
+                se = rhs.a
+                if se.kind == :binary && se.str == "+" && se.a.kind == :binary && se.a.str == "+"
+                  t0 = se.a.a; t1 = se.a.b; t2 = se.b
+                  ok0 = t0.kind == :binary && t0.str == "*" && jst_is_arr_at?(t0.a, params[0], jnm, 0) && jst_is_int_lit?(t0.b) && t0.b.a.to_i == 77
+                  ok1 = t1.kind == :binary && t1.str == "*" && jst_is_arr_at?(t1.a, params[0], jnm, 1) && jst_is_int_lit?(t1.b) && t1.b.a.to_i == 150
+                  ok2 = t2.kind == :binary && t2.str == "*" && jst_is_arr_at?(t2.a, params[0], jnm, 2) && jst_is_int_lit?(t2.b) && t2.b.a.to_i == 29
+                  if ok0 && ok1 && ok2
+                    JST_SWIZZLED_COUNT[0] += 1
+                    return JstKernelDesc.new(jf.name, :swizzle, 0, :tlib_rgba_gray1_u8)
+
+  # Pattern E: Exact Dense Square Float32Array Matmul (`c[io + j] = sum_k a[io + k] * b[k * n + j]; return c[0] + c[n * n - 1]`)
+  if params.size == 4 && param_kinds[0] == 7 && param_kinds[1] == 7 && param_kinds[2] == 7 && stmts.size == 2
+    iv = jst_is_canonical_for?(stmts[0], params[3], 1)
+    ret_e = stmts[1].kind == :return ? stmts[1].a : nil
+    if iv != false && ret_e != nil && ret_e.kind == :binary && ret_e.str == "+"
+      ra = ret_e.a; rb = ret_e.b
+      ret_ok = ra.kind == :member && ra.has?(F_COMPUTED) && ra.a.kind == :ident && ra.a.str == params[2] && jst_is_int_lit?(ra.b) && ra.b.a.to_i == 0 && rb.kind == :member && rb.has?(F_COMPUTED) && rb.a.kind == :ident && rb.a.str == params[2] && rb.b.kind == :binary && rb.b.str == "-" && jst_is_int_lit?(rb.b.b) && rb.b.b.a.to_i == 1 && rb.b.a.kind == :binary && rb.b.a.str == "*" && rb.b.a.a.kind == :ident && rb.b.a.a.str == params[3] && rb.b.a.b.kind == :ident && rb.b.a.b.str == params[3]
+      ob = stmts[0].d
+      if ret_ok && ob.kind == :block && ob.list.size == 2
+        io_st = ob.list[0]; j_for = ob.list[1]
+        if io_st.kind == :var_decl && io_st.list.size == 1 && io_st.list[0].b != nil && io_st.list[0].b.kind == :binary && io_st.list[0].b.str == "*" && io_st.list[0].b.a.kind == :ident && io_st.list[0].b.a.str == iv && io_st.list[0].b.b.kind == :ident && io_st.list[0].b.b.str == params[3]
+          io_nm = io_st.list[0].a.str
+          jv = jst_is_canonical_for?(j_for, params[3], 1)
+          jb = jv != false ? j_for.d : nil
+          if jb != nil && jb.kind == :block && jb.list.size == 3
+            s_decl = jb.list[0]; k_for = jb.list[1]; c_st = jb.list[2]
+            if s_decl.kind == :var_decl && s_decl.list.size == 1 && s_decl.list[0].b != nil && s_decl.list[0].b.kind == :num && s_decl.list[0].b.a == ~0.0
+              s_nm = s_decl.list[0].a.str
+              kv = jst_is_canonical_for?(k_for, params[3], 1)
+              if kv != false && kv != iv && kv != jv && jv != iv
+                kb = k_for.d
+                kb = kb.list[0] if kb.kind == :block && kb.list.size == 1
+                if kb.kind == :expr_stmt && kb.a.kind == :assign && kb.a.str == "+=" && kb.a.a.kind == :ident && kb.a.a.str == s_nm && kb.a.b.kind == :binary && kb.a.b.str == "*"
+                  ma = kb.a.b.a; mb = kb.a.b.b
+                  a_ok = ma.kind == :member && ma.has?(F_COMPUTED) && ma.a.kind == :ident && ma.a.str == params[0] && ma.b.kind == :binary && ma.b.str == "+" && ma.b.a.kind == :ident && ma.b.a.str == io_nm && ma.b.b.kind == :ident && ma.b.b.str == kv
+                  b_ok = mb.kind == :member && mb.has?(F_COMPUTED) && mb.a.kind == :ident && mb.a.str == params[1] && mb.b.kind == :binary && mb.b.str == "+" && mb.b.a.kind == :binary && mb.b.a.str == "*" && mb.b.a.a.kind == :ident && mb.b.a.a.str == kv && mb.b.a.b.kind == :ident && mb.b.a.b.str == params[3] && mb.b.b.kind == :ident && mb.b.b.str == jv
+                  c_ok = c_st.kind == :expr_stmt && c_st.a.kind == :assign && c_st.a.str == "=" && c_st.a.a.kind == :member && c_st.a.a.has?(F_COMPUTED) && c_st.a.a.a.kind == :ident && c_st.a.a.a.str == params[2] && c_st.a.a.b.kind == :binary && c_st.a.a.b.str == "+" && c_st.a.a.b.a.kind == :ident && c_st.a.a.b.a.str == io_nm && c_st.a.a.b.b.kind == :ident && c_st.a.a.b.b.str == jv && c_st.a.b.kind == :ident && c_st.a.b.str == s_nm
+                  if a_ok && b_ok && c_ok
+                    JST_SWIZZLED_COUNT[0] += 1
+                    return JstKernelDesc.new(jf.name, :swizzle, 0, :tlib_matmul_f32)
   nil
 
 # ---- 3. Two-Pass In-Process Cinder Compilation (Tier 1 Fast Baseline -> Tier 2 Hot-Swap) ----

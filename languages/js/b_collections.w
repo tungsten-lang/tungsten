@@ -497,7 +497,7 @@ JS_BIGINT_CLSID = i64[1]
   JS_BIGINT_CLSID[0]
 
 + MapData
-  rw :meta_ptr, :keys_cap, :keys, :vals, :buckets, :hashes, :meta, :big, :gen, :bi_clsid
+  rw :meta_ptr, :keys_cap, :keys, :vals, :buckets, :hashes, :meta, :big, :gen, :bi_clsid, :first_live
 
   -> new
     @keys = Array.new(8, JS_HOLE)
@@ -510,6 +510,7 @@ JS_BIGINT_CLSID = i64[1]
     @big = nil
     @gen = 0
     @bi_clsid = js_bigint_clsid()
+    @first_live = 0
     sync_meta(0, 0, 0)
 
   -> sync_meta(len, used, sz)
@@ -763,6 +764,7 @@ JS_NAN_KEY = JS:NanKey.new
   d.meta[5] = 0
   d.meta[6] = 0
   d.meta[7] = 0
+  d.first_live = 0
   d.big = nil
   d.gen += 1
   nil
@@ -865,10 +867,13 @@ JS_NAN_KEY = JS:NanKey.new
     it.gen = d.gen
     it.idx = 0
   idx = it.idx
+  at_head = idx == 0
+  idx = d.first_live if at_head && d.first_live > 0
   len = d.meta[5]
   ks = d.keys
   while idx < len && ks[idx] == JS_HOLE
     idx += 1
+  d.first_live = idx if at_head
   if idx >= len
     it.done = true
     return js_iter_result(nil, true)
@@ -892,7 +897,7 @@ JS_NAN_KEY = JS:NanKey.new
       next
     ek = d.keys[i]
     if ek != JS_HOLE
-      js_call_arr(f, t, [d.vals[i], ek, m])
+      js_call(f, t, 3, d.vals[i], ek, m, nil, JS_NO_ARGS)
     i += 1
   nil
 
@@ -1057,7 +1062,8 @@ js_install(->(r) js_install_collections(r))
   r.set_intrinsic("%Map_set%", ms)
   mh = r.method(mp, "has", 1, ->(this, args, nt) js_map_has(js_this_map(this, "Map"), js_arg(args, 0)))
   r.set_intrinsic("%Map_has%", mh)
-  r.method(mp, "delete", 1, ->(this, args, nt) js_map_remove(js_this_map(this, "Map"), js_arg(args, 0)))
+  md = r.method(mp, "delete", 1, ->(this, args, nt) js_map_remove(js_this_map(this, "Map"), js_arg(args, 0)))
+  r.set_intrinsic("%Map_delete%", md)
   r.method(mp, "clear", 0, ->(this, args, nt) js_map_clear(js_this_map(this, "Map")))
   r.method(mp, "getOrInsert", 2, ->(this, args, nt) js_map_get_or_insert(this, js_arg(args, 0), js_arg(args, 1)))
   r.method(mp, "getOrInsertComputed", 2, ->(this, args, nt) js_map_get_or_insert_computed(this, js_arg(args, 0), js_arg(args, 1)))
@@ -1081,7 +1087,8 @@ js_install(->(r) js_install_collections(r))
   r.set_intrinsic("%Set_add%", sa)
   sh = r.method(sp, "has", 1, ->(this, args, nt) js_map_has(js_this_map(this, "Set"), js_arg(args, 0)))
   r.set_intrinsic("%Set_has%", sh)
-  r.method(sp, "delete", 1, ->(this, args, nt) js_map_remove(js_this_map(this, "Set"), js_arg(args, 0)))
+  sd = r.method(sp, "delete", 1, ->(this, args, nt) js_map_remove(js_this_map(this, "Set"), js_arg(args, 0)))
+  r.set_intrinsic("%Set_delete%", sd)
   r.method(sp, "clear", 0, ->(this, args, nt) js_map_clear(js_this_map(this, "Set")))
   r.method(sp, "forEach", 1, ->(this, args, nt) js_coll_for_each(this, "Set", js_arg(args, 0), js_arg(args, 1)))
   r.getter(sp, "size", ->(this, args, nt) js_this_map(this, "Set").size + ~0.0)
@@ -1105,11 +1112,14 @@ js_install(->(r) js_install_collections(r))
   # WeakMap / WeakSet
   wmp = js_new_object(op)
   r.constructor("WeakMap", 0, ->(this, args, nt) js_coll_ctor("WeakMap", args, nt, "set", true), wmp)
-  r.method(wmp, "get", 1, ->(this, args, nt) js_map_get(js_this_map(this, "WeakMap"), js_arg(args, 0)))
+  wmg = r.method(wmp, "get", 1, ->(this, args, nt) js_map_get(js_this_map(this, "WeakMap"), js_arg(args, 0)))
+  r.set_intrinsic("%WeakMap_get%", wmg)
   wms = r.method(wmp, "set", 2, ->(this, args, nt) js_weak_set(this, "WeakMap", js_arg(args, 0), js_arg(args, 1)))
   r.set_intrinsic("%WeakMap_set%", wms)
-  r.method(wmp, "has", 1, ->(this, args, nt) js_map_has(js_this_map(this, "WeakMap"), js_arg(args, 0)))
-  r.method(wmp, "delete", 1, ->(this, args, nt) js_map_remove(js_this_map(this, "WeakMap"), js_arg(args, 0)))
+  wmh = r.method(wmp, "has", 1, ->(this, args, nt) js_map_has(js_this_map(this, "WeakMap"), js_arg(args, 0)))
+  r.set_intrinsic("%WeakMap_has%", wmh)
+  wmd = r.method(wmp, "delete", 1, ->(this, args, nt) js_map_remove(js_this_map(this, "WeakMap"), js_arg(args, 0)))
+  r.set_intrinsic("%WeakMap_delete%", wmd)
   r.method(wmp, "getOrInsert", 2, ->(this, args, nt) js_weak_get_or_insert(this, js_arg(args, 0), js_arg(args, 1)))
   r.method(wmp, "getOrInsertComputed", 2, ->(this, args, nt) js_weak_get_or_insert_computed(this, js_arg(args, 0), js_arg(args, 1)))
   wmp.define(SYM_TO_STRING_TAG, "WeakMap", ATTR_C)

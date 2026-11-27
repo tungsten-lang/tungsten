@@ -156,8 +156,13 @@ in JS
     h = @handler
     t = trap("has")
     return jhas_property?(tgt, k) if t == nil
-    v = js_to_boolean(js_call_arr(t, h, [tgt, k]))
+    v = js_to_boolean(js_call(t, h, 2, tgt, k, nil, nil, JS_NO_ARGS))
     if !v
+      if tgt.is_a?(JS:Object) && !tgt.shape.dict
+        sl = tgt.shape.slot_of(k)
+        return false if sl < 0
+        if (tgt.shape.attrs_of(k) & ATTR_C) != 0 && !tgt.shape.nonext
+          return false
       td = jget_own_property(tgt, k)
       if td != nil
         js_throw_type("'has' on proxy: trap returned falsish for property '" + js_to_display(js_key_display(k)) + "' which exists in the proxy target as non-configurable") if td.configurable == false
@@ -171,7 +176,10 @@ in JS
     h = @handler
     t = trap("get")
     return jget(tgt, k, receiver) if t == nil
-    v = js_call_arr(t, h, [tgt, k, js_dec_recv(receiver)])
+    v = js_call(t, h, 3, tgt, k, js_dec_recv(receiver), nil, JS_NO_ARGS)
+    if tgt.is_a?(JS:Object) && !tgt.shape.dict
+      sl = tgt.shape.slot_of(k)
+      return v if sl < 0 || (tgt.shape.attrs_of(k) & ATTR_C) != 0
     td = jget_own_property(tgt, k)
     if td != nil && td.configurable == false
       if !td.accessor? && td.writable == false
@@ -187,8 +195,11 @@ in JS
     h = @handler
     t = trap("set")
     return jset(tgt, k, v, receiver) if t == nil
-    ok = js_to_boolean(js_call_arr(t, h, [tgt, k, v, js_dec_recv(receiver)]))
+    ok = js_to_boolean(js_call(t, h, 4, tgt, k, v, js_dec_recv(receiver), JS_NO_ARGS))
     return false if !ok
+    if tgt.is_a?(JS:Object) && !tgt.shape.dict
+      sl = tgt.shape.slot_of(k)
+      return true if sl < 0 || (tgt.shape.attrs_of(k) & ATTR_C) != 0
     td = jget_own_property(tgt, k)
     if td != nil && td.configurable == false
       if !td.accessor? && td.writable == false
@@ -206,8 +217,12 @@ in JS
     h = @handler
     t = trap("deleteProperty")
     return jdelete(tgt, k) if t == nil
-    ok = js_to_boolean(js_call_arr(t, h, [tgt, k]))
+    ok = js_to_boolean(js_call(t, h, 2, tgt, k, nil, nil, JS_NO_ARGS))
     return false if !ok
+    if tgt.is_a?(JS:Object) && !tgt.shape.dict
+      sl = tgt.shape.slot_of(k)
+      return true if sl < 0
+      return true if (tgt.shape.attrs_of(k) & ATTR_C) != 0 && !tgt.shape.nonext
     td = jget_own_property(tgt, k)
     if td != nil
       js_throw_type("'deleteProperty' on proxy: trap returned truish for property '" + js_to_display(js_key_display(k)) + "' which is non-configurable in the proxy target") if td.configurable == false
@@ -220,7 +235,7 @@ in JS
     h = @handler
     t = trap("ownKeys")
     return jown_keys(tgt) if t == nil
-    res = js_call_arr(t, h, [tgt])
+    res = js_call(t, h, 1, tgt, nil, nil, nil, JS_NO_ARGS)
     js_throw_type("CreateListFromArrayLike called on non-object") if !js_object?(res)
     keys = []
     lst = js_list_from_array_like(res)

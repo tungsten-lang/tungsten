@@ -19,6 +19,7 @@ use ./ll_parser
 use ./ll_opt
 use ./ll_a64
 use ./ll_x64
+use ./lto
 use ./driver
 
 # Compile a `WireFunc` into executable JIT memory for the current host architecture

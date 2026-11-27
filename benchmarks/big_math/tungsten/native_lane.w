@@ -37,6 +37,20 @@ POW_EXPONENT = 5
 -> release_bigint_value(value)
   ccall_nobox("w_bigint_release_dead_raw", value)
 
+fn __is_bigint_bits(bits) (i64) i64
+  ll <<~IR
+    ; tungsten:alwaysinline
+    entry:
+      %sh = lshr i64 %bits, 48
+      %eq = icmp eq i64 %sh, 65531
+      %r = zext i1 %eq to i64
+      ret i64 %r
+  IR
+
+-> release_int_or_bigint(value)
+  if __is_bigint_bits(wvalue_bits(value)) != 0
+    ccall_nobox("w_bigint_release_dead_raw", value)
+
 -> native_reference(operation, a, b, modulus, decimal)
   ccall("w_bench_tungsten_native_reference", operation, a, b, modulus, decimal)
 
@@ -108,7 +122,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a / b
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -121,7 +135,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a % b
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -134,7 +148,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = ccall("w_bigint_gcd", a, b)
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -147,7 +161,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a & b
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -160,7 +174,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a | b
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -173,7 +187,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a ^ b
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -186,7 +200,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a << SHIFT_BITS
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -199,7 +213,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a >> SHIFT_BITS
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -340,7 +354,7 @@ fn __bench_launder(x) (i64) i64
   while i < iterations
     next_result = ccall("w_bigint_not", a)
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -353,7 +367,7 @@ fn __bench_launder(x) (i64) i64
   while i < iterations
     next_result = ccall("w_bigint_tdiv", a, b)
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -366,7 +380,7 @@ fn __bench_launder(x) (i64) i64
   while i < iterations
     next_result = ccall("w_bigint_tmod", a, b)
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -379,7 +393,7 @@ fn __bench_launder(x) (i64) i64
   while i < iterations
     next_result = ccall("w_bigint_cdiv", a, b)
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -392,7 +406,7 @@ fn __bench_launder(x) (i64) i64
   while i < iterations
     next_result = ccall("w_bigint_cmod", a, b)
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -405,7 +419,7 @@ fn __bench_launder(x) (i64) i64
   while i < iterations
     next_result = ccall("w_bigint_divexact", a, b)
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -576,9 +590,9 @@ fn __bench_launder(x) (i64) i64
   i = 0 ## i64
   started = thread_cpu_ns()
   while i < iterations
-    next_result = ccall("w_bigint_setbit", a, SHIFT_BITS)
+    next_result = a.setbit(SHIFT_BITS)
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -589,9 +603,9 @@ fn __bench_launder(x) (i64) i64
   i = 0 ## i64
   started = thread_cpu_ns()
   while i < iterations
-    next_result = ccall("w_bigint_clrbit", a, 0)
+    next_result = a.clrbit(0)
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -602,9 +616,9 @@ fn __bench_launder(x) (i64) i64
   i = 0 ## i64
   started = thread_cpu_ns()
   while i < iterations
-    next_result = ccall("w_bigint_combit", a, SHIFT_BITS)
+    next_result = a.combit(SHIFT_BITS)
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_int_or_bigint(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -894,6 +908,9 @@ fn __bench_launder(x) (i64) i64
 
 Tungsten.PROTECT_THE_CORE!
 Tungsten.LOCK_THE_DOORS!
+
+if env("TUNGSTEN_BENCH_GC") == "1"
+  GC.enable()
 
 args = argv()
 if args.size == 1 && args[0] == "--self-test"

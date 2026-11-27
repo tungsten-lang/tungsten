@@ -239,7 +239,8 @@ tungsten_clear_cache() {
       rm -f -- "$f" && count=$((count + 1))
     done < <(find "$dir" -maxdepth 1 -type f \( -name '*.memo' -o -name 'linkbin-*' -o -name 'irshard-*' \
                -o -name 'loader-parse-*' -o -name 'core-wire-*' -o -name 'library-wire-*' \
-               -o -name 'core-render-*' -o -name 'target-probe-*' -o -name 'native-arm-cpu-*' \) -print0 2>/dev/null)
+               -o -name 'core-render-*' -o -name 'target-probe-*' -o -name 'native-arm-cpu-*' \
+               -o -name 'cinder-link-*' \) -print0 2>/dev/null)
     if [ -d "$dir/thinlto-cache" ]; then
       while IFS= read -r -d '' f; do
         rm -f -- "$f" && count=$((count + 1))
@@ -310,7 +311,7 @@ tungsten_wipe_store() {
     # ordinary directory into the target of a recursive wipe.
     while IFS= read -r -d '' entry; do
       case "${entry##*/}" in
-        irbin-*|irshard-*|linkbin-*|companion-*.o|runtime-*|*.twc|*.memo|media-codecs-v1.cache|run|thinlto-cache|autotune|debug|gpu-bench|satori|parity|suites|bin|.gc-*) ;;
+        irbin-*|irshard-*|linkbin-*|companion-*.o|runtime-*|cinder-link-*|cinder-rt-lto-*|cinder-minrt-*|*.twc|*.memo|media-codecs-v1.cache|run|thinlto-cache|autotune|debug|gpu-bench|satori|parity|suites|bin|.gc-*) ;;
         *) printf 'Refusing mixed-use cache directory: %s\n' "$dir" >&2; return 2 ;;
       esac
     done < <(find "$dir" -mindepth 1 -maxdepth 1 -print0)

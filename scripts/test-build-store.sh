@@ -73,12 +73,15 @@ make_cache() {
   : >"$dir/core-render-v1-1-2.twc"
   : >"$dir/target-probe-v1-1.twc"
   : >"$dir/native-arm-cpu-v1-1.twc"
+  : >"$dir/cinder-link-v3-1.txt"
   : >"$dir/loader-ast-1.memo"
   mkdir -p "$dir/thinlto-cache"
   : >"$dir/thinlto-cache/llvmcache-1"
   # content-named runtime objects
   : >"$dir/runtime-native-1.a"
   : >"$dir/companion-metal_m-1.o"
+  : >"$dir/cinder-rt-lto-v1-1.o"
+  : >"$dir/cinder-minrt-v2-1.o"
   mkdir -p "$dir/runtime-lto-1"
   : >"$dir/runtime-lto-1/runtime.o"
 }
@@ -87,7 +90,7 @@ SHARED="$TMP/shared-store"
 make_cache "$SHARED/compile"
 out="$(clean_env HOME="$TMP/nohome" TUNGSTEN_BUILD_STORE="$SHARED" bash "$STORE_SH" clear-cache /roots/mine)"
 case "$out" in
-  "Cleared 16 cache files ("*) ;;
+  "Cleared 17 cache files ("*) ;;
   *) fail "shared clear-cache reported: $out" ;;
 esac
 c="$SHARED/compile"
@@ -95,12 +98,12 @@ c="$SHARED/compile"
 for gone in irbin-aaaa.manifest irbin-aaaa.bin irbin-aaaa.sidemap run/1111.wc run/1111.wc.id \
             linkbin-1.bin irshard-v1-1.o loader-parse-1.twc loader-parse-1-manifest.twc core-wire-1-2.twc \
             library-wire-v1-1-2.twc core-render-v1-1-2.twc target-probe-v1-1.twc \
-            native-arm-cpu-v1-1.twc loader-ast-1.memo thinlto-cache; do
+            native-arm-cpu-v1-1.twc cinder-link-v3-1.txt loader-ast-1.memo thinlto-cache; do
   [ ! -e "$c/$gone" ] || fail "shared clear-cache left $gone"
 done
 # ... another root's are not, nor is anything named by content.
 for kept in irbin-bbbb.manifest irbin-bbbb.bin run/2222.wc run/2222.wc.id run/eval-0123.w \
-            runtime-native-1.a companion-metal_m-1.o runtime-lto-1/runtime.o; do
+            runtime-native-1.a companion-metal_m-1.o cinder-rt-lto-v1-1.o cinder-minrt-v2-1.o runtime-lto-1/runtime.o; do
   [ -e "$c/$kept" ] || fail "shared clear-cache removed $kept"
 done
 

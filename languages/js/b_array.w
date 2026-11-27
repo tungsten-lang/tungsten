@@ -326,6 +326,296 @@ JS_PROTO_CLEAN = [-1, false, nil]
     return js_is_array(js_proxy_target(v))
   false
 
+# ---- Fast Native LLVM Dense-Array map / filter / reduce (100% spec-exact for numeric arrays!) ----
+
+fn jsr_map_f64_k(src, dst, n, op, kb, nan_b) (i64 i64 i64 i64 i64 i64) i64
+  ll <<~IR
+    %ku = sub i64 %kb, 281474976710656
+    %dk = bitcast i64 %ku to double
+    %sp = inttoptr i64 %src to ptr
+    %dp = inttoptr i64 %dst to ptr
+    br label %init
+  init:
+    br label %loop
+  loop:
+    %i = phi i64 [ 0, %init ], [ %ni, %next ]
+    %done = icmp sge i64 %i, %n
+    br i1 %done, label %ok, label %body
+  body:
+    %pe = getelementptr i64, ptr %sp, i64 %i
+    %v = load i64, ptr %pe, align 8
+    %u = sub i64 %v, 281474976710656
+    %ok1 = icmp ult i64 %u, -4503599627370495
+    br i1 %ok1, label %chk_ord, label %fail
+  chk_ord:
+    %dx = bitcast i64 %u to double
+    %ord = fcmp ord double %dx, %dx
+    br i1 %ord, label %calc, label %fail
+  calc:
+    %is_mul = icmp eq i64 %op, 1
+    br i1 %is_mul, label %do_mul, label %chk_add
+  do_mul:
+    %rm = fmul double %dx, %dk
+    br label %store
+  chk_add:
+    %is_add = icmp eq i64 %op, 2
+    br i1 %is_add, label %do_add, label %chk_sub
+  do_add:
+    %ra = fadd double %dx, %dk
+    br label %store
+  chk_sub:
+    %is_sub = icmp eq i64 %op, 3
+    br i1 %is_sub, label %do_sub, label %do_div
+  do_sub:
+    %rs = fsub double %dx, %dk
+    br label %store
+  do_div:
+    %rd = fdiv double %dx, %dk
+    br label %store
+  store:
+    %res = phi double [ %rm, %do_mul ], [ %ra, %do_add ], [ %rs, %do_sub ], [ %rd, %do_div ]
+    %rord = fcmp ord double %res, %res
+    %rb0 = bitcast double %res to i64
+    %rb1 = add i64 %rb0, 281474976710656
+    %rb = select i1 %rord, i64 %rb1, i64 %nan_b
+    %pd = getelementptr i64, ptr %dp, i64 %i
+    store i64 %rb, ptr %pd, align 8
+    br label %next
+  next:
+    %ni = add i64 %i, 1
+    br label %loop
+  ok:
+    ret i64 1
+  fail:
+    ret i64 0
+  IR
+
+fn jsr_filter_f64_mod(src, dst, n, eq_mode, k_i, c_i) (i64 i64 i64 i64 i64 i64) i64
+  ll <<~IR
+    %dk = sitofp i64 %k_i to double
+    %dc = sitofp i64 %c_i to double
+    %sp = inttoptr i64 %src to ptr
+    %dp = inttoptr i64 %dst to ptr
+    br label %init
+  init:
+    br label %loop
+  loop:
+    %i = phi i64 [ 0, %init ], [ %ni, %next ]
+    %to = phi i64 [ 0, %init ], [ %nto, %next ]
+    %done = icmp sge i64 %i, %n
+    br i1 %done, label %ok, label %body
+  body:
+    %pe = getelementptr i64, ptr %sp, i64 %i
+    %v = load i64, ptr %pe, align 8
+    %u = sub i64 %v, 281474976710656
+    %ok1 = icmp ult i64 %u, -4503599627370495
+    br i1 %ok1, label %chk_ord, label %fail
+  chk_ord:
+    %dx = bitcast i64 %u to double
+    %ord = fcmp ord double %dx, %dx
+    br i1 %ord, label %chk_int, label %fail
+  chk_int:
+    %xi = fptosi double %dx to i64
+    %xf = sitofp i64 %xi to double
+    %exact = fcmp oeq double %xf, %dx
+    br i1 %exact, label %int_mod, label %fp_mod
+  int_mod:
+    %ir = srem i64 %xi, %k_i
+    %ieq = icmp eq i64 %ir, %c_i
+    br label %decide
+  fp_mod:
+    %fr = frem double %dx, %dk
+    %feq = fcmp oeq double %fr, %dc
+    br label %decide
+  decide:
+    %eqv = phi i1 [ %ieq, %int_mod ], [ %feq, %fp_mod ]
+    %want_eq = icmp eq i64 %eq_mode, 1
+    %inv = xor i1 %eqv, true
+    %keep = select i1 %want_eq, i1 %eqv, i1 %inv
+    br i1 %keep, label %emit, label %skip
+  emit:
+    %pd = getelementptr i64, ptr %dp, i64 %to
+    store i64 %v, ptr %pd, align 8
+    %to1 = add i64 %to, 1
+    br label %next
+  skip:
+    br label %next
+  next:
+    %nto = phi i64 [ %to1, %emit ], [ %to, %skip ]
+    %ni = add i64 %i, 1
+    br label %loop
+  ok:
+    ret i64 %to
+  fail:
+    ret i64 -1
+  IR
+
+fn jsr_reduce_f64_op(src, n, acc_b, op) (i64 i64 i64 i64) i64
+  ll <<~IR
+    %au0 = sub i64 %acc_b, 281474976710656
+    %da0 = bitcast i64 %au0 to double
+    %sp = inttoptr i64 %src to ptr
+    br label %init
+  init:
+    br label %loop
+  loop:
+    %i = phi i64 [ 0, %init ], [ %ni, %next ]
+    %acc = phi double [ %da0, %init ], [ %nacc, %next ]
+    %done = icmp sge i64 %i, %n
+    br i1 %done, label %ok, label %body
+  body:
+    %pe = getelementptr i64, ptr %sp, i64 %i
+    %v = load i64, ptr %pe, align 8
+    %u = sub i64 %v, 281474976710656
+    %ok1 = icmp ult i64 %u, -4503599627370495
+    br i1 %ok1, label %chk_ord, label %fail
+  chk_ord:
+    %dx = bitcast i64 %u to double
+    %ord = fcmp ord double %dx, %dx
+    br i1 %ord, label %calc, label %fail
+  calc:
+    %is_add = icmp eq i64 %op, 1
+    br i1 %is_add, label %do_add, label %do_mul
+  do_add:
+    %ra = fadd double %acc, %dx
+    br label %next
+  do_mul:
+    %rm = fmul double %acc, %dx
+    br label %next
+  next:
+    %nacc = phi double [ %ra, %do_add ], [ %rm, %do_mul ]
+    %ni = add i64 %i, 1
+    br label %loop
+  ok:
+    %aord = fcmp ord double %acc, %acc
+    br i1 %aord, label %ret_ok, label %fail
+  ret_ok:
+    %ab = bitcast double %acc to i64
+    %res = add i64 %ab, 281474976710656
+    ret i64 %res
+  fail:
+    ret i64 0
+  IR
+
+fn jsr_copy_u64s(dst, src, n) (i64 i64 i64) i64
+  ll <<~IR
+    %dp = inttoptr i64 %dst to ptr
+    %sp = inttoptr i64 %src to ptr
+    br label %init
+  init:
+    br label %loop
+  loop:
+    %i = phi i64 [ 0, %init ], [ %ni, %body ]
+    %done = icmp sge i64 %i, %n
+    br i1 %done, label %ok, label %body
+  body:
+    %ps = getelementptr i64, ptr %sp, i64 %i
+    %pd = getelementptr i64, ptr %dp, i64 %i
+    %v = load i64, ptr %ps, align 8
+    store i64 %v, ptr %pd, align 8
+    %ni = add i64 %i, 1
+    br label %loop
+  ok:
+    ret i64 0
+  IR
+
+-> js_hof_single_ret(f, nparams)
+  return nil if !f.is_a?(JS:Function) || f.code == nil || (f.code.flags & CODE_CLASS) != 0
+  jf = f.code.node
+  return nil if !jf.is_a?(JaFunc) || !jf.simple || jf.dynamic || jf.free.size > 0 || jf.params.size != nparams
+  n = jf.node
+  re = nil
+  if jf.arrow && n.has?(F_EXPR_BODY)
+    re = n.b
+  elsif n.b.is_a?(Array) && n.b.size == 1 && n.b[0].kind == :return
+    re = n.b[0].a
+  return nil if re == nil
+  [jf, re]
+
+-> js_arr_map_fast(o, f)
+  return nil if !js_default_species?(o)
+  ob = wvalue_bits(o) ## i64
+  return nil if (jsr_aflags(ob) & 15) != JS_AF_ARRAY || jsr_arr_start(ob) != 0
+  info = js_hof_single_ret(f, 1)
+  return nil if info == nil
+  jf = info[0]
+  re = info[1]
+  return nil if re.kind != :binary
+  op_s = re.str
+  op = op_s == "*" ? 1 : (op_s == "+" ? 2 : (op_s == "-" ? 3 : (op_s == "/" ? 4 : 0)))
+  return nil if op == 0
+  p0 = jf.params[0]
+  kv = nil
+  if re.a.kind == :ident && re.a.x != nil && re.a.x.binding == p0 && re.b.kind == :num
+    kv = re.b.a
+  elsif (op == 1 || op == 2) && re.b.kind == :ident && re.b.x != nil && re.b.x.binding == p0 && re.a.kind == :num
+    kv = re.a.a
+  return nil if kv == nil || kv != kv
+  n = o.size
+  out = Array.new(n, nil)
+  if n > 0
+    ok = jsr_map_f64_k(jsr_arr_slots_ptr(ob), jsr_arr_slots_ptr(wvalue_bits(out) ## i64), n, op, wvalue_bits(kv) ## i64, wvalue_bits(js_nan()) ## i64)
+    return nil if ok == 0
+  js_mark_array(out)
+
+-> js_arr_filter_fast(o, f)
+  return nil if !js_default_species?(o)
+  ob = wvalue_bits(o) ## i64
+  return nil if (jsr_aflags(ob) & 15) != JS_AF_ARRAY || jsr_arr_start(ob) != 0
+  info = js_hof_single_ret(f, 1)
+  return nil if info == nil
+  jf = info[0]
+  re = info[1]
+  return nil if re.kind != :binary || (re.str != "===" && re.str != "!==" && re.str != "==" && re.str != "!=")
+  eq_mode = (re.str == "===" || re.str == "==") ? 1 : 0
+  p0 = jf.params[0]
+  lhs = re.a
+  rhs = re.b
+  if rhs.kind == :binary && rhs.str == "%"
+    t_sw = lhs; lhs = rhs; rhs = t_sw
+  return nil if lhs.kind != :binary || lhs.str != "%" || rhs.kind != :num
+  return nil if lhs.a.kind != :ident || lhs.a.x == nil || lhs.a.x.binding != p0 || lhs.b.kind != :num
+  kf = lhs.b.a
+  cf = rhs.a
+  return nil if kf != kf || cf != cf || kf == ~0.0
+  ki = kf.to_i
+  ci = cf.to_i
+  return nil if ki == 0 || ki.to_f != kf || ci.to_f != cf || kf < ~-2147483648.0 || kf > ~2147483647.0 || cf < ~-2147483648.0 || cf > ~2147483647.0
+  n = o.size
+  return js_mark_array([]) if n == 0
+  buf = JS_SORT_SCRATCH[0]
+  if buf.size < n
+    buf = i64[n]
+    JS_SORT_SCRATCH[0] = buf
+  dst_p = jsr_arr_slots_ptr(wvalue_bits(buf) ## i64)
+  cnt = jsr_filter_f64_mod(jsr_arr_slots_ptr(ob), dst_p, n, eq_mode, ki, ci)
+  return nil if cnt < 0
+  out = Array.new(cnt, nil)
+  jsr_copy_u64s(jsr_arr_slots_ptr(wvalue_bits(out) ## i64), dst_p, cnt) if cnt > 0
+  js_mark_array(out)
+
+-> js_arr_reduce_fast(o, f, acc)
+  return JS_HOLE if !js_plain_array?(o) || !js_number?(acc) || acc != acc
+  ob = wvalue_bits(o) ## i64
+  return JS_HOLE if (jsr_aflags(ob) & 15) != JS_AF_ARRAY || jsr_arr_start(ob) != 0
+  info = js_hof_single_ret(f, 2)
+  return JS_HOLE if info == nil
+  jf = info[0]
+  re = info[1]
+  return JS_HOLE if re.kind != :binary || (re.str != "+" && re.str != "*")
+  op = re.str == "+" ? 1 : 2
+  p0 = jf.params[0]
+  p1 = jf.params[1]
+  return JS_HOLE if re.a.kind != :ident || re.b.kind != :ident || re.a.x == nil || re.b.x == nil
+  ba = re.a.x.binding
+  bb = re.b.x.binding
+  return JS_HOLE if !((ba == p0 && bb == p1) || (ba == p1 && bb == p0))
+  n = o.size
+  return acc if n == 0
+  rb = jsr_reduce_f64_op(jsr_arr_slots_ptr(ob), n, wvalue_bits(acc) ## i64, op)
+  return JS_HOLE if rb == 0
+  wvalue_from_bits(rb)
+
 # ---- iteration-style methods: f.call(thisArg, value, index, obj) ----
 
 -> js_arr_each(this, args, mode)
@@ -333,6 +623,12 @@ JS_PROTO_CLEAN = [-1, false, nil]
   n = js_len_of(o)
   f = js_fn_arg(args, 0, mode.to_s)
   t = js_arg(args, 1)
+  if mode == :map
+    fast = js_arr_map_fast(o, f)
+    return fast if fast != nil
+  elsif mode == :filter
+    fast = js_arr_filter_fast(o, f)
+    return fast if fast != nil
   out = nil
   if mode == :map
     out = js_species_create(o, n)
@@ -389,6 +685,9 @@ JS_PROTO_CLEAN = [-1, false, nil]
   o = js_to_obj(this)
   n = js_len_of(o)
   f = js_fn_arg(args, 0, "reduce")
+  if !right && args.size >= 2
+    fast_r = js_arr_reduce_fast(o, f, args[1])
+    return fast_r if fast_r != JS_HOLE
   i = right ? n - 1 : 0
   acc = nil
   if args.size >= 2

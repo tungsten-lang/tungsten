@@ -5805,6 +5805,14 @@ static double bench_prime_prefilter(const char *mode, int iters) {
 #endif
 
 int main(int argc, char **argv) {
+#ifndef W_COMPILE_NO_GC
+    {
+        const char *gc_env = getenv("TUNGSTEN_BENCH_GC");
+        if (gc_env && strcmp(gc_env, "1") == 0) {
+            w_gc_enable();
+        }
+    }
+#endif
 #ifdef BN_BZ_PROFILE_COUNTS
     if (argc == 3 && strcmp(argv[1], "--trace-isqrt-bz") == 0) {
         int32_t limbs = (int32_t)atoi(argv[2]);

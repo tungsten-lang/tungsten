@@ -24,11 +24,16 @@
   return "peephole"        if s == "peephole" || s == "instcombine"
   return "reg-promote"     if s == "reg-promote" || s == "regalloc"
   return "leaf-frame-elim" if s == "leaf-frame-elim" || s == "omit-leaf-frame-pointer"
+  return "lto-internalize" if s == "lto-internalize" || s == "internalize"
+  return "ipa-sccp"        if s == "ipa-sccp" || s == "ipsccp" || s == "ipa-constprop"
+  return "lto-dce"         if s == "lto-dce" || s == "lto-global-dce" || s == "global-dce"
   ""
 
 CINDER_ALL_PASSES = [
   "always-inline",
   "inline",
+  "lto-internalize",
+  "ipa-sccp",
   "const-fold",
   "sroa",
   "jump-threading",
@@ -39,14 +44,15 @@ CINDER_ALL_PASSES = [
   "simd",
   "unroll-loops",
   "dce",
+  "lto-dce",
   "peephole",
   "reg-promote",
   "leaf-frame-elim"
 ]
 
 + CinderOptConfig
-  rw :opt_level, :fast_math, :strict_math, :debug, :frame_pointers, :print_passes
-  rw :overrides, :explicit_passes, :pass_stats
+  rw :opt_level, :fast_math, :strict_math, :debug, :frame_pointers, :print_passes, :lto_mode
+  rw :overrides, :explicit_passes, :pass_stats, :pass_agg, :pass_agg_order
 
   -> new(level = 2)
     @opt_level = level
@@ -55,9 +61,15 @@ CINDER_ALL_PASSES = [
     @debug = false
     @frame_pointers = false
     @print_passes = false
+    @lto_mode = :none
     @overrides = {}
     @explicit_passes = nil
     @pass_stats = []
+    @pass_agg = {}
+    @pass_agg_order = []
+
+  -> lto_enabled?
+    @lto_mode != :none
 
   -> clone
     cp = CinderOptConfig.new(@opt_level)
@@ -66,6 +78,7 @@ CINDER_ALL_PASSES = [
     cp.debug = @debug
     cp.frame_pointers = @frame_pointers
     cp.print_passes = @print_passes
+    cp.lto_mode = @lto_mode
     @overrides.keys.each ->(k)
       cp.overrides[k] = @overrides[k]
     if @explicit_passes != nil
@@ -100,6 +113,7 @@ CINDER_ALL_PASSES = [
     if @opt_level == 1
       return true if cn == "inline" || cn == "const-fold" || cn == "sroa" || cn == "jump-threading"
       return true if cn == "strength-reduce" || cn == "carry-chains" || cn == "dce"
+      return true if cn == "lto-internalize" || cn == "ipa-sccp" || cn == "lto-dce"
       return true if cn == "peephole" || cn == "reg-promote"
       return (!@debug && !@frame_pointers) if cn == "leaf-frame-elim"
       return false
@@ -126,8 +140,8 @@ CINDER_ALL_PASSES = [
   -> inline_threshold
     return 0 if !pass_enabled?("inline")
     return 15  if @opt_level == 1
-    return 200 if @opt_level >= 3
-    65
+    return 320 if @opt_level >= 3
+    90
 
   # Parse a single CLI flag into this config. Returns true if recognized, false otherwise.
   -> parse_flag(arg)
@@ -175,6 +189,15 @@ CINDER_ALL_PASSES = [
     if arg == "--print-passes"
       @print_passes = true
       return true
+    if arg == "--lto" || arg == "-flto" || arg == "-flto=thin"
+      @lto_mode = :thin
+      return true
+    if arg == "--full-lto" || arg == "-flto=full"
+      @lto_mode = :full
+      return true
+    if arg == "--no-lto" || arg == "-fno-lto"
+      @lto_mode = :none
+      return true
     if arg.starts_with?("--opt-passes=")
       spec = arg.slice(13, arg.size() - 13).strip()
       @explicit_passes = {}
@@ -197,7 +220,17 @@ CINDER_ALL_PASSES = [
     parse_flag(arg)
 
   -> record_stat(pass_name, before_insts, after_insts, elapsed_us)
-    @pass_stats.push([pass_name, before_insts, after_insts, elapsed_us])
+    if @pass_stats.size() < 64
+      @pass_stats.push([pass_name, before_insts, after_insts, elapsed_us])
+    ag = @pass_agg[pass_name]
+    if ag == nil
+      @pass_agg[pass_name] = [1, before_insts, after_insts, elapsed_us]
+      @pass_agg_order.push(pass_name)
+    else
+      ag[0] = ag[0] + 1
+      ag[1] = ag[1] + before_insts
+      ag[2] = ag[2] + after_insts
+      ag[3] = ag[3] + elapsed_us
     nil
 
   -> enabled_pass_list
@@ -212,7 +245,8 @@ CINDER_ALL_PASSES = [
   -> summary_line
     fp_s = @fast_math ? "fast" : (@strict_math ? "strict" : "precise")
     dbg_s = @debug ? "debug" : "no-debug"
-    "cinder opt: -O" + @opt_level.to_s() + " math=" + fp_s + " " + dbg_s + " passes=\[" + enabled_pass_list().join(",") + "\]"
+    lto_s = @lto_mode == :full ? " lto=full" : (@lto_mode == :thin ? " lto=thin" : "")
+    "cinder opt: -O" + @opt_level.to_s() + " math=" + fp_s + " " + dbg_s + lto_s + " passes=\[" + enabled_pass_list().join(",") + "\]"
 
   -> summary
     summary_line()
@@ -221,13 +255,14 @@ CINDER_ALL_PASSES = [
     hdr = summary_line()
     hdr = hdr + " (" + target_label + ")" if target_label != ""
     ccall("w_eputs", hdr)
-    si = 0
-    while si < @pass_stats.size()
-      st = @pass_stats[si]
-      delta = st[2] - st[1]
+    ai = 0
+    while ai < @pass_agg_order.size()
+      pnm = @pass_agg_order[ai]
+      ag = @pass_agg[pnm]
+      delta = ag[2] - ag[1]
       d_str = delta >= 0 ? ("+" + delta.to_s()) : delta.to_s()
-      ccall("w_eputs", "  pass " + st[0] + ": " + st[1].to_s() + " -> " + st[2].to_s() + " insts (" + d_str + ") in " + st[3].to_s() + " us")
-      si += 1
+      ccall("w_eputs", "  pass " + pnm + " (n=" + ag[0].to_s() + "): " + ag[1].to_s() + " -> " + ag[2].to_s() + " insts (" + d_str + ") in " + (ag[3] / 1000).to_s() + " ms (" + ag[3].to_s() + " us)")
+      ai += 1
     nil
 
   -> to_cli_args
@@ -236,6 +271,8 @@ CINDER_ALL_PASSES = [
     parts.push("--strict-math") if @strict_math
     parts.push(@debug ? "--debug" : "--no-debug")
     parts.push("--frame-pointers") if @frame_pointers && !@debug
+    parts.push("--full-lto") if @lto_mode == :full
+    parts.push("--lto") if @lto_mode == :thin
     parts.push("--print-passes") if @print_passes
     if @explicit_passes != nil
       ep = []

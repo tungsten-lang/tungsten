@@ -841,7 +841,12 @@ typedef struct {
     uint8_t total;
     BnDivPreinvCache div_preinv;
 } WBigintPool;
+#if defined(_WIN32)
 static __thread WBigintPool bigint_pool_state;
+#else
+__attribute__((visibility("hidden"))) __thread WBigintPool w_bigint_pool_state;
+#define bigint_pool_state w_bigint_pool_state
+#endif
 
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
 _Static_assert(BN_BIGINT_POOL_MAX_CAP <= (1U << 15),
@@ -17204,34 +17209,60 @@ void w_slab_init(void) {
     g_string_slab.next_slot = 1;  /* slot 0 reserved (empty sentinel) */
     g_string_slab.page_hwm = 0;
     g_string_slab.frozen = 0;
+    g_string_slab.static_slots = 0;
+    g_string_slab.is_static_ro = 0;
+    g_string_slab.intern_built = 1;
     pthread_mutex_init(&g_string_slab.lock, NULL);
 }
 
-/* Initialize slab from pre-computed static data (emitted by compiler).
- * Copies static slot data into a writable mmap region and rebuilds g_intern. */
+/* Initialize slab from pre-computed static data (emitted by compiler / Cinder
+ * into __TEXT,__const or .rodata, which the OS kernel mmaps read-only directly
+ * from the binary file). Points g_string_slab.base straight at the mmap'd
+ * static block — zero anonymous mmap, zero mprotect, zero memcpy at startup!
+ * g_intern + g_slab_filter are populated lazily on the first runtime w_string
+ * lookup, and a writable mmap arena is allocated copy-on-write only if a
+ * non-frozen slab allocates a new dynamic slot. */
 static inline uint8_t *w_slab_slot(uint32_t index);
 static void w_slab_intern_grow(void);
+
+static __attribute__((noinline)) void w_slab_ensure_intern_ready(void) {
+    if (g_string_slab.intern_built) return;
+    g_string_slab.intern_built = 1;
+    if (g_string_slab.static_slots > 1) {
+        w_slab_rebuild_intern(g_string_slab.static_slots);
+    }
+}
+
+static __attribute__((noinline)) void w_slab_promote_writable(void) {
+    if (!g_string_slab.is_static_ro) return;
+    const uint8_t *ro_data = g_string_slab.base;
+    size_t data_size = (size_t)g_string_slab.static_slots * W_SLAB_SLOT_SIZE;
+    uint8_t *rw_base = mmap(NULL, W_SLAB_TOTAL_SIZE,
+                            PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (rw_base == MAP_FAILED) die("string slab: mmap failed");
+    size_t page_size = (size_t)sysconf(_SC_PAGESIZE);
+    size_t needed = (data_size + page_size - 1) & ~(page_size - 1);
+    if (needed > 0) {
+        if (mprotect(rw_base, needed, PROT_READ | PROT_WRITE) != 0)
+            die("string slab: mprotect failed");
+        memcpy(rw_base, ro_data, data_size);
+    }
+    g_string_slab.base = rw_base;
+    g_string_slab.page_hwm = (uint32_t)needed;
+    g_string_slab.is_static_ro = 0;
+}
 
 void w_slab_init_static(const uint8_t *data, uint32_t total_slots) {
     if (g_string_slab.base) return;
 
-    w_slab_hash_cache_init();
-    size_t data_size = (size_t)total_slots * W_SLAB_SLOT_SIZE;
-    g_string_slab.base = mmap(NULL, W_SLAB_TOTAL_SIZE,
-                              PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
-
-    if (g_string_slab.base == MAP_FAILED) die("string slab: mmap failed");
-
-    /* Make data pages writable and copy static data */
-    size_t page_size = (size_t)sysconf(_SC_PAGESIZE);
-    size_t needed = (data_size + page_size - 1) & ~(page_size - 1);
-    mprotect(g_string_slab.base, needed, PROT_READ | PROT_WRITE);
-    memcpy(g_string_slab.base, data, data_size);
+    g_string_slab.base = (uint8_t *)(uintptr_t)data;
     g_string_slab.next_slot = total_slots;
-    g_string_slab.page_hwm = (uint32_t)needed;
+    g_string_slab.page_hwm = 0;
     g_string_slab.frozen = 0;
+    g_string_slab.static_slots = total_slots;
+    g_string_slab.is_static_ro = 1;
+    g_string_slab.intern_built = (total_slots <= 1) ? 1 : 0;
     pthread_mutex_init(&g_string_slab.lock, NULL);
-    w_slab_rebuild_intern(total_slots);
 }
 
 /* Callable from Tungsten code: freeze_slab() */
@@ -17281,6 +17312,7 @@ static inline uint64_t w_slab_hash_index(uint32_t index, size_t len) {
 
 /* Allocate N contiguous slab slots. Returns index of first slot, or 0 on failure. */
 static inline uint32_t w_slab_alloc(int n) {
+    if (__builtin_expect(g_string_slab.is_static_ro, 0)) w_slab_promote_writable();
     uint32_t idx = g_string_slab.next_slot;
     if (__builtin_expect(idx + n > W_SLAB_MAX_SLOTS, 0)) return 0;  /* exhausted → caller uses mode 7 */
     g_string_slab.next_slot = idx + n;
@@ -17569,6 +17601,7 @@ static WValue w_string_n_known_ascii(const char *s, size_t len, int ascii) {
 
     /* When frozen: check intern table for existing slab entry, fall back to heap */
     if (g_string_slab.frozen) {
+        if (__builtin_expect(!g_string_slab.intern_built, 0)) w_slab_ensure_intern_ready();
         if (w_slab_filter_maybe(s, len)) {
             uint64_t h = w_hash_wyhash((const uint8_t *)s, len);
             WValue existing = w_slab_lookup_existing(s, len, h);
@@ -17584,6 +17617,7 @@ static WValue w_string_n_known_ascii(const char *s, size_t len, int ascii) {
     uint64_t h = w_hash_wyhash((const uint8_t *)s, len);
 
     if (__builtin_expect(g_slab_needs_lock, 0)) pthread_mutex_lock(&g_string_slab.lock);
+    if (__builtin_expect(!g_string_slab.intern_built, 0)) w_slab_ensure_intern_ready();
     WValue v = w_slab_intern(s, len, h, ascii);
     if (__builtin_expect(g_slab_needs_lock, 0)) pthread_mutex_unlock(&g_string_slab.lock);
 
@@ -28942,6 +28976,15 @@ WValue w_str_append(WValue str, WValue suffix) {
 /* ---- I/O ---- */
 
 WValue w_puts(WValue v) {
+    if (__builtin_expect(w_is_string(v), 1)) {
+        char buf[6];
+        const char *p;
+        size_t len;
+        w_str_data(v, buf, &p, &len);
+        if (len > 0) fwrite(p, 1, len, stdout);
+        fputc('\n', stdout);
+        return W_NIL;
+    }
     WValue s = w_to_s(v);
     printf("%s\n", as_str(s));
     return W_NIL;
@@ -39230,6 +39273,18 @@ __attribute__((always_inline))
 WValue w_bigint_release_dead_raw(WValue v) {
     if (v != W_NIL) bigint_release_if_live(w_as_bigint(v));
     return W_NIL;
+}
+WValue w_bigint_alloc_hot_cold(int64_t cap) {
+    int64_t c = cap < 1 ? 1 : cap;
+    if (c > (int64_t)INT32_MAX / 8) die("w_bigint_alloc_hot: capacity too large");
+    return bigint_box(bigint_alloc_raw((int32_t)c));
+}
+void w_bigint_release_dead_cold(WValue v) {
+    if (v != W_NIL) bigint_release_if_live(w_as_bigint(v));
+}
+void w_bigint_displaced_cold(uint64_t displaced, uint64_t cur_ptr) {
+    WBigint *prev = bigint_hot_ptr(displaced);
+    if ((uint64_t)(uintptr_t)prev != cur_ptr) bigint_release_cold(prev);
 }
 WValue w_bigint_finish_add(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);

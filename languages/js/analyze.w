@@ -1640,6 +1640,9 @@ use parser
     nil
 
   -> release
+    if JS_GC_ON[0]
+      @src = nil
+      return nil
     seen = {}
     seen[(wvalue_bits(JS_EMPTY_BLOCK) ## i64) & 140737488355312] = true
     seen[(wvalue_bits(JS_EMPTY_BLOCK.list) ## i64) & 140737488355312] = true

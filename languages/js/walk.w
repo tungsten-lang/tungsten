@@ -119,7 +119,7 @@ WK_PARSE_CACHE_HOOK = [nil, nil]
   an = nil
   if mode == nil && WK_PARSE_CACHE_HOOK[0] != nil
     hit = WK_PARSE_CACHE_HOOK[0].call(src, url)
-    if hit != nil
+    if hit != nil && hit[1] != nil && hit[1].funcs != nil && hit[1].funcs.size > 0 && hit[1].funcs[0] != nil
       prog = hit[0]
       an = hit[1]
   if an == nil
@@ -315,7 +315,7 @@ WK_JIT_OSR_THRESH = 16
     h = c.jit_hits + 1
     c.jit_hits = h
     if h >= WK_JIT_FN_THRESH
-      if jit_compile_and_install(c)
+      if jit_compile_and_install(c, argc > 0 ? [a0, a1, a2, a3] : nil)
         return jit_enter_fn(c, f, this, argc, a0, a1, a2, a3, more)
   wk_call_tier0(f, this, argc, a0, a1, a2, a3, more)
 
@@ -1266,6 +1266,7 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
   thr = wk_loop_heavy?(s.b) ? 2 : WK_JIT_OSR_THRESH
   while true
     js_check_deadline() if JS_DEADLINE_SEC[0] > ~0.0
+    js_ui_pump_maybe() if JS_UI_PUMP_HOOK[0] != nil
     js_gc_backedge(act) if JS_GC_ON[0] && JS_GC_HEAP.size >= JS_GC_NEXT[0]
     if it == thr && labels == nil && JS_DEADLINE_SEC[0] <= ~0.0
       rc = jit_try_osr(s, act)
@@ -1282,6 +1283,7 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
 -> wk_do_while(s, act, labels)
   while true
     js_check_deadline() if JS_DEADLINE_SEC[0] > ~0.0
+    js_ui_pump_maybe() if JS_UI_PUMP_HOOK[0] != nil
     js_gc_backedge(act) if JS_GC_ON[0] && JS_GC_HEAP.size >= JS_GC_NEXT[0]
     wk_ex(s.a, act)
     r = wk_loop_signal(act, labels)
@@ -1310,6 +1312,7 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
     thr = wk_loop_heavy?(s.d) ? 2 : WK_JIT_OSR_THRESH
     while true
       js_check_deadline() if JS_DEADLINE_SEC[0] > ~0.0
+      js_ui_pump_maybe() if JS_UI_PUMP_HOOK[0] != nil
       js_gc_backedge(act) if JS_GC_ON[0] && JS_GC_HEAP.size >= JS_GC_NEXT[0]
       if !has_disp && it == thr && !per && labels == nil && JS_DEADLINE_SEC[0] <= ~0.0
         rc = jit_try_osr(s, act)
@@ -1362,12 +1365,13 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
   wk_scope_enter(fs, act) if fs.is_a?(JaScope)
   obj = wk_ev(s.b, act)
   ks = js_for_in_keys(obj)
+  sh0 = obj.is_a?(JS:Object) && !obj.shape.dict ? obj.shape : nil
   i = 0
   while i < ks.size
     k = ks[i]
     i += 1
-    # a key deleted before it is reached is not visited
-    if js_object?(obj) && !jhas_property?(obj, k)
+    # a key deleted before it is reached is not visited (skip lookup if shape is unchanged!)
+    if !(sh0 != nil && obj.shape == sh0) && js_object?(obj) && !jhas_property?(obj, k)
       next
     if fs.is_a?(JaScope)
       act.env = saved
@@ -1543,10 +1547,15 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
 -> wk_switch(s, act, labels)
   saved = act.env
   bs = s.x
-  wk_scope_enter(bs, act) if bs.is_a?(JaScope)
   d = wk_ev(s.a, act)
+  wk_scope_enter(bs, act) if bs.is_a?(JaScope)
   n = s.list.size
   meta = wk_switch_meta(s)
+  if meta[0]
+    hi = 0
+    while hi < n
+      wk_hoist_functions(s.list[hi].list, act)
+      hi += 1
   lmap = meta[1]
   ix = -1
   if lmap != nil && (js_number?(d) || js_string?(d))
@@ -1572,11 +1581,6 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
         dflt = i if s.list[i].a == nil
         i += 1
       ix = dflt
-  if meta[0]
-    i = 0
-    while i < n
-      wk_hoist_functions(s.list[i].list, act)
-      i += 1
   i = ix
   while i < n
     wk_stmts(s.list[i].list, act)
@@ -1601,7 +1605,13 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
   if k == :member
     return wk_super_get(e, act) if e.a.kind == :super
     o = wk_ev(e.a, act)
-    return js_getv(o, wk_ev(e.b, act)) if e.has?(F_COMPUTED)
+    if e.has?(F_COMPUTED)
+      idx = wk_ev(e.b, act)
+      if js_array?(o) && (js_array_flags(o) & 15) == JS_AF_ARRAY && js_number?(idx)
+        ii = jsr_i32(wvalue_bits(idx) ## i64)
+        if ii >= 0 && ii < o.size && ii.to_f == idx
+          return o[ii]
+      return js_getv(o, idx)
     return js_priv_get(o, wk_read_ref(e.b.x, act)) if e.b.kind == :private_name
     return js_getp_ic(o, e.b.str, wk_ic(e))
   if k == :call
@@ -1689,7 +1699,12 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
   if k == :regex
     return js_regexp_create(e.str, e.a)
   if k == :bigint
-    return js_bigint_literal(e.str)
+    bv = e.x
+    if bv == nil
+      bv = js_bigint_literal(e.str)
+      e.x = bv
+      jit_keep(bv)
+    return bv
   js_throw(js_make_error("SyntaxError", "tier 0: expression " + k.to_s))
 
 
@@ -1832,6 +1847,16 @@ WK_AOPS = {"+=" => 1, "-=" => 2, "*=" => 3, "/=" => 4, "%=" => 5, "|=" => 14, "&
   if c == nil
     c = WK_OPS[e.str]
     e.d = c
+  if js_number?(a) && js_number?(b)
+    return a + b if c == 1
+    return a - b if c == 2
+    return a * b if c == 3
+    return a < b if c == 6
+    return a > b if c == 7
+    return a <= b if c == 8
+    return a >= b if c == 9
+    return a == b if c == 10
+    return a != b if c == 11
   wk_binop_code(c, a, b, e.str)
 
 -> wk_unary(e, act)
@@ -1933,9 +1958,16 @@ WK_AOPS = {"+=" => 1, "-=" => 2, "*=" => 3, "/=" => 4, "%=" => 5, "|=" => 14, "&
     nv = js_inc(old, inc)
     js_priv_set(o, pn, nv)
     return e.has?(F_PREFIX) ? nv : old
-  raw_key = t.has?(F_COMPUTED) ? wk_ev(t.b, act) : t.b.str
+  if !t.has?(F_COMPUTED)
+    key = t.b.str
+    js_throw_type("Cannot read properties of " + js_to_display(o)) if js_nullish?(o)
+    old = js_tonumeric(js_getp_ic(o, key, wk_ic(e)))
+    nv = js_inc(old, inc)
+    js_setp_ic(o, key, nv, wk_ic(t), act.f.strict)
+    return e.has?(F_PREFIX) ? nv : old
+  raw_key = wk_ev(t.b, act)
   js_throw_type("Cannot read properties of " + js_to_display(o)) if js_nullish?(o)
-  key = t.has?(F_COMPUTED) ? js_to_property_key(raw_key) : raw_key
+  key = js_to_property_key(raw_key)
   old = js_tonumeric(js_getv(o, key))
   nv = js_inc(old, inc)
   js_setv(o, key, nv, act.f.strict)
@@ -2031,12 +2063,17 @@ WK_AOPS = {"+=" => 1, "-=" => 2, "*=" => 3, "/=" => 4, "%=" => 5, "|=" => 14, "&
     return v
   if !t.has?(F_COMPUTED)
     key = t.b.str
-    v = op == "=" ? wk_ev(e.b, act) : wk_assign_op(e, js_getv(o, key), wk_ev(e.b, act))
+    v = op == "=" ? wk_ev(e.b, act) : wk_assign_op(e, js_getp_ic(o, key, wk_ic(e)), wk_ev(e.b, act))
     js_setp_ic(o, key, v, wk_ic(t), act.f.strict)
     return v
   raw_key = wk_ev(t.b, act)
   if op == "="
     v = wk_ev(e.b, act)
+    if js_array?(o) && (js_array_flags(o) & 15) == JS_AF_ARRAY && js_number?(raw_key)
+      ii = jsr_i32(wvalue_bits(raw_key) ## i64)
+      if ii >= 0 && ii < o.size && ii.to_f == raw_key
+        o[ii] = v
+        return v
     js_setv(o, raw_key, v, act.f.strict)
     return v
   js_throw_type("Cannot read properties of " + js_to_display(o)) if js_nullish?(o)

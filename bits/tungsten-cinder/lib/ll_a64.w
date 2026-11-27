@@ -39,19 +39,20 @@ use ./ll_opt
   cands
 
 + LLA64FuncCompiler
-  rw :fn_ir, :mod_info, :is_macho, :opt_cfg, :a
-  rw :out_arg_bytes, :local_base, :save_off, :save_bytes, :body_frame_bytes
+  rw :fn_ir, :mod_info, :is_macho, :opt_cfg, :rodata_buf, :a
+  rw :out_arg_bytes, :local_base, :save_off, :save_bytes, :asm_spill_off, :body_frame_bytes
   rw :has_inline_asm, :has_any_call, :has_wide128, :omit_frame
-  rw :do_peephole, :do_simd, :slot_reg_g, :slot_reg_f, :used_cs_g, :used_cs_f
+  rw :do_peephole, :do_simd, :slot_reg_g, :slot_reg_f, :vec_reg_q, :used_cs_g, :used_cs_f
   rw :blk_labels, :l_epi, :edge_labels, :edge_list
 
-  -> new(@fn_ir, @mod_info, @is_macho, @opt_cfg = nil)
+  -> new(@fn_ir, @mod_info, @is_macho, @opt_cfg = nil, @rodata_buf = nil)
     @opt_cfg = CinderOptConfig.new(2) if @opt_cfg == nil
     @a = CinderA64.new(@fn_ir.blocks.size() * 32 + 64)
     @out_arg_bytes = 0
     @local_base = 0
     @save_off = 0
     @save_bytes = 0
+    @asm_spill_off = 0
     @body_frame_bytes = 0
     @has_inline_asm = false
     @has_any_call = false
@@ -61,6 +62,7 @@ use ./ll_opt
     @do_simd = @opt_cfg.pass_enabled?("simd")
     @slot_reg_g = {}
     @slot_reg_f = {}
+    @vec_reg_q = {}
     @used_cs_g = []
     @used_cs_f = []
     @blk_labels = []
@@ -95,7 +97,7 @@ use ./ll_opt
         check_sym_tls_call(ins.k1, ins.v1)
         check_sym_tls_call(ins.k2, ins.v2)
         if op == :call_asm
-          @has_inline_asm = true
+          @has_inline_asm = true if ins.extra[0] != ""
         elsif op == :frem
           @has_any_call = true
         elsif op == :intrinsic && ins.pred == "memcpy.p0.p0.i64"
@@ -136,7 +138,7 @@ use ./ll_opt
       pi += 1
 
     # Promote hottest scalar slots into hardware registers when `-freg-promote` is active!
-    if @opt_cfg.pass_enabled?("reg-promote") && !@has_inline_asm && !@fn_ir.is_preserve_most && @fn_ir.slot_is_fp != nil
+    if @opt_cfg.pass_enabled?("reg-promote") && !@fn_ir.is_preserve_most && @fn_ir.slot_is_fp != nil
       g_cands = []
       f_cands = []
       off = ((@fn_ir.alloca_bytes + 15) / 16) * 16
@@ -144,14 +146,14 @@ use ./ll_opt
         kind_fp = @fn_ir.slot_is_fp[off]
         if kind_fp == false
           g_cands.push([off, @fn_ir.slot_uses[off]])
-        elsif kind_fp == true
+        elsif kind_fp == true && !@has_inline_asm
           f_cands.push([off, @fn_ir.slot_uses[off]])
         off += 8
       lla64_sort_slot_candidates(g_cands)
       lla64_sort_slot_candidates(f_cands)
 
       # Zero-frame pure 64-bit leaf fast path (`R_X12..R_X15`, zero `stp fp, lr`, zero `sp` adjustment!)
-      can_leaf = @opt_cfg.pass_enabled?("leaf-frame-elim") && !@opt_cfg.debug && !@opt_cfg.frame_pointers && !@has_any_call && !@fn_ir.uses_ic && !@has_wide128 && !has_in_stack_params && @fn_ir.alloca_bytes == 0 && max_phis == 0 && g_cands.size() <= 4 && f_cands.size() == 0
+      can_leaf = @opt_cfg.pass_enabled?("leaf-frame-elim") && !@opt_cfg.debug && !@opt_cfg.frame_pointers && !@has_any_call && !@has_inline_asm && !@fn_ir.uses_ic && !@has_wide128 && !has_in_stack_params && @fn_ir.alloca_bytes == 0 && max_phis == 0 && g_cands.size() <= 4 && f_cands.size() == 0
       if can_leaf
         leaf_regs = [R_X12, R_X13, R_X14, R_X15]
         li = 0
@@ -163,6 +165,7 @@ use ./ll_opt
         @local_base = 0
         @save_off = 0
         @save_bytes = 0
+        @asm_spill_off = 0
         @body_frame_bytes = 0
         return nil
 
@@ -181,6 +184,64 @@ use ./ll_opt
         @used_cs_f.push(r)
         fi += 1
 
+    # Promote intra-block call-free `<2 x i64>` (`LLTY_V2I64`) SSA vectors directly to NEON `v16..v31`!
+    if @do_simd && @has_wide128
+      v2_def_blk = {}
+      no_qreg = {}
+      bi = 0
+      while bi < @fn_ir.blocks.size()
+        blk = @fn_ir.blocks[bi]
+        blk.phis.each ->(ph)
+          no_qreg[ph.dst] = true if ph.dst >= 0
+          prs = ph.extra
+          pk = 0
+          while pk < prs.size()
+            no_qreg[prs[pk][2]] = true if prs[pk][1] == LLOP_VAL
+            pk += 1
+        ii = 0
+        while ii < blk.insts.size()
+          ins = blk.insts[ii]
+          if ins.dst >= 0 && @fn_ir.val_tys[ins.dst] == LLTY_V2I64
+            if ins.op == :load || ins.op == :and || ins.op == :or || ins.op == :xor
+              v2_def_blk[ins.dst] = bi
+            else
+              no_qreg[ins.dst] = true
+          if ins.op == :extractelement || ins.op == :extractvalue
+            no_qreg[ins.v0] = true if ins.k0 == LLOP_VAL
+          else
+            no_qreg[ins.v0] = true if ins.k0 == LLOP_VAL && v2_def_blk[ins.v0] != nil && v2_def_blk[ins.v0] != bi
+            no_qreg[ins.v1] = true if ins.k1 == LLOP_VAL && v2_def_blk[ins.v1] != nil && v2_def_blk[ins.v1] != bi
+            no_qreg[ins.v2] = true if ins.k2 == LLOP_VAL && v2_def_blk[ins.v2] != nil && v2_def_blk[ins.v2] != bi
+          if ins.extra != nil && (ins.op == :call || ins.op == :intrinsic)
+            ai = 0
+            while ai < ins.extra.size()
+              ca = ins.extra[ai]
+              no_qreg[ca[2]] = true if ca[1] == LLOP_VAL
+              ai += 1
+          ii += 1
+        bi += 1
+
+      bi = 0
+      while bi < @fn_ir.blocks.size()
+        blk = @fn_ir.blocks[bi]
+        blk_has_call = false
+        v2_defs = []
+        ii = 0
+        while ii < blk.insts.size()
+          ins = blk.insts[ii]
+          op = ins.op
+          if op == :call || op == :frem || (op == :call_asm && ins.extra[0] != "") || (op == :intrinsic && ins.pred == "memcpy.p0.p0.i64")
+            blk_has_call = true
+          if ins.dst >= 0 && v2_def_blk[ins.dst] == bi && !no_qreg[ins.dst]
+            v2_defs.push(ins.dst)
+          ii += 1
+        if !blk_has_call && v2_defs.size() > 0 && v2_defs.size() <= 16
+          qi = 0
+          while qi < v2_defs.size()
+            @vec_reg_q[v2_defs[qi]] = 16 + qi
+            qi += 1
+        bi += 1
+
     @out_arg_bytes = ((max_stack_args * 8 + 15) / 16) * 16
     @local_base = @out_arg_bytes
     @save_off = @local_base + @fn_ir.frame_slots_bytes
@@ -195,7 +256,9 @@ use ./ll_opt
       ic_pair  = @fn_ir.uses_ic ? 16 : 0
       @save_bytes = ng_pairs * 16 + nf_pairs * 16 + ic_pair
 
-    @body_frame_bytes = ((@save_off + @save_bytes + 15) / 16) * 16
+    @asm_spill_off = @save_off + @save_bytes
+    asm_spill_bytes = (@has_inline_asm && @used_cs_g.size() > 0) ? 64 : 0
+    @body_frame_bytes = ((@asm_spill_off + asm_spill_bytes + 15) / 16) * 16
     nil
 
   -> slot_sp_off(val_id)
@@ -319,6 +382,36 @@ use ./ll_opt
       succ = @fn_ir.blocks[succ_bid]
       phis = succ.phis
       @a.bind(el)
+      # Fast register-staged PHI copy when <= 4 scalar 64-bit GPR PHIs (zero stack memory ops!)
+      all_gpr64 = phis.size() <= 4
+      pi = 0
+      while all_gpr64 && pi < phis.size()
+        pty = phis[pi].ty
+        all_gpr64 = false if pty == LLTY_I128 || pty == LLTY_V2I64 || pty == LLTY_OV64 || pty == LLTY_F64 || pty == LLTY_F32
+        pi += 1
+
+      if all_gpr64
+        pi = 0
+        while pi < phis.size()
+          ph = phis[pi]
+          prs = ph.extra
+          pk = LLOP_IMM; pv = 0
+          j = 0
+          while j < prs.size()
+            if prs[j][0] == pred_bid
+              pk = prs[j][1]; pv = prs[j][2]
+              j = prs.size()
+            j += 1
+          load_op64(R_X12 + pi, pk, pv, ph.ty)
+          pi += 1
+        pi = 0
+        while pi < phis.size()
+          store_val64(phis[pi].dst, R_X12 + pi)
+          pi += 1
+        @a.b(@blk_labels[succ_bid])
+        ei += 1
+        next
+
       stage_base = @local_base + @fn_ir.phi_stage_off
       pi = 0
       while pi < phis.size()
@@ -574,6 +667,8 @@ use ./ll_opt
         elsif ty == LLTY_F64
           a.ldr_d(R_D0, R_X10, 0)
           store_val_f64(ins.dst, R_D0)
+        elsif ty == LLTY_V2I64 && @vec_reg_q[ins.dst] != nil
+          a.ldr_q(@vec_reg_q[ins.dst], R_X10, 0)
         elsif ty == LLTY_V2I64 && @do_simd && slot_sp_off(ins.dst) <= 65520 && (slot_sp_off(ins.dst) & 15) == 0
           a.ldr_q(3, R_X10, 0)
           a.str_q(3, R_SP, slot_sp_off(ins.dst))
@@ -599,6 +694,8 @@ use ./ll_opt
         elsif ty == LLTY_F64
           load_op_f64(R_D0, ins.k0, ins.v0)
           a.str_d(R_D0, R_X10, 0)
+        elsif ty == LLTY_V2I64 && ins.k0 == LLOP_VAL && @vec_reg_q[ins.v0] != nil
+          a.str_q(@vec_reg_q[ins.v0], R_X10, 0)
         elsif ty == LLTY_V2I64 && @do_simd && ins.k0 == LLOP_VAL && slot_sp_off(ins.v0) <= 65520 && (slot_sp_off(ins.v0) & 15) == 0
           a.ldr_q(3, R_SP, slot_sp_off(ins.v0))
           a.str_q(3, R_X10, 0)
@@ -635,13 +732,21 @@ use ./ll_opt
         store_val64(ins.dst, R_X9)
       elsif op == :add || op == :sub || op == :mul || op == :sdiv || op == :udiv || op == :srem || op == :urem || op == :and || op == :or || op == :xor || op == :shl || op == :ashr || op == :lshr
         ty = ins.ty
-        if ty == LLTY_V2I64 && @do_simd && (op == :and || op == :or || op == :xor) && ins.k0 == LLOP_VAL && ins.k1 == LLOP_VAL && slot_sp_off(ins.v0) <= 65520 && slot_sp_off(ins.v1) <= 65520 && slot_sp_off(ins.dst) <= 65520 && (slot_sp_off(ins.v0) & 15) == 0 && (slot_sp_off(ins.v1) & 15) == 0 && (slot_sp_off(ins.dst) & 15) == 0
-          a.ldr_q(3, R_SP, slot_sp_off(ins.v0))
-          a.ldr_q(4, R_SP, slot_sp_off(ins.v1))
-          a.and_16b(3, 3, 4) if op == :and
-          a.orr_16b(3, 3, 4) if op == :or
-          a.eor_16b(3, 3, 4) if op == :xor
-          a.str_q(3, R_SP, slot_sp_off(ins.dst))
+        if ty == LLTY_V2I64 && @do_simd && (op == :and || op == :or || op == :xor) && ins.k0 == LLOP_VAL && ins.k1 == LLOP_VAL && (@vec_reg_q[ins.v0] != nil || (slot_sp_off(ins.v0) <= 65520 && (slot_sp_off(ins.v0) & 15) == 0)) && (@vec_reg_q[ins.v1] != nil || (slot_sp_off(ins.v1) <= 65520 && (slot_sp_off(ins.v1) & 15) == 0)) && (@vec_reg_q[ins.dst] != nil || (slot_sp_off(ins.dst) <= 65520 && (slot_sp_off(ins.dst) & 15) == 0))
+          q0 = @vec_reg_q[ins.v0]
+          if q0 == nil
+            a.ldr_q(3, R_SP, slot_sp_off(ins.v0))
+            q0 = 3
+          q1 = @vec_reg_q[ins.v1]
+          if q1 == nil
+            a.ldr_q(4, R_SP, slot_sp_off(ins.v1))
+            q1 = 4
+          qd = @vec_reg_q[ins.dst]
+          rd_q = qd != nil ? qd : 3
+          a.and_16b(rd_q, q0, q1) if op == :and
+          a.orr_16b(rd_q, q0, q1) if op == :or
+          a.eor_16b(rd_q, q0, q1) if op == :xor
+          a.str_q(3, R_SP, slot_sp_off(ins.dst)) if qd == nil
         elsif ty == LLTY_I128 || ty == LLTY_V2I64
           load_op128(R_X9, R_X10, ins.k0, ins.v0)
           load_op128(R_X11, R_X12, ins.k1, ins.v1)
@@ -720,6 +825,13 @@ use ./ll_opt
         elsif @do_peephole && (ty == LLTY_I64 || ty == LLTY_PTR) && ins.k1 == LLOP_IMM && ((op == :add || op == :sub) && ins.v1 >= 0 && ins.v1 <= 4095)
           load_op64(R_X9, ins.k0, ins.v0, ty)
           op == :add ? a.add_i(R_X9, R_X9, ins.v1) : a.sub_i(R_X9, R_X9, ins.v1)
+          store_val64(ins.dst, R_X9)
+        elsif @do_peephole && (ty == LLTY_I64 || ty == LLTY_PTR) && ins.k1 == LLOP_IMM && op == :and && (ins.v1 == 1 || ins.v1 == 255 || ins.v1 == 65535 || ins.v1 == 0xFFFFFFFF)
+          load_op64(R_X9, ins.k0, ins.v0, ty)
+          a.and_xi(R_X9, R_X9, 1) if ins.v1 == 1
+          a.uxtb_x(R_X9, R_X9)    if ins.v1 == 255
+          a.uxth_x(R_X9, R_X9)    if ins.v1 == 65535
+          a.uxtw(R_X9, R_X9)      if ins.v1 == 0xFFFFFFFF
           store_val64(ins.dst, R_X9)
         elsif @do_peephole && (ty == LLTY_I64 || ty == LLTY_PTR) && ins.k1 == LLOP_IMM && (op == :shl || op == :lshr || op == :ashr) && ins.v1 >= 0 && ins.v1 <= 63
           load_op64(R_X9, ins.k0, ins.v0, ty)
@@ -1011,69 +1123,95 @@ use ./ll_opt
       elsif op == :call_asm
         tmpl = ins.extra[0]
         aargs = ins.extra[1]
-        # Bind output ${0:x} -> x19, inputs ${1:x}..${8:x} -> x20..x27
-        ai = 0
-        while ai < aargs.size()
-          load_op64(20 + ai, aargs[ai][1], aargs[ai][2], LLTY_I64)
-          ai += 1
-        op_regs = [19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
-        st = A64AsmState.new(a)
-        st.assemble_text(a64_asm_unescape(tmpl, op_regs))
-        store_val64(ins.dst, R_X19) if ins.dst >= 0
+        if tmpl == "" && aargs.size() >= 1 && ins.dst >= 0
+          # Zero-cost compiler barrier (`asm sideeffect "", "=r,0"`) without clobbering x19..x28!
+          load_op64(R_X9, aargs[0][1], aargs[0][2], LLTY_I64)
+          store_val64(ins.dst, R_X9)
+        else
+          # Evaluate inputs into caller-saved x0..x7 BEFORE spilling promoted x19..x26!
+          ai = 0
+          while ai < aargs.size() && ai < 8
+            load_op64(ai, aargs[ai][1], aargs[ai][2], LLTY_I64)
+            ai += 1
+          ng_cs = @used_cs_g.size()
+          if ng_cs > 0
+            csi = 0
+            while csi < ng_cs
+              a.str_x(@used_cs_g[csi], R_SP, @asm_spill_off + csi * 8, R_X17)
+              csi += 1
+          ai = 0
+          while ai < aargs.size() && ai < 8
+            a.mov_r(20 + ai, ai)
+            ai += 1
+          op_regs = [19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+          st = A64AsmState.new(a)
+          st.assemble_text(a64_asm_unescape(tmpl, op_regs))
+          a.mov_r(R_X9, R_X19) if ins.dst >= 0
+          if ng_cs > 0
+            csi = 0
+            while csi < ng_cs
+              a.ldr_x(@used_cs_g[csi], R_SP, @asm_spill_off + csi * 8, R_X17)
+              csi += 1
+          store_val64(ins.dst, R_X9) if ins.dst >= 0
       elsif op == :call
         cargs = ins.extra
-        # Stage stack arguments FIRST (`[sp + st_idx * 8]`), then register arguments (`x0..x7`, `d0..d7`)!
-        # Note: if `load_op64` calls `_tlv_bootstrap` (for a non-`.ic` TLS sym), do register args in reverse or via stack?
-        # Wait: `@reuse.site.0` is never passed directly as a call arg (only loaded/stored); `.ic` uses x28 (zero calls)!
-        # Still, stage `x0..x7` via `R_X9..R_X15, R_X8` or load stack args first and register args `7` down to `0` so even a TLS arg in `x1..x7` could never clobber `x0`!
-        reg_g_ops = []
-        reg_f_ops = []
-        st_idx = 0
-        ai = 0
-        while ai < cargs.size()
-          ca = cargs[ai]
-          aty = ca[0]
-          if aty == LLTY_F64 || aty == LLTY_F32
-            if reg_f_ops.size() < 8
-              reg_f_ops.push(ca)
-            else
-              load_op_f64(R_D16, ca[1], ca[2])
-              a.str_d(R_D16, R_SP, st_idx * 8, R_X17)
-              st_idx += 1
-          else
-            if reg_g_ops.size() < 8
-              reg_g_ops.push(ca)
-            else
-              load_op64(R_X9, ca[1], ca[2], aty)
-              a.str_x(R_X9, R_SP, st_idx * 8, R_X17)
-              st_idx += 1
-          ai += 1
-        # Load indirect callee pointer into `R_X16`->`R_X8` BEFORE filling x0..x7
-        if ins.k0 != LLOP_SYM
-          load_op64(R_X8, ins.k0, ins.v0, LLTY_PTR)
-        fi = 0
-        while fi < reg_f_ops.size()
-          load_op_f64(fi, reg_f_ops[fi][1], reg_f_ops[fi][2])
-          fi += 1
-        gi = reg_g_ops.size() - 1
-        while gi >= 0
-          ca = reg_g_ops[gi]
-          load_op64(gi, ca[1], ca[2], ca[0])
-          gi -= 1
-
-        if ins.k0 == LLOP_SYM
-          cal_nm = @mod_info.sym_list[ins.v0]
-          a.bl_sym(@is_macho ? ("_" + cal_nm) : cal_nm)
+        slab_puts_off = -1
+        if @do_peephole && ins.dst < 0 && ins.k0 == LLOP_SYM && @mod_info.sym_list[ins.v0] == "w_puts" && cargs.size() == 1 && cargs[0][1] == LLOP_IMM
+          slab_puts_off = ll_slab_puts_offset(@mod_info, @rodata_buf, cargs[0][2])
+        if slab_puts_off >= 0
+          a.addr_sym_local(R_X0, "__static_slab", slab_puts_off)
+          @mod_info.intern_sym("puts", LLSYM_EXT_FN)
+          a.bl_sym(@is_macho ? "_puts" : "puts")
         else
-          a.blr(R_X8)
+          # Stage stack arguments FIRST (`[sp + st_idx * 8]`), then register arguments (`x0..x7`, `d0..d7`)!
+          reg_g_ops = []
+          reg_f_ops = []
+          st_idx = 0
+          ai = 0
+          while ai < cargs.size()
+            ca = cargs[ai]
+            aty = ca[0]
+            if aty == LLTY_F64 || aty == LLTY_F32
+              if reg_f_ops.size() < 8
+                reg_f_ops.push(ca)
+              else
+                load_op_f64(R_D16, ca[1], ca[2])
+                a.str_d(R_D16, R_SP, st_idx * 8, R_X17)
+                st_idx += 1
+            else
+              if reg_g_ops.size() < 8
+                reg_g_ops.push(ca)
+              else
+                load_op64(R_X9, ca[1], ca[2], aty)
+                a.str_x(R_X9, R_SP, st_idx * 8, R_X17)
+                st_idx += 1
+            ai += 1
+          # Load indirect callee pointer into `R_X8` BEFORE filling x0..x7
+          if ins.k0 != LLOP_SYM
+            load_op64(R_X8, ins.k0, ins.v0, LLTY_PTR)
+          fi = 0
+          while fi < reg_f_ops.size()
+            load_op_f64(fi, reg_f_ops[fi][1], reg_f_ops[fi][2])
+            fi += 1
+          gi = reg_g_ops.size() - 1
+          while gi >= 0
+            ca = reg_g_ops[gi]
+            load_op64(gi, ca[1], ca[2], ca[0])
+            gi -= 1
 
-        if ins.dst >= 0 && ins.ty != LLTY_VOID
-          if ins.ty == LLTY_I128
-            store_val128(ins.dst, R_X0, R_X1)
-          elsif ins.ty == LLTY_F64 || ins.ty == LLTY_F32
-            store_val_f64(ins.dst, R_D0)
+          if ins.k0 == LLOP_SYM
+            cal_nm = @mod_info.sym_list[ins.v0]
+            a.bl_sym(@is_macho ? ("_" + cal_nm) : cal_nm)
           else
-            store_val64(ins.dst, R_X0)
+            a.blr(R_X8)
+
+          if ins.dst >= 0 && ins.ty != LLTY_VOID
+            if ins.ty == LLTY_I128
+              store_val128(ins.dst, R_X0, R_X1)
+            elsif ins.ty == LLTY_F64 || ins.ty == LLTY_F32
+              store_val_f64(ins.dst, R_D0)
+            else
+              store_val64(ins.dst, R_X0)
       elsif op == :br
         a.b(branch_target_label(bid, ins.v0))
       elsif op == :cond_br
@@ -1128,8 +1266,18 @@ use ./ll_opt
       raise "Cinder LL->A64 fixup overflow in function " + @fn_ir.name
     @a
 
+-> cinder_ms_since(t0)
+  ((clock - t0) * ~1000.0).floor()
+
+-> lla64_mark_ref(ref_syms, ref_wl, nm)
+  return nil if nm == nil
+  if ref_syms[nm] == nil
+    ref_syms[nm] = true
+    ref_wl.push(nm) if ref_wl != nil
+  nil
+
 # Emit a compiled `LLFunc` (`fa = LLA64FuncCompiler.compile()`) into `writer.text` and record relocations
--> lla64_emit_func_to_writer(writer, is_macho, fn_ir, fa, fn_offsets, ref_syms)
+-> lla64_emit_func_to_writer(writer, is_macho, fn_ir, fa, fn_offsets, ref_syms, ref_wl = nil)
   writer.text.align_to(8, 0)
   fn_off = writer.text.len
   fn_sz = fa.byte_len()
@@ -1146,8 +1294,9 @@ use ./ll_opt
     rsym = fa.rel_sym[ri]
     rkind = fa.rel_kind[ri]
     radd = fa.rel_add[ri]
-    ref_syms[rsym] = true
-    ref_syms[rsym.slice(1, rsym.size() - 1)] = true if is_macho && rsym.starts_with?("_")
+    lla64_mark_ref(ref_syms, ref_wl, rsym)
+    if is_macho && rsym.starts_with?("_")
+      lla64_mark_ref(ref_syms, ref_wl, rsym.slice(1, cinder_blen(rsym) - 1))
     if is_macho
       if rkind == CREL_A64_BRANCH26
         writer.add_text_reloc_raw(roff, rsym, rkind, radd)
@@ -1158,108 +1307,155 @@ use ./ll_opt
     ri += 1
   nil
 
+-> lla64_assemble_mod_asm(mod_info, writer, is_macho, fn_offsets, ref_syms, ref_wl)
+  return nil if mod_info.mod_asm_lines.size() == 0
+  asm_a64 = CinderA64.new(mod_info.mod_asm_lines.size() * 4 + 64)
+  st = A64AsmState.new(asm_a64)
+  joined_sb = StringBuffer(mod_info.mod_asm_lines.size() * 48)
+  mi = 0
+  while mi < mod_info.mod_asm_lines.size()
+    joined_sb << a64_asm_unescape(mod_info.mod_asm_lines[mi], nil)
+    joined_sb << "\n"
+    mi += 1
+  st.assemble_text(joined_sb.to_s())
+  if !asm_a64.patch_fixups()
+    raise "Cinder ARM64 module asm fixup failed"
+  writer.text.align_to(64, 0)
+  base_off = writer.text.len
+  writer.text.put_buf(asm_a64.buf)
+  di = 0
+  while di < st.def_syms.size()
+    raw_nm = st.def_syms[di][0]
+    soff = base_off + st.def_syms[di][1]
+    is_glob = st.globl_syms[raw_nm] == true
+    if is_macho
+      writer.define_sym_raw(raw_nm, MSEC_TEXT, soff, is_glob ? MSYM_GLOBAL : MSYM_LOCAL)
+      ir_nm = raw_nm.starts_with?("_") ? raw_nm.slice(1, raw_nm.size() - 1) : raw_nm
+      fn_offsets[ir_nm] = [soff, 0]
+    else
+      writer.define_sym(raw_nm, ESEC_TEXT, soff, 0, is_glob ? ESYM_GLOBAL : ESYM_LOCAL, ESTT_FUNC)
+      fn_offsets[raw_nm] = [soff, 0]
+    di += 1
+  ri = 0
+  while ri < asm_a64.rel_off.size()
+    roff = base_off + asm_a64.rel_off[ri]
+    rsym = asm_a64.rel_sym[ri]
+    rkind = asm_a64.rel_kind[ri]
+    radd = asm_a64.rel_add[ri]
+    lla64_mark_ref(ref_syms, ref_wl, rsym)
+    lla64_mark_ref(ref_syms, ref_wl, rsym.slice(1, cinder_blen(rsym) - 1)) if is_macho && rsym.starts_with?("_")
+    if is_macho
+      writer.add_text_reloc_raw(roff, rsym, rkind, radd)
+    else
+      writer.add_text_reloc(roff, rsym, rkind, radd)
+    ri += 1
+  nil
+
+-> lla64_compile_span_into(src, src_ptr, mod_info, span, inl_ctx, is_macho, cfg, writer, fn_offsets, ref_syms, ref_wl, prof, prof_sec)
+  if prof
+    ts0 = clock
+    fn_ir = ll_parse_function(src, src_ptr, mod_info, span, false)
+    ts1 = clock
+    ll_opt_function(fn_ir, inl_ctx, cfg)
+    ts2 = clock
+    fc = LLA64FuncCompiler.new(fn_ir, mod_info, is_macho, cfg, writer.rodata)
+    fa = fc.compile()
+    lla64_emit_func_to_writer(writer, is_macho, fn_ir, fa, fn_offsets, ref_syms, ref_wl)
+    ts3 = clock
+    prof_sec[0] = prof_sec[0] + (ts1 - ts0)
+    prof_sec[1] = prof_sec[1] + (ts2 - ts1)
+    prof_sec[2] = prof_sec[2] + (ts3 - ts2)
+  else
+    fn_ir = ll_parse_function(src, src_ptr, mod_info, span, false)
+    ll_opt_function(fn_ir, inl_ctx, cfg)
+    fc = LLA64FuncCompiler.new(fn_ir, mod_info, is_macho, cfg, writer.rodata)
+    fa = fc.compile()
+    lla64_emit_func_to_writer(writer, is_macho, fn_ir, fa, fn_offsets, ref_syms, ref_wl)
+  nil
+
 # Compile an entire `.ll` text string into `MachO64Writer` (`is_macho = true`) or `Elf64Writer` (`is_macho = false`)!
 -> cinder_compile_ll_a64(src, is_macho = true, opt_cfg = nil)
+  prof = env("CINDER_PROFILE") == "1"
+  t_p = [clock, ~0.0, ~0.0, ~0.0]
   cfg = opt_cfg != nil ? opt_cfg : cinder_opt_from_env(2)
   src = src + "                        " if cinder_blen(src) <= 16
   writer = is_macho ? MachO64Writer.new() : Elf64Writer.new(ELF_EM_AARCH64)
   mod_info = ll_scan_module_and_emit_globals(src, writer, is_macho)
+  t_p[1] = clock
   src_ptr = cinder_heap_str_ptr(wvalue_bits(src) ## i64)
   inl_ctx = LLInlineContext.new(src, src_ptr, mod_info, cfg)
+  if cfg.opt_level >= 1 && (cfg.pass_enabled?("ipa-sccp") || cfg.lto_enabled?())
+    ll_build_ipa_summaries(src, src_ptr, mod_info, inl_ctx, cfg)
+  t_p[2] = clock
 
   fn_offsets = {}
   ref_syms = {}
-  mod_info.used_syms.each ->(unm) ref_syms[unm] = true
-  mod_info.aliases.each ->(al) ref_syms[al[1]] = true
-  # Also preserve any symbol referenced in `.rodata` / `.data` pointer relocations!
+  ref_wl = []
+  ui = 0
+  while ui < mod_info.used_syms.size()
+    lla64_mark_ref(ref_syms, ref_wl, mod_info.used_syms[ui])
+    ui += 1
+  ali = 0
+  while ali < mod_info.aliases.size()
+    lla64_mark_ref(ref_syms, ref_wl, mod_info.aliases[ali][1])
+    ali += 1
   if is_macho
-    writer.const_rel_sym.each ->(rs)
-      ref_syms[rs] = true
-      ref_syms[rs.slice(1, rs.size() - 1)] = true if rs.starts_with?("_")
-    writer.data_rel_sym.each ->(rs)
-      ref_syms[rs] = true
-      ref_syms[rs.slice(1, rs.size() - 1)] = true if rs.starts_with?("_")
+    cri = 0
+    while cri < writer.const_rel_sym.size()
+      rs = writer.const_rel_sym[cri]
+      lla64_mark_ref(ref_syms, ref_wl, rs)
+      lla64_mark_ref(ref_syms, ref_wl, rs.slice(1, cinder_blen(rs) - 1)) if rs.starts_with?("_")
+      cri += 1
+    dri = 0
+    while dri < writer.data_rel_sym.size()
+      rs = writer.data_rel_sym[dri]
+      lla64_mark_ref(ref_syms, ref_wl, rs)
+      lla64_mark_ref(ref_syms, ref_wl, rs.slice(1, cinder_blen(rs) - 1)) if rs.starts_with?("_")
+      dri += 1
   else
-    writer.ro_rel_sym.each   ->(rs) ref_syms[rs] = true
-    writer.data_rel_sym.each ->(rs) ref_syms[rs] = true
+    rri = 0
+    while rri < writer.ro_rel_sym.size()
+      lla64_mark_ref(ref_syms, ref_wl, writer.ro_rel_sym[rri])
+      rri += 1
+    dri = 0
+    while dri < writer.data_rel_sym.size()
+      lla64_mark_ref(ref_syms, ref_wl, writer.data_rel_sym[dri])
+      dri += 1
 
   # 1. Assemble `module asm` block (if present — e.g., macOS ARM64 limb_kernels!)
-  if mod_info.mod_asm_lines.size() > 0
-    asm_a64 = CinderA64.new(mod_info.mod_asm_lines.size() * 4 + 64)
-    st = A64AsmState.new(asm_a64)
-    joined_sb = StringBuffer(mod_info.mod_asm_lines.size() * 48)
-    mi = 0
-    while mi < mod_info.mod_asm_lines.size()
-      joined_sb << a64_asm_unescape(mod_info.mod_asm_lines[mi], nil)
-      joined_sb << "\n"
-      mi += 1
-    st.assemble_text(joined_sb.to_s())
-    if !asm_a64.patch_fixups()
-      raise "Cinder ARM64 module asm fixup failed"
-    writer.text.align_to(64, 0)
-    base_off = writer.text.len
-    writer.text.put_buf(asm_a64.buf)
-    di = 0
-    while di < st.def_syms.size()
-      raw_nm = st.def_syms[di][0]
-      soff = base_off + st.def_syms[di][1]
-      is_glob = st.globl_syms[raw_nm] == true
-      if is_macho
-        writer.define_sym_raw(raw_nm, MSEC_TEXT, soff, is_glob ? MSYM_GLOBAL : MSYM_LOCAL)
-        ir_nm = raw_nm.starts_with?("_") ? raw_nm.slice(1, raw_nm.size() - 1) : raw_nm
-        fn_offsets[ir_nm] = [soff, 0]
-      else
-        writer.define_sym(raw_nm, ESEC_TEXT, soff, 0, is_glob ? ESYM_GLOBAL : ESYM_LOCAL, ESTT_FUNC)
-        fn_offsets[raw_nm] = [soff, 0]
-      di += 1
-    ri = 0
-    while ri < asm_a64.rel_off.size()
-      roff = base_off + asm_a64.rel_off[ri]
-      rsym = asm_a64.rel_sym[ri]
-      rkind = asm_a64.rel_kind[ri]
-      radd = asm_a64.rel_add[ri]
-      ref_syms[rsym] = true
-      ref_syms[rsym.slice(1, rsym.size() - 1)] = true if is_macho && rsym.starts_with?("_")
-      if is_macho
-        writer.add_text_reloc_raw(roff, rsym, rkind, radd)
-      else
-        writer.add_text_reloc(roff, rsym, rkind, radd)
-      ri += 1
+  lla64_assemble_mod_asm(mod_info, writer, is_macho, fn_offsets, ref_syms, ref_wl)
+  t_p[3] = clock
 
   # 2. Stream, optimize, and compile each `define` function into `writer.text`.
-  #    Under `--no-debug` + `-fdce`, defer `internal`/`private` `alwaysinline` helpers and emit them
-  #    ONLY if an un-inlined call, alias, or data relocation actually referenced them!
-  drop_dead_inl = !cfg.debug && cfg.pass_enabled?("dce") && cfg.pass_enabled?("always-inline")
-  deferred_spans = []
+  prof_sec = [~0.0, ~0.0, ~0.0]
+  n_compiled = 0
+  drop_dead_int = !cfg.debug && cfg.pass_enabled?("dce")
+  deferred_map = {}
+  deferred_emitted = {}
   fi = 0
   while fi < mod_info.fn_spans.size()
     span = mod_info.fn_spans[fi]
     hdr = span[0]
     is_int_hdr = hdr.index(" internal ") != nil || hdr.index(" private ") != nil
-    if drop_dead_inl && is_int_hdr && inl_ctx.span_is_alwaysinline?(span)
-      deferred_spans.push(span)
+    if drop_dead_int && is_int_hdr
+      dat = ll_index_outside_quotes(hdr, 64, 0)
+      dlp = ll_index_outside_quotes(hdr, 40, dat)
+      dnm = ll_clean_sym(hdr.slice(dat, dlp - dat))
+      deferred_map[dnm] = span
     else
-      fn_ir = ll_parse_function(src, src_ptr, mod_info, span, false)
-      ll_opt_function(fn_ir, inl_ctx, cfg)
-      fc = LLA64FuncCompiler.new(fn_ir, mod_info, is_macho, cfg)
-      fa = fc.compile()
-      lla64_emit_func_to_writer(writer, is_macho, fn_ir, fa, fn_offsets, ref_syms)
+      lla64_compile_span_into(src, src_ptr, mod_info, span, inl_ctx, is_macho, cfg, writer, fn_offsets, ref_syms, ref_wl, prof, prof_sec)
+      n_compiled += 1
     fi += 1
 
-  di = 0
-  while di < deferred_spans.size()
-    dspan = deferred_spans[di]
-    dhdr = dspan[0]
-    dat = ll_index_outside_quotes(dhdr, 64, 0)
-    dlp = ll_index_outside_quotes(dhdr, 40, dat)
-    dnm = ll_clean_sym(dhdr.slice(dat, dlp - dat))
-    if ref_syms[dnm] == true
-      fn_ir = ll_parse_function(src, src_ptr, mod_info, dspan, false)
-      ll_opt_function(fn_ir, inl_ctx, cfg)
-      fc = LLA64FuncCompiler.new(fn_ir, mod_info, is_macho, cfg)
-      fa = fc.compile()
-      lla64_emit_func_to_writer(writer, is_macho, fn_ir, fa, fn_offsets, ref_syms)
-    di += 1
+  wi = 0
+  while wi < ref_wl.size()
+    wnm = ref_wl[wi]
+    wi += 1
+    dspan = deferred_map[wnm]
+    if dspan != nil && deferred_emitted[wnm] == nil
+      deferred_emitted[wnm] = true
+      lla64_compile_span_into(src, src_ptr, mod_info, dspan, inl_ctx, is_macho, cfg, writer, fn_offsets, ref_syms, ref_wl, prof, prof_sec)
+      n_compiled += 1
 
   # 3. Emit `hidden alias` symbols pointing at their target functions!
   ai = 0
@@ -1274,5 +1470,18 @@ use ./ll_opt
         writer.define_sym(al_nm, ESEC_TEXT, info[0], info[1], ESYM_HIDDEN, ESTT_FUNC)
     ai += 1
 
+  if prof
+    total_fns = mod_info.fn_spans.size()
+    dropped_fns = total_fns - n_compiled
+    ms_scan = ((t_p[1] - t_p[0]) * ~1000.0).to_i()
+    ms_ipa  = ((t_p[2] - t_p[1]) * ~1000.0).to_i()
+    ms_asm  = ((t_p[3] - t_p[2]) * ~1000.0).to_i()
+    ms_prs  = (prof_sec[0] * ~1000.0).to_i()
+    ms_opt  = (prof_sec[1] * ~1000.0).to_i()
+    ms_cg   = (prof_sec[2] * ~1000.0).to_i()
+    ccall("w_eputs", "\[cinder-profile\] functions: total=" + total_fns.to_s() + " compiled=" + n_compiled.to_s() + " dce_skipped=" + dropped_fns.to_s() + " inline_cached=" + inl_ctx.callee_cache.keys.size().to_s())
+    ccall("w_eputs", "\[cinder-profile\] phases (ms): scan_globals=" + ms_scan.to_s() + " ipa_summaries=" + ms_ipa.to_s() + " mod_asm=" + ms_asm.to_s() + " ir_parse=" + ms_prs.to_s() + " ir_opt=" + ms_opt.to_s() + " a64_codegen=" + ms_cg.to_s())
+    if is_macho
+      ccall("w_eputs", "\[cinder-profile\] sections (bytes): __text=" + writer.text.len.to_s() + " __const=" + writer.rodata.len.to_s() + " __data_const=" + writer.const_data.len.to_s() + " __data=" + writer.data.len.to_s() + " __bss=" + writer.bss_size.to_s() + " syms=" + writer.sym_names.size().to_s() + " text_relocs=" + writer.text_rel_off.size().to_s())
   cfg.print_report("aot-a64") if cfg.print_passes
   writer

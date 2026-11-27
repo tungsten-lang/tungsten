@@ -72,11 +72,11 @@ WK_PRE_RUN[0] = ->(an) jsu_on_script(an)
     js_new_realm(host)
 
   -> .eval(src, name = "<eval>", realm = nil)
-    r = realm == nil ? js_new_realm(nil) : realm
     prev = JS_REALM[0]
-    JS_REALM[0] = r
     out = nil
     begin
+      r = realm == nil ? js_new_realm(nil) : realm
+      JS_REALM[0] = r
       out = js_run_script(src, name)
       r.run_jobs
     rescue ex

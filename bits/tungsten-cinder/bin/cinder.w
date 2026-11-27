@@ -6,13 +6,16 @@ use ../lib/cinder
   << "cinder " + CINDER_VERSION + " — Pure-Tungsten Native Backend, JIT & Mach-O/ELF64 Compiler"
   << ""
   << "Usage:"
-  << "  cinder compile <input.w|input.ll> \[options\] \[-c\] \[-o <output>\]"
+  << "  cinder compile <input.w|.ll|.c|.o|.a>... \[options\] \[-c\] \[-o <output>\]"
   << "  cinder run <input.w> \[options\] \[-- <args...>\]"
-  << "  cinder verify-stages <input.w|input.ll> \[options\]"
+  << "  cinder verify-stages <input.w|.ll|.o|.a>... \[options\]"
   << "  cinder info"
   << ""
   << "Optimization & Codegen Options:"
   << "  -O0, -O1, -O2, -O3   Optimization level (default: -O2; -O0 blazing-fast baseline)"
+  << "  --lto, -flto         Enable Cross-File Link-Time Optimization (embeds Fat-LTO IR with -c)"
+  << "  --full-lto, -flto=full  Monolithic whole-program Cross-File LTO"
+  << "  --no-lto, -fno-lto   Disable Link-Time Optimization"
   << "  -Ofast, --fast       Fast FP math (FMA contraction, reciprocal const fdiv)"
   << "  -ffast-math / -fno-fast-math"
   << "  --strict-math        Strict IEEE 754 floating-point (disable FP contraction)"
@@ -20,9 +23,9 @@ use ../lib/cinder
   << "  --no-debug           Omit debug metadata, allow leaf frame elim & dead helper GC"
   << "  --\[no-\]frame-pointers, -f\[no-\]omit-frame-pointer"
   << "  -f<pass>, -fno-<pass>  Enable or disable individual optimization passes:"
-  << "                         always-inline, inline, const-fold, sroa, jump-threading,"
-  << "                         gvn, licm, strength-reduce, carry-chains, simd,"
-  << "                         unroll-loops, dce, peephole, reg-promote, leaf-frame-elim"
+  << "                         always-inline, inline, lto-internalize, ipa-sccp, const-fold,"
+  << "                         sroa, jump-threading, gvn, licm, strength-reduce, carry-chains,"
+  << "                         simd, unroll-loops, dce, lto-dce, peephole, reg-promote, leaf-frame-elim"
   << "  --opt-passes=LIST    Comma-separated explicit pass list or +/-pass overrides"
   << "  --print-passes       Print enabled pass pipeline and per-pass transformation counts"
   << ""
@@ -40,7 +43,7 @@ if args.size() == 0
   exit 0
 
 cmd = "compile"
-in_path = nil
+in_paths = []
 out_path = nil
 emit_obj = false
 target_triple = ""
@@ -62,7 +65,7 @@ while i < args.size()
   elsif a == "--version"
     << "cinder " + CINDER_VERSION
     exit 0
-  elsif a == "info" && in_path == nil
+  elsif a == "info" && in_paths.size() == 0
     << "cinder " + CINDER_VERSION
     << "  host_os:        " + cinder_host_os()
     << "  host_arch:      " + cinder_host_arch()
@@ -70,7 +73,7 @@ while i < args.size()
     << "  jit_ready:      " + cinder_jit_ready?().to_s()
     << "  default_opt:    " + opt_cfg.summary()
     exit 0
-  elsif (a == "compile" || a == "run" || a == "verify-stages") && in_path == nil
+  elsif (a == "compile" || a == "run" || a == "verify-stages") && in_paths.size() == 0
     cmd = a
   elsif a == "-c"
     emit_obj = true
@@ -93,13 +96,13 @@ while i < args.size()
   elsif a.starts_with?("-")
     ccall("w_eputs", "cinder: unknown option: " + a)
     exit 1
-  elsif in_path == nil
-    in_path = a
-  else
+  elsif cmd == "run" && in_paths.size() >= 1
     run_args.push(a)
+  else
+    in_paths.push(a)
   i += 1
 
-if in_path == nil
+if in_paths.size() == 0
   if opt_cfg.print_passes
     << opt_cfg.summary()
     exit 0
@@ -107,12 +110,12 @@ if in_path == nil
   exit 1
 
 if cmd == "verify-stages"
-  ok = cinder_verify_stage_determinism(in_path, opt_cfg, target_triple, true)
+  ok = cinder_verify_stage_determinism_multi(in_paths, opt_cfg, target_triple, true)
   exit(ok ? 0 : 1)
 
 if cmd == "run"
   tmp_bin = "/tmp/cinder_run_" + (ccall_nobox("__w_clock_ns_raw") ## i64).to_s()
-  if !cinder_compile_input(in_path, tmp_bin, false, target_triple, verbose, opt_cfg)
+  if !cinder_compile_inputs(in_paths, tmp_bin, false, target_triple, verbose, opt_cfg)
     exit 1
   exec_cmd = cinder_shq(tmp_bin)
   ri = 0
@@ -124,13 +127,13 @@ if cmd == "run"
   exit(ok ? 0 : 1)
 
 if out_path == nil
-  base = in_path
-  if base.ends_with?(".w")
+  base = in_paths[0]
+  if base.ends_with?(".w") || base.ends_with?(".c") || base.ends_with?(".o") || base.ends_with?(".a")
     base = base.slice(0, base.size() - 2)
   elsif base.ends_with?(".ll")
     base = base.slice(0, base.size() - 3)
   out_path = emit_obj ? (base + ".o") : base
 
-if !cinder_compile_input(in_path, out_path, emit_obj, target_triple, verbose, opt_cfg)
+if !cinder_compile_inputs(in_paths, out_path, emit_obj, target_triple, verbose, opt_cfg)
   exit 1
 exit 0

@@ -38,6 +38,9 @@ void w_slab_init_static_zstd(const uint8_t *data, uint32_t compressed_bytes, uin
     g_string_slab.next_slot = total_slots;
     g_string_slab.page_hwm = (uint32_t)needed;
     g_string_slab.frozen = 0;
+    g_string_slab.static_slots = total_slots;
+    g_string_slab.is_static_ro = 0;
+    g_string_slab.intern_built = 1;
     pthread_mutex_init(&g_string_slab.lock, NULL);
     w_slab_rebuild_intern(total_slots);
 }

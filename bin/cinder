@@ -8,14 +8,37 @@
 set -eu
 unset BASH_ENV
 CINDER_LAUNCHER=$0
-while [ -L "$CINDER_LAUNCHER" ]; do
-  CINDER_LAUNCHER_DIR=$(CDPATH= cd -- "$(dirname -- "$CINDER_LAUNCHER")" && pwd -P)
-  CINDER_LINK_TARGET=$(readlink "$CINDER_LAUNCHER")
-  case "$CINDER_LINK_TARGET" in
-    /*) CINDER_LAUNCHER=$CINDER_LINK_TARGET ;;
-    *) CINDER_LAUNCHER=$CINDER_LAUNCHER_DIR/$CINDER_LINK_TARGET ;;
+if [ ! -L "$CINDER_LAUNCHER" ]; then
+  case "$CINDER_LAUNCHER" in
+    */*) CINDER_BIN_DIR=${CINDER_LAUNCHER%/*} ;;
+    *)   CINDER_BIN_DIR=. ;;
   esac
-done
-CINDER_TOOLCHAIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$CINDER_LAUNCHER")/.." && pwd -P)
+  CINDER_TOOLCHAIN_ROOT=$CINDER_BIN_DIR/..
+else
+  while [ -L "$CINDER_LAUNCHER" ]; do
+    CINDER_LAUNCHER_DIR=$(CDPATH= cd -- "$(dirname -- "$CINDER_LAUNCHER")" && pwd -P)
+    CINDER_LINK_TARGET=$(readlink "$CINDER_LAUNCHER")
+    case "$CINDER_LINK_TARGET" in
+      /*) CINDER_LAUNCHER=$CINDER_LINK_TARGET ;;
+      *) CINDER_LAUNCHER=$CINDER_LAUNCHER_DIR/$CINDER_LINK_TARGET ;;
+    esac
+  done
+  CINDER_TOOLCHAIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$CINDER_LAUNCHER")/.." && pwd -P)
+fi
 export TUNGSTEN_ROOT="$CINDER_TOOLCHAIN_ROOT"
+CINDER_PREBUILT="$CINDER_TOOLCHAIN_ROOT/bits/tungsten-cinder/bin/cinder"
+CINDER_COMPILER="$CINDER_TOOLCHAIN_ROOT/bin/tungsten-compiler"
+if [ -x "$CINDER_PREBUILT" ] && [ -x "$CINDER_COMPILER" ] && [ ! "$CINDER_COMPILER" -nt "$CINDER_PREBUILT" ]; then
+  CINDER_STALE=0
+  for CINDER_SRC in "$CINDER_TOOLCHAIN_ROOT"/bits/tungsten-cinder/bin/*.w "$CINDER_TOOLCHAIN_ROOT"/bits/tungsten-cinder/lib/*.w; do
+    if [ "$CINDER_SRC" -nt "$CINDER_PREBUILT" ]; then
+      CINDER_STALE=1
+      break
+    fi
+  done
+  if [ "$CINDER_STALE" = "0" ]; then
+    export BIT_HOME="${BIT_HOME:-$CINDER_TOOLCHAIN_ROOT/bits}"
+    exec "$CINDER_PREBUILT" "$@"
+  fi
+fi
 exec "$CINDER_TOOLCHAIN_ROOT/bin/tungsten" cinder "$@"

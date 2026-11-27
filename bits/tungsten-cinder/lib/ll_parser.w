@@ -356,10 +356,69 @@ LL_SHORT_STR_BUF = u8[64]
   fv = t.to_f()
   (wvalue_bits(fv) ## i64) - 281474976710656
 
+fn ll_load_u8_raw(base_ptr, off) (i64 i64) i64
+  ll <<~IR
+    ; tungsten:alwaysinline
+    %base = inttoptr i64 %base_ptr to ptr
+    %p = getelementptr i8, ptr %base, i64 %off
+    %b = load i8, ptr %p, align 1
+    %z = zext i8 %b to i64
+    ret i64 %z
+  IR
+
+fn ll_index_outside_quotes_raw(base_ptr, start_pos, n, target_byte) (i64 i64 i64 i64) i64
+  ll <<~IR
+    %base = inttoptr i64 %base_ptr to ptr
+    %tb8 = trunc i64 %target_byte to i8
+    br label %loop
+  loop:
+    %i = phi i64 [ 0, %0 ], [ %ni, %next ]
+    %inq = phi i1 [ false, %0 ], [ %ninq, %next ]
+    %more = icmp slt i64 %i, %n
+    br i1 %more, label %body, label %not_found
+  body:
+    %p = getelementptr i8, ptr %base, i64 %i
+    %b = load i8, ptr %p, align 1
+    %is_q = icmp eq i8 %b, 34
+    br i1 %is_q, label %toggle_q, label %chk_match
+  toggle_q:
+    %tq = xor i1 %inq, true
+    br label %next
+  chk_match:
+    %out_q = xor i1 %inq, true
+    %ge_s = icmp sge i64 %i, %start_pos
+    %eq_t = icmp eq i8 %b, %tb8
+    %ok1 = and i1 %out_q, %ge_s
+    %ok2 = and i1 %ok1, %eq_t
+    br i1 %ok2, label %found, label %next_keep
+  next_keep:
+    br label %next
+  next:
+    %ninq = phi i1 [ %tq, %toggle_q ], [ %inq, %next_keep ]
+    %ni = add i64 %i, 1
+    br label %loop
+  found:
+    ret i64 %i
+  not_found:
+    ret i64 -1
+  IR
+
 # Scan `s` from byte `start_pos` for `target_byte` outside `"..."` quotes (returns byte index or -1).
 # Note: in LLVM IR, literal quotes inside strings/identifiers are always hex-escaped `\22` (never `\"`).
 -> ll_index_outside_quotes(s, target_byte, start_pos = 0)
   n = cinder_blen(s)
+  return -1 if start_pos >= n
+  q_first = s.index("\"")
+  if q_first == nil || (target_byte == 34 && start_pos == 0)
+    idx = s.index(target_byte.chr(), start_pos)
+    return idx != nil ? idx : -1
+  if n > 16
+    sp = cinder_heap_str_ptr(wvalue_bits(s) ## i64)
+    if q_first >= start_pos
+      # Zero quotes in `[0, start_pos)`! Safe to start raw scan directly at `start_pos`!
+      res = ll_index_outside_quotes_raw(sp + start_pos, 0, n - start_pos, target_byte)
+      return res >= 0 ? (start_pos + res) : -1
+    return ll_index_outside_quotes_raw(sp, start_pos, n, target_byte)
   in_q = false
   i = 0
   while i < n
@@ -371,9 +430,46 @@ LL_SHORT_STR_BUF = u8[64]
     i += 1
   -1
 
+# Strip trailing `, align N` in O(1) time by scanning backward over trailing digits!
+-> ll_strip_trailing_align(spec)
+  n = cinder_blen(spec)
+  return spec if n < 10
+  i = n - 1
+  while i >= 0 && spec.byte_at(i) == 32
+    i -= 1
+  d_end = i
+  while i >= 0 && spec.byte_at(i) >= 48 && spec.byte_at(i) <= 57
+    i -= 1
+  return spec if i == d_end || i < 7
+  if spec.slice(i - 7, 8) == ", align "
+    return spec.slice(0, i - 7).strip()
+  spec
+
+# Emit `[N x i64] [i64 <v0>, i64 <v1>, ...]` directly from raw `src_ptr` bytes in `[pos, limit)` with zero heap string allocations!
+-> ll_emit_i64_elems_raw(arr_buf, src_ptr, pos, limit)
+  i = pos
+  while i + 4 <= limit
+    b = ll_load_u8_raw(src_ptr, i)
+    break if b == 93
+    if b == 105 && ll_load_u8_raw(src_ptr, i + 1) == 54 && ll_load_u8_raw(src_ptr, i + 2) == 52 && ll_load_u8_raw(src_ptr, i + 3) == 32
+      ts = i + 4
+      while ts < limit && ll_load_u8_raw(src_ptr, ts) == 32
+        ts += 1
+      te = ts
+      while te < limit
+        tb = ll_load_u8_raw(src_ptr, te)
+        break if tb == 44 || tb == 93 || tb == 32 || tb == 10 || tb == 13
+        te += 1
+      arr_buf.put_u64_le(ll_parse_i64_raw(src_ptr, ts, te - ts))
+      i = te
+    else
+      i += 1
+  nil
+
 # Strip trailing `; comment` and trailing `, !metadata` attachments (`!range`, `!tbaa`, `!llvm.loop`, `!prof`, etc.)
 # outside `"..."` quotes in a single pass!
 -> ll_strip_line_tail(s)
+  return s if s.index(";") == nil && s.index("!") == nil
   n = cinder_blen(s)
   in_q = false
   i = 0
@@ -392,6 +488,9 @@ LL_SHORT_STR_BUF = u8[64]
 # Find matching `)` for `(` at `lp_pos`, ignoring parentheses inside `"..."` quotes.
 -> ll_matching_rparen(s, lp_pos)
   n = cinder_blen(s)
+  if s.index("\"", lp_pos) == nil && s.index("(", lp_pos + 1) == nil
+    rp = s.index(")", lp_pos + 1)
+    return rp != nil ? rp : (n - 1)
   in_q = false
   depth = 0
   i = lp_pos
@@ -433,6 +532,17 @@ LL_SHORT_STR_BUF = u8[64]
 # ---- LLVM Type Size & GEP Byte-Offset Calculator ----
 
 -> ll_split_top_commas(s)
+  n = cinder_blen(s)
+  return [] if n == 0
+  if s.index("\"") == nil && s.index("\[") == nil && s.index("{") == nil && s.index("(") == nil && s.index("<") == nil
+    raw_parts = s.split(",")
+    out_fast = []
+    ri = 0
+    while ri < raw_parts.size()
+      st = raw_parts[ri].strip()
+      out_fast.push(st) if st != ""
+      ri += 1
+    return out_fast
   out = []
   d_br = 0; d_cu = 0; d_pa = 0; d_an = 0; in_q = false
   start = 0
@@ -565,7 +675,7 @@ LLSYM_TLS      = 4
 
 + LLModuleInfo
   rw :sym_list, :sym_to_id, :sym_kind, :aliases, :used_syms, :mod_asm_lines, :fn_spans
-  rw :attr_groups, :fn_span_by_sym_id
+  rw :attr_groups, :fn_span_by_sym_id, :slab_ro_off, :slab_len, :named_types
 
   -> new
     @sym_list = []
@@ -577,6 +687,14 @@ LLSYM_TLS      = 4
     @fn_spans = []       # [[hdr_line_str, body_start_byte, body_end_byte], ...]
     @attr_groups = {}    # "#0" => :always | :never
     @fn_span_by_sym_id = {}
+    @slab_ro_off = -1
+    @slab_len = 0
+    @named_types = {}
+
+  -> resolve_ty(ty_str)
+    t = ty_str.strip()
+    nt = @named_types[t]
+    nt != nil ? nt : t
 
   -> intern_sym(name, kind = -1)
     id = @sym_to_id[name]
@@ -711,7 +829,7 @@ LLSYM_TLS      = 4
   if t.starts_with?("@")
     sn = ll_clean_sym(t)
     sid = mod_info.intern_sym(sn)
-    if sn == ".ic"
+    if (sn == ".ic" || sn.starts_with?(".ic.m")) && !fn_ir.uses_ic
       fn_ir.uses_ic = true
       fn_ir.ic_sym_id = sid
     return [LLOP_SYM, sid]
@@ -775,8 +893,72 @@ LLSYM_TLS      = 4
       pos = nl + 1
       next
 
+    # Zero-copy fast path for huge `@...` global lines (`@__static_slab` 2.75 MB, `@.arr_pool.*` 2.5 MB, etc.)
+    # so we never materialize multi-megabyte temporary substring copies!
+    if b0 == 64 && line_len > 1024
+      peek = src.slice(pos, 320)
+      eq_p = ll_index_outside_quotes(peek, 61, 0)
+      if eq_p > 0
+        sym_p = ll_clean_sym(peek.slice(0, eq_p).strip())
+        rhs_p = peek.slice(eq_p + 1, cinder_blen(peek) - eq_p - 1).strip()
+        is_loc_p = rhs_p.starts_with?("private ") || rhs_p.starts_with?("internal ")
+        mb_p = is_loc_p ? MSYM_LOCAL : MSYM_GLOBAL
+        eb_p = is_loc_p ? ESYM_LOCAL : ESYM_GLOBAL
+        is_const_p = rhs_p.index("constant ") != nil
+        rc_p = peek.index("] c\"", eq_p)
+        if rc_p != nil && sym_p != "llvm.used" && sym_p != "llvm.compiler.used"
+          mod.intern_sym(sym_p, LLSYM_DEF_DATA)
+          lb_p = rhs_p.index("\[")
+          xi_p = rhs_p.index(" x ")
+          n_exp_p = rhs_p.slice(lb_p + 1, xi_p - lb_p - 1).strip().to_i()
+          tbuf_p = is_const_p ? writer.rodata : writer.data
+          is_slab_p = sym_p == "__static_slab" || sym_p == "__static_slab_zstd"
+          tbuf_p.align_to(is_slab_p ? 32 : 8, 0)
+          soff_p = tbuf_p.len
+          tbuf_p.reserve(n_exp_p + 8)
+          ndec_p = ll_decode_cbytes(tbuf_p.raw_ptr() + soff_p, src_ptr, pos + rc_p + 4, pos + line_len)
+          tbuf_p.len = soff_p + ndec_p
+          if ndec_p < n_exp_p
+            tbuf_p.put_zeros(n_exp_p - ndec_p)
+          if sym_p == "__static_slab" && is_const_p
+            mod.slab_ro_off = soff_p
+            mod.slab_len = n_exp_p
+          if is_macho
+            writer.define_sym(sym_p, is_const_p ? MSEC_CONST : MSEC_DATA, soff_p, mb_p)
+          else
+            writer.define_sym(sym_p, is_const_p ? ESEC_RODATA : ESEC_DATA, soff_p, n_exp_p, eb_p, ESTT_OBJECT)
+          pos = nl + 1
+          next
+        i64_arr_p = peek.index(" x i64] \[i64 ", eq_p)
+        if i64_arr_p != nil
+          mod.intern_sym(sym_p, LLSYM_DEF_DATA)
+          lb_p = rhs_p.index("\[")
+          xi_p = rhs_p.index(" x i64]")
+          n_el_p = rhs_p.slice(lb_p + 1, xi_p - lb_p - 1).strip().to_i()
+          abuf_p = is_const_p ? writer.rodata : writer.data
+          abuf_p.align_to(8, 0)
+          soff_p = abuf_p.len
+          abuf_p.reserve(n_el_p * 8 + 16)
+          ll_emit_i64_elems_raw(abuf_p, src_ptr, pos + i64_arr_p + 9, pos + line_len)
+          bsz_p = abuf_p.len - soff_p
+          if is_macho
+            writer.define_sym(sym_p, is_const_p ? MSEC_CONST : MSEC_DATA, soff_p, mb_p)
+          else
+            writer.define_sym(sym_p, is_const_p ? ESEC_RODATA : ESEC_DATA, soff_p, bsz_p, eb_p, ESTT_OBJECT)
+          pos = nl + 1
+          next
+
     line = src.slice(pos, line_len).strip()
     if line == "" || line.starts_with?("target ") || line.starts_with?("source_filename")
+      pos = nl + 1
+      next
+
+    if line.starts_with?("%")
+      eq_t = line.index(" = type ")
+      if eq_t != nil
+        tnm = line.slice(0, eq_t).strip()
+        tbody = line.slice(eq_t + 8, cinder_blen(line) - eq_t - 8).strip()
+        mod.named_types[tnm] = tbody
       pos = nl + 1
       next
 
@@ -913,13 +1095,17 @@ LLSYM_TLS      = 4
         lb = spec.index("\[")
         xi = spec.index(" x ")
         n_expected = spec.slice(lb + 1, xi - lb - 1).strip().to_i()
-        target_buf.align_to(8, 0)
+        is_slab = sym_nm == "__static_slab" || sym_nm == "__static_slab_zstd"
+        target_buf.align_to(is_slab ? 32 : 8, 0)
         sec_off = target_buf.len
         target_buf.reserve(n_expected + 8)
         n_dec = ll_decode_cbytes(target_buf.raw_ptr() + sec_off, src_ptr, c_byte_start, pos + line_len)
         target_buf.len = sec_off + n_dec
         if n_dec < n_expected
           target_buf.put_zeros(n_expected - n_dec)
+        if sym_nm == "__static_slab" && is_const
+          mod.slab_ro_off = sec_off
+          mod.slab_len = n_expected
         if is_macho
           writer.define_sym(sym_nm, is_const ? MSEC_CONST : MSEC_DATA, sec_off, m_bind)
         else
@@ -929,18 +1115,7 @@ LLSYM_TLS      = 4
 
       # Strip trailing `, align N` if NOT multiline (`[` without `]`)
       if !spec.ends_with?("\[")
-        # Scan backward for `, align ` outside quotes
-        ap = -1
-        sc_pos = 0
-        while sc_pos >= 0
-          cm_i = ll_index_outside_quotes(spec, 44, sc_pos)
-          if cm_i < 0
-            sc_pos = -1
-          else
-            if cinder_blen(spec) >= cm_i + 8 && spec.slice(cm_i, 8) == ", align "
-              ap = cm_i
-            sc_pos = cm_i + 1
-        spec = spec.slice(0, ap).strip() if ap >= 0
+        spec = ll_strip_trailing_align(spec)
 
       # Case B: `zeroinitializer`
       zi_pos = spec.index(" zeroinitializer")
@@ -1025,10 +1200,12 @@ LLSYM_TLS      = 4
       if lb2 >= 0 && rb2 > lb2
         arr_ty = spec.slice(lb1, rb1 - lb1 + 1)
         has_ptr_relocs = arr_ty.index(" x ptr]") != nil
-        # On ELF64 PIE (`ld.lld -pie`), relocated pointer tables need writable `.data` (`.data.rel.ro` semantics)
-        # rather than strictly read-only `.rodata`!
-        use_ro = is_const && (is_macho || !has_ptr_relocs)
-        arr_buf = use_ro ? writer.rodata : writer.data
+        # Pure read-only constants (no relocations) go in `writer.rodata` (`__TEXT,__const` / `.rodata`).
+        # Relocated constant pointer tables go in `writer.const_data` (`__DATA,__const`) on Mach-O
+        # and `writer.data` on ELF64 PIE!
+        use_dconst_macho = is_macho && is_const && has_ptr_relocs
+        use_ro = is_const && !has_ptr_relocs
+        arr_buf = use_dconst_macho ? writer.const_data : (use_ro ? writer.rodata : writer.data)
         elems = ll_split_top_commas(spec.slice(lb2 + 1, rb2 - lb2 - 1))
         arr_buf.align_to(8, 0)
         sec_off = arr_buf.len
@@ -1043,9 +1220,9 @@ LLSYM_TLS      = 4
               psym = ll_clean_sym(el.slice(at_e, cinder_blen(el) - at_e))
               mod.intern_sym(psym)
               if is_macho
-                use_ro ? writer.add_const_ptr_reloc(elem_off, psym, 0) : writer.add_data_ptr_reloc(elem_off, psym, 0)
+                use_dconst_macho ? writer.add_const_ptr_reloc(elem_off, psym, 0) : writer.add_data_ptr_reloc(elem_off, psym, 0)
               else
-                use_ro ? writer.add_const_ptr_reloc(elem_off, psym, 0) : writer.add_data_ptr_reloc(elem_off, psym, 0)
+                writer.add_data_ptr_reloc(elem_off, psym, 0)
             ei += 1
         else
           ei = 0
@@ -1057,7 +1234,8 @@ LLSYM_TLS      = 4
             ei += 1
         byte_sz = arr_buf.len - sec_off
         if is_macho
-          writer.define_sym(sym_nm, use_ro ? MSEC_CONST : MSEC_DATA, sec_off, m_bind)
+          m_sec = use_dconst_macho ? MSEC_DATA_CONST : (use_ro ? MSEC_CONST : MSEC_DATA)
+          writer.define_sym(sym_nm, m_sec, sec_off, m_bind)
         else
           writer.define_sym(sym_nm, use_ro ? ESEC_RODATA : ESEC_DATA, sec_off, byte_sz, e_bind, ESTT_OBJECT)
         pos = nl + 1
@@ -1073,6 +1251,73 @@ LLSYM_TLS      = 4
       ui += 1
 
   mod
+
+# Emit a packed 32-byte-slot `@__static_slab` directly into `writer.rodata`
+# (`__TEXT,__const` on Mach-O, `.rodata` on ELF64 — OS mmap'd read-only from the executable!).
+# Returns `[total_slots, slot_indices_array]`.
+-> cinder_emit_static_slab(writer, is_macho, slab_strings)
+  return [0, []] if slab_strings.size() == 0
+  total_slots = 1
+  si = 0
+  while si < slab_strings.size()
+    bl = cinder_blen(slab_strings[si])
+    total_slots += (bl > 30 ? 2 : 1)
+    si += 1
+  total_bytes = total_slots * 32
+  ro = writer.rodata
+  ro.align_to(32, 0)
+  slab_off = ro.len
+  ro.reserve(total_bytes + 8)
+  # Slot 0: 32 zero sentinel bytes
+  ro.put_zeros(32)
+  slot_indices = []
+  cur_slot = 1
+  si = 0
+  while si < slab_strings.size()
+    s = slab_strings[si]
+    bl = cinder_blen(s)
+    nslots = bl > 30 ? 2 : 1
+    ascii = true
+    bi = 0
+    while bi < bl
+      if s.byte_at(bi) >= 128
+        ascii = false
+        bi = bl
+      bi += 1
+    flags = (nslots == 2 ? 3 : 1) | (ascii ? 8 : 0)
+    ro.put_u8(flags)
+    ro.put_u8(bl)
+    ro.put_ascii(s)
+    pad = nslots * 32 - 2 - bl
+    ro.put_zeros(pad) if pad > 0
+    slot_indices.push(cur_slot)
+    cur_slot += nslots
+    si += 1
+  if is_macho
+    writer.define_sym("__static_slab", MSEC_CONST, slab_off, MSYM_LOCAL)
+  else
+    writer.define_sym("__static_slab", ESEC_RODATA, slab_off, total_bytes, ESYM_LOCAL, ESTT_OBJECT)
+  [total_slots, slot_indices]
+
+# If `imm_val` is a mode-6 static slab string WValue whose slot in `rodata_buf` is NUL-terminated
+# and free of embedded NUL bytes, return its byte offset from `@__static_slab` (`idx * 32 + 2`); else `-1`.
+-> ll_slab_puts_offset(mod_info, rodata_buf, imm_val)
+  return -1 if mod_info == nil || rodata_buf == nil || mod_info.slab_ro_off < 0
+  return -1 if ((imm_val >> 48) & 0xFFFF) != 0xFFF9
+  return -1 if (imm_val & 0xF) != 0xC
+  idx = (imm_val >> 4) & 0xFFFFFF
+  return -1 if idx <= 0
+  slot_off = idx * 32
+  return -1 if slot_off + 32 > mod_info.slab_len
+  base = mod_info.slab_ro_off + slot_off
+  slen = rodata_buf.data[base + 1] ## i64
+  return -1 if slot_off + 2 + slen >= mod_info.slab_len
+  return -1 if (rodata_buf.data[base + 2 + slen] ## i64) != 0
+  k = 0
+  while k < slen
+    return -1 if (rodata_buf.data[base + 2 + k] ## i64) == 0
+    k += 1
+  slot_off + 2
 
 # Parse a single function from its byte span `[hdr_line, body_start, body_end]` into `LLFunc`,
 # and optionally compute compact linear-scan stack slot assignments (`assign_slots = true`).
@@ -1105,9 +1350,20 @@ LLSYM_TLS      = 4
         ag = mod_info.attr_groups[post_rp.slice(hi, hend - hi)]
         ih = ag if ag != nil
       hi = post_rp.index("#", hend)
-  # Return type is the token immediately preceding `@`
-  pre_parts = pre_at.split(" ")
-  ret_ty = ll_type_tag(pre_parts[pre_parts.size() - 1])
+  # Return type is the token immediately preceding `@` (after stripping any parenthesized attrs like `range(...)`)
+  clean_pre = pre_at
+  while clean_pre.index("(") != nil
+    lp_r = clean_pre.index("(")
+    rp_r = ll_matching_rparen(clean_pre, lp_r)
+    if rp_r > lp_r
+      clean_pre = (clean_pre.slice(0, lp_r) + " " + clean_pre.slice(rp_r + 1, clean_pre.size() - rp_r - 1)).strip()
+    else
+      break
+  pre_parts = clean_pre.split(" ")
+  r_idx = pre_parts.size() - 1
+  while r_idx > 0 && (pre_parts[r_idx] == "" || pre_parts[r_idx] == "noundef" || pre_parts[r_idx] == "nonnull" || pre_parts[r_idx] == "zeroext" || pre_parts[r_idx] == "signext" || pre_parts[r_idx] == "noalias" || pre_parts[r_idx] == "inreg")
+    r_idx -= 1
+  ret_ty = ll_type_tag(pre_parts[r_idx])
 
   p_str = hdr.slice(lp + 1, rp - lp - 1).strip()
   param_tys = []
@@ -1120,7 +1376,7 @@ LLSYM_TLS      = 4
       pc_i = ll_index_outside_quotes(it, 37, 0)
       it_parts = it.split(" ")
       pty = ll_type_tag(it_parts[0])
-      pnm = pc_i >= 0 ? ll_clean_sym(it.slice(pc_i, cinder_blen(it) - pc_i)) : ("arg." + pi.to_s())
+      pnm = pc_i >= 0 ? ll_clean_sym(it.slice(pc_i, cinder_blen(it) - pc_i)) : pi.to_s()
       param_tys.push(pty)
       param_names.push(pnm)
       pi += 1
@@ -1133,6 +1389,9 @@ LLSYM_TLS      = 4
     pi += 1
 
   cur_blk_id = fn_ir.get_block("__entry")
+  # Register implicit unnamed LLVM entry block IDs (`%0` and `%<n_params>`) for Clang-emitted `.ll` PHIs!
+  fn_ir.blk_map["0"] = 0
+  fn_ir.blk_map[param_names.size().to_s()] = 0
   cur_blk = fn_ir.blocks[cur_blk_id]
   has_explicit_first_label = false
 
@@ -1153,7 +1412,7 @@ LLSYM_TLS      = 4
     if s == "; tungsten:noinline"
       fn_ir.inline_hint = :never
       next
-    if s == "" || s.starts_with?(";") || s == "}"
+    if s == "" || s.starts_with?(";") || s.starts_with?("#") || s == "}"
       next
     # Strip trailing `; comment` and `, !metadata` (`!llvm.loop`, `!prof`, `!range`, `!tbaa`, etc.) outside quotes
     s = ll_strip_line_tail(s)
@@ -1196,9 +1455,9 @@ LLSYM_TLS      = 4
     rest = sp0 == nil ? "" : rhs.slice(sp0 + 1, rhs.size() - sp0 - 1).strip()
 
     if op_str == "alloca"
-      # Forms: `alloca i64, align 8`, `alloca [3 x i64], align 8`, `alloca i64, i32 4, align 8`
+      # Forms: `alloca i64, align 8`, `alloca [3 x i64], align 8`, `alloca %struct.Foo, align 8`
       parts = ll_split_top_commas(rest)
-      sa = ll_type_size_align(parts[0])
+      sa = ll_type_size_align(mod_info.resolve_ty(parts[0]))
       elem_sz = sa[0]
       count = 1
       if parts.size() >= 2 && !parts[1].starts_with?("align ")
@@ -1232,8 +1491,10 @@ LLSYM_TLS      = 4
       cur_blk.insts.push(ins)
     elsif op_str == "getelementptr"
       rest = rest.slice(9, rest.size() - 9).strip() if rest.starts_with?("inbounds ")
+      rest = rest.slice(4, rest.size() - 4).strip() if rest.starts_with?("nuw ")
+      rest = rest.slice(4, rest.size() - 4).strip() if rest.starts_with?("nsw ")
       parts = ll_split_top_commas(rest)
-      cur_ty = parts[0]
+      cur_ty = mod_info.resolve_ty(parts[0])
       base_op = ll_parse_typed_operand(fn_ir, mod_info, parts[1])
       # Build GEP offset steps: const_addend (i64) + dynamic `[[op_kind, op_val, byte_stride], ...]`
       const_off = 0
@@ -1249,14 +1510,15 @@ LLSYM_TLS      = 4
           else
             dyn_steps.push([iop[1], iop[2], stride0])
         else
+          cur_ty = mod_info.resolve_ty(cur_ty)
           if cur_ty.starts_with?("{")
             f_info = ll_struct_field_offset(cur_ty, iop[2])
             const_off += f_info[0]
-            cur_ty = f_info[1]
+            cur_ty = mod_info.resolve_ty(f_info[1])
           elsif cur_ty.starts_with?("\[")
             inner = cur_ty.slice(1, cur_ty.size() - 2).strip()
             xi = inner.index(" x ")
-            ety = inner.slice(xi + 3, inner.size() - xi - 3).strip()
+            ety = mod_info.resolve_ty(inner.slice(xi + 3, inner.size() - xi - 3).strip())
             esa = ll_type_size_align(ety)
             if iop[1] == LLOP_IMM
               const_off += iop[2] * esa[0]
@@ -1358,6 +1620,8 @@ LLSYM_TLS      = 4
       ins.k2 = fop[1]; ins.v2 = fop[2]
       cur_blk.insts.push(ins)
     elsif op_str == "icmp" || op_str == "fcmp"
+      rest = rest.slice(9, rest.size() - 9).strip() if rest.starts_with?("samesign ")
+      rest = rest.slice(5, rest.size() - 5).strip() if rest.starts_with?("fast ")
       sp1 = rest.index(" ")
       pred_s = rest.slice(0, sp1).strip().to_sym()
       rem_s = rest.slice(sp1 + 1, rest.size() - sp1 - 1).strip()
@@ -1469,16 +1733,38 @@ LLSYM_TLS      = 4
           ins.k0 = cop[0]; ins.v0 = cop[1]
           ins.extra = c_args
           cur_blk.insts.push(ins)
+    elsif op_str == "freeze"
+      sop = ll_parse_typed_operand(fn_ir, mod_info, rest)
+      fn_ir.val_tys[dst_id] = sop[0] if dst_id >= 0
+      ins = LLInst.new(:copy, dst_id, sop[0])
+      ins.k0 = sop[1]; ins.v0 = sop[2]
+      cur_blk.insts.push(ins)
+    elsif op_str == "fneg"
+      while rest.starts_with?("fast ") || rest.starts_with?("nnan ") || rest.starts_with?("ninf ") || rest.starts_with?("nsz ") || rest.starts_with?("reassoc ") || rest.starts_with?("contract ") || rest.starts_with?("arcp ") || rest.starts_with?("afn ")
+        sp_f = rest.index(" ")
+        rest = rest.slice(sp_f + 1, rest.size() - sp_f - 1).strip()
+      sop = ll_parse_typed_operand(fn_ir, mod_info, rest)
+      fn_ir.val_tys[dst_id] = sop[0] if dst_id >= 0
+      ins = LLInst.new(:fsub, dst_id, sop[0])
+      ins.k0 = LLOP_IMM; ins.v0 = 0
+      ins.k1 = sop[1]; ins.v1 = sop[2]
+      cur_blk.insts.push(ins)
     else
-      # Binary ALU / FP op: `<op> [nsw] [nuw] [exact] <ty> <a_val>, <b_val>`
-      if rest.starts_with?("nsw ")
-        rest = rest.slice(4, rest.size() - 4).strip()
-      if rest.starts_with?("nuw ")
-        rest = rest.slice(4, rest.size() - 4).strip()
-      if rest.starts_with?("exact ")
-        rest = rest.slice(6, rest.size() - 6).strip()
-      if rest.starts_with?("disjoint ")
-        rest = rest.slice(9, rest.size() - 9).strip()
+      # Binary ALU / FP op: `<op> [nsw|nuw|exact|disjoint|fast-math-flags] <ty> <a_val>, <b_val>`
+      stripping_flags = true
+      while stripping_flags
+        if rest.starts_with?("nsw ") || rest.starts_with?("nuw ") || rest.starts_with?("nsz ") || rest.starts_with?("afn ")
+          rest = rest.slice(4, rest.size() - 4).strip()
+        elsif rest.starts_with?("fast ") || rest.starts_with?("nnan ") || rest.starts_with?("ninf ") || rest.starts_with?("arcp ")
+          rest = rest.slice(5, rest.size() - 5).strip()
+        elsif rest.starts_with?("exact ")
+          rest = rest.slice(6, rest.size() - 6).strip()
+        elsif rest.starts_with?("reassoc ")
+          rest = rest.slice(8, rest.size() - 8).strip()
+        elsif rest.starts_with?("disjoint ") || rest.starts_with?("contract ")
+          rest = rest.slice(9, rest.size() - 9).strip()
+        else
+          stripping_flags = false
       parts = ll_split_top_commas(rest)
       aop = ll_parse_typed_operand(fn_ir, mod_info, parts[0])
       bop = ll_parse_operand(fn_ir, mod_info, parts[1], aop[0])
@@ -1498,10 +1784,36 @@ LLSYM_TLS      = 4
 #     directly into hardware registers (`R_X19..R_X26` / `R_D8..R_D15` on ARM64, `RBX, R12..R14` on x86_64)!
 -> ll_assign_stack_slots(fn_ir)
   nv = fn_ir.n_vals
+  nb = fn_ir.blocks.size()
   def_blk = Array.new(nv, -1)
   last_use = Array.new(nv, -1)
   pinned = Array.new(nv, false)
   uses = Array.new(nv, 0)
+  w_uses = Array.new(nv, 0)
+
+  in_loop = Array.new(nb, false)
+  bi = 0
+  while bi < nb
+    blk = fn_ir.blocks[bi]
+    if blk.insts.size() > 0
+      term = blk.insts[blk.insts.size() - 1]
+      if term.op == :br && term.v0 > 0 && term.v0 <= bi
+        lk = term.v0
+        while lk <= bi
+          in_loop[lk] = true
+          lk += 1
+      elsif term.op == :cond_br
+        if term.v1 > 0 && term.v1 <= bi
+          lk = term.v1
+          while lk <= bi
+            in_loop[lk] = true
+            lk += 1
+        if term.v2 > 0 && term.v2 <= bi
+          lk = term.v2
+          while lk <= bi
+            in_loop[lk] = true
+            lk += 1
+    bi += 1
 
   i = 0
   while i < fn_ir.n_params
@@ -1511,8 +1823,9 @@ LLSYM_TLS      = 4
 
   max_phis_in_blk = 0
   bi = 0
-  while bi < fn_ir.blocks.size()
+  while bi < nb
     blk = fn_ir.blocks[bi]
+    uw = in_loop[bi] ? 16 : 1
     np = blk.phis.size()
     max_phis_in_blk = np if np > max_phis_in_blk
     pi = 0
@@ -1527,6 +1840,7 @@ LLSYM_TLS      = 4
           u = prs[k][2]
           pinned[u] = true
           uses[u] = uses[u] + 1
+          w_uses[u] = w_uses[u] + uw
         k += 1
       pi += 1
 
@@ -1542,6 +1856,7 @@ LLSYM_TLS      = 4
       if ins.k0 == LLOP_VAL
         u = ins.v0
         uses[u] = uses[u] + 1
+        w_uses[u] = w_uses[u] + uw
         if def_blk[u] != bi
           pinned[u] = true
         else
@@ -1549,6 +1864,7 @@ LLSYM_TLS      = 4
       if ins.k1 == LLOP_VAL
         u = ins.v1
         uses[u] = uses[u] + 1
+        w_uses[u] = w_uses[u] + uw
         if def_blk[u] != bi
           pinned[u] = true
         else
@@ -1556,6 +1872,7 @@ LLSYM_TLS      = 4
       if ins.k2 == LLOP_VAL
         u = ins.v2
         uses[u] = uses[u] + 1
+        w_uses[u] = w_uses[u] + uw
         if def_blk[u] != bi
           pinned[u] = true
         else
@@ -1569,6 +1886,7 @@ LLSYM_TLS      = 4
             if ca[1] == LLOP_VAL
               u = ca[2]
               uses[u] = uses[u] + 1
+              w_uses[u] = w_uses[u] + uw
               if def_blk[u] != bi
                 pinned[u] = true
               else
@@ -1582,6 +1900,7 @@ LLSYM_TLS      = 4
             if ca[1] == LLOP_VAL
               u = ca[2]
               uses[u] = uses[u] + 1
+              w_uses[u] = w_uses[u] + uw
               if def_blk[u] != bi
                 pinned[u] = true
               else
@@ -1594,6 +1913,7 @@ LLSYM_TLS      = 4
             if st[0] == LLOP_VAL
               u = st[1]
               uses[u] = uses[u] + 1
+              w_uses[u] = w_uses[u] + uw
               if def_blk[u] != bi
                 pinned[u] = true
               else
@@ -1606,7 +1926,7 @@ LLSYM_TLS      = 4
   slots = Array.new(nv, -1)
   cur_off = ((fn_ir.alloca_bytes + 15) / 16) * 16
   slot_is_fp = {}     # byte_offset -> bool (`true` = f64/f32 scalar, `false` = 64-bit GPR scalar; nil = 16-byte wide)
-  slot_uses = {}      # byte_offset -> weighted score (1 + uses)
+  slot_uses = {}      # byte_offset -> loop-weighted score (1 + w_uses)
 
   # 1. Assign pinned slots
   vi = 0
@@ -1618,7 +1938,7 @@ LLSYM_TLS      = 4
       slots[vi] = cur_off
       if sz == 8
         slot_is_fp[cur_off] = (vt == LLTY_F64 || vt == LLTY_F32)
-        slot_uses[cur_off] = 1 + uses[vi]
+        slot_uses[cur_off] = 1 + w_uses[vi]
       cur_off += sz
     vi += 1
 
@@ -1626,7 +1946,7 @@ LLSYM_TLS      = 4
   pool_slots_g = []
   pool_slots_f = []
   bi = 0
-  while bi < fn_ir.blocks.size()
+  while bi < nb
     blk = fn_ir.blocks[bi]
     free_g = []
     pi = pool_slots_g.size() - 1
@@ -1657,7 +1977,7 @@ LLSYM_TLS      = 4
             pool_slots_f.push(sl)
             slot_is_fp[sl] = true
             slot_uses[sl] = 0
-          slot_uses[sl] = slot_uses[sl] + 1 + uses[d]
+          slot_uses[sl] = slot_uses[sl] + 1 + w_uses[d]
           slots[d] = sl
           lu = last_use[d]
           if lu < 0 || lu <= ii
@@ -1676,7 +1996,7 @@ LLSYM_TLS      = 4
             pool_slots_g.push(sl)
             slot_is_fp[sl] = false
             slot_uses[sl] = 0
-          slot_uses[sl] = slot_uses[sl] + 1 + uses[d]
+          slot_uses[sl] = slot_uses[sl] + 1 + w_uses[d]
           slots[d] = sl
           lu = last_use[d]
           if lu < 0 || lu <= ii

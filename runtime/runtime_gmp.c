@@ -512,27 +512,142 @@ static void bigint_iroot_rem_pair(WValue a, WValue n_val, WValue *root_out, WVal
         bigint_temp_release(abs_a, a, W_NIL);
         return;
     }
-    /* 53-bit float seed shifted to the root's bit position for any limb count. */
-    int fexp;
-    double dval = ldexp((double)ap[an - 1], 64) + (double)ap[an - 2];
-    if (an >= 3) dval += ldexp((double)ap[an - 3], -64);
-    double m = frexp(dval, &fexp);
-    int64_t total_exp = (int64_t)(an - 2) * 64 + fexp;
-    int64_t q_exp = total_exp / n;
-    int r_exp = (int)(total_exp - q_exp * n);
-    if (r_exp < 0) { r_exp += (int)n; q_exp--; }
-    double root_m = pow(m, 1.0 / (double)n) * exp2((double)r_exp / (double)n);
-    int rm_exp;
-    double rm_frac = frexp(root_m, &rm_exp);
-    uint64_t mant53 = (uint64_t)ldexp(rm_frac, 53) + 2ULL;
-    int64_t shift = q_exp + rm_exp - 53;
-    WValue x = (shift >= 0)
-        ? w_bigint_shl(w_u64(mant53), w_int(shift))
-        : w_u64(mant53 >> (-shift) ? (mant53 >> (-shift)) : 1ULL);
+    int64_t root_bits = (bits - 1) / n + 1;
     int64_t nm1 = n - 1;
     WValue nm1_val = w_int(nm1);
     WValue n_box = w_int(n);
-    /* First step guarantees x >= floor(|a|^(1/n)) by AM-GM even if float seed under-approximated. */
+    WValue x = W_NIL;
+    int64_t n_margin = (n <= 64) ? 6 : (68 - __builtin_clzll((uint64_t)n));
+    /* Precision-doubling scaled Newton: since floor(floor(a / 2^(n*K))^(1/n)) == floor(a^(1/n)) >> K
+     * is an exact integer identity for all a >= 0, n >= 1, K >= 0, solving the half-width top slice
+     * recursively gives the exact top (root_bits - K) bits of floor(|a|^(1/n)), so ONE full-width
+     * Newton step converges to within +-1 of the exact root! */
+    if (root_bits > 60 + n_margin && an >= 6) {
+        int64_t k_half = (root_bits - n_margin) >> 1;
+        if (k_half >= 16 && (unsigned __int128)n * (unsigned __int128)k_half < (unsigned __int128)bits) {
+            int64_t slice_shift = n * k_half;
+            WValue a_top = w_bigint_shr(abs_a, w_int(slice_shift));
+            WValue m_root = W_NIL;
+            bigint_iroot_rem_pair(a_top, n_box, &m_root, NULL);
+            bigint_temp_release(a_top, a, m_root);
+            /* Fast Karatsuba cube-root step (Zimmermann) for n == 3:
+             * R = 2^K * M + delta (0 <= delta < 2^K, M >= 4 * 2^K).
+             * Let r0 = |a| - 2^(3K)*M^3, q = min(2^K - 1, floor((r0 >> 2K) / (3*M^2))).
+             * Since (3*2^K*M*delta^2 + delta^3) / (3*2^(2K)*M^2) < delta^2 / (2^K*M) + 1/48 < 1/4 + 1/48 < 1,
+             * exact delta is GUARANTEED to be either q or q - 1, using only half-width multiplies/divisions! */
+            if (n == 3) {
+                WValue m2 = bigint_mul_any(m_root, m_root);
+                WValue m3 = bigint_mul_any(m2, m_root);
+                WValue m3_sh = w_bigint_shl(m3, w_int(3 * k_half));
+                bigint_temp_release(m3, a, m3_sh);
+                WValue r0 = bigint_sub_any(abs_a, m3_sh);
+                bigint_temp_release(m3_sh, a, r0);
+                WValue r0_hi = w_bigint_shr(r0, w_int(2 * k_half));
+                WValue tm2 = bigint_mul_any(w_box_int(3), m2);
+                bigint_temp_release(m2, a, tm2);
+                WValue q = w_bigint_tdiv(r0_hi, tm2);
+                bigint_temp_release(r0_hi, a, q);
+                WValue two_k = w_bigint_shl(w_box_int(1), w_int(k_half));
+                if (bigint_compare_c(q, two_k) >= 0) {
+                    WValue q_clamped = bigint_sub_any(two_k, w_box_int(1));
+                    bigint_temp_release(q, a, q_clamped);
+                    q = q_clamped;
+                }
+                bigint_temp_release(two_k, a, q);
+                /* Test whether delta == q fits: need = (3*M^2*q << 2K) + (3*M*q^2 << K) + q^3 <= r0 */
+                WValue t1_u = bigint_mul_any(tm2, q);
+                bigint_temp_release(tm2, a, t1_u);
+                WValue t1 = w_bigint_shl(t1_u, w_int(2 * k_half));
+                bigint_temp_release(t1_u, a, t1);
+                WValue q2 = bigint_mul_any(q, q);
+                WValue q3 = bigint_mul_any(q2, q);
+                WValue mq2 = bigint_mul_any(m_root, q2);
+                bigint_temp_release(q2, a, mq2);
+                WValue tmq2 = bigint_mul_any(w_box_int(3), mq2);
+                bigint_temp_release(mq2, a, tmq2);
+                WValue t2 = w_bigint_shl(tmq2, w_int(k_half));
+                bigint_temp_release(tmq2, a, t2);
+                WValue s12 = bigint_add_any(t1, t2);
+                bigint_temp_release(t1, a, s12);
+                bigint_temp_release(t2, a, s12);
+                WValue need = bigint_add_any(s12, q3);
+                bigint_temp_release(s12, a, need);
+                bigint_temp_release(q3, a, need);
+                WValue m_sh = w_bigint_shl(m_root, w_int(k_half));
+                if (bigint_compare_c(need, r0) <= 0) {
+                    x = bigint_add_any(m_sh, q);
+                    if (rem_out) {
+                        WValue rem_v = bigint_sub_any(r0, need);
+                        *rem_out = sign_a < 0 ? w_neg(rem_v) : rem_v;
+                    }
+                    bigint_temp_release(m_root, a, x);
+                    bigint_temp_release(m_sh, a, x);
+                    bigint_temp_release(q, a, x);
+                    bigint_temp_release(need, a, x);
+                    bigint_temp_release(r0, a, x);
+                    bigint_temp_release(abs_a, a, x);
+                    *root_out = sign_a < 0 ? w_neg(x) : x;
+                    return;
+                }
+                /* delta == q - 1 is exact! */
+                WValue qm1 = bigint_sub_any(q, w_box_int(1));
+                bigint_temp_release(q, a, qm1);
+                x = bigint_add_any(m_sh, qm1);
+                bigint_temp_release(m_root, a, x);
+                bigint_temp_release(m_sh, a, x);
+                bigint_temp_release(qm1, a, x);
+                bigint_temp_release(need, a, x);
+                bigint_temp_release(r0, a, x);
+                if (rem_out) {
+                    WValue x2 = bigint_mul_any(x, x);
+                    WValue x3 = bigint_mul_any(x2, x);
+                    WValue rem_v = bigint_sub_any(abs_a, x3);
+                    bigint_temp_release(x2, a, rem_v);
+                    bigint_temp_release(x3, a, rem_v);
+                    *rem_out = sign_a < 0 ? w_neg(rem_v) : rem_v;
+                }
+                bigint_temp_release(abs_a, a, x);
+                *root_out = sign_a < 0 ? w_neg(x) : x;
+                return;
+            }
+            WValue m_sh = w_bigint_shl(m_root, w_int(k_half));
+            bigint_temp_release(m_root, a, m_sh);
+            WValue half_bit = w_bigint_shl(w_box_int(1), w_int(k_half - 1));
+            WValue x0 = bigint_add_any(m_sh, half_bit);
+            bigint_temp_release(m_sh, a, x0);
+            bigint_temp_release(half_bit, a, x0);
+            WValue x0_nm1 = bigint_pow_nm1_c(x0, nm1);
+            WValue q0 = w_bigint_tdiv(abs_a, x0_nm1);
+            WValue nm1_x0 = (nm1 == 2) ? w_bigint_shl(x0, w_box_int(1)) : bigint_mul_any(nm1_val, x0);
+            WValue sum0 = bigint_add_any(nm1_x0, q0);
+            x = w_bigint_tdiv(sum0, n_box);
+            bigint_temp_release(x0_nm1, a, x);
+            bigint_temp_release(q0, a, x);
+            bigint_temp_release(nm1_x0, a, x);
+            bigint_temp_release(sum0, a, x);
+            bigint_temp_release(x0, a, x);
+        }
+    }
+    if (x == W_NIL) {
+        /* 53-bit float seed shifted to the root's bit position. */
+        int fexp;
+        double dval = ldexp((double)ap[an - 1], 64) + (double)ap[an - 2];
+        if (an >= 3) dval += ldexp((double)ap[an - 3], -64);
+        double m = frexp(dval, &fexp);
+        int64_t total_exp = (int64_t)(an - 2) * 64 + fexp;
+        int64_t q_exp = total_exp / n;
+        int r_exp = (int)(total_exp - q_exp * n);
+        if (r_exp < 0) { r_exp += (int)n; q_exp--; }
+        double root_m = pow(m, 1.0 / (double)n) * exp2((double)r_exp / (double)n);
+        int rm_exp;
+        double rm_frac = frexp(root_m, &rm_exp);
+        uint64_t mant53 = (uint64_t)ldexp(rm_frac, 53) + 2ULL;
+        int64_t shift = q_exp + rm_exp - 53;
+        x = (shift >= 0)
+            ? w_bigint_shl(w_u64(mant53), w_int(shift))
+            : w_u64(mant53 >> (-shift) ? (mant53 >> (-shift)) : 1ULL);
+    }
+    /* First step guarantees x >= floor(|a|^(1/n)) by AM-GM even if seed under-approximated. */
     WValue x_nm1 = bigint_pow_nm1_c(x, nm1);
     WValue q = w_bigint_tdiv(abs_a, x_nm1);
     if (bigint_compare_c(q, x) > 0) {
@@ -882,7 +997,7 @@ static inline int32_t mag_pos_linear_comb(uint64_t *out,
 }
 
 /* Certified Lehmer simulation for invmod: simulates Euclidean steps on the
- * top limbs of (u, v) and returns positive matrix (m00, m01, m10, m11). */
+ * top 64 bits of (u, v) in pure 64-bit hardware registers and returns positive matrix. */
 static inline int invmod_lehmer_simulate(const uint64_t *u, int32_t ulen,
                                          const uint64_t *v, int32_t vlen,
                                          uint64_t *m00_out, uint64_t *m01_out,
@@ -1172,7 +1287,7 @@ static inline WValue invmod_run_lehmer_workspace(const uint64_t *ap0, int32_t al
         }
         bigint_release(rem_bi);
     }
-    if (vlen == 0) die("Integer#invmod: not invertible");
+    if (vlen == 0) return W_UNDEF;
     int32_t s0len = 0;
     s1[0] = 1ULL;
     int32_t s1len = 1;
@@ -1244,7 +1359,7 @@ static inline WValue invmod_run_lehmer_workspace(const uint64_t *ap0, int32_t al
                 m10 = nm10; m11 = nm11;
                 steps++;
             }
-            if (uh != 1ULL) die("Integer#invmod: not invertible");
+            if (uh != 1ULL) return W_UNDEF;
             int32_t dummy_l1;
             invmod_pos_linear_comb_pair(ns0, ns1, s0, s0len, s1, s1len,
                                         m00, m01, 0, 0, 0, &s0len, &dummy_l1);
@@ -1406,7 +1521,7 @@ static inline WValue invmod_run_lehmer_workspace(const uint64_t *ap0, int32_t al
         s0len = s1len; s1len = ns0len;
         odd ^= 1;
     }
-    if (ulen != 1 || u[0] != 1ULL) die("Integer#invmod: not invertible");
+    if (ulen != 1 || u[0] != 1ULL) return W_UNDEF;
     if (s0len == 0) return w_box_int(0);
     WBigint *res = bigint_alloc_raw_hot(mn0);
     if (odd) {
@@ -1429,11 +1544,28 @@ static inline WValue invmod_run_lehmer_workspace(const uint64_t *ap0, int32_t al
 static __attribute__((noinline))
 WValue w_bigint_invmod_medium(const uint64_t *ap0, int32_t alen0, int32_t an0,
                               const uint64_t *mp0, int32_t mn0) {
-    uint64_t buf_u[66], buf_v[66], buf_nu[66], buf_nv[66];
-    uint64_t buf_s0[68], buf_s1[68], buf_ns0[68], buf_ns1[68];
-    return invmod_run_lehmer_workspace(ap0, alen0, an0, mp0, mn0,
-                                       buf_u, buf_v, buf_nu, buf_nv,
-                                       buf_s0, buf_s1, buf_ns0, buf_ns1);
+    uint64_t buf_u[260], buf_v[260], buf_nu[260], buf_nv[260];
+    uint64_t buf_s0[260], buf_s1[260], buf_ns0[260], buf_ns1[260];
+    WValue r = invmod_run_lehmer_workspace(ap0, alen0, an0, mp0, mn0,
+                                           buf_u, buf_v, buf_nu, buf_nv,
+                                           buf_s0, buf_s1, buf_ns0, buf_ns1);
+    if (__builtin_expect(r == W_UNDEF, 0)) die("Integer#invmod: not invertible");
+    return r;
+}
+
+static __attribute__((noinline))
+WValue w_bigint_invmod_large(const uint64_t *ap0, int32_t alen0, int32_t an0,
+                             const uint64_t *mp0, int32_t mn0) {
+    size_t cap = (size_t)mn0 + 4U;
+    uint64_t *ws = (uint64_t *)malloc(8U * cap * sizeof(uint64_t));
+    if (!ws) die("Integer#invmod: out of memory");
+    WValue r = invmod_run_lehmer_workspace(
+        ap0, alen0, an0, mp0, mn0,
+        ws + 0 * cap, ws + 1 * cap, ws + 2 * cap, ws + 3 * cap,
+        ws + 4 * cap, ws + 5 * cap, ws + 6 * cap, ws + 7 * cap);
+    free(ws);
+    if (__builtin_expect(r == W_UNDEF, 0)) die("Integer#invmod: not invertible");
+    return r;
 }
 
 WValue w_bigint_invmod(WValue a, WValue m_val) {
@@ -1484,53 +1616,18 @@ WValue w_bigint_invmod(WValue a, WValue m_val) {
     int32_t an0 = alen0 < 0 ? -alen0 : alen0;
     if (an0 == 0) die("Integer#invmod: not invertible");
     if (mn0 <= 4) {
-        uint64_t buf_u[6], buf_v[6], buf_nu[6], buf_nv[6];
-        uint64_t buf_s0[6], buf_s1[6], buf_ns0[6], buf_ns1[6];
-        return invmod_run_lehmer_workspace(ap0, alen0, an0, mp0, mn0,
-                                           buf_u, buf_v, buf_nu, buf_nv,
-                                           buf_s0, buf_s1, buf_ns0, buf_ns1);
+        uint64_t buf_u[8], buf_v[8], buf_nu[8], buf_nv[8];
+        uint64_t buf_s0[8], buf_s1[8], buf_ns0[8], buf_ns1[8];
+        WValue r = invmod_run_lehmer_workspace(ap0, alen0, an0, mp0, mn0,
+                                               buf_u, buf_v, buf_nu, buf_nv,
+                                               buf_s0, buf_s1, buf_ns0, buf_ns1);
+        if (__builtin_expect(r == W_UNDEF, 0)) die("Integer#invmod: not invertible");
+        return r;
     }
-    if (mn0 <= 64) {
+    if (mn0 <= 256) {
         return w_bigint_invmod_medium(ap0, alen0, an0, mp0, mn0);
     }
-    WValue m = mlen0 < 0 ? w_neg(m_val) : m_val;
-    WValue a_mod = w_bigint_fmod(a, m);
-    if (bigint_val_sign(a_mod) == 0) {
-        bigint_temp_release(a_mod, a, m_val);
-        bigint_temp_release(m, a, m_val);
-        die("Integer#invmod: not invertible");
-    }
-    WValue old_r = a_mod, r = m;
-    WValue old_s = w_box_int(1), s = w_box_int(0);
-    while (bigint_val_sign(r) != 0) {
-        WValue q, rem;
-        bigint_tdivmod_pair(old_r, r, &q, &rem);
-        WValue qs = bigint_mul_any(q, s);
-        WValue next_s = bigint_sub_any(old_s, qs);
-        bigint_temp_release(qs, a, m_val);
-        bigint_temp_release(q, a, m_val);
-        if (old_r != m) bigint_temp_release(old_r, a, m_val);
-        bigint_temp_release(old_s, a, m_val);
-        old_r = r;
-        r = rem;
-        old_s = s;
-        s = next_s;
-    }
-    bigint_temp_release(r, a, m_val);
-    bigint_temp_release(s, a, m_val);
-    if (old_r != w_box_int(1)) {
-        if (old_r != m) bigint_temp_release(old_r, a, m_val);
-        bigint_temp_release(old_s, a, m_val);
-        bigint_temp_release(m, a, m_val);
-        die("Integer#invmod: not invertible");
-    }
-    if (bigint_val_sign(old_s) < 0) {
-        WValue fixed_s = bigint_add_any(old_s, m);
-        bigint_temp_release(old_s, a, m_val);
-        old_s = fixed_s;
-    }
-    bigint_temp_release(m, a, m_val);
-    return old_s;
+    return w_bigint_invmod_large(ap0, alen0, an0, mp0, mn0);
 }
 
 static inline __attribute__((always_inline))
@@ -1849,6 +1946,96 @@ int bigint_jacobi_odd_limbs_large(const uint64_t *ap, int32_t alen,
             int tail = jacobi_u64_odd_c(rem, v0);
             if (heap_work) free(u_alloc);
             return result * tail;
+        }
+        /* Double-ended certified binary Jacobi Lehmer step (both u, v odd, >= 5 limbs, |ulen - vlen| <= 1):
+         * Simulates up to 58 bits of binary subtraction/shift/swap using exact bottom 64 bits (ul, vl)
+         * and certified fixed-scale top 62-bit interval bounds [uh_lo, uh_hi], [vh_lo, vh_hi], then
+         * applies the resulting signed 2x2 matrix + right-shift to (u, v) in ONE in-place linear scan! */
+        if (ulen >= 5 && vlen >= 5 && ulen <= vlen + 1 && vlen <= ulen + 1) {
+            int32_t top = (ulen > vlen ? ulen : vlen) - 1;
+            uint64_t u_top = (top < ulen) ? u[top] : 0ULL;
+            uint64_t v_top = (top < vlen) ? v[top] : 0ULL;
+            int sh = __builtin_clzll(u_top | v_top);
+            uint64_t u_m1 = u[top - 1], u_m2 = u[top - 2];
+            uint64_t v_m1 = v[top - 1], v_m2 = v[top - 2];
+            unsigned __int128 u_top128 = (sh == 0)
+                ? (((unsigned __int128)u_top << 64) | u_m1)
+                : ((((unsigned __int128)u_top << 64) | u_m1) << sh) | (u_m2 >> (64 - sh));
+            unsigned __int128 v_top128 = (sh == 0)
+                ? (((unsigned __int128)v_top << 64) | v_m1)
+                : ((((unsigned __int128)v_top << 64) | v_m1) << sh) | (v_m2 >> (64 - sh));
+            uint64_t uh_lo = (uint64_t)(u_top128 >> 66);
+            uint64_t uh_hi = uh_lo + 1ULL;
+            uint64_t vh_lo = (uint64_t)(v_top128 >> 66);
+            uint64_t vh_hi = vh_lo + 1ULL;
+            uint64_t ul = u[0], vl = v[0];
+            uint64_t sbit = sign_bit;
+            int64_t m00 = 1, m01 = 0, m10 = 0, m11 = 1;
+            int k = 0;
+            while (k < 58) {
+                if (uh_lo > vh_hi) {
+                    /* Certified u_cur > v_cur */
+                } else if (vh_lo > uh_hi) {
+                    /* Certified u_cur < v_cur: swap and apply quadratic reciprocity */
+                    sbit ^= (ul & vl) >> 1;
+                    uint64_t tl = ul; ul = vl; vl = tl;
+                    uint64_t tlo = uh_lo; uh_lo = vh_lo; vh_lo = tlo;
+                    uint64_t thi = uh_hi; uh_hi = vh_hi; vh_hi = thi;
+                    int64_t tm0 = m00; m00 = m10; m10 = tm0;
+                    int64_t tm1 = m01; m01 = m11; m11 = tm1;
+                } else {
+                    break;
+                }
+                uint64_t dl = ul - vl;
+                uint64_t budget_mask = (1ULL << (58 - k)) - 1ULL;
+                if ((dl & budget_mask) == 0ULL) break;
+                int tz = __builtin_ctzll(dl);
+                ul = dl >> tz;
+                sbit ^= (uint64_t)tz & ((vl >> 1) ^ (vl >> 2));
+                uh_lo = (uh_lo - vh_hi) >> tz;
+                uh_hi = ((uh_hi - vh_lo - 1ULL) >> tz) + 1ULL;
+                m00 -= m10;
+                m01 -= m11;
+                m10 <<= tz;
+                m11 <<= tz;
+                k += tz;
+            }
+            if (k > 0) {
+                sign_bit = sbit;
+                uint64_t u0_i = u[0], v0_i = v[0];
+                __int128 pu0 = (__int128)m00 * (__int128)(unsigned __int128)u0_i
+                             + (__int128)m01 * (__int128)(unsigned __int128)v0_i;
+                __int128 pv0 = (__int128)m10 * (__int128)(unsigned __int128)u0_i
+                             + (__int128)m11 * (__int128)(unsigned __int128)v0_i;
+                uint64_t prev_u = ((uint64_t)pu0) >> k;
+                uint64_t prev_v = ((uint64_t)pv0) >> k;
+                int64_t cu = (int64_t)(pu0 >> 64);
+                int64_t cv = (int64_t)(pv0 >> 64);
+                int rsh = 64 - k;
+                for (int32_t i = 1; i <= top; i++) {
+                    uint64_t ui = (i < ulen) ? u[i] : 0ULL;
+                    uint64_t vi = (i < vlen) ? v[i] : 0ULL;
+                    __int128 pui = (__int128)m00 * (__int128)(unsigned __int128)ui
+                                 + (__int128)m01 * (__int128)(unsigned __int128)vi + (__int128)cu;
+                    __int128 pvi = (__int128)m10 * (__int128)(unsigned __int128)ui
+                                 + (__int128)m11 * (__int128)(unsigned __int128)vi + (__int128)cv;
+                    uint64_t lo_u = (uint64_t)pui;
+                    uint64_t lo_v = (uint64_t)pvi;
+                    u[i - 1] = prev_u | (lo_u << rsh);
+                    v[i - 1] = prev_v | (lo_v << rsh);
+                    prev_u = lo_u >> k;
+                    prev_v = lo_v >> k;
+                    cu = (int64_t)(pui >> 64);
+                    cv = (int64_t)(pvi >> 64);
+                }
+                u[top] = prev_u | (((uint64_t)cu) << rsh);
+                v[top] = prev_v | (((uint64_t)cv) << rsh);
+                ulen = top + 1;
+                while (ulen > 0 && u[ulen - 1] == 0ULL) ulen--;
+                vlen = top + 1;
+                while (vlen > 0 && v[vlen - 1] == 0ULL) vlen--;
+                continue;
+            }
         }
         /* Both u and v are odd and >= 2 limbs. Ensure u >= v. */
         int cmp = (ulen != vlen) ? (ulen > vlen ? 1 : -1) : mag_cmp(u, ulen, v, vlen);
@@ -2692,6 +2879,48 @@ WValue w_bigint_divexact(WValue a, WValue b) {
                     uint64_t q0 = r0 * bn_modinv_odd(d >> tz);
                     return bigint_finish_one_limb(q0, 0);
                 }
+            } else if (an == 4 && bn == 2 && (bb->limbs[0] & 1ULL) != 0 && aa->limbs[3] < bb->limbs[1]) {
+                const uint64_t *np = aa->limbs;
+                const uint64_t *dp = bb->limbs;
+                uint64_t d0v = dp[0], d1 = dp[1];
+                uint64_t r0 = np[0], r1 = np[1];
+                uint64_t inv = bn_modinv_odd(d0v);
+                uint64_t q0 = r0 * inv;
+                uint64_t bw = (uint64_t)(((__uint128_t)q0 * d0v) >> 64);
+                r1 -= (uint64_t)(q0 * d1) + bw;
+                uint64_t q1 = r1 * inv;
+                WBigint *q = bigint_alloc_raw_hot_exact(2U);
+                q->limbs[0] = q0;
+                q->limbs[1] = q1;
+                q->size = q1 ? 2 : (q0 ? 1 : 0);
+                return bigint_finish_mag_sub(q);
+            } else if (an == 6 && bn == 3 && (bb->limbs[0] & 1ULL) != 0 && aa->limbs[5] < bb->limbs[2]) {
+                const uint64_t *np = aa->limbs;
+                const uint64_t *dp = bb->limbs;
+                uint64_t d0v = dp[0], d1 = dp[1], d2 = dp[2];
+                uint64_t r0 = np[0], r1 = np[1], r2 = np[2];
+                uint64_t inv = bn_modinv_odd(d0v);
+                WBigint *q = bigint_alloc_raw_hot_exact(3U);
+                uint64_t q0 = r0 * inv;
+                q->limbs[0] = q0;
+                {
+                    uint64_t bw = (uint64_t)(((__uint128_t)q0 * d0v) >> 64);
+                    __uint128_t p1 = (__uint128_t)q0 * d1 + bw;
+                    uint64_t lo1 = (uint64_t)p1;
+                    bw = (uint64_t)(p1 >> 64) + (r1 < lo1);
+                    r1 -= lo1;
+                    r2 -= (uint64_t)(q0 * d2) + bw;
+                }
+                uint64_t q1 = r1 * inv;
+                q->limbs[1] = q1;
+                {
+                    uint64_t bw = (uint64_t)(((__uint128_t)q1 * d0v) >> 64);
+                    r2 -= (uint64_t)(q1 * d1) + bw;
+                }
+                uint64_t q2 = r2 * inv;
+                q->limbs[2] = q2;
+                q->size = q2 ? 3 : (q1 ? 2 : (q0 ? 1 : 0));
+                return bigint_finish_mag_sub(q);
             } else if (an == 8 && bn == 4 && (bb->limbs[0] & 1ULL) != 0 && aa->limbs[7] < bb->limbs[3]) {
                 const uint64_t *np = aa->limbs;
                 const uint64_t *dp = bb->limbs;

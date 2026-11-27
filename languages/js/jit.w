@@ -58,6 +58,7 @@ OSR_RETURN = 2
   rw :fast_entry_off, :repeat_entry_off, :is_slim_epilogue, :bounded_ta_set, :bounded_mod_ta, :sh_spill_slots
   rw :promoted_rw, :promoted_rw_list, :promoted_owner, :promoted_other_lis, :promoted_bail_lbl
   rw :slim_g_hi, :slim_f_hi, :mono_arr_shape, :mono_arr_num, :d_bias_reg, :prom_cached_fns
+  rw :hoisted_global_tas, :hoisted_gta_regs, :known_vs_sh
 
   -> new(@info)
     @a = JS:A64.new(512)
@@ -73,6 +74,11 @@ OSR_RETURN = 2
     @hoisted_cells = {}    # cell_bits -> expected_val_bits
     @hoisted_arr_regs = {} # lidx -> [slots_reg_or_nil, len_reg_or_nil]
     @hoisted_ta_regs = {}  # lidx -> [ptr_reg_or_nil, len_reg_or_nil]
+    @hoisted_global_tas = {} # JaBinding -> [off_ptr, off_len, kind, cell, gv]
+    @hoisted_gta_regs = {}   # JaBinding -> [ptr_reg_or_nil, len_reg_or_nil]
+    @known_vs_sh = {}        # lidx -> JS:Shape (from param_shapes / sra_vs)
+    @info.param_shapes.each ->(pli, sh) @known_vs_sh[pli] = sh
+    @info.sra_vs.each ->(vli, vs) @known_vs_sh[vli] = vs.ctor_info[4]
     @hoisted_shapes = {}   # shape_bits -> callee-saved GPR holding shape_bits
     @sh_spill_slots = {}   # shape_bits -> positive SP offset (1 LDR instead of 3 movz/movk!)
     @block_prop_fp = {}    # "bli:sl" -> caller-saved FP reg (d18..d31) for read-only properties in pure blocks!
@@ -108,6 +114,7 @@ OSR_RETURN = 2
     @no_ovf_p1_li = -1     # loop induction local proven <= 2147483645 so `i + 1` cannot overflow i32!
     @unroll_i_li = -1      # induction local with deferred increment during 4x unrolling
     @unroll_i_off = 0      # constant offset (0..3) added on reads of @unroll_i_li!
+    @unroll_fp_i_reg = nil # R_D7 holding exact double(i + off) during pure-FP defer_i4 loop!
     @i53_defer_const = nil # [accumulated_const_i64] deferred across 4x unrolled i53 loop!
     @i53_defer_regs = nil  # [[r_cap_gpr, count], ...] loop-invariant int32 regs deferred across 4x i53 loop!
     @i53_cur_body = nil    # current loop body AST inside can_2lane_4x!
@@ -144,6 +151,12 @@ OSR_RETURN = 2
         r_ln = @free_gprs.size > 0 ? @free_gprs.pop : nil
         @hoisted_arr_regs[li] = [r_sl, r_ln]
         sp += 16
+    @info.global_tas.each ->(gb, ginfo)
+      @hoisted_global_tas[gb] = [sp, sp + 8, ginfo[0], ginfo[1], ginfo[2]]
+      r_ptr = @free_gprs.size > 0 ? @free_gprs.pop : nil
+      r_len = @free_gprs.size > 0 ? @free_gprs.pop : nil
+      @hoisted_gta_regs[gb] = [r_ptr, r_len]
+      sp += 16
     @ta_info_slot = sp
     sp += 32
     @tmp_base = sp
@@ -510,7 +523,7 @@ OSR_RETURN = 2
       @repeat_entry_off = @a.pos * 4
     @is_slim_epilogue = true
     # Compute tightest callee-saved GPR/FPR bounds for slim prologue!
-    if !@info.has_loop && @info.reg_gpr.size == 0 && @info.reg_fpr.size == 0 && @hoisted_arr_regs.size == 0 && @hoisted_ta_regs.size == 0
+    if !@info.has_loop && @info.reg_gpr.size == 0 && @info.reg_fpr.size == 0 && @hoisted_arr_regs.size == 0 && @hoisted_ta_regs.size == 0 && @hoisted_gta_regs.size == 0
       @slim_g_hi = 0
       @slim_f_hi = 0
     else
@@ -564,54 +577,88 @@ OSR_RETURN = 2
       pb = @jf.params[pi]
       param_set[pb.lidx] = true if pb.lidx >= 0
       pi += 1
+    # Allocate function scope JS:Env / JS:EnvN when nested closures capture locals/params!
+    if @jf.scope.has_env?
+      @a.str_x(R_X2, R_SP, @tmp_base)
+      @a.str_x(R_X3, R_SP, @tmp_base + 8)
+      @a.str_x(R_X4, R_SP, @tmp_base + 16)
+      @a.str_x(R_X5, R_SP, @tmp_base + 24)
+      @a.str_x(R_X6, R_SP, @tmp_base + 32)
+      @a.ldr_x(R_X1, R_SP, JF_SLOT_ENV)
+      if @jf.scope.env_count > 7
+        @a.mov_imm64(R_X2, wvalue_bits(@jf.scope.env_count) ## i64)
+        call_rt(RT_ENVN_NEW)
+      else
+        call_rt(RT_ENV_NEW)
+      @a.str_x(R_X0, R_SP, JF_SLOT_ENV)
+      @a.ldr_x(R_X2, R_SP, @tmp_base)
+      @a.ldr_x(R_X3, R_SP, @tmp_base + 8)
+      @a.ldr_x(R_X4, R_SP, @tmp_base + 16)
+      @a.ldr_x(R_X5, R_SP, @tmp_base + 24)
+      @a.ldr_x(R_X6, R_SP, @tmp_base + 32)
     # Bind simple parameters directly from x3..x6!
     l_fn_slow = @a.new_label
     r_argc = R_X2
-    i = 0
-    while i < @jf.params.size
-      pb = @jf.params[i]
-      if pb.lidx >= 0
-        @a.mov_r(R_X9, R_X3 + i)
-        @a.cmp_i(r_argc, i)
+    if @jf.scope.has_env?
+      i = 0
+      while i < @jf.params.size
+        pb = @jf.params[i]
+        @a.ldr_x(R_X9, R_SP, @tmp_base + 8 + i * 8)
+        @a.ldr_x(R_X10, R_SP, @tmp_base)
+        @a.cmp_i(R_X10, i)
         @a.csel_x(R_X9, R_X9, R_XZR, CC_GT)
-        if @info.param_ints[pb.lidx]
-          # Unbox read-only integer loop-bound param ONCE in prologue (fallback to tier 0 if non-int32!)
-          emit_unbox_exact_i32(R_X10, R_X9, l_fn_slow)
-          store_slot_i32(pb.lidx, R_X10)
-        elsif @info.param_nums[pb.lidx]
-          # Unbox read-only numeric param ONCE in prologue (fallback to tier 0 if non-number!)
-          emit_unbox_f64(R_D16, R_X9, l_fn_slow)
-          store_slot_f64(pb.lidx, R_D16)
-        else
-          store_slot_any(pb.lidx, R_X9)
-      i += 1
+        if pb.slot >= 0
+          emit_write_binding(pb, R_X9, true)
+        elsif pb.lidx >= 0
+          if @info.param_ints[pb.lidx]
+            emit_unbox_exact_i32(R_X10, R_X9, l_fn_slow)
+            store_slot_i32(pb.lidx, R_X10)
+          elsif @info.param_nums[pb.lidx]
+            emit_unbox_f64(R_D16, R_X9, l_fn_slow)
+            store_slot_f64(pb.lidx, R_D16)
+          else
+            store_slot_any(pb.lidx, R_X9)
+        i += 1
+    else
+      i = 0
+      while i < @jf.params.size
+        pb = @jf.params[i]
+        if pb.lidx >= 0
+          @a.mov_r(R_X9, R_X3 + i)
+          @a.cmp_i(r_argc, i)
+          @a.csel_x(R_X9, R_X9, R_XZR, CC_GT)
+          if @info.param_ints[pb.lidx]
+            # Unbox read-only integer loop-bound param ONCE in prologue (fallback to tier 0 if non-int32!)
+            emit_unbox_exact_i32(R_X10, R_X9, l_fn_slow)
+            store_slot_i32(pb.lidx, R_X10)
+          elsif @info.param_nums[pb.lidx]
+            # Unbox read-only numeric param ONCE in prologue (fallback to tier 0 if non-number!)
+            emit_unbox_f64(R_D16, R_X9, l_fn_slow)
+            store_slot_f64(pb.lidx, R_D16)
+          else
+            store_slot_any(pb.lidx, R_X9)
+        i += 1
     # Guard global TypedArray constructors for @info.local_tas ONCE at entry (zero mutations on fallback!)
     if @info.local_tas.size > 0
       r_cur = js_realm()
-      ta_names = ["Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array"]
+      ta_names = ["Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array", "Float16Array"]
       checked_tk = {}
       @info.local_tas.values.each ->(tk)
         if !checked_tk[tk] && tk >= 0 && tk < ta_names.size
           checked_tk[tk] = true
           tnm = ta_names[tk]
           ctor_v = r_cur.intrinsics[tnm]
-          gcell = r_cur.global.get_own(tnm)
-          if ctor_v == nil
+          tc = r_cur.global.cell(tnm)
+          if ctor_v == nil || tc == nil
             @a.b(l_fn_slow)
           else
-            # Verify global cell for tnm still equals intrinsic ctor_v
-            b_ta = @jf.analysis.funcs[0].scope.names[tnm]
-            if b_ta != nil && b_ta.global?
-              tc = wk_cell(b_ta)
-              jit_keep(tc)
-              jit_keep(ctor_v)
-              @a.mov_imm64(R_X9, (wvalue_bits(tc) ## i64) - 4)
-              @a.ldr_x(R_X10, R_X9, 8)
-              @a.mov_imm64(R_X11, wvalue_bits(ctor_v) ## i64)
-              @a.cmp_r(R_X10, R_X11)
-              @a.b_cond(CC_NE, l_fn_slow)
-            else
-              @a.b(l_fn_slow)
+            jit_keep(tc)
+            jit_keep(ctor_v)
+            @a.mov_imm64(R_X9, (wvalue_bits(tc) ## i64) - 4)
+            @a.ldr_x(R_X10, R_X9, 8)
+            @a.mov_imm64(R_X11, wvalue_bits(ctor_v) ## i64)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_NE, l_fn_slow)
     # Guard JS_EPOCH ONCE at entry if needed for string/array intrinsics, and hoist epoch if body is pure!
     if @info.needs_entry_epoch || (@info.has_loop && @jf.node.b.is_a?(Array))
       all_ep_pure = @jf.node.b.is_a?(Array)
@@ -651,6 +698,57 @@ OSR_RETURN = 2
           else
             @a.str_x(R_XZR, R_SP, @info.spill_off[i])
       i += 1
+    # Guard & hoist read-only TypedArray parameters ONCE in prologue (fallback to tier 0 if kind/detached mismatch!)
+    @info.param_tas.keys.each ->(li)
+      h_ta = @hoisted_tas[li]
+      exp_tk = @info.param_tas[li]
+      ta_out = i64[4]
+      jit_keep(ta_out)
+      load_slot_any(R_X1, li)
+      @a.mov_imm64(R_X2, wvalue_bits(ta_out) ## i64)
+      call_rt(RT_TA_INFO)
+      @a.cmp_i(R_X0, 2)
+      @a.b_cond(CC_NE, l_fn_slow)
+      @a.mov_imm64(R_X9, jit_i64_ptr(ta_out))
+      @a.ldr_x(R_X10, R_X9, 16)
+      @a.cmp_i(R_X10, exp_tk)
+      @a.b_cond(CC_NE, l_fn_slow)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.str_x(R_X10, R_SP, h_ta[0])
+      tr_ta = @hoisted_ta_regs[li]
+      @a.mov_r(tr_ta[0], R_X10) if tr_ta != nil && tr_ta[0] != nil
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.str_x(R_X10, R_SP, h_ta[1])
+      @a.mov_r(tr_ta[1], R_X10) if tr_ta != nil && tr_ta[1] != nil
+    # Guard & hoist read-only global TypedArrays ONCE in prologue (e.g. `K` in sha256, `GRID` in astar)!
+    @hoisted_global_tas.each ->(gb, h_gta)
+      exp_tk = h_gta[2]
+      gcell = h_gta[3]
+      gval = h_gta[4]
+      jit_keep(gcell)
+      jit_keep(gval)
+      ta_out = i64[4]
+      jit_keep(ta_out)
+      @a.mov_imm64(R_X9, (wvalue_bits(gcell) ## i64) - 4)
+      @a.ldr_x(R_X1, R_X9, 8)
+      @a.mov_imm64(R_X10, wvalue_bits(gval) ## i64)
+      @a.cmp_r(R_X1, R_X10)
+      @a.b_cond(CC_NE, l_fn_slow)
+      @a.mov_imm64(R_X2, wvalue_bits(ta_out) ## i64)
+      call_rt(RT_TA_INFO)
+      @a.cmp_i(R_X0, 2)
+      @a.b_cond(CC_NE, l_fn_slow)
+      @a.mov_imm64(R_X9, jit_i64_ptr(ta_out))
+      @a.ldr_x(R_X10, R_X9, 16)
+      @a.cmp_i(R_X10, exp_tk)
+      @a.b_cond(CC_NE, l_fn_slow)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.str_x(R_X10, R_SP, h_gta[0])
+      tr_gta = @hoisted_gta_regs[gb]
+      @a.mov_r(tr_gta[0], R_X10) if tr_gta != nil && tr_gta[0] != nil
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.str_x(R_X10, R_SP, h_gta[1])
+      @a.mov_r(tr_gta[1], R_X10) if tr_gta != nil && tr_gta[1] != nil
     # Guard & hoist read-only dense Array parameters ONCE in prologue (fallback to tier 0 if non-dense!)
     @info.param_arrs.keys.each ->(li)
       h = @hoisted_arrs[li]
@@ -661,6 +759,7 @@ OSR_RETURN = 2
       @a.b_cond(CC_NE, l_fn_slow)
       @a.and_x_ptr47(R_X9, R_X9)
       @a.ldrb(R_X10, R_X9, 2)
+      @a.and_w_lowmask(R_X10, R_X10, 4)
       @a.cmp_wi(R_X10, 1)
       @a.b_cond(CC_NE, l_fn_slow)
       @a.ldr_w(R_X10, R_X9, 4)   # start == 0
@@ -696,7 +795,9 @@ OSR_RETURN = 2
               sh_sp_idx += 1
       # If function has a read-only dense Array param, no non-Math calls, and one unique element shape:
       # verify ONCE in prologue that every arr[0..len-1] has `mono_sh` (else JSR_SLOW -> tier 0, zero mutations)!
-      if mono_sh != 0 && @info.param_arrs.size == 1 && @hoisted_shapes[mono_sh] != nil
+      mono_sh = @info.mono_arr_num_sh if @info.mono_arr_num_sh != 0
+      mono_verified = false
+      if mono_sh != 0 && @info.param_arrs.size == 1
         all_pure = true
         si = 0
         while si < @jf.node.b.size && all_pure
@@ -707,6 +808,9 @@ OSR_RETURN = 2
           ar = @hoisted_arr_regs[arr_li]
           r_sh = @hoisted_shapes[mono_sh]
           if ar != nil && ar[0] != nil && ar[1] != nil
+            if r_sh == nil
+              @a.mov_imm64(R_X14, mono_sh)
+              r_sh = R_X14
             l_chk = @a.new_label
             l_chk_ok = @a.new_label
             @a.movz_x(R_X9, 0)
@@ -726,11 +830,11 @@ OSR_RETURN = 2
             @a.bind(l_chk_ok)
             @mono_arr_shape[arr_li] = mono_sh
             # Check if ALL non-array params are numeric, no object/global leaks, and all member writes are f64!
-            # If so, verify ONCE that all inline slots of arr[0..len-1] are numbers -> enables zero-tag-check
-            # pure SIMD FP loads (`ldr d; sub d, d, d17`) AND 100% sound jit_repeat_fp!
+            # If so, verify ONCE that all inline + @ext overflow slots of arr[0..len-1] are numbers -> enables
+            # zero-tag-check pure SIMD FP loads (`ldr d; sub d, d, d17`) AND 100% sound jit_repeat_fp!
             sh_obj = wvalue_from_bits(mono_sh)
             n_keys = sh_obj.is_a?(JS:Shape) ? sh_obj.key_list.size : 99
-            num_ok = !@info.uses_calls && !@info.uses_env && !@jf.uses_this && n_keys > 0 && n_keys <= sh_obj.inline && stmts_pure_num_obj_fn?(@jf.node.b)
+            num_ok = !@info.uses_calls && !@info.uses_env && !@jf.uses_this && n_keys > 0 && n_keys <= sh_obj.inline + 4 && stmts_pure_num_obj_fn?(@jf.node.b)
             if num_ok
               pi_chk = 0
               while pi_chk < @jf.params.size && num_ok
@@ -748,20 +852,42 @@ OSR_RETURN = 2
               @a.bind(l_num_lp)
               @a.ldr_x_idx(R_X10, ar[0], R_X9)
               @a.sub_i(R_X11, R_X10, 4)
+              n_inl = n_keys < sh_obj.inline ? n_keys : sh_obj.inline
               ski = 0
-              while ski < n_keys
+              while ski < n_inl
                 @a.ldr_x(R_X12, R_X11, (sh_obj.ibase + ski + 1) * 8)
                 @a.sub_r(R_X15, R_X12, R_X20)
                 @a.cmp_r(R_X15, R_X21)
                 @a.b_cond(CC_HS, l_fn_slow)
                 ski += 1
+              if n_keys > sh_obj.inline
+                n_ext = n_keys - sh_obj.inline
+                @a.ldr_x(R_X13, R_X11, 16)
+                @a.lsr_xi(R_X12, R_X13, 48)
+                @a.movz_x(R_X15, 0xFFF4)
+                @a.cmp_r(R_X12, R_X15)
+                @a.b_cond(CC_NE, l_fn_slow)
+                @a.and_x_ptr47(R_X13, R_X13)
+                @a.ldrsw(R_X12, R_X13, 8)
+                @a.cmp_i(R_X12, n_ext)
+                @a.b_cond(CC_LT, l_fn_slow)
+                @a.ldr_x(R_X13, R_X13, 16)
+                eki = 0
+                while eki < n_ext
+                  @a.ldr_x(R_X12, R_X13, eki * 8)
+                  @a.sub_r(R_X15, R_X12, R_X20)
+                  @a.cmp_r(R_X15, R_X21)
+                  @a.b_cond(CC_HS, l_fn_slow)
+                  eki += 1
               @a.add_i(R_X9, R_X9, 1)
               @a.cmp_r(R_X9, ar[1])
               @a.b_cond(CC_LT, l_num_lp)
               @a.bind(l_num_done)
               @mono_arr_num[mono_sh] = true
+              mono_verified = true
             elsif can_repeat_cand
               @repeat_entry_off = -1
+      @a.b(l_fn_slow) if @info.mono_arr_num_sh != 0 && !mono_verified
       @repeat_entry_off = -1 if can_repeat_cand && @mono_arr_shape.size == 0
       # Hoist up to 3 FP literal constants (e.g. `1.00000001`, `0.0000001`, `0.01`) into free callee-saved FPRs ONCE!
       avail_fc = 7 - @info.reg_fpr.size   # leaves R_D15 free for scratch!
@@ -1082,6 +1208,7 @@ OSR_RETURN = 2
       @a.b_cond(CC_NE, l_entry_deopt)
       @a.and_x_ptr47(R_X9, R_X9)
       @a.ldrb(R_X10, R_X9, 2)
+      @a.and_w_lowmask(R_X10, R_X10, 4)
       @a.cmp_wi(R_X10, 1)
       @a.b_cond(CC_NE, l_entry_deopt)
       @a.ldr_w(R_X10, R_X9, 4)   # start == 0
@@ -1437,6 +1564,8 @@ OSR_RETURN = 2
       call_rt(RT_THROW)
     elsif k == :for
       gen_for_loop(s, true)
+    elsif k == :for_in
+      gen_for_in_loop(s)
     elsif k == :while
       gen_while_loop(s)
     elsif k == :do_while
@@ -1544,6 +1673,83 @@ OSR_RETURN = 2
     @a.bind(l_brk)
     @in_loop_depth -= 1
     @loops.pop
+    @known_shapes = {}
+    nil
+
+  # `for (var k in obj) body` / `for (k in obj) body` with zero-lookup shape-unchanged fast path!
+  -> gen_for_in_loop(s)
+    @known_shapes = {}
+    gen_expr_any(s.b)
+    obj_off = push_x(R_X0)
+    # Save original JS:Shape if obj is a WObject (0 otherwise)
+    l_nosh = @a.new_label
+    l_shdone = @a.new_label
+    @a.sub_i(R_X9, R_X0, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_nosh)
+    @a.cbz_x(R_X9, l_nosh)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.b(l_shdone)
+    @a.bind(l_nosh)
+    @a.movz_x(R_X10, 0)
+    @a.bind(l_shdone)
+    sh_off = push_x(R_X10)
+    # Fetch enumerable keys array via RT_FOR_IN_KEYS (cached O(1) for plain objects!)
+    @a.ldr_x(R_X1, R_SP, obj_off)
+    call_rt(RT_FOR_IN_KEYS)
+    ks_off = push_x(R_X0)
+    @a.and_x_ptr47(R_X9, R_X0)
+    @a.ldrsw(R_X10, R_X9, 8)      # len
+    len_off = push_x(R_X10)
+    @a.movz_x(R_X11, 0)
+    idx_off = push_x(R_X11)
+    l_head = @a.new_label
+    l_cont = @a.new_label
+    l_brk = @a.new_label
+    @loops.push(JS:JitLoopCtx.new(l_brk, l_cont, nil))
+    @in_loop_depth += 1
+    lhs_node = s.a.kind == :var_decl ? s.a.list[0].a : s.a
+    lhs_init = s.a.kind == :var_decl && s.a.str != "var"
+    @a.bind(l_head)
+    @a.ldr_x(R_X11, R_SP, idx_off)
+    @a.ldr_x(R_X10, R_SP, len_off)
+    @a.cmp_r(R_X11, R_X10)
+    @a.b_cond(CC_GE, l_brk)
+    # Load key ks[i], advance i
+    @a.ldr_x(R_X9, R_SP, ks_off)
+    @a.and_x_ptr47(R_X9, R_X9)
+    @a.ldrsw(R_X12, R_X9, 4)      # start
+    @a.add_r(R_X12, R_X12, R_X11)
+    @a.ldr_x(R_X13, R_X9, 16)     # slots
+    @a.ldr_x_idx(R_X0, R_X13, R_X12)
+    @a.add_i(R_X11, R_X11, 1)
+    @a.str_x(R_X11, R_SP, idx_off)
+    # Verify key still present (2-insn skip when obj.@shape == orig_shape!)
+    l_present = @a.new_label
+    @a.ldr_x(R_X10, R_SP, sh_off)
+    @a.cbz_x(R_X10, l_present)
+    @a.ldr_x(R_X9, R_SP, obj_off)
+    @a.sub_i(R_X9, R_X9, 4)
+    @a.ldr_x(R_X11, R_X9, 8)
+    @a.cmp_r(R_X11, R_X10)
+    @a.b_cond(CC_EQ, l_present)
+    k_off = push_x(R_X0)
+    @a.ldr_x(R_X1, R_SP, obj_off)
+    @a.mov_r(R_X2, R_X0)
+    call_rt(RT_HAS_PROP)
+    @a.cmp_i(R_X0, 2)
+    @a.ldr_x(R_X0, R_SP, k_off)
+    @tmp_depth -= 1
+    @a.b_cond(CC_NE, l_cont)
+    @a.bind(l_present)
+    emit_write_binding(lhs_node.x.binding, R_X0, lhs_init, lhs_node.x)
+    gen_loop_body_stmt(s.d)
+    @a.bind(l_cont)
+    @a.b(l_head)
+    @a.bind(l_brk)
+    @in_loop_depth -= 1
+    @loops.pop
+    @tmp_depth -= 5
     @known_shapes = {}
     nil
 
@@ -1670,6 +1876,7 @@ OSR_RETURN = 2
         if (c.b.str == "indexOf" || c.b.str == "charCodeAt") && n.list.size == 1
           sli = local_idx(c.a)
           is_pure = true if sli >= 0 && @info.str_locals[sli]
+        is_pure = true if !is_pure && jit_poly_call_pure?(n)
       return true if !is_pure
     return true if stmt_mutates_arr?(n.a, arr_li) || stmt_mutates_arr?(n.b, arr_li) || stmt_mutates_arr?(n.c, arr_li) || stmt_mutates_arr?(n.d, arr_li)
     if n.list.is_a?(Array)
@@ -1699,14 +1906,17 @@ OSR_RETURN = 2
       step_reg = @info.reg_gpr[sli]
     else
       return false
-    # Allow JT_I32 induction var in GPR, OR promote a JT_F64 `j += step` induction var (e.g. `var j = i * i`) into a free GPR!
+    # Allow JT_I32 induction var in GPR, OR promote a JT_F64/JT_ANY `j += step` induction var (e.g. `var j = i * i` inside `if`) into a free GPR!
     promo_f64_j = false
+    promo_any_j = false
     ri = nil
     if @info.types[li] == JT_I32
       ri = @info.reg_gpr[li]
       return false if ri == nil
     elsif @info.types[li] == JT_F64 && step_reg != nil && @free_gprs.size > 0
       promo_f64_j = true
+    elsif @info.types[li] == JT_ANY && step_reg != nil && @free_gprs.size > 0
+      promo_any_j = true
     else
       return false
     # Classify limit: i32 literal or JT_I32 register local
@@ -1724,7 +1934,7 @@ OSR_RETURN = 2
         lim_reg = @info.reg_gpr[lli]
     return false if lim_kind == 0
     promo_j_gpr = nil
-    if promo_f64_j
+    if promo_f64_j || promo_any_j
       promo_j_gpr = @free_gprs.pop
       ri = promo_j_gpr
     borrowed_gpr = nil
@@ -1741,13 +1951,17 @@ OSR_RETURN = 2
     cc_back = is_le ? CC_LE : CC_LT
     l_slow = @a.new_label
     need_slow = false
-    # If `j` was JT_F64 (`var j = i * i`), unbox exact int32 into `ri` at entry (else fallback to exact f64 loop!)
+    # If `j` was JT_F64 or JT_ANY (`var j = i * i`), unbox exact int32 into `ri` at entry (else fallback to exact slow loop!)
     if promo_f64_j
       load_slot_f64(R_D0, li)
       @a.fcvtzs_w_d(ri, R_D0)
       @a.scvtf_d_w(R_D16, ri)
       @a.fcmp_d(R_D0, R_D16)
       @a.b_cond(CC_NE, l_slow)
+      need_slow = true
+    elsif promo_any_j
+      load_slot_any(R_X9, li)
+      emit_unbox_exact_i32(ri, R_X9, l_slow)
       need_slow = true
     # Entry guard: skip loop if already past limit
     emit_counted_cmp_branch(ri, lim_kind, lim_val, lim_reg, -1, cc_exit, l_brk)
@@ -1794,7 +2008,8 @@ OSR_RETURN = 2
         @bounded_mod_ta[lim_li.to_s + ":" + tli.to_s] = true if lim_li >= 0
       need_slow = true
     # Temporarily expose promoted `j` as JT_I32 in `ri` while generating fast loop body!
-    if promo_f64_j
+    saved_li_gpr = @info.reg_gpr[li]
+    if promo_f64_j || promo_any_j
       @info.types[li] = JT_I32
       @info.reg_gpr[li] = ri
     old_no_ovf = @no_ovf_p1_li
@@ -1834,17 +2049,27 @@ OSR_RETURN = 2
             all_f64_pure = false
           bi4 += 1
         defer_i4 = all_f64_pure
+      if defer_i4 && !@info.uses_calls
+        @a.scvtf_d_w(R_D7, ri)
+        @a.mov_imm64(R_X9, jit_f64_bits(wvalue_bits(~1.0) ## i64))
+        @a.fmov_d_x(R_D6, R_X9)
       @a.bind(l_head)
       if defer_i4
         @unroll_i_li = li
+        @unroll_fp_i_reg = !@info.uses_calls ? R_D7 : nil
         @unroll_i_off = 0
         gen_loop_body_stmt(s.d)
+        @a.fadd_d(R_D7, R_D7, R_D6) if @unroll_fp_i_reg != nil
         @unroll_i_off = 1
         gen_loop_body_stmt(s.d)
+        @a.fadd_d(R_D7, R_D7, R_D6) if @unroll_fp_i_reg != nil
         @unroll_i_off = 2
         gen_loop_body_stmt(s.d)
+        @a.fadd_d(R_D7, R_D7, R_D6) if @unroll_fp_i_reg != nil
         @unroll_i_off = 3
         gen_loop_body_stmt(s.d)
+        @a.fadd_d(R_D7, R_D7, R_D6) if @unroll_fp_i_reg != nil
+        @unroll_fp_i_reg = nil
         @unroll_i_li = -1
         @unroll_i_off = 0
         @a.add_wi(ri, ri, 4)
@@ -1926,6 +2151,14 @@ OSR_RETURN = 2
       @info.reg_gpr.delete(li)
       @a.scvtf_d_w(R_D0, ri)
       store_slot_f64(li, R_D0)
+    elsif promo_any_j
+      @info.types[li] = JT_ANY
+      if saved_li_gpr != nil
+        @info.reg_gpr[li] = saved_li_gpr
+      else
+        @info.reg_gpr.delete(li)
+      emit_box_i32(R_X9, ri)
+      store_slot_any(li, R_X9)
     @a.bind(l_brk)
     @in_loop_depth -= 1
     @loops.pop
@@ -2349,6 +2582,7 @@ OSR_RETURN = 2
       @a.b_cond(CC_NE, l_temp_arr_slow)
       @a.and_x_ptr47(R_X9, R_X9)
       @a.ldrb(R_X10, R_X9, 2)
+      @a.and_w_lowmask(R_X10, R_X10, 4)
       @a.cmp_wi(R_X10, 1)
       @a.b_cond(CC_NE, l_temp_arr_slow)
       @a.ldr_w(R_X10, R_X9, 4)
@@ -3397,7 +3631,10 @@ OSR_RETURN = 2
 
     # Check eligibility for 4x / 2x loop unrolling (small simple innermost loop, no break/continue/return/nested loops)!
     body_cnt = !stmt_has_cf_or_loop?(s.d) ? stmt_size_count(s.d) : 999
-    can_unroll4 = (lim_kind == 1 || lim_kind == 2) && body_cnt <= 34
+    r_lim4 = lim_reg
+    if r_lim4 == nil && lim_kind == 3 && @hoisted_arr_regs[lim_container] != nil
+      r_lim4 = @hoisted_arr_regs[lim_container][1]
+    can_unroll4 = (lim_kind == 1 || lim_kind == 2 || (lim_kind == 3 && r_lim4 != nil)) && body_cnt <= 34
     can_unroll2 = !can_unroll4 && body_cnt <= 36
     # When i53_li is active AND body cannot bail mid-4-iters, use 2 independent accumulator lanes (i53_gpr + R_X14)
     # and deferred `add ri, ri, #4` -> breaks BOTH `i` and `s` 1-cycle serial chains to sub-0.6 cycles/iter!
@@ -3407,10 +3644,10 @@ OSR_RETURN = 2
     if can_2lane_4x
       l_epi4 = @a.new_label
       l_epi_lp = @a.new_label
-      if lim_reg != nil
-        @a.cmp_wi(lim_reg, 4)
+      if r_lim4 != nil
+        @a.cmp_wi(r_lim4, 4)
         @a.b_cond(CC_LT, l_epi4)
-        @a.sub_wi(R_X9, lim_reg, 3)
+        @a.sub_wi(R_X9, r_lim4, 3)
       else
         @a.b(l_epi4) if lim_val < 4
         @a.mov_imm32(R_X9, lim_val - 3)
@@ -3444,8 +3681,8 @@ OSR_RETURN = 2
       @unroll_i_off = 0
       @i53_acc_reg = i53_gpr
       @a.add_wi(ri, ri, 4)
-      if lim_reg != nil
-        @a.sub_wi(R_X9, lim_reg, 3)
+      if r_lim4 != nil
+        @a.sub_wi(R_X9, r_lim4, 3)
       else
         @a.mov_imm32(R_X9, lim_val - 3)
       @a.cmp_w(ri, R_X9)
@@ -3477,10 +3714,10 @@ OSR_RETURN = 2
       # 4x unrolled loop: while (i + 3 < LIMIT) { 4 bodies }; epilogue `while (i < LIMIT)`!
       l_epi4 = @a.new_label
       l_epi_lp = @a.new_label
-      if lim_reg != nil
-        @a.cmp_wi(lim_reg, 4)
+      if r_lim4 != nil
+        @a.cmp_wi(r_lim4, 4)
         @a.b_cond(CC_LT, l_epi4)
-        @a.sub_wi(R_X9, lim_reg, 3)
+        @a.sub_wi(R_X9, r_lim4, 3)
       else
         @a.b(l_epi4) if lim_val < 4
         @a.mov_imm32(R_X9, lim_val - 3)
@@ -3495,8 +3732,8 @@ OSR_RETURN = 2
       @a.add_wi(ri, ri, 1)
       gen_loop_body_stmt(s.d)
       @a.add_wi(ri, ri, 1)
-      if lim_reg != nil
-        @a.sub_wi(R_X9, lim_reg, 3)
+      if r_lim4 != nil
+        @a.sub_wi(R_X9, r_lim4, 3)
       else
         @a.mov_imm32(R_X9, lim_val - 3)
       @a.cmp_w(ri, R_X9)
@@ -3926,7 +4163,7 @@ OSR_RETURN = 2
     l_guard_fail = use_promo_bail ? @promoted_bail_lbl : l_slow_blk
     active.each ->(li)
       sh = cands[li]
-      if old_shapes[li] != sh
+      if old_shapes[li] != sh && !(@info.mono_arr_num_locals[li] && sh == @info.mono_arr_num_sh && @mono_arr_num[sh] == true)
         load_slot_any(R_X13, li)
         @a.sub_i(R_X9, R_X13, 4)
         @a.tst_wobj_bad(R_X9)
@@ -4297,6 +4534,9 @@ OSR_RETURN = 2
         else
           gen_sra_rx_exec(li, rhs)
         return nil
+      if ty == JT_SRA_VS
+        gen_sra_vs_assign(li, rhs)
+        return nil
       emit_store_expr_to_slot(li, rhs)
       return nil
     gen_expr_any(rhs)
@@ -4308,6 +4548,13 @@ OSR_RETURN = 2
     if ty == JT_I32
       r = @info.reg_gpr[slot]
       if r != nil && rhs != nil
+        # Hoisted loop-invariant `str.indexOf("const")` -> 1 single mov on iter 0, 0 insns on unrolled iters 1..3!
+        if rhs.kind == :call && rhs.a.kind == :member && !rhs.a.has?(F_COMPUTED) && rhs.a.b.str == "indexOf" && rhs.list.size == 1 && rhs.list[0].kind == :string
+          sli_io = local_idx(rhs.a.a)
+          hr_io = sli_io >= 0 ? @inv_indexof[sli_io.to_s + ":" + rhs.list[0].str] : nil
+          if hr_io != nil
+            @a.mov_w(r, hr_io) if r != hr_io && @unroll_i_off == 0
+            return nil
         # Direct-to-register targeting for `i`, `i + K`, `i & mask` (zero redundant movs!)
         pr = peek_i32_reg(rhs)
         if pr != nil
@@ -4645,6 +4892,7 @@ OSR_RETURN = 2
             @a.b_cond(CC_NE, l_slow_len)
             @a.and_x_ptr47(R_X9, R_X9)
             @a.ldrb(R_X10, R_X9, 2)
+            @a.and_w_lowmask(R_X10, R_X10, 4)
             @a.tst_x_lowmask(R_X10, 1)
             @a.b_cond(CC_EQ, l_slow_len)
             @a.cmp_wi(R_X10, 8)
@@ -4806,7 +5054,10 @@ OSR_RETURN = 2
         return true
     if k == :member && e.has?(F_COMPUTED)
       bli = local_idx(e.a)
-      return bli >= 0 && @hoisted_tas[bli] != nil && @hoisted_tas[bli][2] <= 5   # i8/u8/u8c/i16/u16/i32 TA!
+      return true if bli >= 0 && @hoisted_tas[bli] != nil && @hoisted_tas[bli][2] <= 5   # i8/u8/u8c/i16/u16/i32 TA!
+      if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil
+        return @hoisted_global_tas[e.a.x.binding][2] <= 5
+      return false
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "indexOf" && e.list.size == 1 && !@is_osr
       sli = local_idx(e.a.a)
       return true if sli >= 0 && @info.str_locals[sli]
@@ -4830,6 +5081,7 @@ OSR_RETURN = 2
         return can_f64?(e.a) && can_f64?(e.b)
       return can_i32?(e.a) && can_i32?(e.b) if op == "%"
       return can_f64?(e.a) && can_f64?(e.b) if op == "+"
+      return (e.a.kind == :num || e.b.kind == :num || (can_f64?(e.a) && can_f64?(e.b))) if op == ">>>"
       return false
     if k == :unary
       return true if e.str == "+"
@@ -4840,14 +5092,24 @@ OSR_RETURN = 2
       if bli >= 0 && @info.sra_objs[bli] != nil
         vs = @info.sra_objs[bli].field_slots[e.b.str]
         return vs != nil && @info.types[vs] == JT_F64
-      if bli >= 0 && @known_shapes[bli] != nil && @mono_arr_num[@known_shapes[bli]] == true
+      if bli >= 0 && @info.sra_vs[bli] != nil
+        vs = @info.sra_vs[bli].field_slots[e.b.str]
+        return vs != nil
+      if bli >= 0 && (@info.mono_arr_num_locals[bli] || (@known_shapes[bli] != nil && @mono_arr_num[@known_shapes[bli]] == true))
         return true
     if k == :member && e.has?(F_COMPUTED)
       bli = local_idx(e.a)
-      return bli >= 0 && @hoisted_tas[bli] != nil && @hoisted_tas[bli][2] <= 8
+      return true if bli >= 0 && @hoisted_tas[bli] != nil && @hoisted_tas[bli][2] <= 8
+      if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil
+        return @hoisted_global_tas[e.a.x.binding][2] <= 8
+      return false
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.a.kind == :ident && e.a.a.str == "Math"
       mn = e.a.b.str
-      return e.list.size == 1 && (mn == "sqrt" || mn == "abs" || mn == "floor" || mn == "ceil" || mn == "trunc")
+      return true if e.list.size == 1 && (mn == "sqrt" || mn == "abs" || mn == "floor" || mn == "ceil" || mn == "trunc")
+      return can_f64?(e.list[0]) && can_f64?(e.list[1]) if e.list.size == 2 && (mn == "min" || mn == "max")
+      return false
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && !@is_osr
+      return true if resolve_vstruct_scalar(e) != nil
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "charCodeAt" && e.list.size == 1 && !@is_osr
       sli = local_idx(e.a.a)
       return true if sli >= 0 && @info.str_locals[sli]
@@ -4918,6 +5180,46 @@ OSR_RETURN = 2
               @a.mov_imm64(R_X9, csum[0])
               @a.add_r(@i53_acc_reg, @i53_acc_reg, R_X9)
             return nil
+          # Defer loop-invariant i32 register term (e.g. `var k = s.indexOf("bench"); c += k + s.charCodeAt(i & 31)`)!
+          if terms.size == 2 && csum[0] == 0 && @i53_defer_regs != nil && @inv_indexof.size > 0
+            inv_ti = -1
+            inv_reg = nil
+            tchk = 0
+            while tchk < 2 && inv_ti < 0
+              te = terms[tchk]
+              if te.kind == :ident && can_i32?(te) && peek_i32_reg(te) != nil
+                tli = local_idx(te)
+                # Check if tli is ONLY assigned a hoisted @inv_indexof in @i53_cur_body!
+                if tli >= 0 && @i53_cur_body != nil && @i53_cur_body.kind == :block
+                  ok_inv = false
+                  bsi = 0
+                  while bsi < @i53_cur_body.list.size
+                    bst = @i53_cur_body.list[bsi]
+                    if bst.kind == :var_decl && bst.list.size == 1 && local_idx(bst.list[0].a) == tli
+                      dr = bst.list[0].b
+                      if dr != nil && dr.kind == :call && dr.a.kind == :member && !dr.a.has?(F_COMPUTED) && dr.a.b.str == "indexOf" && dr.list.size == 1 && dr.list[0].kind == :string
+                        sli_io = local_idx(dr.a.a)
+                        hr_io = sli_io >= 0 ? @inv_indexof[sli_io.to_s + ":" + dr.list[0].str] : nil
+                        if hr_io != nil
+                          ok_inv = true
+                          inv_reg = hr_io
+                    bsi += 1
+                  inv_ti = tchk if ok_inv
+              tchk += 1
+            if inv_ti >= 0 && inv_reg != nil
+              other_t = terms[1 - inv_ti]
+              gen_expr_i64_exact(other_t)
+              @a.add_r(@i53_acc_reg, @i53_acc_reg, R_X0)
+              found_dr = false
+              dri = 0
+              while dri < @i53_defer_regs.size
+                if @i53_defer_regs[dri][0] == inv_reg
+                  @i53_defer_regs[dri][1] = @i53_defer_regs[dri][1] + 1
+                  found_dr = true
+                  break
+                dri += 1
+              @i53_defer_regs.push([inv_reg, 1]) if !found_dr
+              return nil
         # Zero-extra-mov fast path for 1-arg additive SRA closure (`s += add(i & 255)` -> 3 insns!)
         if e.str == "+=" && e.b.kind == :call && e.b.a.kind == :ident && e.b.list.size == 1
           cli = local_idx(e.b.a)
@@ -5251,6 +5553,28 @@ OSR_RETURN = 2
         return nil
       if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
         gen_expr_i32(e)
+        return nil
+      if op == ">>>"
+        if e.b.kind == :num && jit_int32_lit?(e.b)
+          gen_expr_to_i32(e.a)
+          sh = e.b.a.to_i & 31
+          @a.lsr_wi(R_X0, R_X0, sh) if sh > 0
+          return nil
+        gen_expr_to_i32(e.a)
+        push_w(R_X0)
+        gen_expr_to_i32(e.b)
+        pop_w(R_X9)
+        @a.lsr_w(R_X0, R_X9, R_X0)
+        return nil
+    # Direct raw 32-bit bits load from Uint32Array (`kind == 6`, local or global!) inside bitwise/i32 ops!
+    if k == :member && e.has?(F_COMPUTED)
+      bli_u = local_idx(e.a)
+      if bli_u >= 0 && @hoisted_tas[bli_u] != nil && @hoisted_tas[bli_u][2] == 6
+        gen_ta_load_raw32(@hoisted_tas[bli_u], @hoisted_ta_regs[bli_u], bli_u, e.b)
+        return nil
+      if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil && @hoisted_global_tas[e.a.x.binding][2] == 6
+        gb_u = e.a.x.binding
+        gen_ta_load_raw32(@hoisted_global_tas[gb_u], @hoisted_gta_regs[gb_u], -1, e.b)
         return nil
     # Direct scalar-replaced closure call returning exact i32 sum!
     if k == :call && e.a.kind == :ident
@@ -5744,6 +6068,10 @@ OSR_RETURN = 2
         # Integer TypedArray element load -> direct ldrb/ldrh/ldr_w_idx into w0!
         gen_ta_load_i32(bli, e.b)
         return nil
+      if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil && @hoisted_global_tas[e.a.x.binding][2] <= 5
+        gb = e.a.x.binding
+        gen_ta_load_i32_h(@hoisted_global_tas[gb], @hoisted_gta_regs[gb], -1, e.b)
+        return nil
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "indexOf" && e.list.size == 1 && !@is_osr
       sli = local_idx(e.a.a)
       if sli >= 0 && @info.str_locals[sli]
@@ -5767,6 +6095,15 @@ OSR_RETURN = 2
             t = t >> 1
           @a.and_w_lowmask(R_X0, R_X0, nb)
           return nil
+      if (op == "<<" || op == ">>") && e.b.kind == :num && jit_int32_lit?(e.b)
+        gen_expr_to_i32(e.a)
+        sh = e.b.a.to_i & 31
+        if sh > 0
+          if op == "<<"
+            @a.lsl_wi(R_X0, R_X0, sh)
+          else
+            @a.asr_wi(R_X0, R_X0, sh)
+        return nil
       if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
         gen_expr_to_i32(e.a)
         push_w(R_X0)
@@ -5870,6 +6207,13 @@ OSR_RETURN = 2
       @a.fmov_d_x(R_D0, R_X9)
       return nil
     if can_i32?(e)
+      if @unroll_fp_i_reg != nil && @unroll_i_li >= 0
+        if k == :ident && local_idx(e) == @unroll_i_li
+          @a.fmov_d(R_D0, @unroll_fp_i_reg)
+          return nil
+        if k == :binary && e.str == "+" && local_idx(e.a) == @unroll_i_li && e.b.kind == :num && e.b.a == ~1.0
+          @a.fadd_d(R_D0, @unroll_fp_i_reg, R_D6)
+          return nil
       gen_expr_i32(e)
       @a.scvtf_d_w(R_D0, R_X0)
       return nil
@@ -5896,6 +6240,11 @@ OSR_RETURN = 2
         if vs != nil && @info.types[vs] == JT_F64
           load_slot_f64(R_D0, vs)
           return nil
+      if bli >= 0 && @info.sra_vs[bli] != nil
+        vs = @info.sra_vs[bli].field_slots[e.b.str]
+        if vs != nil
+          load_slot_f64(R_D0, vs)
+          return nil
       # Direct known-shape own-slot f64 load (1 LDR + unbox, PLUS read-only property CSE in d18..d31!)
       if bli >= 0 && @known_shapes[bli] != nil && e.x != nil
         ic = e.x
@@ -5911,9 +6260,16 @@ OSR_RETURN = 2
           else
             load_slot_any(R_X9, bli)
             @a.sub_i(R_X9, R_X9, 4)
-          if @d_bias_reg != nil && ic[1] > 0 && @mono_arr_num[@known_shapes[bli]] == true
-            # Zero-tag-check, zero-FMOV pure SIMD FP load (`ldr d0; sub d0, d0, d17` = 2 insns, 0 branches!)
-            @a.ldr_d(R_D0, R_X9, (ic[1] + 1) * 8)
+          if @d_bias_reg != nil && @mono_arr_num[@known_shapes[bli]] == true
+            # Zero-tag-check, zero-FMOV pure SIMD FP load (both inline & @ext overflow slots!)
+            if ic[1] > 0
+              @a.ldr_d(R_D0, R_X9, (ic[1] + 1) * 8)
+            else
+              ext_idx = (0 - ic[1]) - 1
+              @a.ldr_x(R_X14, R_X9, 16)
+              @a.and_x_ptr47(R_X14, R_X14)
+              @a.ldr_x(R_X14, R_X14, 16)
+              @a.ldr_d(R_D0, R_X14, ext_idx * 8)
             @a.sub_d_i64(R_D0, R_D0, @d_bias_reg)
           else
             l_sl = @a.new_label
@@ -5956,6 +6312,10 @@ OSR_RETURN = 2
       bli = local_idx(e.a)
       if bli >= 0 && @hoisted_tas[bli] != nil
         gen_ta_load_f64(bli, e.b)
+        return nil
+      if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil
+        gb = e.a.x.binding
+        gen_ta_load_f64_h(@hoisted_global_tas[gb], @hoisted_gta_regs[gb], -1, e.b)
         return nil
     if k == :unary && e.str == "-"
       gen_expr_f64(e.a)
@@ -6058,6 +6418,10 @@ OSR_RETURN = 2
         else
           @a.fdiv_d(R_D0, R_D1, R_D0)
         return nil
+      if op == ">>>"
+        gen_expr_to_i32(e)
+        @a.ucvtf_d_w(R_D0, R_X0)
+        return nil
       if op == "%"
         # Fast integer modulo when both operands are non-negative int32 (e.g. `(k + r) % n` in typed_arrays!)
         if can_i32?(e.a) && can_i32?(e.b)
@@ -6075,6 +6439,9 @@ OSR_RETURN = 2
         return nil
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.a.kind == :ident && e.a.a.str == "Math"
       if gen_math_f64(e.a.b.str, e.list)
+        return nil
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && !@is_osr
+      if gen_vstruct_scalar_f64(e)
         return nil
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "charCodeAt" && e.list.size == 1 && !@is_osr
       sli = local_idx(e.a.a)
@@ -6191,6 +6558,38 @@ OSR_RETURN = 2
           gen_expr_f64(args[0])
           @a.frintz_d(R_D0, R_D0)
         return true
+    if args.size == 2 && (name == "min" || name == "max")
+      da = peek_f64_reg(args[0])
+      db = peek_f64_reg(args[1])
+      if da != nil && db != nil
+        if name == "min"
+          @a.fmin_d(R_D0, da, db)
+        else
+          @a.fmax_d(R_D0, da, db)
+        return true
+      if db != nil
+        gen_expr_f64(args[0])
+        if name == "min"
+          @a.fmin_d(R_D0, R_D0, db)
+        else
+          @a.fmax_d(R_D0, R_D0, db)
+        return true
+      if da != nil
+        gen_expr_f64(args[1])
+        if name == "min"
+          @a.fmin_d(R_D0, da, R_D0)
+        else
+          @a.fmax_d(R_D0, da, R_D0)
+        return true
+      gen_expr_f64(args[0])
+      push_d(R_D0)
+      gen_expr_f64(args[1])
+      pop_d(R_D1)
+      if name == "min"
+        @a.fmin_d(R_D0, R_D1, R_D0)
+      else
+        @a.fmax_d(R_D0, R_D1, R_D0)
+      return true
     false
 
   # ---- TypedArray Fast Loads & Stores (Hoisted raw_ptr + len!) ----
@@ -6225,9 +6624,39 @@ OSR_RETURN = 2
     nil
 
   -> gen_ta_load_i32(bli, idx_e)
-    h = @hoisted_tas[bli]
+    gen_ta_load_i32_h(@hoisted_tas[bli], @hoisted_ta_regs[bli], bli, idx_e)
+
+  -> gen_ta_load_raw32(h, tr, bli, idx_e)
+    r_idx = peek_i32_reg(idx_e)
+    if r_idx != nil
+      @a.sxtw(R_X11, r_idx)
+    else
+      gen_ta_index(idx_e)
+      @a.sxtw(R_X11, R_X0)
+    r_ptr = (tr != nil && tr[0] != nil) ? tr[0] : R_X9
+    @a.ldr_x(R_X9, R_SP, h[0]) if r_ptr == R_X9
+    if bli >= 0 && ta_idx_bounded?(bli, idx_e)
+      @a.ldr_w_idx(R_X0, r_ptr, R_X11)
+      return nil
+    if tr != nil && tr[1] != nil
+      @a.cmp_r(R_X11, tr[1])
+    else
+      @a.ldr_x(R_X10, R_SP, h[1])
+      @a.cmp_r(R_X11, R_X10)
+    l_oob = @a.new_label
+    l_done = @a.new_label
+    @a.b_cond(CC_HS, l_oob)
+    @a.ldr_w_idx(R_X0, r_ptr, R_X11)
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_oob)
+      @a.movz_x(R_X0, 0)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    nil
+
+  -> gen_ta_load_i32_h(h, tr, bli, idx_e)
     kind = h[2]
-    tr = @hoisted_ta_regs[bli]
     r_idx = peek_i32_reg(idx_e)
     if r_idx != nil
       @a.sxtw(R_X11, r_idx)
@@ -6236,7 +6665,7 @@ OSR_RETURN = 2
       @a.sxtw(R_X11, R_X0)
     r_ptr = (tr != nil && tr[0] != nil) ? tr[0] : R_X9
     @a.ldr_x(R_X9, R_SP, h[0]) if r_ptr == R_X9
-    if ta_idx_bounded?(bli, idx_e)
+    if bli >= 0 && ta_idx_bounded?(bli, idx_e)
       emit_ta_load_i32_op(kind, r_ptr, R_X11)
       return nil
     if tr != nil && tr[1] != nil
@@ -6257,9 +6686,10 @@ OSR_RETURN = 2
     nil
 
   -> gen_ta_load_f64(bli, idx_e)
-    h = @hoisted_tas[bli]
+    gen_ta_load_f64_h(@hoisted_tas[bli], @hoisted_ta_regs[bli], bli, idx_e)
+
+  -> gen_ta_load_f64_h(h, tr, bli, idx_e)
     kind = h[2]
-    tr = @hoisted_ta_regs[bli]
     r_idx = peek_i32_reg(idx_e)
     if r_idx != nil
       @a.sxtw(R_X11, r_idx)
@@ -6268,7 +6698,7 @@ OSR_RETURN = 2
       @a.sxtw(R_X11, R_X0)
     r_ptr = (tr != nil && tr[0] != nil) ? tr[0] : R_X9
     @a.ldr_x(R_X9, R_SP, h[0]) if r_ptr == R_X9
-    skip_bc = ta_idx_bounded?(bli, idx_e)
+    skip_bc = bli >= 0 && ta_idx_bounded?(bli, idx_e)
     l_oob = nil
     l_done = nil
     if !skip_bc
@@ -6303,6 +6733,9 @@ OSR_RETURN = 2
     elsif kind == 4
       @a.ldrh_idx(R_X12, r_ptr, R_X11)       # Uint16Array
       @a.scvtf_d_w(R_D0, R_X12)
+    elsif kind == 11
+      @a.ldr_h_idx(R_D0, r_ptr, R_X11)       # Float16Array
+      @a.fcvt_d_h(R_D0, R_D0)
     if !skip_bc
       @a.bind(l_done)
       cb = ->()
@@ -6335,6 +6768,14 @@ OSR_RETURN = 2
     if k == :string
       jit_keep(e.str)
       @a.mov_imm64(R_X0, wvalue_bits(e.str) ## i64)
+      return nil
+    if k == :bigint
+      bv = e.x
+      if bv == nil
+        bv = js_bigint_literal(e.str)
+        e.x = bv
+      jit_keep(bv)
+      @a.mov_imm64(R_X0, wvalue_bits(bv) ## i64)
       return nil
     if k == :regex
       rx = js_rx_compile(e.str, e.a)
@@ -6833,7 +7274,7 @@ OSR_RETURN = 2
     gen_expr_any(e.b)
     @a.mov_r(R_X2, R_X0)
     pop_x(R_X1)
-    rt = op == "%" ? RT_MOD : (op == "==" ? RT_EQ : (op == "!=" ? RT_EQ : (op == ">>>" ? RT_SHR : (op == "in" ? RT_IN : RT_INSTANCEOF))))
+    rt = op == "%" ? RT_MOD : (op == "**" ? RT_POW : (op == "==" ? RT_EQ : (op == "!=" ? RT_EQ : (op == ">>>" ? RT_SHR : (op == "in" ? RT_IN : RT_INSTANCEOF)))))
     call_rt(rt)
     if op == "!="
       # Flip 1 <-> 2
@@ -6843,6 +7284,25 @@ OSR_RETURN = 2
 
   -> gen_unary_any(e)
     op = e.str
+    if op == "delete"
+      a = e.a
+      if a.kind == :member
+        gen_expr_any(a.a)
+        if a.has?(F_COMPUTED)
+          push_x(R_X0)
+          gen_expr_any(a.b)
+          @a.mov_r(R_X2, R_X0)
+          pop_x(R_X1)
+        else
+          @a.mov_r(R_X1, R_X0)
+          jit_keep(a.b.str)
+          @a.mov_imm64(R_X2, wvalue_bits(a.b.str) ## i64)
+        @a.movz_x(R_X3, @jf.strict ? 2 : 1)
+        call_rt(RT_DELETE)
+        return nil
+      gen_expr_void(a)
+      @a.movz_x(R_X0, 2)
+      return nil
     if op == "!"
       l_t = @a.new_label
       l_end = @a.new_label
@@ -6922,34 +7382,103 @@ OSR_RETURN = 2
       pop_x(R_X9)
       @a.mov_r(R_X0, R_X9) if !pre
       return nil
-    # Fallback for member updates
+    # Member updates (`this.count--`, `this.holdCount++`, `++this.currentMark`, `a[i]++`):
+    # Evaluates receiver (and key) ONCE; fast inline numeric IC path for warm own properties!
     gen_expr_any(t.a)
-    push_x(R_X0)
-    gen_member_get_any(t)
+    if !t.has?(F_COMPUTED)
+      key = t.b.str
+      node_ic = wk_ic(t)
+      jit_keep(key)
+      jit_keep(node_ic)
+      sh_warm = node_ic[0]
+      sl_warm = node_ic[1]
+      ns_warm = node_ic[2]
+      obj_off = push_x(R_X0)
+      if sh_warm != 0 && ns_warm == 0 && sl_warm != 0
+        l_slow = @a.new_label
+        l_done = @a.new_label
+        @a.sub_i(R_X9, R_X0, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_slow)
+        @a.cbz_x(R_X9, l_slow)
+        @a.ldr_x(R_X10, R_X9, 8)
+        @a.mov_imm64(R_X11, sh_warm)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_slow)
+        emit_slot_load(R_X12, R_X9, sl_warm)
+        emit_unbox_f64(R_D0, R_X12, l_slow)
+        @a.mov_imm64(R_X10, jit_f64_bits(wvalue_bits(~1.0) ## i64))
+        @a.fmov_d_x(R_D1, R_X10)
+        if inc
+          @a.fadd_d(R_D2, R_D0, R_D1)
+        else
+          @a.fsub_d(R_D2, R_D0, R_D1)
+        emit_box_f64_nonan(R_X13, R_D2)
+        emit_slot_store(R_X9, sl_warm, R_X13)
+        @a.mov_r(R_X0, pre ? R_X13 : R_X12)
+        @a.bind(l_done)
+        cb = ->()
+          @a.bind(l_slow)
+          @a.ldr_x(R_X1, R_SP, obj_off)
+          @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
+          call_rt(RT_GETV)
+          @a.mov_r(R_X1, R_X0)
+          call_rt(RT_TONUMERIC)
+          old_off = push_x(R_X0)
+          @a.mov_r(R_X1, R_X0)
+          @a.movz_x(R_X2, inc ? 2 : 1)
+          call_rt(RT_INC)
+          nv_off = push_x(R_X0)
+          @a.ldr_x(R_X1, R_SP, obj_off)
+          @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
+          @a.mov_r(R_X3, R_X0)
+          @a.movz_x(R_X4, @jf.strict ? 2 : 1)
+          call_rt(RT_SETV)
+          @a.ldr_x(R_X0, R_SP, pre ? nv_off : old_off)
+          @tmp_depth -= 2
+          @a.b(l_done)
+        add_cold_stub(cb)
+        @tmp_depth -= 1
+        return nil
+      # Cold named member update (single receiver eval + IC populate on get/set)
+      @a.mov_r(R_X13, R_X0)
+      emit_ic_get(R_X13, key, node_ic, -1)
+      @a.mov_r(R_X1, R_X0)
+      call_rt(RT_TONUMERIC)
+      old_off = push_x(R_X0)
+      @a.mov_r(R_X1, R_X0)
+      @a.movz_x(R_X2, inc ? 2 : 1)
+      call_rt(RT_INC)
+      nv_off = push_x(R_X0)
+      @a.ldr_x(R_X1, R_SP, obj_off)
+      @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
+      @a.mov_r(R_X3, R_X0)
+      @a.movz_x(R_X4, @jf.strict ? 2 : 1)
+      call_rt(RT_SETV)
+      @a.ldr_x(R_X0, R_SP, pre ? nv_off : old_off)
+      @tmp_depth -= 3
+      return nil
+    # Computed member update `o[k]++` (evaluates o and k ONCE!)
+    obj_off = push_x(R_X0)
+    gen_expr_any(t.b)
+    key_off = push_x(R_X0)
+    @a.ldr_x(R_X1, R_SP, obj_off)
+    @a.mov_r(R_X2, R_X0)
+    call_rt(RT_GETV)
     @a.mov_r(R_X1, R_X0)
     call_rt(RT_TONUMERIC)
-    push_x(R_X0)
+    old_off = push_x(R_X0)
     @a.mov_r(R_X1, R_X0)
     @a.movz_x(R_X2, inc ? 2 : 1)
     call_rt(RT_INC)
-    pop_x(R_X10)   # old
-    pop_x(R_X9)    # obj
-    push_x(pre ? R_X0 : R_X10)
+    nv_off = push_x(R_X0)
+    @a.ldr_x(R_X1, R_SP, obj_off)
+    @a.ldr_x(R_X2, R_SP, key_off)
     @a.mov_r(R_X3, R_X0)
-    @a.mov_r(R_X1, R_X9)
-    if t.has?(F_COMPUTED)
-      push_x(R_X1)
-      push_x(R_X3)
-      gen_expr_any(t.b)
-      @a.mov_r(R_X2, R_X0)
-      pop_x(R_X3)
-      pop_x(R_X1)
-    else
-      jit_keep(t.b.str)
-      @a.mov_imm64(R_X2, wvalue_bits(t.b.str) ## i64)
     @a.movz_x(R_X4, @jf.strict ? 2 : 1)
     call_rt(RT_SETV)
-    pop_x(R_X0)
+    @a.ldr_x(R_X0, R_SP, pre ? nv_off : old_off)
+    @tmp_depth -= 4
     nil
 
   -> gen_logical_any(e)
@@ -6987,7 +7516,30 @@ OSR_RETURN = 2
       if op == "="
         emit_assign_to_binding(b, e.b, false)
         if !b.global? && b.slot < 0 && b.scope.func == @jf
-          load_slot_any(R_X0, b.lidx) if @info.types[b.lidx] != JT_SRA_OBJ && @info.types[b.lidx] != JT_SRA_CLOS && @info.types[b.lidx] != JT_SRA_RX
+          load_slot_any(R_X0, b.lidx) if @info.types[b.lidx] != JT_SRA_OBJ && @info.types[b.lidx] != JT_SRA_CLOS && @info.types[b.lidx] != JT_SRA_RX && @info.types[b.lidx] != JT_SRA_VS
+        return nil
+      if op == "&&=" || op == "||=" || op == "??="
+        l_end = @a.new_label
+        emit_read_binding_any(b, R_X0, t.x)
+        if op == "??="
+          l_rhs = @a.new_label
+          @a.cbz_x(R_X0, l_rhs)
+          @a.ldr_x(R_X9, R_X19, RT_K_NULL_BITS * 8)
+          @a.cmp_r(R_X0, R_X9)
+          @a.b_cond(CC_EQ, l_rhs)
+          @a.b(l_end)
+          @a.bind(l_rhs)
+        else
+          l_rhs = @a.new_label
+          off_cur = push_x(R_X0)
+          emit_truthy_branch(R_X0, l_rhs, op == "&&=")
+          @a.ldr_x(R_X0, R_SP, off_cur)
+          @a.b(l_end)
+          @a.bind(l_rhs)
+          @tmp_depth -= 1
+        gen_expr_any(e.b)
+        emit_write_binding(b, R_X0, false, t.x)
+        @a.bind(l_end)
         return nil
       # Compound ident assign
       li = local_idx(t)
@@ -7011,11 +7563,55 @@ OSR_RETURN = 2
       @a.mov_r(R_X2, R_X0)
       pop_x(R_X1)
       bop = op.slice(0, op.size - 1)
-      rt = bop == "+" ? RT_ADD : (bop == "-" ? RT_SUB : (bop == "*" ? RT_MUL : (bop == "/" ? RT_DIV : (bop == "%" ? RT_MOD : (bop == "|" ? RT_BITOR : (bop == "&" ? RT_BITAND : (bop == "^" ? RT_BITXOR : (bop == "<<" ? RT_SHL : (bop == ">>" ? RT_SAR : RT_SHR)))))))))
+      rt = bop == "+" ? RT_ADD : (bop == "-" ? RT_SUB : (bop == "*" ? RT_MUL : (bop == "/" ? RT_DIV : (bop == "%" ? RT_MOD : (bop == "**" ? RT_POW : (bop == "|" ? RT_BITOR : (bop == "&" ? RT_BITAND : (bop == "^" ? RT_BITXOR : (bop == "<<" ? RT_SHL : (bop == ">>" ? RT_SAR : RT_SHR))))))))))
       call_rt(rt)
       emit_write_binding(b, R_X0, false, t.x)
       return nil
     if t.kind == :member
+      if op == "&&=" || op == "||=" || op == "??="
+        l_end = @a.new_label
+        gen_expr_any(t.a)
+        obj_off = push_x(R_X0)
+        key_off = -1
+        if t.has?(F_COMPUTED)
+          gen_expr_any(t.b)
+          key_off = push_x(R_X0)
+          @a.ldr_x(R_X1, R_SP, obj_off)
+          @a.mov_r(R_X2, R_X0)
+          call_rt(RT_GETV)
+        else
+          jit_keep(t.b.str)
+          @a.ldr_x(R_X1, R_SP, obj_off)
+          @a.mov_imm64(R_X2, wvalue_bits(t.b.str) ## i64)
+          call_rt(RT_GETV)
+        if op == "??="
+          l_rhs = @a.new_label
+          @a.cbz_x(R_X0, l_rhs)
+          @a.ldr_x(R_X9, R_X19, RT_K_NULL_BITS * 8)
+          @a.cmp_r(R_X0, R_X9)
+          @a.b_cond(CC_EQ, l_rhs)
+          @a.b(l_end)
+          @a.bind(l_rhs)
+        else
+          l_rhs = @a.new_label
+          cur_off = push_x(R_X0)
+          emit_truthy_branch(R_X0, l_rhs, op == "&&=")
+          @a.ldr_x(R_X0, R_SP, cur_off)
+          @a.b(l_end)
+          @a.bind(l_rhs)
+          @tmp_depth -= 1
+        gen_expr_any(e.b)
+        @a.mov_r(R_X3, R_X0)
+        @a.ldr_x(R_X1, R_SP, obj_off)
+        if t.has?(F_COMPUTED)
+          @a.ldr_x(R_X2, R_SP, key_off)
+        else
+          @a.mov_imm64(R_X2, wvalue_bits(t.b.str) ## i64)
+        @a.movz_x(R_X4, @jf.strict ? 2 : 1)
+        call_rt(RT_SETV)
+        @a.bind(l_end)
+        @tmp_depth -= (t.has?(F_COMPUTED) ? 2 : 1)
+        return nil
       # Scalar-replaced object field write!
       if !t.has?(F_COMPUTED)
         bli = local_idx(t.a)
@@ -7056,7 +7652,7 @@ OSR_RETURN = 2
         @a.mov_r(R_X2, R_X0)
         pop_x(R_X1)
         bop = op.slice(0, op.size - 1)
-        call_rt(bop == "+" ? RT_ADD : (bop == "-" ? RT_SUB : (bop == "*" ? RT_MUL : (bop == "/" ? RT_DIV : (bop == "%" ? RT_MOD : (bop == "|" ? RT_BITOR : (bop == "&" ? RT_BITAND : (bop == "^" ? RT_BITXOR : (bop == "<<" ? RT_SHL : (bop == ">>" ? RT_SAR : RT_SHR))))))))))
+        call_rt(bop == "+" ? RT_ADD : (bop == "-" ? RT_SUB : (bop == "*" ? RT_MUL : (bop == "/" ? RT_DIV : (bop == "%" ? RT_MOD : (bop == "**" ? RT_POW : (bop == "|" ? RT_BITOR : (bop == "&" ? RT_BITAND : (bop == "^" ? RT_BITXOR : (bop == "<<" ? RT_SHL : (bop == ">>" ? RT_SAR : RT_SHR)))))))))))
         @a.mov_r(R_X3, R_X0)
         pop_x(R_X2)
         pop_x(R_X1)
@@ -7075,7 +7671,7 @@ OSR_RETURN = 2
     if r_idx == nil
       gen_ta_index(idx_e)
       push_w(R_X0)
-    if kind == 8 || kind == 7
+    if kind == 8 || kind == 7 || kind == 11
       gen_expr_f64(val_e)
       if r_idx != nil
         @a.sxtw(R_X11, r_idx)
@@ -7095,9 +7691,12 @@ OSR_RETURN = 2
         @a.b_cond(CC_HS, l_oob)
       if kind == 8
         @a.str_d_idx(R_D0, r_ptr, R_X11)
-      else
+      elsif kind == 7
         @a.fcvt_s_d(R_D1, R_D0)
         @a.str_s_idx(R_D1, r_ptr, R_X11)
+      else
+        @a.fcvt_h_d(R_D1, R_D0)
+        @a.str_h_idx(R_D1, r_ptr, R_X11)
       @a.bind(l_oob) if l_oob != nil
       emit_box_f64(R_X0, R_D0) if need_val
       return nil
@@ -7321,6 +7920,11 @@ OSR_RETURN = 2
         if vs != nil
           load_slot_any(R_X0, vs)
           return nil
+      if bli >= 0 && @info.sra_vs[bli] != nil
+        vs = @info.sra_vs[bli].field_slots[e.b.str]
+        if vs != nil
+          load_slot_any(R_X0, vs)
+          return nil
       # 2. `.length` on a hoisted dense Array, TypedArray, or flat String!
       if e.b.str == "length"
         if bli >= 0 && @hoisted_arrs[bli] != nil
@@ -7363,9 +7967,14 @@ OSR_RETURN = 2
       return nil
     # Computed element access `o[idx]`
     bli = local_idx(e.a)
-    # 4. Hoisted TypedArray element load!
+    # 4. Hoisted TypedArray element load (local OR read-only global)!
     if bli >= 0 && @hoisted_tas[bli] != nil
       gen_ta_load_f64(bli, e.b)
+      emit_box_f64(R_X0, R_D0)
+      return nil
+    if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil
+      gb = e.a.x.binding
+      gen_ta_load_f64_h(@hoisted_global_tas[gb], @hoisted_gta_regs[gb], -1, e.b)
       emit_box_f64(R_X0, R_D0)
       return nil
     # 5. Hoisted dense Array element load `shapes[j]` or `bodies[i]`!
@@ -7415,6 +8024,7 @@ OSR_RETURN = 2
       @a.b_cond(CC_NE, l_slow)
       @a.and_x_ptr47(R_X9, R_X13)
       @a.ldrb(R_X10, R_X9, 2)          # aflags
+      @a.and_w_lowmask(R_X10, R_X10, 4)
       @a.cmp_wi(R_X10, 1)              # JS_AF_ARRAY && no holes && no ext
       @a.b_cond(CC_NE, l_slow)
       @a.ldrsw(R_X10, R_X9, 8)         # size
@@ -7666,38 +8276,57 @@ OSR_RETURN = 2
         rt_id = mname == "split" ? RT_STR_SPLIT_CH : (mname == "indexOf" ? RT_STR_INDEXOF : RT_STR_CHARCODE)
         gen_str_method_intrinsic(c.a, mname, e.list, rt_id)
         return nil
+      if mname == "indexOf" && e.list.size == 2
+        gen_str_method_intrinsic(c.a, "indexOf", e.list, RT_STR_INDEXOF2)
+        return nil
       if mname == "slice" && (e.list.size == 1 || e.list.size == 2)
         gen_str_method_intrinsic(c.a, mname, e.list, RT_STR_SLICE)
         return nil
       if mname == "join" && e.list.size <= 1
         gen_arr_join_intrinsic(c.a, e.list)
         return nil
-      # 2b3. Guarded Map/Set fast-call intrinsics (get, set, add, has)!
-      if mname == "get" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "get", e.list, :map, RT_MAP_GET)
+      # 2b2b. Array.isArray(x) & Object.keys(x) fast intrinsics!
+      if mname == "isArray" && e.list.size == 1 && c.a.kind == :ident && c.a.str == "Array" && gen_array_is_array_intrinsic(c.a, e.list[0])
         return nil
-      if mname == "set" && e.list.size == 2 && gen_coll_method_intrinsic(c.a, "set", e.list, :map, RT_MAP_SET)
+      if mname == "keys" && e.list.size == 1 && c.a.kind == :ident && c.a.str == "Object" && gen_object_keys_intrinsic(c.a, e.list[0])
+        return nil
+      # 2b3. Guarded Map/Set/WeakMap fast-call intrinsics (get, set, add, has, delete)!
+      if mname == "get" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "get", e.list, :map_wm, RT_MAP_GET)
+        return nil
+      if mname == "set" && e.list.size == 2 && gen_coll_method_intrinsic(c.a, "set", e.list, :map_wm, RT_MAP_SET)
         return nil
       if mname == "add" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "add", e.list, :set, RT_SET_ADD)
         return nil
-      if mname == "has" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "has", e.list, :both, RT_SET_HAS)
+      if mname == "has" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "has", e.list, :all, RT_SET_HAS)
+        return nil
+      if mname == "delete" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "delete", e.list, :all, RT_MAP_DELETE)
         return nil
       # 2b4. Guarded Promise.prototype.then & Promise.resolve intrinsics!
       if mname == "then" && (e.list.size == 1 || e.list.size == 2) && gen_prom_then_intrinsic(c.a, e.list)
         return nil
       if mname == "resolve" && e.list.size == 1 && c.a.kind == :ident && c.a.str == "Promise" && gen_prom_resolve_intrinsic(c.a, e.list[0])
         return nil
-      # 2b5. Guarded String.prototype.replace & RegExp.prototype.exec intrinsics!
+      # 2b5. Guarded String.prototype.replace & RegExp.prototype.{exec, test} intrinsics!
       if mname == "replace" && e.list.size == 2
         gen_str_method_intrinsic(c.a, "replace", e.list, RT_STR_REPLACE)
         return nil
       if mname == "exec" && e.list.size == 1 && gen_rx_exec_intrinsic(c.a, e.list[0])
         return nil
-      # 2c. Inlined dense `arr.map(cb)`, `arr.filter(cb)`, `arr.reduce(cb, init)`!
+      if mname == "test" && e.list.size == 1 && gen_rx_test_intrinsic(c.a, e.list[0])
+        return nil
+      # 2c. Inlined dense `arr.map(f).filter(g)` fused pipeline + `arr.map/filter/reduce`!
       if (mname == "map" || mname == "filter" || mname == "reduce") && e.list.size >= 1
         cb_node = e.list[0]
         if (cb_node.kind == :function || cb_node.kind == :arrow) && cb_node.x.is_a?(JaFunc)
           cb_jf = cb_node.x
           if jit_inline_return_expr(cb_jf) != nil && cb_jf.free.size == 0 && !cb_jf.uses_this && cb_jf.params.size <= 3 && cb_jf.self_binding == nil
+            if mname == "filter" && e.list.size == 1 && cb_jf.params.size <= 2 && c.a.kind == :call && c.a.a.kind == :member && !c.a.a.has?(F_COMPUTED) && c.a.a.b.str == "map" && c.a.list.size == 1
+              mcb = c.a.list[0]
+              if (mcb.kind == :function || mcb.kind == :arrow) && mcb.x.is_a?(JaFunc)
+                mjf = mcb.x
+                if jit_inline_return_expr(mjf) != nil && mjf.free.size == 0 && !mjf.uses_this && mjf.params.size <= 3 && mjf.self_binding == nil
+                  gen_inline_array_map_filter(c.a.a.a, mjf, cb_jf)
+                  return nil
             if mname == "map" && e.list.size == 1
               gen_inline_array_map(c.a, cb_jf)
               return nil
@@ -7707,6 +8336,9 @@ OSR_RETURN = 2
             if mname == "reduce" && e.list.size == 2
               gen_inline_array_reduce(c.a, cb_jf, e.list[1])
               return nil
+      # 2c2. Virtual struct method inlining & chained SRA (`ro.add(rd.mul(t))`, `p.sub(c).norm()`, `oc.dot(rd)`!)
+      if gen_vstruct_call_any(e)
+        return nil
       # 2d. Polymorphic method call inlining (`shapes[j].area()` with 1..4 observed shapes!)
       if e.x.is_a?(Array) && e.x.size >= 2 && e.list.size <= 2
         if gen_poly_method_inline(e, c, e.x)
@@ -7796,7 +8428,7 @@ OSR_RETURN = 2
   -> simple_call_leaf?(e)
     return false if !e.is_a?(JsNode)
     k = e.kind
-    return true if k == :num || k == :true || k == :false || k == :null || k == :string
+    return true if k == :num || k == :true || k == :false || k == :null || k == :string || k == :bigint
     if k == :ident
       li = local_idx(e)
       return li >= 0 && (@info.types[li] == JT_ANY || @info.types[li] == JT_I32 || @info.types[li] == JT_F64)
@@ -7815,6 +8447,13 @@ OSR_RETURN = 2
     elsif k == :string
       jit_keep(e.str)
       @a.mov_imm64(dst, wvalue_bits(e.str) ## i64)
+    elsif k == :bigint
+      bv = e.x
+      if bv == nil
+        bv = js_bigint_literal(e.str)
+        e.x = bv
+      jit_keep(bv)
+      @a.mov_imm64(dst, wvalue_bits(bv) ## i64)
     else
       load_slot_any(dst, local_idx(e))
     nil
@@ -7984,6 +8623,7 @@ OSR_RETURN = 2
     @a.bind(l_done)
     mname_s = mem_e.b.str
     jit_keep(mname_s)
+    snap_harrs = @hoisted_arrs.keys.dup
     cb = ->()
       @a.bind(l_slow)
       rec_off = push_x(R_X13)
@@ -7994,6 +8634,19 @@ OSR_RETURN = 2
       @a.ldr_x(R_X2, R_SP, rec_off)
       call_rt(RT_CALL_0)
       @tmp_depth -= 1
+      # Soundness: slow-path JS call could have mutated/reallocated a hoisted array; refresh (slots, len)!
+      snap_harrs.each ->(hli)
+        hh = @hoisted_arrs[hli]
+        har = @hoisted_arr_regs[hli]
+        if hh != nil
+          load_slot_any(R_X9, hli)
+          @a.and_x_ptr47(R_X9, R_X9)
+          @a.ldr_x(R_X10, R_X9, 16)
+          @a.str_x(R_X10, R_SP, hh[0]) if hh[0] > 0
+          @a.mov_r(har[0], R_X10) if har != nil && har[0] != nil
+          @a.ldrsw(R_X10, R_X9, 8)
+          @a.str_x(R_X10, R_SP, hh[1]) if hh[1] > 0
+          @a.mov_r(har[1], R_X10) if har != nil && har[1] != nil
       l_tn = @a.new_label
       emit_unbox_f64(R_D0, R_X0, l_tn)
       @a.b(l_done)
@@ -8028,6 +8681,13 @@ OSR_RETURN = 2
       @a.mov_imm64(R_X10, jit_f64_bits(wvalue_bits(e.a) ## i64))
       @a.fmov_d_x(dst, R_X10)
       return nil
+    if k == :true
+      @a.mov_imm64(R_X10, jit_f64_bits(wvalue_bits(~1.0) ## i64))
+      @a.fmov_d_x(dst, R_X10)
+      return nil
+    if k == :false || k == :null
+      @a.fmov_d_x(dst, R_XZR)
+      return nil
     lr = poly_leaf_reg(e, pmap)
     if lr != nil
       @a.fmov_d(dst, lr) if dst != lr
@@ -8044,22 +8704,60 @@ OSR_RETURN = 2
         emit_f64_op(op, dst, ra, rb)
         return nil
       if rb != nil
+        if op == "*" && e.a.kind == :num && e.a.a == ~2.0
+          @a.fadd_d(dst, rb, rb)
+          return nil
+        if op == "*" && e.a.kind == :num && e.a.a == ~3.0
+          @a.fadd_d(R_D1, rb, rb)
+          @a.fadd_d(dst, R_D1, rb)
+          return nil
         emit_poly_f64_reg(e.a, pmap, dst)
         emit_f64_op(op, dst, dst, rb)
         return nil
       if ra != nil
+        if op == "*" && e.b.kind == :num && e.b.a == ~2.0
+          @a.fadd_d(dst, ra, ra)
+          return nil
+        if op == "*" && e.b.kind == :num && e.b.a == ~3.0
+          @a.fadd_d(R_D1, ra, ra)
+          @a.fadd_d(dst, R_D1, ra)
+          return nil
         emit_poly_f64_reg(e.b, pmap, dst)
         emit_f64_op(op, dst, ra, dst)
         return nil
       if e.b.kind == :num
         emit_poly_f64_reg(e.a, pmap, dst)
-        @a.mov_imm64(R_X10, jit_f64_bits(wvalue_bits(e.b.a) ## i64))
+        if op == "*" && e.b.a == ~2.0
+          @a.fadd_d(dst, dst, dst)
+          return nil
+        if op == "*" && e.b.a == ~3.0
+          @a.fadd_d(R_D1, dst, dst)
+          @a.fadd_d(dst, R_D1, dst)
+          return nil
+        cb = jit_f64_bits(wvalue_bits(e.b.a) ## i64)
+        cr = @block_const_fp[cb]
+        if cr != nil
+          emit_f64_op(op, dst, dst, cr)
+          return nil
+        @a.mov_imm64(R_X10, cb)
         @a.fmov_d_x(R_D1, R_X10)
         emit_f64_op(op, dst, dst, R_D1)
         return nil
       if e.a.kind == :num
         emit_poly_f64_reg(e.b, pmap, dst)
-        @a.mov_imm64(R_X10, jit_f64_bits(wvalue_bits(e.a.a) ## i64))
+        if op == "*" && e.a.a == ~2.0
+          @a.fadd_d(dst, dst, dst)
+          return nil
+        if op == "*" && e.a.a == ~3.0
+          @a.fadd_d(R_D1, dst, dst)
+          @a.fadd_d(dst, R_D1, dst)
+          return nil
+        cb = jit_f64_bits(wvalue_bits(e.a.a) ## i64)
+        cr = @block_const_fp[cb]
+        if cr != nil
+          emit_f64_op(op, dst, cr, dst)
+          return nil
+        @a.mov_imm64(R_X10, cb)
         @a.fmov_d_x(R_D1, R_X10)
         emit_f64_op(op, dst, R_D1, dst)
         return nil
@@ -8175,8 +8873,25 @@ OSR_RETURN = 2
       return e.str == "-" && poly_inline_expr_ok?(e.a, sh)
     false
 
-  # Emit inlined numeric method body -> boxed WValue in x0 (jumps to l_slow if any field isn't a number!).
+  # Emit inlined method body -> boxed WValue in x0 (handles booleans, null, any `this.prop`, & f64 arithmetic!).
   -> emit_poly_inlined_body(e, sh, rec_off, tjf, arg_offs, l_slow)
+    k = e.kind
+    if k == :true
+      @a.movz_x(R_X0, 2)
+      return nil
+    if k == :false
+      @a.movz_x(R_X0, 1)
+      return nil
+    if k == :null
+      @a.ldr_x(R_X0, R_X19, RT_K_NULL_BITS * 8)
+      return nil
+    if k == :member && !e.has?(F_COMPUTED) && e.a.kind == :this
+      sl = sh.slot_of(e.b.str)
+      enc = sl < sh.inline ? (sh.ibase + sl) : (0 - (sl - sh.inline) - 1)
+      @a.ldr_x(R_X13, R_SP, rec_off)
+      @a.sub_i(R_X9, R_X13, 4)
+      emit_slot_load(R_X0, R_X9, enc)
+      return nil
     emit_poly_f64(e, sh, rec_off, l_slow)
     emit_box_f64(R_X0, R_D0)
     nil
@@ -8186,6 +8901,13 @@ OSR_RETURN = 2
     if k == :num
       @a.mov_imm64(R_X10, jit_f64_bits(wvalue_bits(e.a) ## i64))
       @a.fmov_d_x(R_D0, R_X10)
+      return nil
+    if k == :true
+      @a.mov_imm64(R_X10, jit_f64_bits(wvalue_bits(~1.0) ## i64))
+      @a.fmov_d_x(R_D0, R_X10)
+      return nil
+    if k == :false || k == :null
+      @a.fmov_d_x(R_D0, R_XZR)
       return nil
     if k == :member && !e.has?(F_COMPUTED) && e.a.kind == :this
       sl = sh.slot_of(e.b.str)
@@ -8246,6 +8968,7 @@ OSR_RETURN = 2
     @a.b_cond(CC_NE, l_slow)
     @a.and_x_ptr47(R_X9, R_X13)           # x9 = WArray*
     @a.ldrb(R_X10, R_X9, 2)               # aflags
+    @a.and_w_lowmask(R_X10, R_X10, 4)
     @a.cmp_wi(R_X10, 1)                   # JS_AF_ARRAY (plain, no holes, no ext)
     @a.b_cond(CC_NE, l_slow)
     @a.ldrsw(R_X10, R_X9, 4)              # start
@@ -8393,6 +9116,75 @@ OSR_RETURN = 2
     @tmp_depth -= 6
     nil
 
+  # Fused single-pass `arr.map(f).filter(g)` — ZERO intermediate array allocation!
+  -> gen_inline_array_map_filter(arr_e, map_jf, filt_jf)
+    m_re = jit_inline_return_expr(map_jf)
+    f_re = jit_inline_return_expr(filt_jf)
+    gen_expr_any(arr_e)
+    arr_off = push_x(R_X0)
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    emit_dense_array_guard(arr_off, l_slow)
+    # Pin (i=x22, len=x23, arr_slots=x24, out=x25, elem/mapped=x26)
+    s22 = push_x(R_X22)
+    s23 = push_x(R_X23)
+    s24 = push_x(R_X24)
+    s25 = push_x(R_X25)
+    s26 = push_x(R_X26)
+    @a.ldr_x(R_X13, R_SP, arr_off)
+    @a.and_x_ptr47(R_X9, R_X13)
+    @a.ldrsw(R_X23, R_X9, 8)         # len
+    @a.ldrsw(R_X12, R_X9, 4)         # start
+    @a.ldr_x(R_X24, R_X9, 16)        # slots
+    @a.add_r(R_X24, R_X24, R_X12, 3) # arr_slots + start*8
+    call_rt(RT_NEW_ARR)
+    @a.mov_r(R_X25, R_X0)            # out (boxed WArray)
+    @a.movz_x(R_X22, 0)              # i = 0
+    l_lp = @a.new_label
+    l_skip = @a.new_label
+    l_end = @a.new_label
+    @a.cmp_w(R_X22, R_X23)
+    @a.b_cond(CC_GE, l_end)
+    @a.bind(l_lp)
+    @a.ldr_x_idx(R_X26, R_X24, R_X22)
+    old_env = @inline_env
+    menv = {}
+    menv[map_jf.params[0]] = [:reg_x, R_X26] if map_jf.params.size >= 1
+    menv[map_jf.params[1]] = [:reg_w, R_X22] if map_jf.params.size >= 2
+    menv[map_jf.params[2]] = [:spill_x, arr_off] if map_jf.params.size >= 3
+    @inline_env = menv
+    gen_expr_any(m_re)               # x0 = mapped val
+    @a.mov_r(R_X26, R_X0)            # x26 = mapped val
+    fenv = {}
+    fenv[filt_jf.params[0]] = [:reg_x, R_X26] if filt_jf.params.size >= 1
+    fenv[filt_jf.params[1]] = [:reg_w, R_X22] if filt_jf.params.size >= 2
+    @inline_env = fenv
+    gen_cond_branch(f_re, l_skip, false)
+    @inline_env = old_env
+    emit_inline_push_to_reg(R_X25, R_X26)
+    @a.bind(l_skip)
+    @a.add_wi(R_X22, R_X22, 1)
+    @a.cmp_w(R_X22, R_X23)
+    @a.b_cond(CC_LT, l_lp)
+    @a.bind(l_end)
+    @a.mov_r(R_X0, R_X25)
+    @a.ldr_x(R_X26, R_SP, s26)
+    @a.ldr_x(R_X25, R_SP, s25)
+    @a.ldr_x(R_X24, R_SP, s24)
+    @a.ldr_x(R_X23, R_SP, s23)
+    @a.ldr_x(R_X22, R_SP, s22)
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      emit_hof_slow_call(arr_off, "map", map_jf, nil)
+      m_off = push_x(R_X0)
+      emit_hof_slow_call(m_off, "filter", filt_jf, nil)
+      @tmp_depth -= 1
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= 6
+    nil
+
   -> gen_inline_array_reduce(arr_e, cb_jf, init_e)
     re = jit_inline_return_expr(cb_jf)
     gen_expr_any(arr_e)
@@ -8488,6 +9280,7 @@ OSR_RETURN = 2
     @a.b_cond(CC_NE, l_slow)
     @a.and_x_ptr47(R_X9, R_X13)
     @a.ldrb(R_X10, R_X9, 2)
+    @a.and_w_lowmask(R_X10, R_X10, 4)
     @a.cmp_wi(R_X10, 1)
     @a.b_cond(CC_NE, l_slow)
     nil
@@ -8567,10 +9360,7 @@ OSR_RETURN = 2
       @a.b_cond(CC_NE, l_slow)
       @a.ldr_x(R_X10, R_X9, 24)       # f.@code (WValue ptr|4)
       @a.sub_i(R_X10, R_X10, 4)
-      @a.ldr_x(R_X16, R_X10, 80)      # code.@jit_fp (ivar 9 -> offset 9*8+8 = 80!)
-      # Note: jit_fp is a boxed Tungsten Int WValue (W_TAG_INT = 0xFFFC...) or 0 (raw int boxed = 0xFFFC000000000000)!
-      # Wait: Tungsten boxes Int ivars with W_TAG_INT (0xFFFC << 48) + signed 48-bit payload!
-      # Unbox 48-bit int: and_x_lowmask(R_X16, R_X16, 48)!
+      @a.ldr_x(R_X16, R_X10, 96)      # code.@jit_fast_fp (ivar 11 -> offset 11*8+8 = 96; x19..x21 already pinned!)
       @a.and_x_lowmask(R_X16, R_X16, 48)
       @a.cbz_x(R_X16, l_slow)
       # Direct ARM64 call to jit_fp(f, this, argc, a0..a3, more=0)!
@@ -8616,10 +9406,96 @@ OSR_RETURN = 2
     nil
 
   -> gen_new_any(e)
+    n = e.list.size
+    # Fast path: known pure field-init constructor `new C(a0..ak)` -> direct shaped RT_LIT (ZERO wk_call!)
+    if n <= 6 && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && e.a.x.binding.global?
+      cell = wk_cell(e.a.x.binding)
+      ci = jit_pure_ctor_info(cell.value)
+      if ci != nil && ci[6] && ci[2].size <= 6 && ci[1].params.size == ci[2].size
+        fv = ci[0]
+        cjf = ci[1]
+        keys = ci[2]
+        exprs = ci[3]
+        final_sh = ci[4]
+        jit_keep(cell)
+        jit_keep(fv)
+        jit_keep(final_sh)
+        # Evaluate call arguments onto tmp stack once
+        arg_offs = []
+        ai = 0
+        while ai < n
+          gen_expr_any(e.list[ai])
+          arg_offs.push(push_x(R_X0))
+          ai += 1
+        l_slow = @a.new_label
+        l_done = @a.new_label
+        if !@hoisted_epoch
+          ep_now = JS_EPOCH[0]
+          @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+          @a.ldr_x(R_X10, R_X9, 0)
+          @a.mov_imm64(R_X11, ep_now)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_slow)
+        @a.mov_imm64(R_X9, (wvalue_bits(cell) ## i64) - 4)
+        @a.ldr_x(R_X10, R_X9, 8)
+        @a.mov_imm64(R_X11, wvalue_bits(fv) ## i64)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_slow)
+        @a.mov_imm64(R_X1, wvalue_bits(final_sh) ## i64)
+        @a.movz_x(R_X2, 0)
+        @a.movz_x(R_X3, 0)
+        @a.movz_x(R_X4, 0)
+        @a.movz_x(R_X5, 0)
+        @a.movz_x(R_X6, 0)
+        @a.movz_x(R_X7, 0)
+        fi = 0
+        while fi < keys.size
+          pi = cjf.params.index(exprs[fi].x.binding)
+          if pi != nil && pi < n
+            @a.ldr_x(R_X2 + fi, R_SP, arg_offs[pi])
+          fi += 1
+        call_rt(RT_LIT)
+        @a.bind(l_done)
+        cb = ->()
+          @a.bind(l_slow)
+          @a.mov_imm64(R_X1, wvalue_bits(cell) ## i64)
+          call_rt(RT_GGET)
+          if n <= 4
+            ic = i64[8]
+            jit_keep(ic)
+            @a.mov_r(R_X1, R_X0)
+            @a.mov_imm64(R_X2, wvalue_bits(ic) ## i64)
+            if n <= 2
+              @a.mov_imm64(R_X3, wvalue_bits(0) ## i64)
+              @a.ldr_x(R_X4, R_SP, arg_offs[0]) if n >= 1
+              @a.ldr_x(R_X5, R_SP, arg_offs[1]) if n >= 2
+              call_rt(RT_NEW_0 + n)
+            else
+              @a.ldr_x(R_X3, R_SP, arg_offs[0])
+              @a.ldr_x(R_X4, R_SP, arg_offs[1])
+              @a.ldr_x(R_X5, R_SP, arg_offs[2])
+              @a.ldr_x(R_X6, R_SP, arg_offs[3]) if n >= 4
+              call_rt(n == 3 ? RT_NEW_3 : RT_NEW_4)
+          else
+            f_sv = push_x(R_X0)
+            call_rt(RT_NEW_ARR)
+            a_sv = push_x(R_X0)
+            k2 = 0
+            while k2 < n
+              @a.ldr_x(R_X10, R_SP, arg_offs[k2])
+              emit_inline_push_to_off(a_sv, R_X10)
+              k2 += 1
+            @a.ldr_x(R_X1, R_SP, f_sv)
+            @a.ldr_x(R_X2, R_SP, a_sv)
+            call_rt(RT_NEW_N)
+            @tmp_depth -= 2
+          @a.b(l_done)
+        add_cold_stub(cb)
+        @tmp_depth -= n
+        return nil
     gen_expr_any(e.a)
     f_off = push_x(R_X0)
-    n = e.list.size
-    if n <= 2
+    if n <= 4
       ic = i64[8]
       jit_keep(ic)
       i = 0
@@ -8629,10 +9505,17 @@ OSR_RETURN = 2
         i += 1
       @a.ldr_x(R_X1, R_SP, f_off)
       @a.mov_imm64(R_X2, wvalue_bits(ic) ## i64)
-      @a.mov_imm64(R_X3, wvalue_bits(0) ## i64)
-      @a.ldr_x(R_X4, R_SP, f_off + 8) if n >= 1
-      @a.ldr_x(R_X5, R_SP, f_off + 16) if n >= 2
-      call_rt(RT_NEW_0 + n)
+      if n <= 2
+        @a.mov_imm64(R_X3, wvalue_bits(0) ## i64)
+        @a.ldr_x(R_X4, R_SP, f_off + 8) if n >= 1
+        @a.ldr_x(R_X5, R_SP, f_off + 16) if n >= 2
+        call_rt(RT_NEW_0 + n)
+      else
+        @a.ldr_x(R_X3, R_SP, f_off + 8)
+        @a.ldr_x(R_X4, R_SP, f_off + 16)
+        @a.ldr_x(R_X5, R_SP, f_off + 24)
+        @a.ldr_x(R_X6, R_SP, f_off + 32) if n >= 4
+        call_rt(n == 3 ? RT_NEW_3 : RT_NEW_4)
       @tmp_depth -= (1 + n)
       return nil
     call_rt(RT_NEW_ARR)
@@ -8662,10 +9545,16 @@ OSR_RETURN = 2
     nil
 
   -> gen_object_lit(e)
+    n = e.list.size
+    if n == 0
+      sh0 = js_root_shape(js_realm().object_proto, OBJ_INLINE, OBJ_IBASE)
+      jit_keep(sh0)
+      @a.mov_imm64(R_X1, wvalue_bits(sh0) ## i64)
+      call_rt(RT_NEW_OBJ)
+      return nil
     ks = jit_plain_obj_keys(e)
     sh = js_lit_shape(ks)
     jit_keep(sh)
-    n = e.list.size
     if n <= 6
       i = 0
       while i < n
@@ -8767,21 +9656,27 @@ OSR_RETURN = 2
     @tmp_depth -= (1 + n)
     nil
 
-  # Guarded Map.prototype.{get,set,has} & Set.prototype.{add,has} fast-call intrinsic!
+  # Guarded Map.prototype.{get,set,has,delete}, Set.prototype.{add,has,delete} & WeakMap.prototype.{get,set,has,delete} intrinsic!
   -> gen_coll_method_intrinsic(rec_e, mname, arg_nodes, kind, rt_id)
     r = js_realm()
     mp = r.intrinsics["Map.prototype"]
     sp = r.intrinsics["Set.prototype"]
+    wmp = r.intrinsics["WeakMap.prototype"]
     return false if mp == nil || sp == nil
-    if kind == :map || kind == :both
+    has_wm = wmp != nil && (kind == :map_wm || kind == :all)
+    if kind == :map || kind == :map_wm || kind == :both || kind == :all
       return false if mp.get_own(mname) != r.intrinsics["%Map_" + mname + "%"]
-    if kind == :set || kind == :both
+    if kind == :set || kind == :both || kind == :all
       return false if sp.get_own(mname) != r.intrinsics["%Set_" + mname + "%"]
+    if has_wm
+      has_wm = wmp.get_own(mname) == r.intrinsics["%WeakMap_" + mname + "%"]
     map_sh = js_root_shape(mp, SP_INLINE, SP_IBASE)
     set_sh = js_root_shape(sp, SP_INLINE, SP_IBASE)
+    wm_sh = has_wm ? js_root_shape(wmp, SP_INLINE, SP_IBASE) : nil
     jit_keep(mname)
     jit_keep(map_sh)
     jit_keep(set_sh)
+    jit_keep(wm_sh) if wm_sh != nil
     gen_expr_any(rec_e)
     rec_off = push_x(R_X0)
     n = arg_nodes.size
@@ -8795,6 +9690,7 @@ OSR_RETURN = 2
       a1_off = push_x(R_X0)
     l_slow = @a.new_label
     l_fast = @a.new_label
+    l_wm_set = (has_wm && rt_id == RT_MAP_SET) ? @a.new_label : nil
     l_done = @a.new_label
     if !@hoisted_epoch
       ep_now = JS_EPOCH[0]
@@ -8812,6 +9708,15 @@ OSR_RETURN = 2
       @a.mov_imm64(R_X11, wvalue_bits(map_sh) ## i64)
       @a.cmp_r(R_X10, R_X11)
       @a.b_cond(CC_NE, l_slow)
+    elsif kind == :map_wm
+      @a.mov_imm64(R_X11, wvalue_bits(map_sh) ## i64)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_EQ, l_fast)
+      if has_wm
+        @a.mov_imm64(R_X11, wvalue_bits(wm_sh) ## i64)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_EQ, l_wm_set != nil ? l_wm_set : l_fast)
+      @a.b(l_slow)
     elsif kind == :set
       @a.mov_imm64(R_X11, wvalue_bits(set_sh) ## i64)
       @a.cmp_r(R_X10, R_X11)
@@ -8822,7 +9727,20 @@ OSR_RETURN = 2
       @a.b_cond(CC_EQ, l_fast)
       @a.mov_imm64(R_X11, wvalue_bits(map_sh) ## i64)
       @a.cmp_r(R_X10, R_X11)
-      @a.b_cond(CC_NE, l_slow)
+      @a.b_cond(CC_EQ, l_fast)
+      if has_wm
+        @a.mov_imm64(R_X11, wvalue_bits(wm_sh) ## i64)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_EQ, l_fast)
+      @a.b(l_slow)
+    if l_wm_set != nil
+      cb_wm = ->()
+        @a.bind(l_wm_set)
+        @a.ldr_x(R_X2, R_SP, a0_off)
+        @a.ldr_x(R_X3, R_SP, a1_off)
+        call_rt(RT_WM_SET)
+        @a.b(l_done)
+      add_cold_stub(cb_wm)
     @a.bind(l_fast)
     @a.ldr_x(R_X2, R_SP, a0_off) if n >= 1
     @a.ldr_x(R_X3, R_SP, a1_off) if n >= 2
@@ -9346,6 +10264,753 @@ OSR_RETURN = 2
     @tmp_depth -= 2
     true
 
+  # Guarded RegExp.prototype.test(s) fast-call intrinsic (ZERO match-array allocation!)
+  -> gen_rx_test_intrinsic(rec_e, arg_e)
+    r = js_realm()
+    return false if r.regexp_shape == nil || r.regexp_proto == nil
+    return false if r.regexp_proto.get_own("exec") != r.regexp_exec_fn
+    tfn = r.regexp_proto.get_own("test")
+    return false if !tfn.is_a?(JS:NativeFunction)
+    rx_sh = r.regexp_shape
+    jit_keep(rx_sh)
+    jit_keep("test")
+    gen_expr_any(rec_e)
+    rec_off = push_x(R_X0)
+    gen_expr_any(arg_e)
+    a0_off = push_x(R_X0)
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X1, R_SP, rec_off)
+    @a.sub_i(R_X9, R_X1, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_slow)
+    @a.cbz_x(R_X9, l_slow)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.mov_imm64(R_X11, wvalue_bits(rx_sh) ## i64)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X2, R_SP, a0_off)
+    call_rt(RT_RX_TEST)
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @a.ldr_x(R_X1, R_SP, rec_off)
+      @a.mov_imm64(R_X2, wvalue_bits("test") ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, rec_off)
+      @a.ldr_x(R_X3, R_SP, a0_off)
+      call_rt(RT_CALL_1)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= 2
+    true
+
+  # Guarded Array.isArray(x) inline 4-insn tag check (falls back to RT_CALL_1 for Proxy/monkey-patch)!
+  -> gen_array_is_array_intrinsic(arr_ident, arg_e)
+    return false if arr_ident.x == nil || arr_ident.x.binding == nil || !arr_ident.x.binding.global?
+    r = js_realm()
+    arr_ctor = r.intrinsics["Array"]
+    return false if arr_ctor == nil || !arr_ctor.get_own("isArray").is_a?(JS:NativeFunction)
+    cell = wk_cell(arr_ident.x.binding)
+    return false if cell.value != arr_ctor
+    jit_keep(cell)
+    jit_keep(arr_ctor)
+    jit_keep("isArray")
+    gen_expr_any(arg_e)
+    a0_off = push_x(R_X0)
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    l_no = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    @a.mov_imm64(R_X9, (wvalue_bits(cell) ## i64) - 4)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.mov_imm64(R_X11, wvalue_bits(arr_ctor) ## i64)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_NE, l_slow)
+    # Fast check: tag == 0xFFF4 (WArray) && (aflags & 1) == 1 -> true!
+    @a.ldr_x(R_X12, R_SP, a0_off)
+    @a.lsr_xi(R_X9, R_X12, 48)
+    @a.movz_x(R_X10, 0xFFF4)
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_NE, l_no)
+    @a.and_x_ptr47(R_X9, R_X12)
+    @a.ldrb(R_X10, R_X9, 2)
+    @a.tst_x_lowmask(R_X10, 1)
+    @a.b_cond(CC_EQ, l_no)
+    @a.movz_x(R_X0, 2)
+    @a.b(l_done)
+    @a.bind(l_no)
+    # If x is a JS:Proxy (kind == KIND_EXOTIC == 5), delegate to slow path!
+    @a.sub_i(R_X9, R_X12, 4)
+    @a.tst_wobj_bad(R_X9)
+    l_done_f = @a.new_label
+    @a.b_cond(CC_NE, l_done_f)
+    @a.cbz_x(R_X9, l_done_f)
+    @a.ldrb(R_X10, R_X9, 4)
+    @a.and_w_lowmask(R_X10, R_X10, 4)
+    @a.cmp_wi(R_X10, 5)
+    @a.b_cond(CC_EQ, l_slow)
+    @a.bind(l_done_f)
+    @a.movz_x(R_X0, 1)
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @a.mov_imm64(R_X1, wvalue_bits(cell) ## i64)
+      call_rt(RT_GGET)
+      rec_sv = push_x(R_X0)
+      @a.mov_r(R_X1, R_X0)
+      @a.mov_imm64(R_X2, wvalue_bits("isArray") ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, rec_sv)
+      @a.ldr_x(R_X3, R_SP, a0_off)
+      call_rt(RT_CALL_1)
+      @tmp_depth -= 1
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= 1
+    true
+
+  # Guarded Object.keys(o) fast-call intrinsic (uses cached Shape#enum_str_keys!)
+  -> gen_object_keys_intrinsic(obj_ident, arg_e)
+    return false if obj_ident.x == nil || obj_ident.x.binding == nil || !obj_ident.x.binding.global?
+    r = js_realm()
+    obj_ctor = r.intrinsics["Object"]
+    return false if obj_ctor == nil || !obj_ctor.get_own("keys").is_a?(JS:NativeFunction)
+    cell = wk_cell(obj_ident.x.binding)
+    return false if cell.value != obj_ctor
+    jit_keep(cell)
+    jit_keep(obj_ctor)
+    jit_keep("keys")
+    gen_expr_any(arg_e)
+    a0_off = push_x(R_X0)
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    @a.mov_imm64(R_X9, (wvalue_bits(cell) ## i64) - 4)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.mov_imm64(R_X11, wvalue_bits(obj_ctor) ## i64)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X1, R_SP, a0_off)
+    call_rt(RT_OBJ_KEYS)
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @a.mov_imm64(R_X1, wvalue_bits(cell) ## i64)
+      call_rt(RT_GGET)
+      rec_sv = push_x(R_X0)
+      @a.mov_r(R_X1, R_X0)
+      @a.mov_imm64(R_X2, wvalue_bits("keys") ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, rec_sv)
+      @a.ldr_x(R_X3, R_SP, a0_off)
+      call_rt(RT_CALL_1)
+      @tmp_depth -= 1
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= 1
+    true
+
+  # ---- General Value-Struct Method Inlining & Chained Scalar Replacement (SRA) ----
+  # Eliminates intermediate short-lived `new Ctor(x, y, z)` allocations and method calls across
+  # chains like `ro.sub(this.c)`, `oc.dot(rd)`, `p.sub(hitS.c).norm()`, `rd.sub(n.mul(2*rd.dot(n))).norm()`!
+
+  -> resolve_vstruct_expr_ci(e)
+    return nil if !e.is_a?(JsNode)
+    k = e.kind
+    if k == :ident
+      li = local_idx(e)
+      return @info.sra_vs[li].ctor_info if li >= 0 && @info.sra_vs[li] != nil
+      return nil
+    if k == :new && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && e.a.x.binding.global?
+      cell = wk_cell(e.a.x.binding)
+      ci = jit_vstruct_ctor_info(cell.value)
+      return ci if ci != nil && e.list.size == ci[2].size
+      return nil
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED)
+      mc = resolve_vstruct_method_call(e)
+      return mc[2][2] if mc != nil && (mc[2][0] == :vstruct_new || mc[2][0] == :vstruct_call)
+    nil
+
+  -> resolve_vstruct_method_call(e)
+    return nil if !e.is_a?(JsNode) || e.kind != :call || e.a.kind != :member || e.a.has?(F_COMPUTED)
+    mname = e.a.b.str
+    rsh = nil
+    fn = nil
+    if e.x.is_a?(Array) && e.x.size == 2 && e.x[0].is_a?(JS:Shape) && e.x[1].is_a?(JS:Function)
+      rsh = e.x[0]
+      fn = e.x[1]
+    else
+      rci = resolve_vstruct_expr_ci(e.a.a)
+      if rci != nil
+        rsh = rci[4]
+      elsif e.a.a.kind == :ident
+        rli = local_idx(e.a.a)
+        rsh = @known_vs_sh[rli] if rli >= 0
+      if rsh != nil && rsh.proto.is_a?(JS:Object)
+        cand = rsh.proto.get_own(mname)
+        fn = cand if cand.is_a?(JS:Function)
+      elsif @known_vs_sh.size > 0
+        # Speculate against known value-struct shapes in this function (100% guarded by shape + epoch!)
+        @known_vs_sh.values.each ->(csh)
+          if fn == nil && csh.is_a?(JS:Shape) && csh.proto.is_a?(JS:Object)
+            cand = csh.proto.get_own(mname)
+            if cand.is_a?(JS:Function)
+              cmi = jit_vstruct_method_info(cand, csh)
+              if cmi != nil && e.list.size == cmi[1].params.size
+                rsh = csh
+                fn = cand
+    return nil if rsh == nil || fn == nil
+    mi = jit_vstruct_method_info(fn, rsh)
+    return nil if mi == nil || e.list.size != mi[1].params.size
+    [rsh, fn, mi]
+
+  -> resolve_vstruct_scalar(e)
+    mc = resolve_vstruct_method_call(e)
+    return nil if mc == nil || mc[2][0] != :scalar
+    return nil if !vstruct_expr_side_effect_free?(e)
+    mc
+
+  # Verify an expression tree has no arbitrary JS side effects so speculative rollback to `l_slow` is 100% sound!
+  -> vstruct_expr_side_effect_free?(e, depth = 0)
+    return true if e == nil
+    return false if depth > 12 || !e.is_a?(JsNode)
+    k = e.kind
+    return true if k == :num || k == :string || k == :true || k == :false || k == :null || k == :this || k == :ident
+    if k == :member
+      return false if e.has?(F_COMPUTED)
+      return vstruct_expr_side_effect_free?(e.a, depth + 1)
+    if k == :unary
+      return (e.str == "-" || e.str == "+" || e.str == "!" || e.str == "~") && vstruct_expr_side_effect_free?(e.a, depth + 1)
+    if k == :binary
+      return vstruct_expr_side_effect_free?(e.a, depth + 1) && vstruct_expr_side_effect_free?(e.b, depth + 1)
+    if k == :new
+      return false if !(e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && e.a.x.binding.global? && jit_vstruct_ctor_info(wk_cell(e.a.x.binding).value) != nil)
+      i = 0
+      while i < e.list.size
+        return false if !vstruct_expr_side_effect_free?(e.list[i], depth + 1)
+        i += 1
+      return true
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED)
+      if e.a.a.kind == :ident && e.a.a.str == "Math"
+        i = 0
+        while i < e.list.size
+          return false if !vstruct_expr_side_effect_free?(e.list[i], depth + 1)
+          i += 1
+        return true
+      return false if resolve_vstruct_method_call(e) == nil
+      return false if !vstruct_expr_side_effect_free?(e.a.a, depth + 1)
+      i = 0
+      while i < e.list.size
+        return false if !vstruct_expr_side_effect_free?(e.list[i], depth + 1)
+        i += 1
+      return true
+    false
+
+  # Does method body `e` access `param.field` (struct param) rather than scalar `param`?
+  -> vs_expr_uses_param_member?(e, pb)
+    return false if !e.is_a?(JsNode)
+    if e.kind == :member && !e.has?(F_COMPUTED) && e.a.kind == :ident && e.a.x != nil && e.a.x.binding == pb
+      return true
+    return true if vs_expr_uses_param_member?(e.a, pb) || vs_expr_uses_param_member?(e.b, pb) || vs_expr_uses_param_member?(e.c, pb)
+    if e.list.is_a?(Array)
+      i = 0
+      while i < e.list.size
+        return true if vs_expr_uses_param_member?(e.list[i], pb)
+        i += 1
+    false
+
+  -> vs_method_param_is_struct?(mi, pb)
+    return true if mi[0] == :scalar && vs_expr_uses_param_member?(mi[2], pb)
+    if mi[0] == :vstruct_new || mi[0] == :vstruct_call
+      return true if mi[3] != nil && vs_expr_uses_param_member?(mi[3][1], pb)
+      return true if vs_expr_uses_param_member?(mi[4], pb)
+    false
+
+  # Emit a load of field `fname` from virtual struct rep `vs_rep` into `dst_d`!
+  # vs_rep: `[:sra, JitSraVs]` | `[:stack, base_off, keys]`
+  -> emit_vs_field_load(dst_d, vs_rep, fname)
+    if vs_rep[0] == :sra
+      slot = vs_rep[1].field_slots[fname]
+      load_slot_f64(dst_d, slot)
+    else
+      idx = vs_rep[2].index(fname)
+      @a.ldr_d(dst_d, R_SP, vs_rep[1] + idx * 8)
+    nil
+
+  # Evaluate a pure scalar expression inside an inlined vstruct method -> unboxed f64 in `R_D0`!
+  -> emit_vs_scalar_f64(e, sh, this_rep, p_env, loc_env)
+    k = e.kind
+    if k == :num
+      bits = jit_f64_bits(wvalue_bits(e.a) ## i64)
+      @a.mov_imm64(R_X9, bits)
+      @a.fmov_d_x(R_D0, R_X9)
+      return nil
+    if k == :true
+      @a.mov_imm64(R_X9, jit_f64_bits(wvalue_bits(~1.0) ## i64))
+      @a.fmov_d_x(R_D0, R_X9)
+      return nil
+    if k == :false || k == :null
+      @a.fmov_d_x(R_D0, R_XZR)
+      return nil
+    if k == :ident && e.x != nil && e.x.binding != nil
+      b = e.x.binding
+      if loc_env != nil && loc_env[0] == b
+        @a.ldr_d(R_D0, R_SP, loc_env[1])
+        return nil
+      if p_env != nil && p_env[b] != nil && p_env[b][0] == :scalar_spill
+        @a.ldr_d(R_D0, R_SP, p_env[b][1])
+        return nil
+    if k == :member && !e.has?(F_COMPUTED)
+      if e.a.kind == :this
+        emit_vs_field_load(R_D0, this_rep, e.b.str)
+        return nil
+      if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && p_env != nil && p_env[e.a.x.binding] != nil
+        emit_vs_field_load(R_D0, p_env[e.a.x.binding], e.b.str)
+        return nil
+    if k == :unary && e.str == "-"
+      emit_vs_scalar_f64(e.a, sh, this_rep, p_env, loc_env)
+      @a.fneg_d(R_D0, R_D0)
+      return nil
+    if k == :binary
+      op = e.str
+      # Fused `a + (x * y)` -> FMADD_D (3-cycle FMA on Apple Silicon!)
+      if (op == "+" || op == "-") && e.b.kind == :binary && e.b.str == "*"
+        emit_vs_scalar_f64(e.a, sh, this_rep, p_env, loc_env)
+        a_off = push_d(R_D0)
+        emit_vs_scalar_f64(e.b.a, sh, this_rep, p_env, loc_env)
+        x_off = push_d(R_D0)
+        emit_vs_scalar_f64(e.b.b, sh, this_rep, p_env, loc_env)
+        @a.ldr_d(R_D1, R_SP, x_off)
+        @a.ldr_d(R_D2, R_SP, a_off)
+        @tmp_depth -= 2
+        if op == "+"
+          @a.fmadd_d(R_D0, R_D1, R_D0, R_D2)
+        else
+          @a.fmsub_d(R_D0, R_D1, R_D0, R_D2)
+        return nil
+      emit_vs_scalar_f64(e.a, sh, this_rep, p_env, loc_env)
+      a_off = push_d(R_D0)
+      emit_vs_scalar_f64(e.b, sh, this_rep, p_env, loc_env)
+      @a.ldr_d(R_D1, R_SP, a_off)
+      @tmp_depth -= 1
+      emit_f64_op(op, R_D0, R_D1, R_D0)
+      return nil
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED)
+      if e.a.a.kind == :ident && e.a.a.str == "Math" && e.list.size == 1
+        emit_vs_scalar_f64(e.list[0], sh, this_rep, p_env, loc_env)
+        if e.a.b.str == "sqrt"
+          @a.fsqrt_d(R_D0, R_D0)
+        elsif e.a.b.str == "abs"
+          @a.fabs_d(R_D0, R_D0)
+        return nil
+      # Nested scalar method call on `this` (e.g. `this.dot(this)` inside `norm()`!)
+      if e.a.a.kind == :this && e.list.size == 1
+        sub_fn = sh.proto.get_own(e.a.b.str)
+        sub_mi = jit_vstruct_method_info(sub_fn, sh)
+        if sub_mi != nil && sub_mi[0] == :scalar
+          sub_tjf = sub_mi[1]
+          sub_penv = {}
+          ae0 = e.list[0]
+          if ae0.kind == :this
+            sub_penv[sub_tjf.params[0]] = this_rep
+          elsif ae0.kind == :ident && ae0.x != nil && p_env != nil && p_env[ae0.x.binding] != nil
+            sub_penv[sub_tjf.params[0]] = p_env[ae0.x.binding]
+          emit_vs_scalar_f64(sub_mi[2], sh, this_rep, sub_penv, nil)
+          return nil
+    nil
+
+  # Evaluate a value-struct expression `e` into either an existing SRA_VS (`[:sra, vs_obj, 0]`)
+  # or `m` fresh unboxed f64 temp stack slots (`[:stack, out_off, keys, m]`).
+  # Branches to `l_slow` (preserving zero mutations) on any shape/type/cell guard miss!
+  -> gen_vstruct_to_rep(e, ci, l_slow)
+    keys = ci[2]
+    sh = ci[4]
+    m = keys.size
+    # 1. Non-escaping SRA_VS local (`oc`, `n`) -> ZERO loads, ZERO stack slots!
+    if e.kind == :ident
+      li = local_idx(e)
+      if li >= 0 && @info.sra_vs[li] != nil && @info.sra_vs[li].ctor_info[4] == sh
+        return [:sra, @info.sra_vs[li], keys, 0]
+    # 2. Inline `new Ctor(e0, ..., em)` -> evaluate directly into `m` unboxed f64 temp slots!
+    if e.kind == :new && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && e.a.x.binding.global?
+      cell = wk_cell(e.a.x.binding)
+      if cell.value == ci[0] && e.list.size == m
+        jit_keep(cell)
+        jit_keep(ci[0])
+        @a.mov_imm64(R_X9, (wvalue_bits(cell) ## i64) - 4)
+        @a.ldr_x(R_X10, R_X9, 8)
+        @a.mov_imm64(R_X11, wvalue_bits(ci[0]) ## i64)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_slow)
+        out_off = @tmp_base + @tmp_depth * 8
+        @tmp_depth += m
+        @max_tmp = @tmp_depth if @tmp_depth > @max_tmp
+        q = 0
+        while q < m
+          gen_expr_f64(e.list[q])
+          @a.str_d(R_D0, R_SP, out_off + q * 8)
+          q += 1
+        return [:stack, out_off, keys, m]
+    # 3. Chained vstruct-returning method call (`ro.sub(this.c)`, `rd.mul(bestT)`, `p.sub(c).norm()`!)
+    if e.kind == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED)
+      mc = resolve_vstruct_method_call(e)
+      if mc != nil && (mc[2][0] == :vstruct_new || mc[2][0] == :vstruct_call) && mc[2][2][4] == sh
+        mi = mc[2]
+        tjf = mi[1]
+        # Reserve `m` output slots FIRST so all inner temps pop cleanly!
+        out_off = @tmp_base + @tmp_depth * 8
+        @tmp_depth += m
+        @max_tmp = @tmp_depth if @tmp_depth > @max_tmp
+        saved_td = @tmp_depth
+        rec_rep = gen_vstruct_to_rep(e.a.a, ci, l_slow)
+        p_env = {}
+        ai = 0
+        while ai < tjf.params.size
+          pb = tjf.params[ai]
+          if vs_method_param_is_struct?(mi, pb)
+            p_env[pb] = gen_vstruct_to_rep(e.list[ai], ci, l_slow)
+          else
+            gen_expr_f64(e.list[ai])
+            p_env[pb] = [:scalar_spill, push_d(R_D0)]
+          ai += 1
+        loc_env = nil
+        if mi[3] != nil
+          emit_vs_scalar_f64(mi[3][1], sh, rec_rep, p_env, nil)
+          loc_env = [mi[3][0], push_d(R_D0)]
+        if mi[0] == :vstruct_new
+          ctor_cell = mi[5]
+          jit_keep(ctor_cell)
+          jit_keep(ci[0])
+          @a.mov_imm64(R_X9, (wvalue_bits(ctor_cell) ## i64) - 4)
+          @a.ldr_x(R_X10, R_X9, 8)
+          @a.mov_imm64(R_X11, wvalue_bits(ci[0]) ## i64)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_slow)
+          new_node = mi[4]
+          q = 0
+          while q < m
+            emit_vs_scalar_f64(new_node.list[q], sh, rec_rep, p_env, loc_env)
+            @a.str_d(R_D0, R_SP, out_off + q * 8)
+            q += 1
+        else
+          # :vstruct_call (e.g. `norm()` -> `return this.mul(d);`)
+          call_node = mi[4]
+          sub_mi = mi[5]
+          sub_tjf = sub_mi[1]
+          sub_penv = {}
+          sai = 0
+          while sai < sub_tjf.params.size
+            emit_vs_scalar_f64(call_node.list[sai], sh, rec_rep, p_env, loc_env)
+            sub_penv[sub_tjf.params[sai]] = [:scalar_spill, push_d(R_D0)]
+            sai += 1
+          ctor_cell = sub_mi[5]
+          jit_keep(ctor_cell)
+          jit_keep(ci[0])
+          @a.mov_imm64(R_X9, (wvalue_bits(ctor_cell) ## i64) - 4)
+          @a.ldr_x(R_X10, R_X9, 8)
+          @a.mov_imm64(R_X11, wvalue_bits(ci[0]) ## i64)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_slow)
+          new_node = sub_mi[4]
+          q = 0
+          while q < m
+            emit_vs_scalar_f64(new_node.list[q], sh, rec_rep, sub_penv, nil)
+            @a.str_d(R_D0, R_SP, out_off + q * 8)
+            q += 1
+        @tmp_depth = saved_td
+        return [:stack, out_off, keys, m]
+    # 4. Existing heap object (`ro`, `rd`, `this.c`, `hitS.c`, `light`, `hitS.col`, `rcol`) -> guarded unbox into `m` f64 slots!
+    jit_keep(sh)
+    out_off = @tmp_base + @tmp_depth * 8
+    @tmp_depth += m
+    @max_tmp = @tmp_depth if @tmp_depth > @max_tmp
+    gen_expr_any(e)
+    @a.sub_i(R_X9, R_X0, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_slow)
+    @a.cbz_x(R_X9, l_slow)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.mov_imm64(R_X11, wvalue_bits(sh) ## i64)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_NE, l_slow)
+    q = 0
+    while q < m
+      sl = sh.slot_of(keys[q])
+      enc = sl < sh.inline ? (sh.ibase + sl) : (0 - (sl - sh.inline) - 1)
+      emit_slot_load(R_X10, R_X9, enc)
+      emit_unbox_f64(R_D0, R_X10, l_slow)
+      @a.str_d(R_D0, R_SP, out_off + q * 8)
+      q += 1
+    [:stack, out_off, keys, m]
+
+  # Assign a value-struct expression directly into SRA_VS virtual f64 slots (`var oc = ro.sub(this.c)` -> ZERO allocs!)
+  -> gen_sra_vs_assign(li, rhs)
+    vs = @info.sra_vs[li]
+    ci = vs.ctor_info
+    keys = vs.keys
+    m = keys.size
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    saved_td = @tmp_depth
+    rep = gen_vstruct_to_rep(rhs, ci, l_slow)
+    q = 0
+    while q < m
+      emit_vs_field_load(R_D0, rep, keys[q])
+      store_slot_f64(vs.field_slots[keys[q]], R_D0)
+      q += 1
+    @tmp_depth = saved_td
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @tmp_depth = saved_td
+      # Dynamic fallback: evaluate rhs normally and unbox each field into vs.field_slots!
+      gen_expr_any(rhs)
+      obj_off = push_x(R_X0)
+      q2 = 0
+      while q2 < m
+        kn = keys[q2]
+        jit_keep(kn)
+        @a.ldr_x(R_X1, R_SP, obj_off)
+        @a.mov_imm64(R_X2, wvalue_bits(kn) ## i64)
+        call_rt(RT_GETV)
+        l_tn = @a.new_label
+        l_ok = @a.new_label
+        emit_unbox_f64(R_D0, R_X0, l_tn)
+        @a.b(l_ok)
+        @a.bind(l_tn)
+        @a.mov_r(R_X1, R_X0)
+        call_rt(RT_TO_NUMBER)
+        @a.sub_r(R_X15, R_X0, R_X20)
+        @a.fmov_d_x(R_D0, R_X15)
+        @a.bind(l_ok)
+        store_slot_f64(vs.field_slots[kn], R_D0)
+        q2 += 1
+      @tmp_depth -= 1
+      @a.b(l_done)
+    add_cold_stub(cb)
+    nil
+
+  # Inline a scalar vstruct method call (`oc.dot(rd)`, `oc.dot(oc)`, `n.dot(light)`, `rd.dot(n)`) -> unboxed f64 in R_D0!
+  -> gen_vstruct_scalar_f64(e)
+    mc = resolve_vstruct_scalar(e)
+    return false if mc == nil
+    sh = mc[0]
+    mi = mc[2]
+    tjf = mi[1]
+    ci = nil
+    # Build synthetic ctor_info for field loads from `sh`
+    keys = sh.key_list
+    ci = [nil, nil, keys, nil, sh, sh.proto, true]
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    saved_td = @tmp_depth
+    rec_rep = gen_vstruct_to_rep(e.a.a, ci, l_slow)
+    p_env = {}
+    ai = 0
+    while ai < tjf.params.size
+      pb = tjf.params[ai]
+      if vs_method_param_is_struct?(mi, pb)
+        p_env[pb] = gen_vstruct_to_rep(e.list[ai], ci, l_slow)
+      else
+        gen_expr_f64(e.list[ai])
+        p_env[pb] = [:scalar_spill, push_d(R_D0)]
+      ai += 1
+    emit_vs_scalar_f64(mi[2], sh, rec_rep, p_env, nil)
+    @tmp_depth = saved_td
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @tmp_depth = saved_td
+      emit_vstruct_call_fallback(e)
+      l_tn = @a.new_label
+      emit_unbox_f64(R_D0, R_X0, l_tn)
+      @a.b(l_done)
+      @a.bind(l_tn)
+      @a.mov_r(R_X1, R_X0)
+      call_rt(RT_TO_NUMBER)
+      @a.sub_r(R_X15, R_X0, R_X20)
+      @a.fmov_d_x(R_D0, R_X15)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    true
+
+  # Inline a vstruct method call returning boxed WValue (either scalar OR materialized final struct via 1 RT_LIT!)
+  -> gen_vstruct_call_any(e)
+    return false if !vstruct_expr_side_effect_free?(e)
+    mc = resolve_vstruct_method_call(e)
+    return false if mc == nil
+    mi = mc[2]
+    if mi[0] == :scalar
+      sh_s = mc[0]
+      tjf_s = mi[1]
+      keys_s = sh_s.key_list
+      ci_s = [nil, nil, keys_s, nil, sh_s, sh_s.proto, true]
+      l_slow_s = @a.new_label
+      l_done_s = @a.new_label
+      if !@hoisted_epoch
+        ep_now = JS_EPOCH[0]
+        @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+        @a.ldr_x(R_X10, R_X9, 0)
+        @a.mov_imm64(R_X11, ep_now)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_slow_s)
+      saved_td_s = @tmp_depth
+      rec_rep_s = gen_vstruct_to_rep(e.a.a, ci_s, l_slow_s)
+      p_env_s = {}
+      ai_s = 0
+      while ai_s < tjf_s.params.size
+        pb_s = tjf_s.params[ai_s]
+        if vs_method_param_is_struct?(mi, pb_s)
+          p_env_s[pb_s] = gen_vstruct_to_rep(e.list[ai_s], ci_s, l_slow_s)
+        else
+          gen_expr_f64(e.list[ai_s])
+          p_env_s[pb_s] = [:scalar_spill, push_d(R_D0)]
+        ai_s += 1
+      emit_vs_scalar_f64(mi[2], sh_s, rec_rep_s, p_env_s, nil)
+      emit_box_f64(R_X0, R_D0)
+      @tmp_depth = saved_td_s
+      @a.bind(l_done_s)
+      cb_s = ->()
+        @a.bind(l_slow_s)
+        @tmp_depth = saved_td_s
+        emit_vstruct_call_fallback(e)
+        @a.b(l_done_s)
+      add_cold_stub(cb_s)
+      return true
+    # Struct-returning chain (`ro.add(rd.mul(t))`, `rd.sub(n.mul(2*rd.dot(n))).norm()`, `new Vec(...).norm()`!)
+    ci = mi[2]
+    keys = ci[2]
+    sh = ci[4]
+    m = keys.size
+    jit_keep(sh)
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    saved_td = @tmp_depth
+    rep = gen_vstruct_to_rep(e, ci, l_slow)
+    # Materialize ONE single shaped object via RT_LIT(sh, box(f0), box(f1), ...)!
+    @a.mov_imm64(R_X1, wvalue_bits(sh) ## i64)
+    @a.movz_x(R_X2, 0)
+    @a.movz_x(R_X3, 0)
+    @a.movz_x(R_X4, 0)
+    @a.movz_x(R_X5, 0)
+    @a.movz_x(R_X6, 0)
+    @a.movz_x(R_X7, 0)
+    q = 0
+    while q < m
+      emit_vs_field_load(R_D0, rep, keys[q])
+      emit_box_f64(R_X2 + q, R_D0)
+      q += 1
+    call_rt(RT_LIT)
+    @tmp_depth = saved_td
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @tmp_depth = saved_td
+      emit_vstruct_call_fallback(e)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    true
+
+  # Cold fallback: dynamically evaluate method call `e` (`e.a.a[mname](e.list...)`) via RT_GETV + RT_CALL_k
+  # (Handles arbitrary nested calls without re-entering gen_vstruct_call_any!)
+  -> emit_vstruct_call_fallback(e)
+    c = e.a
+    mname = c.b.str
+    jit_keep(mname)
+    # Evaluate receiver (note: if receiver is an SRA_VS local, materialize it as a shaped object first!)
+    rli = local_idx(c.a)
+    if rli >= 0 && @info.sra_vs[rli] != nil
+      emit_materialize_sra_vs(@info.sra_vs[rli])
+    else
+      gen_expr_any(c.a)
+    rec_off = push_x(R_X0)
+    n = e.list.size
+    a_offs = []
+    i = 0
+    while i < n
+      ali = local_idx(e.list[i])
+      if ali >= 0 && @info.sra_vs[ali] != nil
+        emit_materialize_sra_vs(@info.sra_vs[ali])
+      else
+        gen_expr_any(e.list[i])
+      a_offs.push(push_x(R_X0))
+      i += 1
+    @a.ldr_x(R_X1, R_SP, rec_off)
+    @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
+    call_rt(RT_GETV)
+    @a.mov_r(R_X1, R_X0)
+    @a.ldr_x(R_X2, R_SP, rec_off)
+    @a.ldr_x(R_X3, R_SP, a_offs[0]) if n >= 1
+    @a.ldr_x(R_X4, R_SP, a_offs[1]) if n >= 2
+    @a.ldr_x(R_X5, R_SP, a_offs[2]) if n >= 3
+    @a.ldr_x(R_X6, R_SP, a_offs[3]) if n >= 4
+    call_rt(RT_CALL_0 + n)
+    @tmp_depth -= (1 + n)
+    nil
+
+  -> emit_materialize_sra_vs(vs)
+    sh = vs.ctor_info[4]
+    keys = vs.keys
+    jit_keep(sh)
+    @a.mov_imm64(R_X1, wvalue_bits(sh) ## i64)
+    @a.movz_x(R_X2, 0)
+    @a.movz_x(R_X3, 0)
+    @a.movz_x(R_X4, 0)
+    @a.movz_x(R_X5, 0)
+    @a.movz_x(R_X6, 0)
+    @a.movz_x(R_X7, 0)
+    q = 0
+    while q < keys.size
+      load_slot_f64(R_D0, vs.field_slots[keys[q]])
+      emit_box_f64(R_X2 + q, R_D0)
+      q += 1
+    call_rt(RT_LIT)
+    nil
+
   # Guarded Array.prototype.join fast-call intrinsic!
   -> gen_arr_join_intrinsic(rec_e, arg_nodes)
     jit_keep("join")
@@ -9372,6 +11037,7 @@ OSR_RETURN = 2
     @a.b_cond(CC_NE, l_slow)
     @a.and_x_ptr47(R_X9, R_X1)
     @a.ldrb(R_X10, R_X9, 2)
+    @a.and_w_lowmask(R_X10, R_X10, 4)
     @a.cmp_wi(R_X10, 1)
     @a.b_cond(CC_NE, l_slow)
     if n >= 1
@@ -9451,6 +11117,9 @@ OSR_RETURN = 2
     ccall("w_value_free_w", @hoisted_cells) if @hoisted_cells != nil
     ccall("w_value_free_w", @hoisted_arr_regs) if @hoisted_arr_regs != nil
     ccall("w_value_free_w", @hoisted_ta_regs) if @hoisted_ta_regs != nil
+    ccall("w_value_free_w", @hoisted_global_tas) if @hoisted_global_tas != nil
+    ccall("w_value_free_w", @hoisted_gta_regs) if @hoisted_gta_regs != nil
+    ccall("w_value_free_w", @known_vs_sh) if @known_vs_sh != nil
     ccall("w_value_free_w", @hoisted_shapes) if @hoisted_shapes != nil
     ccall("w_value_free_w", @sh_spill_slots) if @sh_spill_slots != nil
     ccall("w_value_free_w", @block_prop_fp) if @block_prop_fp != nil
@@ -9473,22 +11142,32 @@ OSR_RETURN = 2
 
 # ---- Top-Level Entry Points for Tier 0 (`walk.w`) & `js_dispatch` (`engine.w`) ----
 
--> jit_compile_and_install(code)
+-> jit_compile_and_install(code, warm_args = nil)
   return false if !JIT_ENABLED[0] || !jit_mem_ready?()
   return code.jit_fp != 0 if code.jit_state != 0
   jf = code.node
+  if JST_ENABLED[0] && code.jst_state != -1
+    if code.jst_desc != nil
+      code.jit_state = -1
+      return false
+    if jf.is_a?(JaFunc) && !jf.script && !jf.dynamic
+      jan = jst_analyze_func(jf)
+      if jan[0] && jan[1][:has_bigint] && jan[1][:reads_arr]
+        return false
   if !jf.is_a?(JaFunc) || !jit_eligible_fn?(jf)
     code.jit_state = -1
     return false
   code.jit_state = -1   # prevent re-entrant compile loops
   an = JS:JitAnalyzer.new(jf, false, nil)
-  info = an.analyze(nil)
+  info = an.analyze(nil, warm_args)
   an.release
   comp = JS:JitCompiler.new(info)
   fp = comp.compile_fn()
   fast_off = comp.fast_entry_off
   rep_off = comp.repeat_entry_off
   fast_rec = info.fast_rec
+  sra_vs_n = info.sra_vs.size
+  mono_sh_d = info.mono_arr_num_sh
   comp.release
   info.release
   if fp == 0
@@ -9497,11 +11176,12 @@ OSR_RETURN = 2
   code.jit_fast_fp = fast_off >= 0 ? (fp + fast_off) : fp
   code.jit_repeat_fp = rep_off >= 0 ? (fp + rep_off) : 0
   code.jit_state = 1
-  ccall("w_eputs", "\[js-jit] compiled fn " + jf.name.to_s + " (" + fast_rec.to_s + ")") if JIT_DEBUG[0]
+  ccall("w_eputs", "\[js-jit] compiled fn " + jf.name.to_s + " (" + fast_rec.to_s + " rep=" + (rep_off >= 0).to_s + " mono=" + (mono_sh_d != 0).to_s + " sra_vs=" + sra_vs_n.to_s + ")") if JIT_DEBUG[0]
   true
 
 # Enter a JITted JS function from `js_dispatch` / `wk_call`.
 -> jit_enter_fn(code, f, this, argc, a0, a1, a2, a3, more)
+  js_ui_pump_maybe() if JS_UI_PUMP_HOOK[0] != nil
   d = JS_CALL_DEPTH[0] + 1
   js_throw_range("Maximum call stack size exceeded") if d > 1200
   if d == 1 || JIT_RT_TBL[RT_K_SP_LIMIT] == 0

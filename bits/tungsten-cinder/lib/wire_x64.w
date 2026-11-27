@@ -617,22 +617,27 @@ use ./opt_config
     do_carry = @opt_cfg == nil || (@opt_cfg.pass_enabled?("carry-chains") && @opt_cfg.opt_level >= 2)
     do_simd  = @opt_cfg == nil || @opt_cfg.pass_enabled?("simd")
     strict_fp = @opt_cfg != nil && @opt_cfg.strict_math
+    allow_reassoc = @opt_cfg != nil && @opt_cfg.fast_math && !strict_fp
     if do_carry
       carry_sk = try_emit_carry_loop_x64(cond_id, defs, c_i64)
       return carry_sk if carry_sk != nil
-    return nil if !do_simd || strict_fp
+    return nil if !do_simd || !allow_reassoc
     lp = wire_match_counted_loop(@wf, cond_id, c_i64)
     return nil if lp == nil
     body = lp[0]; idx_sl = lp[1]; lim_vr = lp[2]; end_id = lp[3]; skip = lp[4]
-    return nil if body.size < 4 || body.size > 9
+    return nil if body.size < 3 || body.size > 9
     st = body[body.size - 1]
     return nil if st.op != :store_double
     acc_sl = st.imm
     fadd_ins = defs[st.a]
-    return nil if fadd_ins == nil || fadd_ins.op != :fadd_f64 || !wire_is_slot_load?(fadd_ins.a, acc_sl, defs)
-    fmul_ins = defs[fadd_ins.b]
-    return nil if fmul_ins == nil || fmul_ins.op != :fmul_f64
-    ga = defs[fmul_ins.a]; gb = defs[fmul_ins.b]
+    ga = nil
+    gb = nil
+    if fadd_ins != nil && fadd_ins.op == :fadd_f64 && wire_is_slot_load?(fadd_ins.a, acc_sl, defs)
+      fmul_ins = defs[fadd_ins.b]
+      if fmul_ins != nil && fmul_ins.op == :fmul_f64
+        ga = defs[fmul_ins.a]; gb = defs[fmul_ins.b]
+    elsif fadd_ins != nil && fadd_ins.op == :fmadd_f64 && wire_is_slot_load?(fadd_ins.c, acc_sl, defs)
+      ga = defs[fadd_ins.a]; gb = defs[fadd_ins.b]
     return nil if ga == nil || gb == nil || ga.op != :typed_array_get_inline || gb.op != :typed_array_get_inline || ga.ebits != -32 || gb.ebits != -32
     return nil if !wire_is_slot_load?(ga.b, idx_sl, defs) || !wire_is_slot_load?(gb.b, idx_sl, defs)
     bi = 0

@@ -15,13 +15,14 @@ use ./buf
 use ./a64
 
 # Logical section IDs used by callers before final Mach-O section numbering
-MSEC_NONE  = 0
-MSEC_TEXT  = 1
-MSEC_CONST = 2
-MSEC_DATA  = 3
-MSEC_BSS   = 4
-MSEC_TBSS  = 5
-MSEC_TVARS = 6
+MSEC_NONE       = 0
+MSEC_TEXT       = 1
+MSEC_CONST      = 2   # `__TEXT,__const` — pure read-only constants & `@__static_slab` (mmap'd in `__TEXT`!)
+MSEC_DATA       = 3   # `__DATA,__data`  — mutable initialized globals
+MSEC_BSS        = 4   # `__DATA,__bss`   — zero-initialized globals
+MSEC_TBSS       = 5   # `__DATA,__thread_bss`
+MSEC_TVARS      = 6   # `__DATA,__thread_vars`
+MSEC_DATA_CONST = 7   # `__DATA,__const` — read-only pointer tables with rebasing relocations (`__DATA_CONST`)
 
 # Symbol bindings
 MSYM_LOCAL  = 0
@@ -57,7 +58,7 @@ MACHO_ARM64_RELOC_ADDEND            = 10
   (val + (pow2 - 1)) & (0 - pow2)
 
 + MachO64Writer
-  rw :text, :rodata, :data
+  rw :text, :rodata, :const_data, :data, :lto_payload
   rw :bss_size, :tbss_size
   rw :sym_names, :sym_bind, :sym_sec, :sym_off, :sym_no_dead_strip, :sym_map
   rw :tls_names, :tls_tbss_off, :tls_sizes
@@ -68,7 +69,9 @@ MACHO_ARM64_RELOC_ADDEND            = 10
   -> new
     @text = ByteBuf.new(65536)
     @rodata = ByteBuf.new(65536)
+    @const_data = ByteBuf.new(4096)
     @data = ByteBuf.new(4096)
+    @lto_payload = ByteBuf.new(0)
     @bss_size = 0
     @tbss_size = 0
 
@@ -193,10 +196,22 @@ MACHO_ARM64_RELOC_ADDEND            = 10
     return [MACHO_ARM64_RELOC_TLVP_LOAD_PAGEOFF12, 0, 2] if kind == CREL_A64_TLVP_PAGEOFF12
     [MACHO_ARM64_RELOC_UNSIGNED, 0, 3]
 
+  -> set_lto_ir(ir_str)
+    return nil if ir_str == nil
+    ir_len = cinder_blen(ir_str)
+    @lto_payload = ByteBuf.new(ir_len + 24)
+    @lto_payload.put_ascii("CNDRLTO1")
+    @lto_payload.put_u32_le(0)
+    @lto_payload.put_u32_le(ir_len)
+    @lto_payload.put_ascii(ir_str)
+    @lto_payload.align_to(8, 0)
+    nil
+
   -> build_bytes
-    # Align section payloads cleanly
+    # Align section payloads cleanly (`@rodata` aligned to 32B for `@__static_slab` slots!)
     @text.align_to(8, 0)
-    @rodata.align_to(8, 0)
+    @rodata.align_to(32, 0)
+    @const_data.align_to(8, 0)
     @data.align_to(8, 0)
     @bss_size = macho_align_up(@bss_size, 8)
     @tbss_size = macho_align_up(@tbss_size, 8)
@@ -206,23 +221,38 @@ MACHO_ARM64_RELOC_ADDEND            = 10
     tvars_buf.put_zeros(@tls_names.size() * 24)
 
     has_tls = @tls_names.size() > 0
+    has_dconst = @const_data.len > 0
+    has_lto = @lto_payload.len > 0
 
     # Assign 1-based Mach-O section indices & virtual section addresses:
-    #   1: __TEXT,__text
-    #   2: __DATA,__const
-    #   3: __DATA,__data
-    #   4: __DATA,__bss          (zerofill)
-    #   5: __DATA,__thread_bss   (optional zerofill)
-    #   6: __DATA,__thread_vars  (optional file-backed)
-    nsects = has_tls ? 6 : 4
-    sec_num = Array.new(7, 0)
-    sec_num[MSEC_TEXT]  = 1
-    sec_num[MSEC_CONST] = 2
-    sec_num[MSEC_DATA]  = 3
-    sec_num[MSEC_BSS]   = 4
+    #   - __TEXT,__text
+    #   - __TEXT,__const         (pure read-only constants & `@__static_slab`, mmap'd in `__TEXT`!)
+    #   - __DATA,__const         (optional: relocated constant pointer tables for `__DATA_CONST`)
+    #   - __DATA,__data
+    #   - __DATA,__thread_vars   (optional file-backed)
+    #   - __DWARF,__cinder_lto   (optional Fat-LTO IR section; S_ATTR_DEBUG so non-LTO `ld` strips it!)
+    #   - __DATA,__bss           (zerofill)
+    #   - __DATA,__thread_bss    (optional zerofill)
+    sec_num = Array.new(8, 0)
+    cur_sec = 1
+    sec_num[MSEC_TEXT]  = cur_sec; cur_sec += 1
+    sec_num[MSEC_CONST] = cur_sec; cur_sec += 1
+    if has_dconst
+      sec_num[MSEC_DATA_CONST] = cur_sec; cur_sec += 1
+    sec_num[MSEC_DATA]  = cur_sec; cur_sec += 1
+    tv_sec = 0
     if has_tls
-      sec_num[MSEC_TBSS]  = 5
-      sec_num[MSEC_TVARS] = 6
+      tv_sec = cur_sec; cur_sec += 1
+    if has_lto
+      cur_sec += 1
+    bs_sec = cur_sec; cur_sec += 1
+    tb_sec = 0
+    if has_tls
+      tb_sec = cur_sec; cur_sec += 1
+    sec_num[MSEC_BSS]   = bs_sec
+    sec_num[MSEC_TBSS]  = tb_sec
+    sec_num[MSEC_TVARS] = tv_sec
+    nsects = cur_sec - 1
 
     # Header (32) + LC_SEGMENT_64 (72 + nsects*80) + LC_BUILD_VERSION (24) + LC_SYMTAB (24) + LC_DYSYMTAB (80)
     seg_cmd_size = 72 + nsects * 80
@@ -235,13 +265,19 @@ MACHO_ARM64_RELOC_ADDEND            = 10
 
     text_vaddr = cur_vaddr
     text_foff = cur_foff
-    cur_vaddr = macho_align_up(cur_vaddr + @text.len, 16)
-    cur_foff = macho_align_up(cur_foff + @text.len, 16)
+    cur_vaddr = macho_align_up(cur_vaddr + @text.len, 32)
+    cur_foff = macho_align_up(cur_foff + @text.len, 32)
 
     const_vaddr = cur_vaddr
     const_foff = cur_foff
     cur_vaddr = macho_align_up(cur_vaddr + @rodata.len, 16)
     cur_foff = macho_align_up(cur_foff + @rodata.len, 16)
+
+    dconst_vaddr = cur_vaddr
+    dconst_foff = cur_foff
+    if has_dconst
+      cur_vaddr = macho_align_up(cur_vaddr + @const_data.len, 16)
+      cur_foff = macho_align_up(cur_foff + @const_data.len, 16)
 
     data_vaddr = cur_vaddr
     data_foff = cur_foff
@@ -254,6 +290,12 @@ MACHO_ARM64_RELOC_ADDEND            = 10
       cur_vaddr = macho_align_up(cur_vaddr + tvars_buf.len, 16)
       cur_foff = macho_align_up(cur_foff + tvars_buf.len, 16)
 
+    lto_vaddr = cur_vaddr
+    lto_foff = cur_foff
+    if has_lto
+      cur_vaddr = macho_align_up(cur_vaddr + @lto_payload.len, 16)
+      cur_foff = macho_align_up(cur_foff + @lto_payload.len, 16)
+
     seg_filesize = cur_foff - hdr_end
 
     bss_vaddr = cur_vaddr
@@ -265,13 +307,14 @@ MACHO_ARM64_RELOC_ADDEND            = 10
 
     seg_vmsize = cur_vaddr
 
-    sec_vaddr = Array.new(7, 0)
-    sec_vaddr[MSEC_TEXT]  = text_vaddr
-    sec_vaddr[MSEC_CONST] = const_vaddr
-    sec_vaddr[MSEC_DATA]  = data_vaddr
-    sec_vaddr[MSEC_BSS]   = bss_vaddr
-    sec_vaddr[MSEC_TBSS]  = tbss_vaddr
-    sec_vaddr[MSEC_TVARS] = tvars_vaddr
+    sec_vaddr = Array.new(8, 0)
+    sec_vaddr[MSEC_TEXT]       = text_vaddr
+    sec_vaddr[MSEC_CONST]      = const_vaddr
+    sec_vaddr[MSEC_DATA_CONST] = dconst_vaddr
+    sec_vaddr[MSEC_DATA]       = data_vaddr
+    sec_vaddr[MSEC_BSS]        = bss_vaddr
+    sec_vaddr[MSEC_TBSS]       = tbss_vaddr
+    sec_vaddr[MSEC_TVARS]      = tvars_vaddr
 
     # Partition symbols into [locals, extdefs, undefs] and build final mangled_name -> final_sym_index map!
     locals = []
@@ -354,7 +397,7 @@ MACHO_ARM64_RELOC_ADDEND            = 10
     while ri >= 0
       roff = @const_rel_off[ri]
       snum = final_idx[@const_rel_sym[ri]]
-      @rodata.patch_u64_le(roff, @const_rel_add[ri])
+      @const_data.patch_u64_le(roff, @const_rel_add[ri])
       emit_reloc_entry(const_rel_buf, roff, snum, 0, 3, 1, MACHO_ARM64_RELOC_UNSIGNED)
       ri -= 1
     n_const_rel = const_rel_buf.len >> 3
@@ -398,14 +441,14 @@ MACHO_ARM64_RELOC_ADDEND            = 10
     # Assemble complete Mach-O binary!
     out = ByteBuf.new(stroff + strtab.len + 64)
 
-    # 1. mach_header_64 (32 bytes)
+    # 1. mach_header_64 (32 bytes; MH_SUBSECTIONS_VIA_SYMBOLS = 0x2000 enables ld -dead_strip per symbol!)
     out.put_u32_le(0xFEEDFACF)
     out.put_u32_le(0x0100000C)
     out.put_u32_le(0)
     out.put_u32_le(1)             # MH_OBJECT
     out.put_u32_le(4)             # ncmds
     out.put_u32_le(sizeofcmds)
-    out.put_u32_le(0)             # flags
+    out.put_u32_le(0x2000)        # MH_SUBSECTIONS_VIA_SYMBOLS
     out.put_u32_le(0)             # reserved
 
     # 2. LC_SEGMENT_64
@@ -421,7 +464,7 @@ MACHO_ARM64_RELOC_ADDEND            = 10
     out.put_u32_le(nsects)
     out.put_u32_le(0)
 
-    # Section 1: __TEXT,__text (align 2^6 = 64 bytes for limb_kernels .balign 64!)
+    # Section: __TEXT,__text (align 2^6 = 64 bytes for limb_kernels .balign 64!)
     macho_put_pad16(out, "__text")
     macho_put_pad16(out, "__TEXT")
     out.put_u64_le(text_vaddr)
@@ -433,19 +476,32 @@ MACHO_ARM64_RELOC_ADDEND            = 10
     out.put_u32_le(0x80000400)
     out.put_u32_le(0); out.put_u32_le(0); out.put_u32_le(0)
 
-    # Section 2: __DATA,__const
+    # Section: __TEXT,__const (align 2^5 = 32 bytes; mmap'd read-only in `__TEXT`, including `@__static_slab`!)
     macho_put_pad16(out, "__const")
-    macho_put_pad16(out, "__DATA")
+    macho_put_pad16(out, "__TEXT")
     out.put_u64_le(const_vaddr)
     out.put_u64_le(@rodata.len)
     out.put_u32_le(const_foff)
-    out.put_u32_le(4)
-    out.put_u32_le(const_reloff)
-    out.put_u32_le(n_const_rel)
+    out.put_u32_le(5)
+    out.put_u32_le(0)
+    out.put_u32_le(0)
     out.put_u32_le(0)
     out.put_u32_le(0); out.put_u32_le(0); out.put_u32_le(0)
 
-    # Section 3: __DATA,__data
+    if has_dconst
+      # Section: __DATA,__const (relocated constant pointer tables -> `__DATA_CONST`)
+      macho_put_pad16(out, "__const")
+      macho_put_pad16(out, "__DATA")
+      out.put_u64_le(dconst_vaddr)
+      out.put_u64_le(@const_data.len)
+      out.put_u32_le(dconst_foff)
+      out.put_u32_le(4)
+      out.put_u32_le(const_reloff)
+      out.put_u32_le(n_const_rel)
+      out.put_u32_le(0)
+      out.put_u32_le(0); out.put_u32_le(0); out.put_u32_le(0)
+
+    # Section: __DATA,__data
     macho_put_pad16(out, "__data")
     macho_put_pad16(out, "__DATA")
     out.put_u64_le(data_vaddr)
@@ -457,7 +513,33 @@ MACHO_ARM64_RELOC_ADDEND            = 10
     out.put_u32_le(0)
     out.put_u32_le(0); out.put_u32_le(0); out.put_u32_le(0)
 
-    # Section 4: __DATA,__bss (S_ZEROFILL = 0x1)
+    if has_tls
+      # Section: __DATA,__thread_vars (S_THREAD_LOCAL_VARIABLES = 0x13; emitted before zerofill sections)
+      macho_put_pad16(out, "__thread_vars")
+      macho_put_pad16(out, "__DATA")
+      out.put_u64_le(tvars_vaddr)
+      out.put_u64_le(tvars_buf.len)
+      out.put_u32_le(tvars_foff)
+      out.put_u32_le(3)
+      out.put_u32_le(tvars_reloff)
+      out.put_u32_le(n_tvars_rel)
+      out.put_u32_le(0x13)
+      out.put_u32_le(0); out.put_u32_le(0); out.put_u32_le(0)
+
+    if has_lto
+      # Section: __DWARF,__cinder_lto (S_ATTR_DEBUG = 0x02000000; stripped automatically on non-LTO ld links!)
+      macho_put_pad16(out, "__cinder_lto")
+      macho_put_pad16(out, "__DWARF")
+      out.put_u64_le(lto_vaddr)
+      out.put_u64_le(@lto_payload.len)
+      out.put_u32_le(lto_foff)
+      out.put_u32_le(3)
+      out.put_u32_le(0)
+      out.put_u32_le(0)
+      out.put_u32_le(0x02000000)
+      out.put_u32_le(0); out.put_u32_le(0); out.put_u32_le(0)
+
+    # Section: __DATA,__bss (S_ZEROFILL = 0x1)
     macho_put_pad16(out, "__bss")
     macho_put_pad16(out, "__DATA")
     out.put_u64_le(bss_vaddr)
@@ -470,7 +552,7 @@ MACHO_ARM64_RELOC_ADDEND            = 10
     out.put_u32_le(0); out.put_u32_le(0); out.put_u32_le(0)
 
     if has_tls
-      # Section 5: __DATA,__thread_bss (S_THREAD_LOCAL_ZEROFILL = 0x12)
+      # Section: __DATA,__thread_bss (S_THREAD_LOCAL_ZEROFILL = 0x12)
       macho_put_pad16(out, "__thread_bss")
       macho_put_pad16(out, "__DATA")
       out.put_u64_le(tbss_vaddr)
@@ -480,18 +562,6 @@ MACHO_ARM64_RELOC_ADDEND            = 10
       out.put_u32_le(0)
       out.put_u32_le(0)
       out.put_u32_le(0x12)
-      out.put_u32_le(0); out.put_u32_le(0); out.put_u32_le(0)
-
-      # Section 6: __DATA,__thread_vars (S_THREAD_LOCAL_VARIABLES = 0x13)
-      macho_put_pad16(out, "__thread_vars")
-      macho_put_pad16(out, "__DATA")
-      out.put_u64_le(tvars_vaddr)
-      out.put_u64_le(tvars_buf.len)
-      out.put_u32_le(tvars_foff)
-      out.put_u32_le(3)
-      out.put_u32_le(tvars_reloff)
-      out.put_u32_le(n_tvars_rel)
-      out.put_u32_le(0x13)
       out.put_u32_le(0); out.put_u32_le(0); out.put_u32_le(0)
 
     # 3. LC_BUILD_VERSION (24 bytes, macOS 14.0)
@@ -527,13 +597,19 @@ MACHO_ARM64_RELOC_ADDEND            = 10
     # Pad to hdr_end and emit section contents
     out.align_to(64, 0)
     out.put_buf(@text)
-    out.align_to(16, 0)
+    out.align_to(32, 0)
     out.put_buf(@rodata)
     out.align_to(16, 0)
+    if has_dconst
+      out.put_buf(@const_data)
+      out.align_to(16, 0)
     out.put_buf(@data)
     out.align_to(16, 0)
     if has_tls
       out.put_buf(tvars_buf)
+      out.align_to(16, 0)
+    if has_lto
+      out.put_buf(@lto_payload)
       out.align_to(16, 0)
 
     # Emit relocations, symtab, strtab

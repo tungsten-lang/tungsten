@@ -390,3 +390,38 @@ fn jsr_str(v) (i64) i64
   no:
     ret i64 0
   IR
+
+# Immediate 8-byte WValue DOM handle using free top-level tag slot 0xFFF5:
+#   bits 63..48 = 0xFFF5 (DOM handle tag — not a double, string, array, or heap ptr)
+#   bits 47..32 = doc_id:16  (up to 65,536 live arenas/documents)
+#   bits 31..0  = node_id:32 (up to 4B nodes per arena)
+fn jsr_is_dom(v) (i64) i64
+  ll <<~IR
+    %t = and i64 %v, u0xFFFF000000000000
+    %c = icmp eq i64 %t, u0xFFF5000000000000
+    %r = zext i1 %c to i64
+    ret i64 %r
+  IR
+
+fn jsr_pack_dom(doc_id, node_id) (i64 i64) i64
+  ll <<~IR
+    %d = and i64 %doc_id, 65535
+    %ds = shl i64 %d, 32
+    %n = and i64 %node_id, 4294967295
+    %p = or i64 %ds, %n
+    %r = or i64 %p, u0xFFF5000000000000
+    ret i64 %r
+  IR
+
+fn jsr_dom_doc(v) (i64) i64
+  ll <<~IR
+    %s = lshr i64 %v, 32
+    %r = and i64 %s, 65535
+    ret i64 %r
+  IR
+
+fn jsr_dom_node(v) (i64) i64
+  ll <<~IR
+    %r = and i64 %v, 4294967295
+    ret i64 %r
+  IR

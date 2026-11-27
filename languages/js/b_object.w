@@ -132,6 +132,8 @@ in JS
       out.push(k) if js_string?(k) && jenumerable?(o, k)
       i += 1
     return out
+  if o.is_a?(JS:Object) && !o.shape.dict
+    return o.shape.enum_str_keys().dup
   ex = js_proxy?(o)
   ks = jown_keys(o)
   i = 0
@@ -141,7 +143,7 @@ in JS
       if ex
         d = o.get_own_property(k)
         out.push(k) if d != nil && d.enumerable == true
-      elsif o.enumerable?(k)
+      elsif jenumerable?(o, k)
         out.push(k)
     i += 1
   out

@@ -97,6 +97,7 @@ fn __bigint_shl_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
 # load, one store, and the two complementary shifts.
 fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   ll <<~IR
+    ; tungsten:alwaysinline
     entry:
       %rq = inttoptr i64 %rp to ptr
       %sq = inttoptr i64 %sp to ptr
@@ -654,6 +655,7 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   # by the callers' shape tests, so the paired loop always runs.
   fn __bigint_bw_and(rp, ap, bp, n) (i64 i64 i64 i64) i64
     ll <<~IR
+      ; tungsten:alwaysinline
       entry:
         %rq = inttoptr i64 %rp to ptr
         %aq = inttoptr i64 %ap to ptr
@@ -767,6 +769,7 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   # the longer operand (callers sort with plain if/else), sl >= 2.
   fn __bigint_bw_or_uneq(rp, lp, ln, sp, sn) (i64 i64 i64 i64 i64) i64
     ll <<~IR
+      ; tungsten:alwaysinline
       entry:
         %rq = inttoptr i64 %rp to ptr
         %lq = inttoptr i64 %lp to ptr
@@ -924,6 +927,7 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   # the longer operand (callers sort with plain if/else), sl >= 2.
   fn __bigint_bw_xor_uneq(rp, lp, ln, sp, sn) (i64 i64 i64 i64 i64) i64
     ll <<~IR
+      ; tungsten:alwaysinline
       entry:
         %rq = inttoptr i64 %rp to ptr
         %lq = inttoptr i64 %lp to ptr

@@ -22,7 +22,7 @@ JS_GC_VALUE_TYPES = {}
   nil
 
 -> js_gc_atomic?(v)
-  v == nil || v == true || v == false || v.is_a?(Float) || v.is_a?(Int) || v.is_a?(String) || v.is_a?(Symbol)
+  v == nil || v == true || v == false || js_dom_handle?(v) || v.is_a?(Float) || v.is_a?(Int) || v.is_a?(String) || v.is_a?(Symbol)
 
 -> js_gc_push(stack, marks, x)
   return nil if js_gc_atomic?(x)
@@ -126,9 +126,9 @@ JS_GC_BACKEDGE_ON = [Env.get("BLADE_JS_GC_BACKEDGE", "") == "1"]
           kn = d.keys.size
           while ki < kn
             k = d.keys[ki]
-            if k != JS_HOLE && !js_gc_atomic?(k)
+            if k != JS_HOLE && (js_dom_handle?(k) || !js_gc_atomic?(k))
               kk = js_gc_key(wvalue_bits(k) ## i64)
-              if marks.has_key?(kk) || !heap_keys.has_key?(kk)
+              if js_dom_handle?(k) || marks.has_key?(kk) || !heap_keys.has_key?(kk)
                 val = d.vals[ki]
                 if !js_gc_atomic?(val)
                   vk = js_gc_key(wvalue_bits(val) ## i64)

@@ -17,6 +17,10 @@ CINDER_HOST_MEMO = {}
 CINDER_C_SYMS = {}
 
 -> cinder_host_os
+  on macos
+    return "macos"
+  on linux
+    return "linux"
   cached = CINDER_HOST_MEMO[:os]
   return cached if cached != nil
   u = capture("uname -s").strip()
@@ -25,6 +29,10 @@ CINDER_C_SYMS = {}
   res
 
 -> cinder_host_arch
+  on arm64
+    return "arm64"
+  on x86_64
+    return "x86_64"
   cached = CINDER_HOST_MEMO[:arch]
   return cached if cached != nil
   m = capture("uname -m").strip()

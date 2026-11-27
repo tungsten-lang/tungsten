@@ -46,7 +46,7 @@ ELF_R_AARCH64_LD64_GOT_LO12_NC    = 312
   (val + (pow2 - 1)) & (0 - pow2)
 
 + Elf64Writer
-  rw :machine, :text, :rodata, :data
+  rw :machine, :text, :rodata, :data, :lto_payload
   rw :bss_size, :tbss_size
   rw :sym_names, :sym_bind, :sym_type, :sym_sec, :sym_off, :sym_size, :sym_map
   rw :text_rel_off, :text_rel_sym, :text_rel_kind, :text_rel_add
@@ -57,6 +57,7 @@ ELF_R_AARCH64_LD64_GOT_LO12_NC    = 312
     @text = ByteBuf.new(65536)
     @rodata = ByteBuf.new(65536)
     @data = ByteBuf.new(4096)
+    @lto_payload = ByteBuf.new(0)
     @bss_size = 0
     @tbss_size = 0
 
@@ -168,9 +169,20 @@ ELF_R_AARCH64_LD64_GOT_LO12_NC    = 312
     out.put_u64_le(sh_entsize)
     nil
 
+  -> set_lto_ir(ir_str)
+    return nil if ir_str == nil
+    ir_len = cinder_blen(ir_str)
+    @lto_payload = ByteBuf.new(ir_len + 24)
+    @lto_payload.put_ascii("CNDRLTO1")
+    @lto_payload.put_u32_le(0)
+    @lto_payload.put_u32_le(ir_len)
+    @lto_payload.put_ascii(ir_str)
+    @lto_payload.align_to(8, 0)
+    nil
+
   -> build_bytes
     @text.align_to(16, 0x90)
-    @rodata.align_to(16, 0)
+    @rodata.align_to(32, 0)
     @data.align_to(16, 0)
     @bss_size = elf_align_up(@bss_size, 16)
     @tbss_size = elf_align_up(@tbss_size, 16)
@@ -284,6 +296,8 @@ ELF_R_AARCH64_LD64_GOT_LO12_NC    = 312
       rela_data.put_u64_le(@data_rel_add[ri])
       ri += 1
 
+    has_lto = @lto_payload.len > 0
+
     # Section header string table (.shstrtab)
     shstr = ByteBuf.new(256)
     shstr.put_u8(0)
@@ -299,10 +313,11 @@ ELF_R_AARCH64_LD64_GOT_LO12_NC    = 312
     nm_rela_text = shstr.put_cstr(".rela.text")
     nm_rela_ro   = shstr.put_cstr(".rela.rodata")
     nm_rela_data = shstr.put_cstr(".rela.data")
+    nm_lto       = has_lto ? shstr.put_cstr(".cinder.lto") : 0
     shstr.align_to(8, 0)
 
-    # Assemble ELF64 file: 64-byte Elf64_Ehdr -> sections -> 13 * 64-byte Elf64_Shdr
-    out = ByteBuf.new(64 + @text.len + @rodata.len + @data.len + symtab.len + strtab.len + rela_text.len + rela_ro.len + rela_data.len + 1024)
+    # Assemble ELF64 file: 64-byte Elf64_Ehdr -> sections -> (13 or 14) * 64-byte Elf64_Shdr
+    out = ByteBuf.new(64 + @text.len + @rodata.len + @data.len + @lto_payload.len + symtab.len + strtab.len + rela_text.len + rela_ro.len + rela_data.len + 1024)
 
     # Elf64_Ehdr (64 bytes; patch e_shoff at offset 40 once sections are written)
     out.put_u8(0x7F); out.put_u8(0x45); out.put_u8(0x4C); out.put_u8(0x46)
@@ -322,14 +337,14 @@ ELF_R_AARCH64_LD64_GOT_LO12_NC    = 312
     out.put_u16_le(0)  # e_phentsize
     out.put_u16_le(0)  # e_phnum
     out.put_u16_le(64) # e_shentsize
-    out.put_u16_le(13) # e_shnum
+    out.put_u16_le(has_lto ? 14 : 13) # e_shnum
     out.put_u16_le(9)  # e_shstrndx = 9
 
     out.align_to(64, 0)
     off_text = out.len
     out.put_buf(@text)
 
-    out.align_to(16, 0)
+    out.align_to(32, 0)
     off_rodata = out.len
     out.put_buf(@rodata)
 
@@ -361,16 +376,22 @@ ELF_R_AARCH64_LD64_GOT_LO12_NC    = 312
     off_rela_data = out.len
     out.put_buf(rela_data)
 
+    off_lto = 0
+    if has_lto
+      out.align_to(8, 0)
+      off_lto = out.len
+      out.put_buf(@lto_payload)
+
     out.align_to(8, 0)
     shoff = out.len
     out.patch_u64_le(40, shoff)
 
-    # Emit all 13 Elf64_Shdr entries (64 bytes each):
+    # Emit all 13 (or 14 with .cinder.lto) Elf64_Shdr entries (64 bytes each):
     # SHT_NULL=0, SHT_PROGBITS=1, SHT_SYMTAB=2, SHT_STRTAB=3, SHT_RELA=4, SHT_NOBITS=8
     # SHF_WRITE=0x1, SHF_ALLOC=0x2, SHF_EXECINSTR=0x4, SHF_INFO_LINK=0x40, SHF_TLS=0x400
     emit_shdr(out, 0,            0, 0,       0, 0,             0,              0, 0,                0,  0)
     emit_shdr(out, nm_text,      1, 0x6,     0, off_text,      @text.len,      0, 0,                64, 0)
-    emit_shdr(out, nm_rodata,    1, 0x2,     0, off_rodata,    @rodata.len,    0, 0,                16, 0)
+    emit_shdr(out, nm_rodata,    1, 0x2,     0, off_rodata,    @rodata.len,    0, 0,                32, 0)
     emit_shdr(out, nm_data,      1, 0x3,     0, off_data,      @data.len,      0, 0,                16, 0)
     emit_shdr(out, nm_bss,       8, 0x3,     0, off_bss,       @bss_size,      0, 0,                16, 0)
     emit_shdr(out, nm_tbss,      8, 0x403,   0, off_tbss,      @tbss_size,     0, 0,                16, 0)
@@ -381,6 +402,8 @@ ELF_R_AARCH64_LD64_GOT_LO12_NC    = 312
     emit_shdr(out, nm_rela_text, 4, 0x40,    0, off_rela_text, rela_text.len,  7, 1,                8,  24)
     emit_shdr(out, nm_rela_ro,   4, 0x40,    0, off_rela_ro,   rela_ro.len,    7, 2,                8,  24)
     emit_shdr(out, nm_rela_data, 4, 0x40,    0, off_rela_data, rela_data.len,  7, 3,                8,  24)
+    if has_lto
+      emit_shdr(out, nm_lto,     1, 0x0,     0, off_lto,       @lto_payload.len, 0, 0,              8,  0)
 
     out
 

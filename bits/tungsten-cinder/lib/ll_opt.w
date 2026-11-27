@@ -178,10 +178,32 @@ use ./opt_config
 # ---- Pass 1: Function Inliner (`alwaysinline` + Cost-Modeled `-finline`) ----
 
 + LLInlineContext
-  rw :src, :src_ptr, :mod_info, :opt_cfg, :callee_cache
+  rw :src, :src_ptr, :mod_info, :opt_cfg, :callee_cache, :alias_sym_id
+  rw :call_counts, :const_ret_map
 
   -> new(@src, @src_ptr, @mod_info, @opt_cfg)
     @callee_cache = {}
+    @alias_sym_id = {}
+    @call_counts = {}
+    @const_ret_map = {}
+    if @mod_info != nil && @mod_info.aliases != nil
+      ai = 0
+      while ai < @mod_info.aliases.size()
+        al_nm = @mod_info.aliases[ai][0]
+        tg_nm = @mod_info.aliases[ai][1]
+        al_id = @mod_info.sym_to_id[al_nm]
+        tg_id = @mod_info.sym_to_id[tg_nm]
+        if al_id != nil && tg_id != nil
+          @alias_sym_id[al_id] = tg_id
+        ai += 1
+
+  -> resolve_sym_id(raw_sym_id)
+    sym_id = raw_sym_id
+    guard = 0
+    while @alias_sym_id[sym_id] != nil && guard < 8
+      sym_id = @alias_sym_id[sym_id]
+      guard += 1
+    sym_id
 
   -> span_is_alwaysinline?(span)
     hdr = span[0]
@@ -206,7 +228,8 @@ use ./opt_config
       return true if head_s.index("; tungsten:alwaysinline") != nil
     false
 
-  -> get_callee(sym_id, only_always)
+  -> get_callee(raw_sym_id, only_always)
+    sym_id = resolve_sym_id(raw_sym_id)
     span_idx = @mod_info.fn_span_by_sym_id[sym_id]
     return nil if span_idx == nil
     cached = @callee_cache[sym_id]
@@ -223,7 +246,7 @@ use ./opt_config
         @callee_cache[sym_id] = :skip
         return nil
       blen = span[2] - span[1]
-      max_b = @opt_cfg.opt_level >= 3 ? 20000 : (@opt_cfg.opt_level == 2 ? 7500 : 1800)
+      max_b = @opt_cfg.opt_level >= 3 ? 45000 : (@opt_cfg.opt_level == 2 ? 12000 : 2400)
       if blen > max_b
         @callee_cache[sym_id] = :skip
         return nil
@@ -231,6 +254,13 @@ use ./opt_config
     if cal_ir.inline_hint == :never
       @callee_cache[sym_id] = :skip
       return nil
+    # Pre-simplify callee (`sroa` + `const-fold` + `jump-threading` + `dce`) once before caching
+    # so `%vs.*` allocas disappear and cost estimation reflects actual simplified IR!
+    if @opt_cfg == nil || @opt_cfg.opt_level >= 1
+      ll_pass_sroa(cal_ir)
+      ll_pass_const_fold(cal_ir, @opt_cfg)
+      ll_pass_jump_threading(cal_ir)
+      ll_pass_dce(cal_ir)
     @callee_cache[sym_id] = cal_ir
     return nil if only_always && cal_ir.inline_hint != :always
     cal_ir
@@ -398,8 +428,9 @@ use ./opt_config
   while pi < nargs
     return false if !ll_types_inline_compat?(cargs[pi][0], callee.param_tys[pi])
     pi += 1
-  # Never duplicate static `alloca` buffers inside non-entry blocks (could be inside a loop!)
-  return false if callee.alloca_bytes > 0 && caller_bid != 0
+  # `callee.alloca_bytes` are static frame slots in `fn_ir.alloca_bytes` (never dynamic SP bumps);
+  # bound frame growth for heuristic inlining into non-entry blocks to <= 256 bytes.
+  return false if callee.alloca_bytes > 256 && caller_bid != 0 && callee.inline_hint != :always
   # Ensure at least one return exists when caller expects a return value
   if call_ins.dst >= 0
     has_ret = false
@@ -411,6 +442,71 @@ use ./opt_config
       bi += 1
     return false if !has_ret
   true
+
+# Interprocedural constant-return discovery & whole-module call-site counting (`ipa-sccp` + single-caller LTO boost):
+#   - Counts direct call references per target symbol across the module so single-caller `internal`
+#     functions get a 2.5x inline threshold boost (inlining eliminates the out-of-line body!).
+#   - Identifies side-effect-free functions whose simplified body unconditionally returns an immediate
+#     constant (`ret i64 C`), allowing callers to fold `call @fn(...)` directly to `C` even with `-fno-inline`!
+-> ll_build_ipa_summaries(src, src_ptr, mod_info, inl_ctx, opt_cfg)
+  return nil if mod_info == nil || inl_ctx == nil
+  do_sccp = opt_cfg != nil && opt_cfg.pass_enabled?("ipa-sccp")
+  n_spans = mod_info.fn_spans.size()
+  fi = 0
+  while fi < n_spans
+    span = mod_info.fn_spans[fi]
+    b_start = span[1]
+    b_end = span[2]
+    # Fast byte-level scan for `call ... @<sym>(` to populate `call_counts` without full IR parse!
+    pos = b_start
+    while pos < b_end
+      nl = ll_find_nl(src_ptr, pos, b_end)
+      if nl > pos
+        ln = src.slice(pos, nl - pos)
+        c_idx = ln.index("call ")
+        if c_idx != nil
+          at_i = ll_index_outside_quotes(ln, 64, c_idx + 5)
+          if at_i >= 0
+            lp_i = ll_index_outside_quotes(ln, 40, at_i + 1)
+            if lp_i > at_i
+              cnm = ll_clean_sym(ln.slice(at_i, lp_i - at_i))
+              raw_sid = mod_info.sym_to_id[cnm]
+              if raw_sid != nil
+                sid = inl_ctx.resolve_sym_id(raw_sid)
+                prev_c = inl_ctx.call_counts[sid]
+                inl_ctx.call_counts[sid] = (prev_c == nil ? 1 : (prev_c + 1))
+      pos = nl + 1
+
+    # Check tiny single-block functions (`<= 320` body bytes) for pure constant return (`ipa-sccp`)
+    if do_sccp && (b_end - b_start) <= 320
+      hdr = span[0]
+      if hdr.index("weak") == nil && hdr.index("linkonce") == nil
+        at_h = ll_index_outside_quotes(hdr, 64, 0)
+        lp_h = ll_index_outside_quotes(hdr, 40, at_h)
+        fnm = ll_clean_sym(hdr.slice(at_h, lp_h - at_h))
+        fsid = mod_info.sym_to_id[fnm]
+        if fsid != nil
+          cal = ll_parse_function(src, src_ptr, mod_info, span, false)
+          ll_pass_sroa(cal)
+          ll_pass_const_fold(cal, opt_cfg)
+          ll_pass_jump_threading(cal)
+          ll_pass_dce(cal)
+          inl_ctx.callee_cache[fsid] = cal if cal.inline_hint != :never
+          if cal.blocks.size() == 1 && cal.blocks[0].phis.size() == 0
+            insts = cal.blocks[0].insts
+            if insts.size() >= 1
+              last_i = insts[insts.size() - 1]
+              if last_i.op == :ret && last_i.k0 == LLOP_IMM
+                pure_all = true
+                ki = 0
+                while ki < insts.size() - 1
+                  if !ll_is_pure_inst?(insts[ki])
+                    pure_all = false
+                    break
+                  ki += 1
+                inl_ctx.const_ret_map[fsid] = [last_i.ty, last_i.v0] if pure_all
+    fi += 1
+  nil
 
 -> ll_pass_inline(fn_ir, inl_ctx, opt_cfg)
   return nil if fn_ir == nil || inl_ctx == nil
@@ -434,7 +530,17 @@ use ./opt_config
       while ii < blk.insts.size()
         ins = blk.insts[ii]
         if ins.op == :call && ins.k0 == LLOP_SYM
-          callee = inl_ctx.get_callee(ins.v0, only_always)
+          res_sid = inl_ctx.resolve_sym_id(ins.v0)
+          cret = (opt_cfg != nil && opt_cfg.pass_enabled?("ipa-sccp")) ? inl_ctx.const_ret_map[res_sid] : nil
+          if cret != nil && ll_types_inline_compat?(ins.ty, cret[0])
+            if ins.dst >= 0
+              blk.insts[ii] = ll_make_copy_inst(ins.dst, ins.ty, LLOP_IMM, cret[1])
+            else
+              blk.insts[ii] = LLInst.new(:copy, -1, LLTY_VOID)
+            changed = true
+            ii += 1
+            next
+          callee = inl_ctx.get_callee(res_sid, only_always)
           if callee != nil && ll_callee_can_inline?(fn_ir, bi, ins, callee)
             do_inl = false
             if callee.inline_hint == :always && allow_always
@@ -442,6 +548,8 @@ use ./opt_config
             elsif allow_heur && caller_insts < 1600
               est = ll_estimate_inline_cost(callee, ins)
               eff_t = thresh
+              if callee.is_internal && inl_ctx.call_counts[res_sid] == 1 && caller_insts <= 80 && callee.blocks.size() <= 4
+                eff_t = (eff_t * 5) / 2
               cargs = ins.extra
               if cargs != nil && cargs.size() > 0
                 all_c = true
@@ -449,7 +557,7 @@ use ./opt_config
                 while ci < cargs.size()
                   all_c = false if cargs[ci][1] != LLOP_IMM
                   ci += 1
-                eff_t = thresh * 2 if all_c
+                eff_t = eff_t * 2 if all_c
               do_inl = (est <= eff_t)
 
             if do_inl
@@ -469,7 +577,7 @@ use ./opt_config
               if callee.alloca_bytes > 0
                 alloca_base = ((fn_ir.alloca_bytes + 15) / 16) * 16
                 fn_ir.alloca_bytes = alloca_base + callee.alloca_bytes
-              if callee.uses_ic
+              if callee.uses_ic && !fn_ir.uses_ic
                 fn_ir.uses_ic = true
                 fn_ir.ic_sym_id = callee.ic_sym_id
 
@@ -676,6 +784,150 @@ use ./opt_config
       ii += 1
     bi += 1
 
+  rem_allocas = []
+  promotable.keys.each ->(aid)
+    rem_allocas.push(aid) if has_load[aid] == true && alloca_ty[aid] != 0
+
+  # Step 3: Multi-block SSA `mem2reg` (Braun et al., CC 2013) for remaining scalar `alloca`s!
+  if rem_allocas.size() > 0 && fn_ir.blocks.size() > 1
+    nb = fn_ir.blocks.size()
+    reach = Array.new(nb, false)
+    reach[0] = true
+    wl = [0]
+    wi = 0
+    while wi < wl.size()
+      b = fn_ir.blocks[wl[wi]]
+      wi += 1
+      if b.insts.size() > 0
+        t = b.insts[b.insts.size() - 1]
+        if t.op == :br
+          if !reach[t.v0]
+            reach[t.v0] = true; wl.push(t.v0)
+        elsif t.op == :cond_br
+          if !reach[t.v1]
+            reach[t.v1] = true; wl.push(t.v1)
+          if !reach[t.v2]
+            reach[t.v2] = true; wl.push(t.v2)
+        elsif t.op == :switch
+          if !reach[t.v1]
+            reach[t.v1] = true; wl.push(t.v1)
+          ci = 0
+          while ci < t.extra.size()
+            sb = t.extra[ci][1]
+            if !reach[sb]
+              reach[sb] = true; wl.push(sb)
+            ci += 1
+
+    preds = Array.new(nb, nil)
+    bi = 0
+    while bi < nb
+      preds[bi] = []
+      bi += 1
+    bi = 0
+    while bi < nb
+      if reach[bi]
+        b = fn_ir.blocks[bi]
+        if b.insts.size() > 0
+          t = b.insts[b.insts.size() - 1]
+          if t.op == :br
+            preds[t.v0].push(bi) if !preds[t.v0].include?(bi)
+          elsif t.op == :cond_br
+            preds[t.v1].push(bi) if !preds[t.v1].include?(bi)
+            preds[t.v2].push(bi) if !preds[t.v2].include?(bi)
+          elsif t.op == :switch
+            preds[t.v1].push(bi) if !preds[t.v1].include?(bi)
+            ci = 0
+            while ci < t.extra.size()
+              sb = t.extra[ci][1]
+              preds[sb].push(bi) if !preds[sb].include?(bi)
+              ci += 1
+      bi += 1
+
+    subst2 = {}
+    promoted_done = {}
+    ri = 0
+    while ri < rem_allocas.size()
+      aid = rem_allocas[ri]
+      aty = alloca_ty[aid]
+      entry_load_dst = Array.new(nb, -1)
+      last_store = Array.new(nb, nil)
+      bi = 0
+      while bi < nb
+        if reach[bi]
+          blk = fn_ir.blocks[bi]
+          ii = 0
+          while ii < blk.insts.size()
+            ins = blk.insts[ii]
+            if ins.op == :load && ins.k0 == LLOP_VAL && ins.v0 == aid
+              entry_load_dst[bi] = ins.dst
+            elsif ins.op == :store && ins.k1 == LLOP_VAL && ins.v1 == aid
+              last_store[bi] = [ins.k0, ins.v0]
+            ii += 1
+        bi += 1
+
+      entry_memo = Array.new(nb, nil)
+      created_phis = []
+
+      # Iterative helper: resolve value of `aid` at ENTRY of reachable block `start_b`
+      resolve_entry = ->(start_b)
+        return entry_memo[start_b] if entry_memo[start_b] != nil
+        chain = []
+        cur = start_b
+        res = nil
+        while res == nil
+          if entry_memo[cur] != nil
+            res = entry_memo[cur]
+          elsif cur == 0 || preds[cur].size() == 0
+            res = [LLOP_IMM, 0]
+          elsif preds[cur].size() == 1
+            p0 = preds[cur][0]
+            if last_store[p0] != nil
+              res = last_store[p0]
+            else
+              chain.push(cur)
+              cur = p0
+          else
+            ph = LLInst.new(:phi, fn_ir.alloc_anon_val(aty), aty)
+            ph.extra = []
+            fn_ir.blocks[cur].phis.push(ph)
+            res = [LLOP_VAL, ph.dst]
+            entry_memo[cur] = res
+            created_phis.push([cur, ph])
+        ci2 = 0
+        while ci2 < chain.size()
+          entry_memo[chain[ci2]] = res
+          ci2 += 1
+        entry_memo[start_b] = res
+        res
+
+      bi = 0
+      while bi < nb
+        ld_dst = entry_load_dst[bi]
+        if ld_dst >= 0
+          subst2[ld_dst] = resolve_entry.call(bi)
+        bi += 1
+
+      qi = 0
+      while qi < created_phis.size()
+        item = created_phis[qi]
+        qi += 1
+        pb = item[0]
+        ph = item[1]
+        ps = preds[pb]
+        pi2 = 0
+        while pi2 < ps.size()
+          pr_b = ps[pi2]
+          pv = last_store[pr_b] != nil ? last_store[pr_b] : resolve_entry.call(pr_b)
+          ph.extra.push([pr_b, pv[0], pv[1]])
+          pi2 += 1
+
+      promoted_done[aid] = true
+      has_load[aid] = false
+      ri += 1
+
+    ll_apply_subst_to_func(fn_ir, subst2)
+
+  any_alloca_left = false
   bi = 0
   while bi < fn_ir.blocks.size()
     blk = fn_ir.blocks[bi]
@@ -686,12 +938,15 @@ use ./opt_config
       drop = false
       if ins.op == :alloca && promotable[ins.dst] && !has_load[ins.dst]
         drop = true
-      elsif ins.op == :store && ins.k1 == LLOP_VAL && promotable[ins.v1] && !has_load[ins.v1]
+      elsif (ins.op == :store && ins.k1 == LLOP_VAL && promotable[ins.v1] && !has_load[ins.v1]) || (ins.op == :load && ins.k0 == LLOP_VAL && promotable[ins.v0] && !has_load[ins.v0])
         drop = true
-      kept.push(ins) if !drop
+      if !drop
+        any_alloca_left = true if ins.op == :alloca
+        kept.push(ins)
       ii += 1
     blk.insts = kept
     bi += 1
+  fn_ir.alloca_bytes = 0 if !any_alloca_left
   nil
 
 # ---- Pass 3: Constant Folding, Copy Propagation, `i128` Pack/Unpack & `--fast` FP ----
@@ -1099,39 +1354,56 @@ use ./opt_config
 
 # ---- Pass 6: Loop-Invariant Code Motion (LICM toDominating Entry) ----
 
--> ll_op_in_entry?(k, v, in_entry)
+-> ll_op_in_entry?(k, v, in_entry, mod_info = nil)
+  if k == LLOP_SYM
+    return false if mod_info != nil && mod_info.sym_kind[v] == LLSYM_TLS
+    return true
   return true if k != LLOP_VAL
   in_entry[v] == true
 
--> ll_inst_operands_in_entry?(ins, in_entry)
-  return false if !ll_op_in_entry?(ins.k0, ins.v0, in_entry)
-  return false if !ll_op_in_entry?(ins.k1, ins.v1, in_entry)
-  return false if !ll_op_in_entry?(ins.k2, ins.v2, in_entry)
+-> ll_inst_operands_in_entry?(ins, in_entry, mod_info = nil)
+  return false if !ll_op_in_entry?(ins.k0, ins.v0, in_entry, mod_info)
+  return false if !ll_op_in_entry?(ins.k1, ins.v1, in_entry, mod_info)
+  return false if !ll_op_in_entry?(ins.k2, ins.v2, in_entry, mod_info)
   if ins.op == :gep && ins.extra != nil
     ai = 0
     while ai < ins.extra.size()
-      return false if !ll_op_in_entry?(ins.extra[ai][0], ins.extra[ai][1], in_entry)
+      return false if !ll_op_in_entry?(ins.extra[ai][0], ins.extra[ai][1], in_entry, mod_info)
       ai += 1
   elsif ins.extra != nil
     return false
   true
 
--> ll_pass_licm(fn_ir)
+-> ll_pass_licm(fn_ir, mod_info = nil)
   return nil if fn_ir == nil || fn_ir.blocks.size() <= 1
   entry = fn_ir.blocks[0]
   return nil if entry.insts.size() == 0
   term = entry.insts[entry.insts.size() - 1]
   return nil if term.op != :br && term.op != :cond_br
 
-  # Only hoist from blocks that actually participate in a back-edge (`succ <= bi`)
+  # Mark all blocks inside natural back-edge loops (`hdr .. bi` where `0 < hdr <= bi`)
   in_loop = Array.new(fn_ir.blocks.size(), false)
   bi = 1
   while bi < fn_ir.blocks.size()
     b = fn_ir.blocks[bi]
     if b.insts.size() > 0
       t = b.insts[b.insts.size() - 1]
-      if (t.op == :br && t.v0 <= bi && t.v0 > 0) || (t.op == :cond_br && ((t.v1 <= bi && t.v1 > 0) || (t.v2 <= bi && t.v2 > 0)))
-        in_loop[bi] = true
+      if t.op == :br && t.v0 <= bi && t.v0 > 0
+        ki = t.v0
+        while ki <= bi
+          in_loop[ki] = true
+          ki += 1
+      elsif t.op == :cond_br
+        if t.v1 <= bi && t.v1 > 0
+          ki = t.v1
+          while ki <= bi
+            in_loop[ki] = true
+            ki += 1
+        if t.v2 <= bi && t.v2 > 0
+          ki = t.v2
+          while ki <= bi
+            in_loop[ki] = true
+            ki += 1
     bi += 1
 
   in_entry = Array.new(fn_ir.n_vals, false)
@@ -1155,9 +1427,9 @@ use ./opt_config
       while ii < blk.insts.size()
         ins = blk.insts[ii]
         op = ins.op
-        # Hoist only trap-free pure scalar/address arithmetic whose operands are defined in entry!
-        safe_op = (op == :gep || op == :add || op == :sub || op == :mul || op == :and || op == :or || op == :xor || op == :shl || op == :lshr || op == :ashr || op == :zext || op == :sext || op == :trunc) && ins.ty != LLTY_I128 && ins.ty != LLTY_V2I64
-        if ins.dst >= 0 && safe_op && ll_inst_operands_in_entry?(ins, in_entry)
+        # Hoist trap-free pure scalar/comparison/address arithmetic whose operands are defined in entry!
+        safe_op = (op == :gep || op == :icmp || op == :select || op == :add || op == :sub || op == :mul || op == :and || op == :or || op == :xor || op == :shl || op == :lshr || op == :ashr || op == :zext || op == :sext || op == :trunc) && ins.ty != LLTY_I128 && ins.ty != LLTY_V2I64
+        if ins.dst >= 0 && safe_op && ll_inst_operands_in_entry?(ins, in_entry, mod_info)
           in_entry[ins.dst] = true
           hoisted.push(ins)
         else
@@ -1382,11 +1654,11 @@ use ./opt_config
 -> ll_run_pass_timed(fn_ir, cfg, pass_name, fn_cb)
   if cfg != nil && cfg.print_passes
     b0 = ll_count_func_insts(fn_ir)
-    t0 = ccall_nobox("__w_clock_ns_raw") ## i64
+    t0 = clock
     fn_cb.call()
-    t1 = ccall_nobox("__w_clock_ns_raw") ## i64
+    dt_us = ((clock - t0) * ~1000000.0).to_i()
     b1 = ll_count_func_insts(fn_ir)
-    cfg.record_stat(fn_ir.name + ":" + pass_name, b0, b1, (t1 - t0) / 1000)
+    cfg.record_stat(pass_name, b0, b1, dt_us)
   else
     fn_cb.call()
   nil
@@ -1413,7 +1685,8 @@ use ./opt_config
   if cfg.pass_enabled?("gvn")
     ll_run_pass_timed(fn_ir, cfg, "gvn", ->() ll_pass_gvn(fn_ir))
   if cfg.pass_enabled?("licm")
-    ll_run_pass_timed(fn_ir, cfg, "licm", ->() ll_pass_licm(fn_ir))
+    minfo = inl_ctx != nil ? inl_ctx.mod_info : nil
+    ll_run_pass_timed(fn_ir, cfg, "licm", ->() ll_pass_licm(fn_ir, minfo))
   if cfg.pass_enabled?("strength-reduce")
     ll_run_pass_timed(fn_ir, cfg, "strength-reduce", ->() ll_pass_strength_reduce(fn_ir, cfg))
   if cfg.pass_enabled?("const-fold")

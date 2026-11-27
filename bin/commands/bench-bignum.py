@@ -1193,6 +1193,7 @@ def external_harness_is_stale(language: str) -> bool:
             ROOT / "bin" / "tungsten",
             ROOT / "bin" / "tungsten-compiler",
         ]
+        sources += list((ROOT / "bits" / "tungsten-cinder").rglob("*.w"))
         sources += list((ROOT / "core").rglob("*.w"))
         runtime_dir = ROOT / "runtime"
         sources += [
@@ -1253,17 +1254,22 @@ def build_external_harness(language: str) -> None:
         env["TUNGSTEN_C_INCLUDES"] = str(TUNGSTEN_NATIVE_REF)
         native_ir = TUNGSTEN_NATIVE_BINARY.with_suffix(".ll")
         env["TUNGSTEN_LL_PATH"] = str(native_ir)
+        compile_cmd = [
+            str(ROOT / "bin" / "tungsten"),
+            "compile",
+            str(TUNGSTEN_NATIVE_SOURCE),
+            "--release",
+            "--native",
+            "--fast",
+        ]
+        if env.get("TUNGSTEN_BACKEND") != "clang":
+            compile_cmd.append("--cinder")
+        compile_cmd += [
+            "--out",
+            str(TUNGSTEN_NATIVE_BINARY),
+        ]
         run_checked(
-            [
-                str(ROOT / "bin" / "tungsten"),
-                "compile",
-                str(TUNGSTEN_NATIVE_SOURCE),
-                "--release",
-                "--native",
-                "--fast",
-                "--out",
-                str(TUNGSTEN_NATIVE_BINARY),
-            ],
+            compile_cmd,
             env=env,
         )
         try:

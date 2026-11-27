@@ -42,12 +42,12 @@ use ./ll_opt
   cands
 
 + LLX64FuncCompiler
-  rw :fn_ir, :mod_info, :opt_cfg, :a
+  rw :fn_ir, :mod_info, :opt_cfg, :rodata_buf, :a
   rw :out_arg_bytes, :local_base, :pushed_regs, :body_frame_bytes
   rw :do_peephole, :do_simd, :slot_reg_g
   rw :blk_labels, :l_epi, :edge_labels, :edge_list
 
-  -> new(@fn_ir, @mod_info, @opt_cfg = nil)
+  -> new(@fn_ir, @mod_info, @opt_cfg = nil, @rodata_buf = nil)
     @opt_cfg = CinderOptConfig.new(2) if @opt_cfg == nil
     @a = CinderX64.new(@fn_ir.blocks.size() * 48 + 64)
     @out_arg_bytes = 0
@@ -897,60 +897,68 @@ use ./ll_opt
           a.call_sym("memcpy")
       elsif op == :call
         cargs = ins.extra
-        sysv_g = [X64_RDI, X64_RSI, X64_RDX, X64_RCX, X64_R8, X64_R9]
-        reg_g_ops = []
-        reg_f_ops = []
-        st_idx = 0
-        ai = 0
-        while ai < cargs.size()
-          ca = cargs[ai]
-          aty = ca[0]
-          if aty == LLTY_F64 || aty == LLTY_F32
-            if reg_f_ops.size() < 8
-              reg_f_ops.push(ca)
-            else
-              load_op_f64(X64_XMM7, ca[1], ca[2])
-              a.movsd_store(X64_XMM7, X64_RSP, st_idx * 8)
-              st_idx += 1
-          else
-            if reg_g_ops.size() < 6
-              reg_g_ops.push(ca)
-            else
-              load_op64(X64_RAX, ca[1], ca[2], aty)
-              a.store64(X64_RAX, X64_RSP, st_idx * 8)
-              st_idx += 1
-          ai += 1
-
-        # Load indirect callee into R10 before populating arg registers
-        if ins.k0 != LLOP_SYM
-          load_op64(X64_R10, ins.k0, ins.v0, LLTY_PTR)
-
-        fi = 0
-        while fi < reg_f_ops.size()
-          load_op_f64(fi, reg_f_ops[fi][1], reg_f_ops[fi][2])
-          fi += 1
-
-        gi = reg_g_ops.size() - 1
-        while gi >= 0
-          ca = reg_g_ops[gi]
-          load_op64(sysv_g[gi], ca[1], ca[2], ca[0])
-          gi -= 1
-
-        # Set AL = # of XMM register args (System V varargs convention — e.g. snprintf / printf in runtime!)
-        a.mov_imm64(X64_RAX, reg_f_ops.size()) if reg_f_ops.size() > 0 || ins.k0 == LLOP_SYM
-
-        if ins.k0 == LLOP_SYM
-          a.call_sym(@mod_info.sym_list[ins.v0])
+        slab_puts_off = -1
+        if @do_peephole && ins.dst < 0 && ins.k0 == LLOP_SYM && @mod_info.sym_list[ins.v0] == "w_puts" && cargs.size() == 1 && cargs[0][1] == LLOP_IMM
+          slab_puts_off = ll_slab_puts_offset(@mod_info, @rodata_buf, cargs[0][2])
+        if slab_puts_off >= 0
+          a.addr_sym_local(X64_RDI, "__static_slab", slab_puts_off)
+          @mod_info.intern_sym("puts", LLSYM_EXT_FN)
+          a.call_sym("puts")
         else
-          a.call_r(X64_R10)
+          sysv_g = [X64_RDI, X64_RSI, X64_RDX, X64_RCX, X64_R8, X64_R9]
+          reg_g_ops = []
+          reg_f_ops = []
+          st_idx = 0
+          ai = 0
+          while ai < cargs.size()
+            ca = cargs[ai]
+            aty = ca[0]
+            if aty == LLTY_F64 || aty == LLTY_F32
+              if reg_f_ops.size() < 8
+                reg_f_ops.push(ca)
+              else
+                load_op_f64(X64_XMM7, ca[1], ca[2])
+                a.movsd_store(X64_XMM7, X64_RSP, st_idx * 8)
+                st_idx += 1
+            else
+              if reg_g_ops.size() < 6
+                reg_g_ops.push(ca)
+              else
+                load_op64(X64_RAX, ca[1], ca[2], aty)
+                a.store64(X64_RAX, X64_RSP, st_idx * 8)
+                st_idx += 1
+            ai += 1
 
-        if ins.dst >= 0 && ins.ty != LLTY_VOID
-          if ins.ty == LLTY_I128
-            store_val128(ins.dst, X64_RAX, X64_RDX)
-          elsif ins.ty == LLTY_F64 || ins.ty == LLTY_F32
-            store_val_f64(ins.dst, X64_XMM0)
+          # Load indirect callee into R10 before populating arg registers
+          if ins.k0 != LLOP_SYM
+            load_op64(X64_R10, ins.k0, ins.v0, LLTY_PTR)
+
+          fi = 0
+          while fi < reg_f_ops.size()
+            load_op_f64(fi, reg_f_ops[fi][1], reg_f_ops[fi][2])
+            fi += 1
+
+          gi = reg_g_ops.size() - 1
+          while gi >= 0
+            ca = reg_g_ops[gi]
+            load_op64(sysv_g[gi], ca[1], ca[2], ca[0])
+            gi -= 1
+
+          # Set AL = # of XMM register args (System V varargs convention — e.g. snprintf / printf in runtime!)
+          a.mov_imm64(X64_RAX, reg_f_ops.size()) if reg_f_ops.size() > 0 || ins.k0 == LLOP_SYM
+
+          if ins.k0 == LLOP_SYM
+            a.call_sym(@mod_info.sym_list[ins.v0])
           else
-            store_val64(ins.dst, X64_RAX)
+            a.call_r(X64_R10)
+
+          if ins.dst >= 0 && ins.ty != LLTY_VOID
+            if ins.ty == LLTY_I128
+              store_val128(ins.dst, X64_RAX, X64_RDX)
+            elsif ins.ty == LLTY_F64 || ins.ty == LLTY_F32
+              store_val_f64(ins.dst, X64_XMM0)
+            else
+              store_val64(ins.dst, X64_RAX)
       elsif op == :br
         a.jmp(branch_target_label(bid, ins.v0))
       elsif op == :cond_br
@@ -1028,6 +1036,8 @@ use ./ll_opt
   mod_info = ll_scan_module_and_emit_globals(src, writer, false)
   src_ptr = cinder_heap_str_ptr(wvalue_bits(src) ## i64)
   inl_ctx = LLInlineContext.new(src, src_ptr, mod_info, cfg)
+  if cfg.opt_level >= 1 && (cfg.pass_enabled?("ipa-sccp") || cfg.lto_enabled?())
+    ll_build_ipa_summaries(src, src_ptr, mod_info, inl_ctx, cfg)
 
   fn_offsets = {}
   ref_syms = {}
@@ -1036,37 +1046,44 @@ use ./ll_opt
   writer.ro_rel_sym.each   ->(rs) ref_syms[rs] = true
   writer.data_rel_sym.each ->(rs) ref_syms[rs] = true
 
-  drop_dead_inl = !cfg.debug && cfg.pass_enabled?("dce") && cfg.pass_enabled?("always-inline")
+  drop_dead_int = !cfg.debug && cfg.pass_enabled?("dce")
   deferred_spans = []
   fi = 0
   while fi < mod_info.fn_spans.size()
     span = mod_info.fn_spans[fi]
     hdr = span[0]
     is_int_hdr = hdr.index(" internal ") != nil || hdr.index(" private ") != nil
-    if drop_dead_inl && is_int_hdr && inl_ctx.span_is_alwaysinline?(span)
+    if drop_dead_int && is_int_hdr
       deferred_spans.push(span)
     else
       fn_ir = ll_parse_function(src, src_ptr, mod_info, span, false)
       ll_opt_function(fn_ir, inl_ctx, cfg)
-      fc = LLX64FuncCompiler.new(fn_ir, mod_info, cfg)
+      fc = LLX64FuncCompiler.new(fn_ir, mod_info, cfg, writer.rodata)
       fa = fc.compile()
       llx64_emit_func_to_writer(writer, fn_ir, fa, fn_offsets, ref_syms)
     fi += 1
 
-  di = 0
-  while di < deferred_spans.size()
-    dspan = deferred_spans[di]
-    dhdr = dspan[0]
-    dat = ll_index_outside_quotes(dhdr, 64, 0)
-    dlp = ll_index_outside_quotes(dhdr, 40, dat)
-    dnm = ll_clean_sym(dhdr.slice(dat, dlp - dat))
-    if ref_syms[dnm] == true
-      fn_ir = ll_parse_function(src, src_ptr, mod_info, dspan, false)
-      ll_opt_function(fn_ir, inl_ctx, cfg)
-      fc = LLX64FuncCompiler.new(fn_ir, mod_info, cfg)
-      fa = fc.compile()
-      llx64_emit_func_to_writer(writer, fn_ir, fa, fn_offsets, ref_syms)
-    di += 1
+  deferred_done = Array.new(deferred_spans.size(), false)
+  progress = true
+  while progress
+    progress = false
+    di = 0
+    while di < deferred_spans.size()
+      if !deferred_done[di]
+        dspan = deferred_spans[di]
+        dhdr = dspan[0]
+        dat = ll_index_outside_quotes(dhdr, 64, 0)
+        dlp = ll_index_outside_quotes(dhdr, 40, dat)
+        dnm = ll_clean_sym(dhdr.slice(dat, dlp - dat))
+        if ref_syms[dnm] == true
+          deferred_done[di] = true
+          progress = true
+          fn_ir = ll_parse_function(src, src_ptr, mod_info, dspan, false)
+          ll_opt_function(fn_ir, inl_ctx, cfg)
+          fc = LLX64FuncCompiler.new(fn_ir, mod_info, cfg, writer.rodata)
+          fa = fc.compile()
+          llx64_emit_func_to_writer(writer, fn_ir, fa, fn_offsets, ref_syms)
+      di += 1
 
   ai = 0
   while ai < mod_info.aliases.size()

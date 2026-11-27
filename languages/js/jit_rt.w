@@ -132,6 +132,15 @@ RT_GTYPEOF        = 110  # (cell) -> typeof global without ReferenceError
 RT_STR_CHARCODE_IC = 111 # (s, idx_boxed, ic_arr) -> boxed charCodeAt (populates ASCII ptr/len IC)
 RT_STR_INDEXOF_IC  = 112 # (s, sub, ic_arr) -> boxed indexOf (populates immutable (s, sub)->res IC)
 RT_ARR_NEW_EMPTY_CAP = 113 # (cap_boxed) -> empty JS array pre-reserved to cap (or nil if out of range)
+RT_NEW_3           = 114 # (f, ic, a0, a1, a2) -> obj
+RT_NEW_4           = 115 # (f, ic, a0, a1, a2, a3) -> obj
+RT_STR_INDEXOF2    = 116 # (s, sub, from) -> boxed int
+RT_FOR_IN_KEYS     = 117 # (obj) -> Array of enumerable string keys
+RT_HAS_PROP        = 118 # (obj, key) -> bool
+RT_MAP_DELETE      = 119 # (m, k) -> bool
+RT_WM_SET          = 120 # (wm, k, v) -> wm
+RT_RX_TEST         = 121 # (re, s) -> bool
+RT_OBJ_KEYS        = 122 # (o) -> JS array of own enumerable keys
 
 JIT_RT_TBL = i64[128]
 JIT_RT_KEEP = []
@@ -485,13 +494,29 @@ JIT_SPLIT_BUF = i64[256]
     return (bi == nil ? -1 : bi) + ~0.0
   js_str_index_of(js_this_str(s, "indexOf"), js_to_string(sub), 0) + ~0.0
 
+-> jit_str_indexof2_fast(s, sub, from)
+  if js_string?(s) && js_string?(sub) && s.ascii? && js_number?(from)
+    n = s.size
+    fi = from.to_i
+    fi = 0 if fi < 0
+    if sub.size == 0
+      return (fi > n ? n : fi) + ~0.0
+    return ~-1.0 if fi >= n
+    bi = s.index(sub, fi)
+    return (bi == nil ? -1 : bi) + ~0.0
+  js_str_index_of(js_this_str(s, "indexOf"), js_to_string(sub), js_to_integer(js_to_number(from))) + ~0.0
+
 -> jit_str_slice_fast(s, a, b)
-  if js_string?(s) && s.ascii? && js_number?(a) && js_number?(b)
+  if js_string?(s) && s.ascii? && js_number?(a)
     n = s.size
     ai = a.to_i
-    bi = b.to_i
-    if ai >= 0 && bi >= ai && bi <= n && ai.to_f == a && bi.to_f == b
-      return s.slice(ai, bi - ai)
+    if ai >= 0 && ai <= n && ai.to_f == a
+      if b == nil
+        return s.slice(ai, n - ai)
+      if js_number?(b)
+        bi = b.to_i
+        if bi >= ai && bi <= n && bi.to_f == b
+          return s.slice(ai, bi - ai)
   js_str_slice(js_this_str(s, "slice"), a, b)
 
 # Single-pass flat ByteArray join for dense string arrays (inline 0..5, slab 6, heap 7).
@@ -709,7 +734,29 @@ fn jit_pack_str_u31_inl(pre_bits, iv) (i64 i64) i64
   js_str_cat(pre, js_number_to_s(iv + ~0.0))
 
 -> jit_str_charcode_fast(s, idx)
+  if js_string?(s) && s.ascii? && js_number?(idx)
+    ii = idx.to_i
+    if ii.to_f == idx
+      return (ii >= 0 && ii < s.size) ? (s.byte_at(ii) + ~0.0) : js_nan()
   js_str_char_code_at(js_this_str(s, "charCodeAt"), idx)
+
+-> jit_rx_test_fast(o, s)
+  r = js_realm()
+  sv = js_string?(s) ? s : js_to_string(s)
+  if o.is_a?(JS:Special) && o.shape == r.regexp_shape && sv.ascii?
+    rx = o.internal
+    if rx.is_a?(JS:Regex)
+      fp = rx.jit_tried ? rx.jit_fp : js_rx_ensure_jit(rx)
+      if fp != 0
+        caps = JS_RX_CAPS
+        caps_p = jit_arr_slots_ptr(wvalue_bits(caps) ## i64)
+        en = js_rx_exec_caps_raw(o, sv, caps_p)
+        return false if en == -1
+        if en >= 0
+          js_rx_record_legacy(r, rx, sv, caps)
+          return true
+  res = js_regexp_builtin_exec(o, sv)
+  res != JS_NULL && res != nil
 
 # Populate 3-slot IC [str_bits, ascii_ptr, byte_len] when s is an ASCII flat heap string (size >= 6).
 -> jit_str_charcode_ic(s, idx, ic)
@@ -833,6 +880,15 @@ fn jit_pack_str_u31_inl(pre_bits, iv) (i64 i64) i64
   jit_reg(RT_STR_CHARCODE_IC, ->(s, idx, ic) jit_str_charcode_ic(s, idx, ic))
   jit_reg(RT_STR_INDEXOF_IC,  ->(s, sub, ic) jit_str_indexof_ic(s, sub, ic))
   jit_reg(RT_ARR_NEW_EMPTY_CAP, ->(n) jit_new_arr_empty_cap(n))
+  jit_reg(RT_NEW_3,           ->(f, ic, a0, a1, a2) js_new_t(f, ic, 0, 3, a0, a1, a2, nil, nil))
+  jit_reg(RT_NEW_4,           ->(f, ic, a0, a1, a2, a3) js_new_t(f, ic, 0, 4, a0, a1, a2, a3, nil))
+  jit_reg(RT_STR_INDEXOF2,    ->(s, sub, from) jit_str_indexof2_fast(s, sub, from))
+  jit_reg(RT_FOR_IN_KEYS,     ->(o) js_for_in_keys(o))
+  jit_reg(RT_HAS_PROP,        ->(o, k) js_object?(o) ? jhas_property?(o, k) : true)
+  jit_reg(RT_MAP_DELETE,      ->(m, k) js_map_remove(m.internal, k))
+  jit_reg(RT_WM_SET,          ->(wm, k, v) js_weak_set(wm, "WeakMap", k, v))
+  jit_reg(RT_RX_TEST,         ->(re, s) jit_rx_test_fast(re, s))
+  jit_reg(RT_OBJ_KEYS,        ->(o) js_object_keys(o, :keys))
 
   # Constants & class IDs (discovered dynamically at runtime — zero hardcoded ABI guesses!)
   JIT_RT_TBL[RT_K_EPOCH_PTR]    = jit_i64_ptr(JS_EPOCH)

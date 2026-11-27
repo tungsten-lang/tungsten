@@ -23,6 +23,21 @@ static WValue worker_fn(WValue *captures) {
     return w_int(42);
 }
 
+static WValue detached_worker_fn(WValue *captures) {
+    WValue chan = *(WValue *)(uintptr_t)captures[0];
+    WValue payload = *(WValue *)(uintptr_t)captures[1];
+    WValue local_arr = w_array_new(8, 16);
+    local_arr = w_array_push(local_arr, w_int(99));
+    w_thread_sleep_ms(80);
+    local_arr = w_array_push(local_arr, w_int(42));
+    WValue sz = w_int(w_as_array(local_arr)->size);
+    (void)sz;
+    assert(w_eq(payload, make_large_str(424242)) == W_TRUE);
+    assert(w_as_int(w_array_get(local_arr, w_int(1))) == 42);
+    w_chan_send(chan, payload);
+    return W_NIL;
+}
+
 int main(void) {
     printf("=== Tungsten GC Test Suite ===\n");
 
@@ -140,6 +155,64 @@ int main(void) {
     printf("  6. Multi-threaded GC + stats (swept=%lld objs, %lld bytes): OK\n",
            (long long)w_as_int(swept), (long long)w_as_int(swept_b));
     assert(w_as_int(swept) > 20000);
+
+    /* 7. Regression: WClosure 4-capture array placed by malloc at cell - 32
+     *    (&cl->captures[4 + 0] == cell) must still mark the tracked cell! */
+    {
+        WValue closures = w_array_new(65, 256);
+        for (int k = 0; k < 200; k++) {
+            void *pad = calloc(1, 32);
+            void *c0 = w_closure_cell_new();
+            void *c1 = w_closure_cell_new();
+            void *c2 = w_closure_cell_new();
+            void *c3 = w_closure_cell_new();
+            *(WValue *)c0 = make_large_str(10000 + k);
+            *(WValue *)c1 = w_int(k);
+            *(WValue *)c2 = w_int(k + 1);
+            *(WValue *)c3 = w_int(k + 2);
+            free(pad); /* puts pad (commonly c0 - 32) onto 32B free list for cl->captures */
+            WValue raw_caps[4] = {
+                (WValue)(uintptr_t)c0, (WValue)(uintptr_t)c1,
+                (WValue)(uintptr_t)c2, (WValue)(uintptr_t)c3
+            };
+            WValue cl = w_closure_new((void *)worker_fn, raw_caps, 4);
+            w_array_push(closures, cl);
+        }
+        w_gc_minor();
+        w_gc_wait_sweep();
+        for (int g = 0; g < 1000; g++) (void)w_closure_cell_new();
+        w_gc_major();
+        w_gc_wait_sweep();
+        for (int k = 0; k < 200; k++) {
+            WClosure *cl = (WClosure *)w_as_ptr(w_array_get(closures, w_int(k)));
+            WValue v0 = *(WValue *)(uintptr_t)cl->captures[0];
+            assert(w_eq(v0, make_large_str(10000 + k)) == W_TRUE);
+        }
+        printf("  7. Adjacent WClosure captures + W_GC_KIND_CELL retention: OK\n");
+    }
+
+    /* 8. Fire-and-forget Thread.new + blocking sleep retains snapshot & stack locals across GC.major */
+    {
+        WValue done_ch = w_chan_new(w_int(4));
+        {
+            void *cell_ch  = w_closure_cell_new();
+            void *cell_pay = w_closure_cell_new();
+            *(WValue *)cell_ch  = done_ch;
+            *(WValue *)cell_pay = make_large_str(424242);
+            WValue raw_caps[2] = { (WValue)(uintptr_t)cell_ch, (WValue)(uintptr_t)cell_pay };
+            WValue cl = w_closure_new((void *)detached_worker_fn, raw_caps, 2);
+            (void)w_thread_spawn_slots(cl); /* intentionally drop WThread! */
+        }
+        w_thread_sleep_ms(15);
+        for (int g = 0; g < 2000; g++) (void)make_large_str(800000 + g);
+        w_gc_minor();
+        w_gc_wait_sweep();
+        w_gc_major();
+        w_gc_wait_sweep();
+        WValue got = w_chan_recv(done_ch);
+        assert(w_eq(got, make_large_str(424242)) == W_TRUE);
+        printf("  8. Fire-and-forget Thread.new + blocking syscall root retention: OK\n");
+    }
 
     printf("=== All GC tests passed! ===\n");
     return 0;

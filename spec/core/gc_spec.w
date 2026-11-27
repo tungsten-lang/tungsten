@@ -90,7 +90,7 @@ GC.wait_sweep
 -> mutate_old_containers(h, node)
   i = 0
   while i < 50
-    h[("k" + i.to_s).to_sym] = "val-" + i.to_s + "-" + ("b" * 72)
+    h["k" + i.to_s] = "val-" + i.to_s + "-" + ("b" * 72)
     node.children.push("child-" + i.to_s + "-" + ("c" * 72))
     i += 1
   nil
@@ -99,8 +99,26 @@ mutate_old_containers(old_hash, old_node)
 GC.minor
 GC.wait_sweep
 
-gc_check("gen.old_hash_young_val", old_hash[:k49] == "val-49-" + ("b" * 72))
+gc_check("gen.old_hash_young_val", old_hash["k49"] == "val-49-" + ("b" * 72))
 gc_check("gen.old_node_young_child", old_node.children[49] == "child-49-" + ("c" * 72))
+
+# 4b. Escaping 4-capture closures retain all heap capture cells even when
+#     malloc places cl->captures immediately before cell_0 (32B size class).
+-> make_listener_closure(a, b, c)
+  rt = a
+  ->(ev) rt.label + ":" + b + ":" + c + ":" + ev
+
+listeners = []
+li = 0
+while li < 120
+  nd = GcSpecNode.new("rt-" + li.to_s + "-" + ("r" * 40), [], {})
+  listeners.push(make_listener_closure(nd, "b" + li.to_s, "c" + li.to_s))
+  li += 1
+GC.minor
+GC.wait_sweep
+GC.major
+GC.wait_sweep
+gc_check("closure.four_capture_cells", listeners[119].call("ok") == "rt-119-" + ("r" * 40) + ":b119:c119:ok")
 
 # 5. Churn unreachable heap strings, slices, objects, arrays, hashes, closures.
 -> churn_garbage(rounds)
@@ -149,6 +167,29 @@ threads.each ->(th) sum += th.join
 GC.major
 GC.wait_sweep
 gc_check("threads.joined_cleanly", sum == 24)
+
+# 7. Fire-and-forget Thread.new + blocking syscall retains both captured heap
+#    objects and worker-stack locals across concurrent GC.minor + GC.major!
+ff_done = Chan.new(4)
+-> spawn_detached_worker(ch)
+  payload = "detached-job-" + ("d" * 96)
+  box = GcSpecNode.new(payload, [ByteArray.from_array([1, 2, 3, 4])], {:ok => payload})
+  Thread.new ->
+    local_buf = ByteArray.from_array([9, 8, 7])
+    sleep(0.08)
+    b = box.children[0]
+    b.push(local_buf[0])
+    ch.send(box.label + ":" + b.size.to_s + ":" + b[4].to_s)
+  nil
+
+spawn_detached_worker(ff_done)
+sleep(0.015)
+GC.minor
+GC.wait_sweep
+GC.major
+GC.wait_sweep
+ff_msg = ff_done.recv
+gc_check("threads.detached_blocking_roots", ff_msg == "detached-job-" + ("d" * 96) + ":5:9")
 
 GC.disable
 gc_check("final.disabled", !GC.enabled?)

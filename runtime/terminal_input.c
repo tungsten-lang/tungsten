@@ -1,4 +1,4 @@
-#include "runtime.h"
+#include "runtime_internal.h"
 
 #include <poll.h>
 #include <stdatomic.h>
@@ -141,7 +141,12 @@ WValue w_input_poll(int64_t timeout_ms) {
     pfd[1].fd = g_hid_pipe[0]; pfd[1].events = POLLIN; pfd[1].revents = 0;
     nfds_t n = (g_hid_pipe[0] >= 0) ? 2 : 1;   /* keyboard-only when no device */
 
-    int r = poll(pfd, n, (int)timeout_ms);
+    int r;
+    {
+        W_GC_BLOCKING_BEGIN();
+        r = poll(pfd, n, (int)timeout_ms);
+        W_GC_BLOCKING_END();
+    }
     if (r <= 0) return w_int(-1);              /* timeout or EINTR → nothing */
 
     if (n == 2 && (pfd[1].revents & POLLIN)) { /* drain wake bytes (level-trigger) */

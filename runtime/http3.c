@@ -10,7 +10,7 @@
 
 #ifdef TUNGSTEN_HTTP3
 
-#include "runtime.h"
+#include "runtime_internal.h"
 #include <ngtcp2/ngtcp2.h>
 #include <ngtcp2/ngtcp2_crypto.h>
 #include <ngtcp2/ngtcp2_crypto_ossl.h>
@@ -765,7 +765,11 @@ void w_http3_serve(int port, WClosure *handler, const char *cert_path, const cha
                 if (timeout_ms < 0) timeout_ms = 0;
 
                 struct pollfd pfd = {fd, POLLIN, 0};
-                poll(&pfd, 1, timeout_ms);
+                {
+                    W_GC_BLOCKING_BEGIN();
+                    poll(&pfd, 1, timeout_ms);
+                    W_GC_BLOCKING_END();
+                }
 
                 /* Process expired connections */
                 now = quic_timestamp();

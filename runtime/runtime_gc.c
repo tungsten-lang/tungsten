@@ -315,8 +315,9 @@ static size_t  g_gc_dirty_cap    = 0;
 static size_t g_gc_young_bytes     = 0;
 static size_t g_gc_old_bytes       = 0;
 static size_t g_gc_keep_bytes      = 0;
-static size_t g_gc_young_threshold = 24u * 1024u * 1024u;  /* 24 MiB nursery */
-static size_t g_gc_old_threshold   = 96u * 1024u * 1024u;  /* 96 MiB initial major */
+static size_t g_gc_young_threshold   = 24u * 1024u * 1024u;  /* 24 MiB nursery */
+static size_t g_gc_young_defer_floor = 0;
+static size_t g_gc_old_threshold     = 96u * 1024u * 1024u;  /* 96 MiB initial major */
 
 static _Atomic uint64_t g_gc_minor_count   = 0;
 static _Atomic uint64_t g_gc_major_count   = 0;
@@ -353,7 +354,9 @@ static WThreadGC *gc_get_or_create_tgc(void *anchor) {
 #if !defined(__wasm__)
     t->tid = pthread_self();
 #endif
-    t->stack_top = gc_discover_stack_top(anchor ? anchor : (void *)&t);
+    void *init_anchor = anchor ? anchor : (void *)&t;
+    t->stack_top = gc_discover_stack_top(init_anchor);
+    t->saved_sp  = init_anchor;
     t->exc_stack_ptr     = &w_exception_stack;
     t->br_stack_ptr      = &w_block_return_stack;
     t->cleanup_stack_ptr = &g_cleanup_stack;
@@ -642,8 +645,14 @@ static void gc_trace_object_children(GCMarkBuf *mb, void *p, uint8_t kind) {
                 int cnt = cl->capture_count;
                 for (int i = 0; i < cnt; i++) {
                     WValue entry = cl->captures[i];
-                    /* w_thread_capture_snapshot allocates [caps(cnt), cells(cnt)] in one block */
-                    if (entry == (WValue)(uintptr_t)&cl->captures[cnt + i]) {
+                    /* Note: a tracked W_GC_KIND_CELL (32B) can be placed by malloc
+                     * immediately after cl->captures (e.g. 4*8 = 32B), making
+                     * entry == (uintptr_t)&cl->captures[cnt + i] by address coincidence!
+                     * Always check gc_radix_lookup(entry) first so tracked cells are marked;
+                     * only read inline w_thread_capture_snapshot slots when entry is untracked. */
+                    if (gc_radix_lookup((uintptr_t)entry) != W_GC_KIND_NONE) {
+                        gc_mark_word(mb, entry);
+                    } else if (entry == (WValue)(uintptr_t)&cl->captures[cnt + i]) {
                         gc_mark_word(mb, cl->captures[cnt + i]);
                     } else {
                         gc_mark_word(mb, entry);
@@ -1063,9 +1072,9 @@ static void gc_collect_internal(int full_major, void *pinned_new_ptr) {
     atomic_store_explicit(&g_gc_safepoint_req, 1, memory_order_seq_cst);
 
     /* Wait for any active running mutator threads to reach a safepoint or block
-     * (bounded wait of 50 ms so an uninstrumented C compute thread cannot hang). */
+     * (bounded wait of 250 ms so an uninstrumented C compute thread cannot hang). */
     int waited_rounds = 0;
-    while (!gc_all_mutators_stopped_locked(caller) && waited_rounds < 500) {
+    while (!gc_all_mutators_stopped_locked(caller) && waited_rounds < 2500) {
         struct timespec ts = {0, 100000L}; /* 100 us */
 #ifdef __APPLE__
         pthread_cond_timedwait_relative_np(&g_gc_park_cond, &g_gc_stw_lock, &ts);
@@ -1079,13 +1088,34 @@ static void gc_collect_internal(int full_major, void *pinned_new_ptr) {
         waited_rounds++;
     }
 
+    if (!gc_all_mutators_stopped_locked(caller)) {
+        /* Ironclad soundness invariant: never sweep while any mutator thread is
+         * still W_TGC_RUNNING with uncaptured CPU registers / stack frames.
+         * Defer this collection by bumping the nursery floor so we retry cleanly
+         * once the compute call reaches a safepoint or blocks. */
+        pthread_mutex_lock(&g_gc_alloc_lock);
+        g_gc_young_defer_floor = g_gc_young_bytes + (8u * 1024u * 1024u);
+        pthread_mutex_unlock(&g_gc_alloc_lock);
+        atomic_store_explicit(&g_gc_safepoint_req, 0, memory_order_release);
+        atomic_store_explicit(&g_gc_in_collection, 0, memory_order_release);
+        pthread_cond_broadcast(&g_gc_resume_cond);
+        pthread_mutex_unlock(&g_gc_stw_lock);
+        return;
+    }
+
     pthread_mutex_lock(&g_gc_alloc_lock);
 #else
     atomic_store_explicit(&g_gc_in_collection, 1, memory_order_release);
 #endif
 
-    /* 1. Flush all thread-local nursery buffers into g_gc_young + radix map. */
+    /* 1. Flush all thread-local nursery buffers into g_gc_young + radix map.
+     *    If a foreign/uninstrumented OS thread is still W_TGC_RUNNING after the
+     *    safepoint timeout, defer flushing its local nursery so its unsafepointed
+     *    in-flight allocations cannot be swept out from under its live registers. */
     for (WThreadGC *t = g_gc_threads; t; t = t->next) {
+        if (t != caller && atomic_load_explicit(&t->state, memory_order_acquire) == W_TGC_RUNNING) {
+            continue;
+        }
         gc_flush_nursery_locked(t);
     }
 
@@ -1247,6 +1277,7 @@ static void gc_collect_internal(int full_major, void *pinned_new_ptr) {
     }
     g_gc_young.count = 0;
     g_gc_young_bytes = 0;
+    g_gc_young_defer_floor = 0;
 
     if (full_major) {
         size_t next_thresh = g_gc_old_bytes * 2u;
@@ -1322,9 +1353,11 @@ void W_GC_COLD_SLOW w_gc_register_slow(void *ptr, uint8_t kind, size_t bytes) {
         gc_vec_push(&g_gc_young, e);
         g_gc_young_bytes += bytes;
     }
+    size_t eff_young_thresh = g_gc_young_threshold > g_gc_young_defer_floor
+                            ? g_gc_young_threshold : g_gc_young_defer_floor;
     if (g_gc_auto && (!t || !t->internal_no_auto) &&
         !atomic_load_explicit(&g_gc_in_collection, memory_order_relaxed) &&
-        g_gc_young_bytes >= g_gc_young_threshold) {
+        g_gc_young_bytes >= eff_young_thresh) {
         trigger_auto = 1;
     }
 #if !defined(__wasm__)
@@ -1582,7 +1615,9 @@ static void gc_adopt_word_locked(uint64_t w, int exact_slot) {
                 int cnt = cl->capture_count;
                 for (int i = 0; i < cnt; i++) {
                     WValue entry = cl->captures[i];
-                    if (entry == (WValue)(uintptr_t)&cl->captures[cnt + i]) {
+                    if (gc_radix_lookup((uintptr_t)entry) != W_GC_KIND_NONE) {
+                        gc_adopt_word_locked(entry, 1);
+                    } else if (entry == (WValue)(uintptr_t)&cl->captures[cnt + i]) {
                         gc_adopt_word_locked(cl->captures[cnt + i], 1);
                     } else {
                         gc_adopt_word_locked(entry, 1);
@@ -1685,6 +1720,7 @@ static void gc_adopt_pre_gc_roots(void *stack_anchor) {
     }
 #endif
     w_rt_gc_scan_runtime_globals(gc_adopt_root_cb, NULL);
+    w_rt_gc_scan_os_thread_roots(gc_adopt_root_cb, NULL);
 #if !defined(__wasm__)
     pthread_mutex_unlock(&g_gc_alloc_lock);
 #endif
@@ -1746,6 +1782,7 @@ WValue w_gc_keep_all(void) {
     }
     g_gc_young.count = 0;
     g_gc_young_bytes = 0;
+    g_gc_young_defer_floor = 0;
 #if !defined(__wasm__)
     pthread_mutex_unlock(&g_gc_alloc_lock);
 #endif

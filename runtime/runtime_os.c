@@ -137,12 +137,24 @@ WValue __w_proc_wait(WValue pid_val, WValue block_val) {
     pid_t pid = (pid_t)w_as_int(pid_val);
     int block = (int)w_as_int(block_val);
     int status = 0;
-    for (;;) {
-        pid_t r = waitpid(pid, &status, block ? 0 : WNOHANG);
-        if (r == pid) break;
-        if (r == 0) return w_int(-1);
-        if (r == -1 && errno == EINTR) continue;
-        return w_int(-2);
+    if (block) {
+        W_GC_BLOCKING_BEGIN();
+        for (;;) {
+            pid_t r = waitpid(pid, &status, 0);
+            if (r == pid) break;
+            if (r == -1 && errno == EINTR) continue;
+            W_GC_BLOCKING_END();
+            return w_int(-2);
+        }
+        W_GC_BLOCKING_END();
+    } else {
+        for (;;) {
+            pid_t r = waitpid(pid, &status, WNOHANG);
+            if (r == pid) break;
+            if (r == 0) return w_int(-1);
+            if (r == -1 && errno == EINTR) continue;
+            return w_int(-2);
+        }
     }
     if (WIFEXITED(status)) return w_int((int64_t)WEXITSTATUS(status));
     if (WIFSIGNALED(status)) return w_int(256 + (int64_t)WTERMSIG(status));
@@ -198,7 +210,11 @@ WValue w_run_argv(WValue argv_val) {
     free(argv);
     if (spawn_error != 0) return w_int(-(int64_t)spawn_error);
     int status = 0;
-    while (waitpid(pid, &status, 0) == -1 && errno == EINTR) {}
+    {
+        W_GC_BLOCKING_BEGIN();
+        while (waitpid(pid, &status, 0) == -1 && errno == EINTR) {}
+        W_GC_BLOCKING_END();
+    }
     if (WIFEXITED(status)) return w_int((int64_t)WEXITSTATUS(status));
     if (WIFSIGNALED(status)) return w_int(256 + (int64_t)WTERMSIG(status));
     return w_int(-1);
@@ -534,17 +550,26 @@ WValue w_env_to_h(void) {
 WValue __w_capture(WValue cmd_val) {
     const char *cmd = as_str(cmd_val);
     w_sandbox_gate("capture", cmd);
-    FILE *fp = popen(cmd, "r");
-    if (!fp) return w_string("");
+    char *buf = NULL;
+    size_t len = 0;
+    {
+        W_GC_BLOCKING_BEGIN();
+        FILE *fp = popen(cmd, "r");
+        if (!fp) {
+            W_GC_BLOCKING_END();
+            return w_string("");
+        }
 
-    size_t cap = 256, len = 0;
-    char *buf = malloc(cap);
-    size_t n;
-    while ((n = fread(buf + len, 1, cap - len, fp)) > 0) {
-        len += n;
-        if (len == cap) { cap *= 2; buf = realloc(buf, cap); }
+        size_t cap = 256;
+        buf = malloc(cap);
+        size_t n;
+        while ((n = fread(buf + len, 1, cap - len, fp)) > 0) {
+            len += n;
+            if (len == cap) { cap *= 2; buf = realloc(buf, cap); }
+        }
+        pclose(fp);
+        W_GC_BLOCKING_END();
     }
-    pclose(fp);
     buf[len] = '\0';
     WValue result = w_string(buf);
     free(buf);
@@ -1852,6 +1877,7 @@ WValue w_repl_state_set(WValue name, WValue value) {
 
 W_RT_INTERNAL void w_rt_gc_scan_os_thread_roots(WGCRootVisitor root_fn, void *ctx) {
     if (w_repl_state != W_NIL) root_fn(w_repl_state, ctx);
+    w_rt_gc_scan_spawned_threads(root_fn, ctx);
 }
 
 /* Resolve a Tungsten fn by its SOURCE name inside a loaded snippet dylib.
@@ -2268,14 +2294,18 @@ WValue __w_system(WValue cmd_val) {
     int status;
     int wait_ok = 0;
     pthread_cleanup_push(w_system_child_cleanup, &child);
-    for (;;) {
-        pid_t waited = waitpid(child.pid, &status, 0);
-        if (waited == child.pid) {
-            child.pid = -1;
-            wait_ok = 1;
-            break;
+    {
+        W_GC_BLOCKING_BEGIN();
+        for (;;) {
+            pid_t waited = waitpid(child.pid, &status, 0);
+            if (waited == child.pid) {
+                child.pid = -1;
+                wait_ok = 1;
+                break;
+            }
+            if (waited == -1 && errno != EINTR) break;
         }
-        if (waited == -1 && errno != EINTR) break;
+        W_GC_BLOCKING_END();
     }
     pthread_cleanup_pop(wait_ok ? 0 : 1);
 

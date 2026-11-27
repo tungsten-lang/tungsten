@@ -408,12 +408,80 @@ static void w_mutex_release_owned_by_current_thread(void) {
     }
 }
 
+typedef struct WSpawnedThreadNode {
+    WThread *thread;
+    struct WSpawnedThreadNode *next;
+} WSpawnedThreadNode;
+
+static pthread_mutex_t g_spawned_threads_lock = PTHREAD_MUTEX_INITIALIZER;
+static WSpawnedThreadNode *g_spawned_threads = NULL;
+
+static void w_spawned_thread_register(WThread *t) {
+    WSpawnedThreadNode *node = calloc(1, sizeof(WSpawnedThreadNode));
+    if (!node) return;
+    node->thread = t;
+    pthread_mutex_lock(&g_spawned_threads_lock);
+    node->next = g_spawned_threads;
+    g_spawned_threads = node;
+    pthread_mutex_unlock(&g_spawned_threads_lock);
+}
+
+static void w_spawned_thread_unlink_locked(WThread *t) {
+    WSpawnedThreadNode **pp = &g_spawned_threads;
+    while (*pp) {
+        if ((*pp)->thread == t) {
+            WSpawnedThreadNode *victim = *pp;
+            *pp = victim->next;
+            free(victim);
+            return;
+        }
+        pp = &(*pp)->next;
+    }
+}
+
+static void w_thread_release_snapshot(WThread *t);
+
+W_RT_INTERNAL void w_rt_gc_scan_spawned_threads(WGCRootVisitor root_fn, void *ctx) {
+    pthread_mutex_lock(&g_spawned_threads_lock);
+    WSpawnedThreadNode **pp = &g_spawned_threads;
+    while (*pp) {
+        WSpawnedThreadNode *node = *pp;
+        WThread *t = node->thread;
+        if (!t->alive && t->closure == W_NIL && (t->joined || t->result == W_NIL)) {
+            *pp = node->next;
+            free(node);
+            continue;
+        }
+        if (t->result != W_NIL) {
+            root_fn(t->result, ctx);
+        }
+        if (t->closure != W_NIL && w_is_closure(t->closure)) {
+            WClosure *cl = (WClosure *)w_as_ptr(t->closure);
+            if (cl->capture_count > 0 && cl->captures != NULL) {
+                int cnt = cl->capture_count;
+                for (int i = 0; i < cnt; i++) {
+                    root_fn(cl->captures[i], ctx);
+                    root_fn(cl->captures[cnt + i], ctx);
+                }
+            }
+        }
+        pp = &node->next;
+    }
+    pthread_mutex_unlock(&g_spawned_threads_lock);
+}
+
 static void w_thread_mark_stopped(void *arg) {
     WThread *t = (WThread *)arg;
     w_gc_thread_leave();
     w_mutex_release_owned_by_current_thread();
     w_rt_release_thread_tls();
+    pthread_mutex_lock(&g_spawned_threads_lock);
+    w_thread_release_snapshot(t);
     t->alive = 0;
+    if (t->result == W_NIL || t->joined) {
+        w_spawned_thread_unlink_locked(t);
+    }
+    pthread_mutex_unlock(&g_spawned_threads_lock);
 }
 
 static void *thread_entry(void *arg) {
@@ -517,9 +585,14 @@ static WValue w_thread_spawn_impl(WValue closure, int captures_are_slots) {
     t->joined = 0;
     t->result = W_NIL;
 
+    w_spawned_thread_register(t);
+
     int err = pthread_create(&t->handle, NULL, thread_entry, t);
     if (err != 0) {
+        pthread_mutex_lock(&g_spawned_threads_lock);
+        w_spawned_thread_unlink_locked(t);
         w_thread_release_snapshot(t);
+        pthread_mutex_unlock(&g_spawned_threads_lock);
         free(t);
         w_raise(w_string("Thread.new: pthread_create failed (EAGAIN)"));
     }
@@ -550,8 +623,11 @@ WValue w_thread_join(WValue thread) {
         W_GC_BLOCKING_BEGIN();
         pthread_join(t->handle, NULL);
         W_GC_BLOCKING_END();
+        pthread_mutex_lock(&g_spawned_threads_lock);
         t->joined = 1;
         w_thread_release_snapshot(t);
+        w_spawned_thread_unlink_locked(t);
+        pthread_mutex_unlock(&g_spawned_threads_lock);
     }
     return t->result;
 }
@@ -562,6 +638,9 @@ WValue w_thread_join_release(WValue thread) {
     }
     WThread *t = (WThread *)w_as_ptr(thread);
     WValue result = w_thread_join(thread);
+    pthread_mutex_lock(&g_spawned_threads_lock);
+    w_spawned_thread_unlink_locked(t);
+    pthread_mutex_unlock(&g_spawned_threads_lock);
     free(t);
     return result;
 }
@@ -590,7 +669,9 @@ WValue w_thread_join_timeout(WValue thread, int64_t ms) {
         if (remaining_ms <= interval)
             sleep_ns = remaining_ms * 1000000 - elapsed_ns % 1000000;
         struct timespec ts = { .tv_sec = 0, .tv_nsec = sleep_ns };
+        W_GC_BLOCKING_BEGIN();
         nanosleep(&ts, NULL);
+        W_GC_BLOCKING_END();
         if (interval < 10) interval++;
     }
 
@@ -598,9 +679,14 @@ WValue w_thread_join_timeout(WValue thread, int64_t ms) {
         return W_FALSE;  /* timed out, thread still running */
     }
     if (!t->joined) {
+        W_GC_BLOCKING_BEGIN();
         pthread_join(t->handle, NULL);
+        W_GC_BLOCKING_END();
+        pthread_mutex_lock(&g_spawned_threads_lock);
         t->joined = 1;
         w_thread_release_snapshot(t);
+        w_spawned_thread_unlink_locked(t);
+        pthread_mutex_unlock(&g_spawned_threads_lock);
     }
     return W_TRUE;
 }
@@ -619,7 +705,9 @@ WValue w_thread_sleep_ms(int64_t ms) {
  * or Decimal; nil blocks forever (Ruby semantics). Returns the duration. */
 WValue __w_sleep(WValue duration) {
     if (duration == W_NIL) {
+        W_GC_BLOCKING_BEGIN();
         for (;;) pause();
+        W_GC_BLOCKING_END();
     }
     double secs = cmp_numeric_double(duration);
     if (secs > 0) {
@@ -628,7 +716,9 @@ WValue __w_sleep(WValue duration) {
         ts.tv_nsec = (long)((secs - (double)ts.tv_sec) * 1e9);
         if (ts.tv_nsec < 0) ts.tv_nsec = 0;
         if (ts.tv_nsec > 999999999L) ts.tv_nsec = 999999999L;
+        W_GC_BLOCKING_BEGIN();
         nanosleep(&ts, NULL);
+        W_GC_BLOCKING_END();
     }
     return duration;
 }
@@ -2423,7 +2513,12 @@ static int w_socket_tcp_connect_fd_impl(const char *host, int port, int64_t dead
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
-    int err = getaddrinfo(host, port_str, &hints, &result);
+    int err;
+    {
+        W_GC_BLOCKING_BEGIN();
+        err = getaddrinfo(host, port_str, &hints, &result);
+        W_GC_BLOCKING_END();
+    }
     if (err != 0) {
         if (raise_errors) w_raise(w_string("socket: DNS resolution failed"));
         return -1;
@@ -4433,6 +4528,7 @@ static __attribute__((noinline)) void w_mutex_pause(WGoroutine *self) {
     } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
         /* drove a goroutine cooperatively */
     } else {
+        w_gc_safepoint();
         sched_yield();
     }
 }

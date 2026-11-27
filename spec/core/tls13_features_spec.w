@@ -1,3 +1,4 @@
+# spec: compiled -- core/crypto AEAD and curve kernels use inline LLVM IR
 # TLS 1.3 cipher suites (AES-256-GCM, ChaCha20-Poly1305), GREASE, OCSP, SCT,
 # and RFC 8879 CompressedCertificate (Brotli alg=2 + zlib alg=1) spec.
 

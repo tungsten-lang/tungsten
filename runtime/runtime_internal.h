@@ -455,6 +455,7 @@ W_RT_INTERNAL int  w_rt_gc_propagate_views(WGCRootVisitor mark_fn, void *ctx);
 W_RT_INTERNAL void w_rt_gc_prune_views(void);
 W_RT_INTERNAL void w_rt_gc_scan_runtime_globals(WGCRootVisitor root_fn, void *ctx);
 W_RT_INTERNAL void w_rt_gc_scan_os_thread_roots(WGCRootVisitor root_fn, void *ctx);
+W_RT_INTERNAL void w_rt_gc_scan_spawned_threads(WGCRootVisitor root_fn, void *ctx);
 W_RT_INTERNAL void w_rt_register_string_view(WValue str_parent, WValue view);
 
 #ifdef W_COMPILE_NO_GC

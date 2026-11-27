@@ -17798,6 +17798,22 @@
       ]
     },
     {
+      "symbol": "__w_clock_ns_raw",
+      "native": {
+        "symbol": "__w_clock_ns_raw",
+        "return": {
+          "llvm": "i64",
+          "abi": "raw"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall_nobox"
+      ]
+    },
+    {
       "symbol": "__w_clock_ticks_raw",
       "native": {
         "symbol": "__w_clock_ticks_raw",
@@ -17843,6 +17859,27 @@
       },
       "call_modes": [
         "ccall"
+      ]
+    },
+    {
+      "symbol": "__w_deadline_ticks_after_ms",
+      "native": {
+        "symbol": "__w_deadline_ticks_after_ms",
+        "return": {
+          "llvm": "i64",
+          "abi": "raw"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "raw"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall_nobox"
       ]
     },
     {
@@ -31854,6 +31891,31 @@
       ]
     },
     {
+      "symbol": "w_dlsym",
+      "native": {
+        "symbol": "w_dlsym",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "w_dns_available",
       "native": {
         "symbol": "w_dns_available",
@@ -32186,6 +32248,282 @@
       "symbol": "w_frozen_p",
       "native": {
         "symbol": "w_frozen_p",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_count",
+      "native": {
+        "symbol": "w_gc_count",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_disable",
+      "native": {
+        "symbol": "w_gc_disable",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_enable",
+      "native": {
+        "symbol": "w_gc_enable",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_enabled_p",
+      "native": {
+        "symbol": "w_gc_enabled_p",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_keep",
+      "native": {
+        "symbol": "w_gc_keep",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_keep_all",
+      "native": {
+        "symbol": "w_gc_keep_all",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_major",
+      "native": {
+        "symbol": "w_gc_major",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_minor",
+      "native": {
+        "symbol": "w_gc_minor",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_old_threshold_get",
+      "native": {
+        "symbol": "w_gc_old_threshold_get",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_old_threshold_set",
+      "native": {
+        "symbol": "w_gc_old_threshold_set",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_start",
+      "native": {
+        "symbol": "w_gc_start",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_stats",
+      "native": {
+        "symbol": "w_gc_stats",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_tracking_p",
+      "native": {
+        "symbol": "w_gc_tracking_p",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_wait_sweep",
+      "native": {
+        "symbol": "w_gc_wait_sweep",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_young_threshold_get",
+      "native": {
+        "symbol": "w_gc_young_threshold_get",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_gc_young_threshold_set",
+      "native": {
+        "symbol": "w_gc_young_threshold_set",
         "return": {
           "llvm": "i64",
           "abi": "value"
@@ -38224,7 +38562,7 @@
           }
         ],
         "arity": 1,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -38369,7 +38707,7 @@
           }
         ],
         "arity": 3,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -38410,7 +38748,7 @@
           }
         ],
         "arity": 6,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -38566,7 +38904,7 @@
           }
         ],
         "arity": 3,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -38612,7 +38950,7 @@
           }
         ],
         "arity": 2,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -38729,7 +39067,7 @@
           }
         ],
         "arity": 3,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -38771,7 +39109,7 @@
           }
         ],
         "arity": 1,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -38800,7 +39138,7 @@
           }
         ],
         "arity": 3,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39220,7 +39558,7 @@
           }
         ],
         "arity": 5,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39340,7 +39678,7 @@
           }
         ],
         "arity": 1,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39427,7 +39765,7 @@
           }
         ],
         "arity": 4,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39521,7 +39859,7 @@
           }
         ],
         "arity": 5,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39607,7 +39945,7 @@
           }
         ],
         "arity": 4,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39628,7 +39966,7 @@
           }
         ],
         "arity": 1,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39657,7 +39995,7 @@
           }
         ],
         "arity": 3,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39731,7 +40069,7 @@
           }
         ],
         "arity": 5,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39784,7 +40122,7 @@
           }
         ],
         "arity": 9,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39809,7 +40147,7 @@
           }
         ],
         "arity": 2,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39838,7 +40176,7 @@
           }
         ],
         "arity": 3,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -39863,7 +40201,7 @@
           }
         ],
         "arity": 2,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -40017,7 +40355,7 @@
           }
         ],
         "arity": 2,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -41840,7 +42178,7 @@
           }
         ],
         "arity": 5,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"
@@ -41877,7 +42215,7 @@
           }
         ],
         "arity": 5,
-        "source": "runtime/metal.m"
+        "source": "runtime/runtime.c"
       },
       "call_modes": [
         "ccall"

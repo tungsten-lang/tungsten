@@ -966,7 +966,7 @@ use h264_dsp
       tl = dst[d - lw - 1] if atl == 1
       mode = @i4m[gy * @w4 + gx]
       h264_pred_nxn(dst, d, lw, 4, mode, top, left, tl, al | (at << 1))
-      h264_idct4_add(dst, d, lw, @coef, blk * 16) if @nnz[gy * @w4 + gx] > 0
+      h264_idct4_scratch(dst, d, lw, @coef, blk * 16, @idct_scratch) if @nnz[gy * @w4 + gx] > 0
       blk += 1
     0
 
@@ -1006,7 +1006,7 @@ use h264_dsp
       mode = @i4m[gy * @w4 + gx]
       h264_pred_nxn(dst, d, lw, 8, mode, @ft, @fl, ftl, al | (at << 1))
       if ((@nzmask[@mb] >> (by * 4 + bx)) & 1) == 1
-        h264_idct8_add(dst, d, lw, @coef, b8 * 64)
+        h264_idct8_scratch(dst, d, lw, @coef, b8 * 64, @idct_scratch)
       else
         k = 0
         while k < 64
@@ -1032,7 +1032,7 @@ use h264_dsp
     while blk < 16
       bd = d + @blky[blk] * 4 * lw + @blkx[blk] * 4
       if @nnz[(@gy0 + @blky[blk]) * @w4 + @gx0 + @blkx[blk]] > 0
-        h264_idct4_add(dst, bd, lw, @coef, blk * 16)
+        h264_idct4_scratch(dst, bd, lw, @coef, blk * 16, @idct_scratch)
       elsif @coef[blk * 16] != 0
         h264_idct4_dc_add(dst, bd, lw, @coef, blk * 16)
       blk += 1
@@ -1072,7 +1072,7 @@ use h264_dsp
         gx = @mbx * 2 + (b & 1)
         gy = @mby * rows + (b >> 1)
         if @nnzc[cb + gy * @cw4 + gx] > 0
-          h264_idct4_add(dst, bd, cw, @coef, base + b * 16)
+          h264_idct4_scratch(dst, bd, cw, @coef, base + b * 16, @idct_scratch)
         elsif @coef[base + b * 16] != 0
           h264_idct4_dc_add(dst, bd, cw, @coef, base + b * 16)
         b += 1
@@ -1333,7 +1333,7 @@ use h264_dsp
         bx = (b8 & 1) * 2
         by = (b8 >> 1) * 2
         if ((@nzmask[mb] >> (by * 4 + bx)) & 1) == 1
-          h264_idct8_add(@cur_y, d + by * 4 * @lw + bx * 4, @lw, @coef, b8 * 64)
+          h264_idct8_scratch(@cur_y, d + by * 4 * @lw + bx * 4, @lw, @coef, b8 * 64, @idct_scratch)
         b8 += 1
     elsif (cbp & 15) != 0
       recon_luma_residual4(d)

@@ -42,12 +42,14 @@
   [v, o + len]
 
 + QKeys
-  ro :key, :iv, :hp
-  -> new(secret)
+  ro :key, :iv, :hp, :cs
+  -> new(secret, @cs = 0x1301)
     e = ByteArray.new(0)
-    @key = hkdf_label(secret, "quic key", e, 16)
-    @iv = hkdf_label(secret, "quic iv", e, 12)
-    @hp = aes128_expand(hkdf_label(secret, "quic hp", e, 16))
+    klen = suite_key_len(@cs)
+    @key = hkdf_label_h(@cs, secret, "quic key", e, klen)
+    @iv = hkdf_label_h(@cs, secret, "quic iv", e, 12)
+    hp_raw = hkdf_label_h(@cs, secret, "quic hp", e, klen)
+    @hp = @cs == 0x1303 ? hp_raw : (@cs == 0x1302 ? aes256_expand(hp_raw) : aes128_expand(hp_raw))
 
   -> nonce(pn)
     n = bslice(@iv, 0, 12)
@@ -58,6 +60,8 @@
     n
 
   -> mask(sample)
+    return chacha_hp_mask(@hp, sample) if @cs == 0x1303
+    return aes256_block(@hp, sample) if @cs == 0x1302
     aes128_block(@hp, sample)
 
 # Per packet-number-space state (Initial, Handshake, Application).
@@ -237,7 +241,7 @@ QDEBUG = [Env.get("BLADE_QUIC_DEBUG") != nil]
       h.push(ln & 255)
     pn_off = h.size
     bpush32(h, pn & 0xffffffff)
-    ct = aes_gcm_seal(s.tx.key, s.tx.nonce(pn), pl, h)
+    ct = aead_seal(s.tx.cs, s.tx.key, s.tx.nonce(pn), pl, h)
     pkt = bcat(h, ct)
     sample = bslice(pkt, pn_off + 4, 16)
     m = s.tx.mask(sample)
@@ -340,7 +344,7 @@ QDEBUG = [Env.get("BLADE_QUIC_DEBUG") != nil]
         hdr[pn_off - start + i] = (tr >> (8 * (pnlen - 1 - i))) & 255
         i += 1
       ct = bslice(d, pn_off + pnlen, pkt_end - pn_off - pnlen)
-      pt = aes_gcm_open(s.rx.key, s.rx.nonce(pn), ct, hdr)
+      pt = aead_open(s.rx.cs, s.rx.key, s.rx.nonce(pn), ct, hdr)
       next if pt == nil
       any = true
       s.largest = pn if pn > s.largest
@@ -505,13 +509,17 @@ QDEBUG = [Env.get("BLADE_QUIC_DEBUG") != nil]
       s.hsbuf = bslice(s.hsbuf, ml, s.hsbuf.size - ml)
       before = @tls.state
       fin = @tls.feed(msg)
+      ch2 = @tls.take_hrr_ch2()
+      if ch2 != nil
+        send_initial(crypto_frame(0, ch2))
+        next
       if before == :wait_sh
-        @spaces[1].tx = QKeys.new(@tls.c_hs)
-        @spaces[1].rx = QKeys.new(@tls.s_hs)
+        @spaces[1].tx = QKeys.new(@tls.c_hs, @tls.cipher)
+        @spaces[1].rx = QKeys.new(@tls.s_hs, @tls.cipher)
       if fin != nil
         @client_fin = fin
-        @spaces[2].tx = QKeys.new(@tls.c_ap)
-        @spaces[2].rx = QKeys.new(@tls.s_ap)
+        @spaces[2].tx = QKeys.new(@tls.c_ap, @tls.cipher)
+        @spaces[2].rx = QKeys.new(@tls.s_ap, @tls.cipher)
 
   -> flush_acks
     if @spaces[0].ack_due && @spaces[0].tx != nil
@@ -533,8 +541,8 @@ QDEBUG = [Env.get("BLADE_QUIC_DEBUG") != nil]
     blk.push(0)
     qp_field(blk, ":method", method)
     qp_field(blk, ":scheme", "https")
-    qp_field(blk, ":authority", @host)
     qp_field(blk, ":path", path)
+    qp_field(blk, ":authority", @host)
     headers.each ->(h) qp_field(blk, h[0].downcase, h[1])
     f = ByteArray.new(0)
     qv_push(f, 1)

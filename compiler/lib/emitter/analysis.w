@@ -1664,6 +1664,8 @@ emitter_last_artifact_state = {
     feat[:unicode_needed] = true
   if sym.index("lchs") != nil || sym.index("lexchars") != nil
     feat[:lexchars_needed] = true
+  if sym == "w_gc_enable"
+    feat[:needs_gc] = true
   nil
 
 -> compute_module_link_features(declared_names, known_fns, strings, saw_lchs_mcall, embedded_ir_str)
@@ -1683,7 +1685,8 @@ emitter_last_artifact_state = {
     prime_needed: false,
     lexchars_needed: saw_lchs_mcall == true,
     unicode_needed: false,
-    needs_zstd: false
+    needs_zstd: false,
+    needs_gc: false
   }
   dkeys = declared_names.keys()
   i = 0
@@ -1702,6 +1705,8 @@ emitter_last_artifact_state = {
       feat[:dynamic_exports_needed] = true
     if embedded_ir_str.index("@w_slab_init_static_zstd(") != nil || embedded_ir_str.index("@w_zstd_compress_llvm_escaped(") != nil || embedded_ir_str.index("@w_zstd_decompress(") != nil || embedded_ir_str.index("@w_zstd_compress(") != nil
       feat[:needs_zstd] = true
+    if embedded_ir_str.index("@w_gc_enable(") != nil
+      feat[:needs_gc] = true
     if embedded_ir_str.index("@w_metal_") != nil || embedded_ir_str.index("@w_gfx_") != nil || embedded_ir_str.index("@w_hid_") != nil || embedded_ir_str.index("@w_fused_gpu_run") != nil || embedded_ir_str.index("@w_gpu_") != nil
       feat[:bridges_needed] = true
     if embedded_ir_str.index("@w_blas_") != nil || embedded_ir_str.index("@w_array_cos_") != nil || embedded_ir_str.index("@w_array_sin_") != nil || embedded_ir_str.index("@w_array_sqrt_") != nil || embedded_ir_str.index("@w_array_exp_") != nil || embedded_ir_str.index("@w_array_log_") != nil || embedded_ir_str.index("@w_array_tan_") != nil

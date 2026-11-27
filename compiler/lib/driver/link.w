@@ -318,6 +318,7 @@
     lexchars_needed = precomputed_lf[:lexchars_needed] == true
     unicode_needed = precomputed_lf[:unicode_needed] == true
     needs_zstd = precomputed_lf[:needs_zstd] == true
+    needs_gc = precomputed_lf[:needs_gc] == true
   else
     compiler_image_runtime_profile = ll_code_has(ll_probe_text, "@w_compiler_image_lean_profile(")
     dynamic_exports_needed = ll_needs_dynamic_exports(ll_probe_text)
@@ -335,6 +336,7 @@
     lexchars_needed = ll_needs_lexchars(ll_probe_text)
     unicode_needed = ll_needs_unicode(ll_probe_text)
     needs_zstd = ll_needs_zstd_text(ll_probe_text)
+    needs_gc = ll_code_has(ll_probe_text, "@w_gc_enable(")
   link_started_at = clock
   # LTO is opt-in: whole-program LTO (lean binary, slow link) only for
   # --release / --lto; the default is a target-matched object runtime
@@ -354,7 +356,7 @@
   # flags and identity, so debug builds can reuse it without losing backtraces.
   store_entries = []
   if runtime_objs == nil && !full_runtime_lto && cross_target == ""
-    runtime_objs = dev_runtime_archive(verbose, needs_zstd)
+    runtime_objs = dev_runtime_archive(verbose, needs_zstd, needs_gc)
     if runtime_objs != nil
       store_entries.push(runtime_objs)
   clang_opt = env("TUNGSTEN_CLANG_OPT")
@@ -437,7 +439,7 @@
       dev_runtime_renew(store_entries)
     return c_res == true
   if runtime_objs == nil && full_runtime_lto && cross_target == ""
-    runtime_objs = dev_runtime_lto_objects(compiler_image_runtime_profile, verbose, needs_zstd)
+    runtime_objs = dev_runtime_lto_objects(compiler_image_runtime_profile, verbose, needs_zstd, needs_gc)
     if runtime_objs != nil
       store_entries.push(runtime_objs.slice(0, runtime_objs.size() - 4))
 
@@ -1200,7 +1202,7 @@
   dev_runtime_append_env(config, "PKG_CONFIG_LIBDIR")
   cache_dir + "/runtime-native-" + wyhash64_hex_string(config.to_s()) + ".a"
 
--> dev_runtime_archive(verbose = false, needs_zstd = false)
+-> dev_runtime_archive(verbose = false, needs_zstd = false, needs_gc = false)
   runtime_dir = resolve_runtime_dir
   runtime_kind = runtime_identity()
   runtime_root = dev_runtime_source_identity(runtime_dir, runtime_kind)
@@ -1214,6 +1216,8 @@
   if cache_dir == nil
     return nil
   compile_flags = profile_opt_flag() + " " + debug_compile_flag() + " " + march_flags()
+  if !needs_gc
+    compile_flags += " -DW_COMPILE_NO_GC"
   if frame_pointers
     compile_flags += " -fno-omit-frame-pointer"
   tcf = tls_cflags
@@ -1293,7 +1297,7 @@
   dev_runtime_append_env(config, "PKG_CONFIG_LIBDIR")
   cache_dir + "/runtime-lto-" + wyhash64_hex_string(config.to_s())
 
--> dev_runtime_lto_objects(compiler_image_runtime_profile = false, verbose = false, needs_zstd = false)
+-> dev_runtime_lto_objects(compiler_image_runtime_profile = false, verbose = false, needs_zstd = false, needs_gc = false)
   clang_opt = env("TUNGSTEN_CLANG_OPT")
   if clang_opt != nil && clang_opt.index("-fprofile") != nil
     return nil
@@ -1310,6 +1314,8 @@
   opt_flag = runtime_lto_opt_flag(clang_opt)
   compile_flags = opt_flag + " " + debug_compile_flag() + " " + march_flags() + " -fmerge-all-constants"
   compile_flags += " " + lto_mode_flag()
+  if !needs_gc
+    compile_flags += " -DW_COMPILE_NO_GC"
   if frame_pointers
     compile_flags += " -fno-omit-frame-pointer"
   if compiler_image_runtime_profile

@@ -268,6 +268,10 @@ fn rb_lc_cp(lc_val)
     k = i < @count ? i : @count - 1
     @lines[k]
 
+  -> space_before?(i)
+    k = i < @count ? i : @count - 1
+    rb_packed_line_start(@packed, k) != 0
+
   -> raw_slice(i)
     k = i < @count ? i : @count - 1
     @src.slice(rb_packed_off(@packed, k), rb_packed_len(@packed, k))
@@ -366,21 +370,30 @@ fn rb_scan_hex_end(lc, pos, count)
       break
   p
 
-+ RbLexer
-  ro :frozen_strings
+RB_LCHS_PROBE = [-1]
 
-  -> new(@src)
+-> rb_lchs_available?
+  if RB_LCHS_PROBE[0] < 0
+    t = "a 1\"".lchs("ruby", bits: 64)
+    ok = t != nil && t.size == 4 && (t[0] & 0xD7) == 0x40 && (t[1] & 0xD7) == 0x10 && (t[2] & 0xD7) == 0x01 && (t[3] & 0xD7) == 0x02
+    RB_LCHS_PROBE[0] = ok ? 1 : 0
+  RB_LCHS_PROBE[0] == 1
+
++ RbLexer
+  ro :frozen_strings, :end_data
+
+  -> new(@src, shared_heredocs = nil)
     @n = @src.size
-    @ascii = @src.ascii?()
+    @ascii = @src.ascii?() && rb_lchs_available?()
     @lc = @ascii ? @src.lchs("ruby", bits: 64) : nil
     @lc_n = @lc != nil ? @lc.size : 0
     @i = 0
     @line = 1
     @frozen_strings = false
+    @end_data = nil
     @prev_id = RB_T_NL
     @prev_space = false
-    @line_start = 1
-    @heredocs = []
+    @heredocs = shared_heredocs != nil ? shared_heredocs : []
     cap = @n / 2 + 16
     cap = 32 if cap < 32
     @packed = i64[cap]
@@ -409,24 +422,24 @@ fn rb_scan_hex_end(lc, pos, count)
 
   -> emit(tid, off, len, ln)
     grow_toks() if @tc >= @cap
-    rb_packed_emit(@packed, @tc, tid, len, off, @line_start)
+    sp = @prev_space ? 1 : 0
+    rb_packed_emit(@packed, @tc, tid, len, off, sp)
     @lines[@tc] = ln
     @extra_idx[@tc] = -1
     @tc += 1
     @prev_id = tid
-    @line_start = (tid == RB_T_NL) ? 1 : 0
     nil
 
   -> emit_val(tid, off, len, ln, val, extra = nil)
     grow_toks() if @tc >= @cap
     ei = @extras.size
     @extras.push([val, extra])
-    rb_packed_emit(@packed, @tc, tid, len, off, 2 | @line_start)
+    sp = @prev_space ? 1 : 0
+    rb_packed_emit(@packed, @tc, tid, len, off, 2 | sp)
     @lines[@tc] = ln
     @extra_idx[@tc] = ei
     @tc += 1
     @prev_id = tid
-    @line_start = (tid == RB_T_NL) ? 1 : 0
     nil
 
   -> eof?
@@ -470,11 +483,11 @@ fn rb_scan_hex_end(lc, pos, count)
     when 110 then "\n"
     when 116 then "\t"
     when 114 then "\r"
-    when 102 then "\f"
-    when 98  then "\b"
-    when 97  then "\a"
-    when 118 then "\v"
-    when 101 then "\e"
+    when 102 then 12.chr
+    when 98  then 8.chr
+    when 97  then 7.chr
+    when 118 then 11.chr
+    when 101 then 27.chr
     when 115 then " "
     when 92  then "\\"
     when 34  then "\""
@@ -482,6 +495,44 @@ fn rb_scan_hex_end(lc, pos, count)
     when 35  then "#"
     when 32  then " "
     when 10  then ""
+    when 77 # \M-x or \M-\C-x
+      if !eof? && peek() == 45
+        adv()
+        inner = ""
+        if !eof? && peek() == 92
+          adv()
+          inner = read_escape_char()
+        elsif !eof?
+          inner = @src.slice(@i, 1)
+          adv()
+        b0 = inner.size > 0 ? (inner.byte_at(0) | 0x80) : 0x80
+        return b0.chr
+      return "M"
+    when 67 # \C-x
+      if !eof? && peek() == 45
+        adv()
+        inner = ""
+        if !eof? && peek() == 92
+          adv()
+          inner = read_escape_char()
+        elsif !eof?
+          inner = @src.slice(@i, 1)
+          adv()
+        b0 = inner.size > 0 ? (inner.byte_at(0) & 0x1F) : 0
+        return b0.chr
+      return "C"
+    when 99 # \cx
+      if !eof?
+        inner = ""
+        if peek() == 92
+          adv()
+          inner = read_escape_char()
+        else
+          inner = @src.slice(@i, 1)
+          adv()
+        b0 = inner.size > 0 ? (inner.byte_at(0) & 0x1F) : 0
+        return b0.chr
+      return "c"
     when 120 # \xHH
       hex = ""
       k = 0
@@ -534,14 +585,14 @@ fn rb_scan_hex_end(lc, pos, count)
     depth = 0
     while !eof?
       b = peek()
-      if b == close_b && depth == 0
+      if close_b >= 0 && b == close_b && depth == 0
         adv()
         break
       if open_b >= 0 && b == open_b
         depth += 1
         buf << @src.slice(@i, 1)
         adv()
-      elsif b == close_b && depth > 0
+      elsif close_b >= 0 && b == close_b && depth > 0
         depth -= 1
         buf << @src.slice(@i, 1)
         adv()
@@ -566,9 +617,17 @@ fn rb_scan_hex_end(lc, pos, count)
             if brace_d == 0
               expr_src = @src.slice(expr_start, @i - expr_start)
               adv()
-              parts.push([:expr, expr_src])
+              if expr_src.index("<<") != nil
+                sub_lex = RbLexer.new(expr_src, @heredocs)
+                parts.push([:toks, sub_lex.tokenize()])
+              else
+                parts.push([:expr, expr_src])
               break
             adv()
+          elsif cb == 35
+            # Comment inside #{...} until newline
+            while !eof? && peek() != 10
+              adv()
           elsif cb == 34 || cb == 39
             q = adv()
             while !eof?
@@ -577,6 +636,26 @@ fn rb_scan_hex_end(lc, pos, count)
                 adv()
               elsif sb == q
                 break
+          elsif cb == 37 && @i + 2 < @n
+            # Handle %q{...} / %Q(...) / %w[...] inside #{...} so braces stay balanced
+            nb = peek(1)
+            db = (nb == 113 || nb == 81 || nb == 119 || nb == 87 || nb == 105 || nb == 73 || nb == 114 || nb == 115 || nb == 120) ? peek(2) : -1
+            if db > 0 && !is_ident?(db)
+              adv(); adv(); adv()
+              cd = matching_delim(db)
+              od = cd != db ? db : -1
+              dd = 0
+              while !eof?
+                sb = adv()
+                if sb == 92 && !eof?
+                  adv()
+                elsif od >= 0 && sb == od
+                  dd += 1
+                elsif sb == cd
+                  break if dd == 0
+                  dd -= 1
+            else
+              adv()
           else
             adv()
       elsif b == 35 && (peek(1) == 64 || peek(1) == 36)
@@ -710,6 +789,7 @@ fn rb_scan_hex_end(lc, pos, count)
       mode = hd[1]
       interp = hd[2]
       tok = hd[3]
+      is_xstr = hd.size > 4 && hd[4] == true
       lines = []
       while !eof?
         ls = @i
@@ -735,14 +815,18 @@ fn rb_scan_hex_end(lc, pos, count)
             stripped.push(l.size > min_ind ? l.slice(min_ind, l.size - min_ind) : "")
           lines = stripped
       body = lines.join("\n") + (lines.size > 0 ? "\n" : "")
-      if interp && body.index('#{') != nil
-        sub = RbLexer.new(body + "\x00")
-        res = sub.scan_dstr(0)
-        tok[0] = res[0] == RB_T_DSTR ? :dstr : :string
-        tok[1] = res[1]
+      if interp
+        sub = RbLexer.new(body, @heredocs)
+        res = sub.scan_dstr(-1)
+        if is_xstr
+          tok[0] = :xstr
+          tok[1] = [res[0] == RB_T_DSTR ? :dstr : :string, res[1]]
+        else
+          tok[0] = res[0] == RB_T_DSTR ? :dstr : :string
+          tok[1] = res[1]
       else
-        tok[0] = :string
-        tok[1] = body
+        tok[0] = is_xstr ? :xstr : :string
+        tok[1] = is_xstr ? [:string, body] : body
 
   # Tokenize into an RbTokenStream backed by LexChar (`lchs("ruby", bits: 64)`)
   # and packed 64-bit W_LEXICAL_TOKEN WValues (`i64[]`).
@@ -792,6 +876,35 @@ fn rb_scan_hex_end(lc, pos, count)
       break if @i >= @n
       ln = @line
       st = @i
+
+      # Multi-line `=begin` ... `=end` block comment or `__END__` data marker at column 0
+      if @i == 0 || @src.byte_at(@i - 1) == 10
+        cb0 = @src.byte_at(@i)
+        if cb0 == 61 && @i + 6 <= @n && @src.slice(@i, 6) == "=begin"
+          ab = @i + 6 < @n ? @src.byte_at(@i + 6) : 10
+          if ab == 32 || ab == 9 || ab == 10 || ab == 13
+            while @i < @n
+              while @i < @n && @src.byte_at(@i) != 10
+                @i += 1
+              if @i < @n
+                @i += 1
+                @line += 1
+              if @i + 4 <= @n && @src.slice(@i, 4) == "=end"
+                eb = @i + 4 < @n ? @src.byte_at(@i + 4) : 10
+                if eb == 32 || eb == 9 || eb == 10 || eb == 13
+                  while @i < @n && @src.byte_at(@i) != 10
+                    @i += 1
+                  break
+            next
+        elsif cb0 == 95 && @i + 7 <= @n && @src.slice(@i, 7) == "__END__"
+          eb = @i + 7 < @n ? @src.byte_at(@i + 7) : 10
+          if eb == 10 || eb == 13
+            dstart = @i + 7
+            dstart += 1 if dstart < @n && @src.byte_at(dstart) == 13
+            dstart += 1 if dstart < @n && @src.byte_at(dstart) == 10
+            @end_data = dstart < @n ? @src.slice(dstart, @n - dstart) : ""
+            @i = @n
+            break
 
       # Classify using 64-bit LexChar WValue when ASCII (99.9% of Ruby source)
       flags = 0
@@ -944,8 +1057,8 @@ fn rb_scan_hex_end(lc, pos, count)
             emit_val(RB_T_INT, st, @i - st, ln, rb_parse_int(clean, base))
         next
 
-      # 4. Quoted strings (LexChar 0x02)
-      if flags == 0x02 || b == 34 || b == 39
+      # 4. Quoted strings (`"` or `'`; do NOT swallow backtick `` ` `` which also has LexChar 0x02!)
+      if b == 34 || b == 39
         if b == 34
           @i += 1
           r = scan_dstr(34)
@@ -971,24 +1084,28 @@ fn rb_scan_hex_end(lc, pos, count)
         emit(RB_T_SEMI, st, 1, ln)
         next
 
-      # 7. Backtick command string
+      # 7. Backtick command string (or operator `` ` `` in def/dot/alias/undef context)
       if b == 96
+        if @prev_id == RB_T_KW_DEF || @prev_id == RB_T_DOT || @prev_id == RB_T_SAFE_DOT || @prev_id == RB_T_KW_ALIAS || @prev_id == RB_T_KW_UNDEF
+          @i += 1
+          emit(RB_T_OP, st, 1, ln)
+          next
         @i += 1
         r = scan_dstr(96)
         emit_val(RB_T_XSTR, st, @i - st, ln, [r[0] == RB_T_DSTR ? :dstr : :string, r[1]])
         next
 
-      # 8. Percent literals (%w, %W, %i, %I, %q, %Q, %r, %s, %()) when in expr_beg?
+      # 8. Percent literals (%w, %W, %i, %I, %q, %Q, %r, %s, %x, %()) when in expr_beg?
       if b == 37 && expr_beg?()
         nxt = peek(1)
         kind = nil
         adv_n = 0
-        if nxt == 119 || nxt == 87 || nxt == 105 || nxt == 73 || nxt == 113 || nxt == 81 || nxt == 114 || nxt == 115
+        if nxt == 119 || nxt == 87 || nxt == 105 || nxt == 73 || nxt == 113 || nxt == 81 || nxt == 114 || nxt == 115 || nxt == 120
           delim_b = peek(2)
           if delim_b > 0 && !is_ident?(delim_b)
             kind = @src.slice(@i + 1, 1)
             adv_n = 3
-        elsif nxt > 0 && !is_ident?(nxt) && nxt != 32 && nxt != 61
+        elsif nxt > 0 && !(nxt >= 65 && nxt <= 90) && !(nxt >= 97 && nxt <= 122) && !(nxt >= 48 && nxt <= 57) && nxt != 32 && nxt != 9 && nxt != 10 && nxt != 13 && (nxt != 61 || RB_EXPR_BEG_TBL[@prev_id] != 0)
           kind = "Q"
           delim_b = nxt
           adv_n = 2
@@ -1002,11 +1119,15 @@ fn rb_scan_hex_end(lc, pos, count)
           elsif kind == "Q"
             r = scan_dstr(close_b, open_b)
             emit_val(r[0], st, @i - st, ln, r[1], @frozen_strings)
+          elsif kind == "x"
+            r = scan_dstr(close_b, open_b)
+            emit_val(RB_T_XSTR, st, @i - st, ln, [r[0] == RB_T_DSTR ? :dstr : :string, r[1]])
           elsif kind == "r"
             rx = scan_regex(close_b, open_b)
             emit_val(rx[0] ? RB_T_DREGEX : RB_T_REGEX, st, @i - st, ln, rx[1], rx[2])
           elsif kind == "w" || kind == "W" || kind == "i" || kind == "I"
-            s = (kind == "w" || kind == "i") ? scan_sstr(close_b, open_b) : scan_dstr(close_b, open_b)[1].to_s
+            is_interp = kind == "W" || kind == "I"
+            s = scan_sstr(close_b, open_b)
             words = []
             wi = 0
             while wi < s.size
@@ -1014,9 +1135,31 @@ fn rb_scan_hex_end(lc, pos, count)
                 wi += 1
               break if wi >= s.size
               ws = wi
-              while wi < s.size && s.byte_at(wi) != 32 && s.byte_at(wi) != 9 && s.byte_at(wi) != 10 && s.byte_at(wi) != 13
-                wi += 1
-              words.push(s.slice(ws, wi - ws))
+              bd = 0
+              while wi < s.size
+                wb = s.byte_at(wi)
+                if wb == 92 && wi + 1 < s.size
+                  wi += 2
+                elsif is_interp && wb == 35 && wi + 1 < s.size && s.byte_at(wi + 1) == 123
+                  bd += 1
+                  wi += 2
+                elsif bd > 0 && wb == 123
+                  bd += 1
+                  wi += 1
+                elsif bd > 0 && wb == 125
+                  bd -= 1
+                  wi += 1
+                elsif bd == 0 && (wb == 32 || wb == 9 || wb == 10 || wb == 13)
+                  break
+                else
+                  wi += 1
+              w = s.slice(ws, wi - ws)
+              if is_interp
+                sub = RbLexer.new(w, @heredocs)
+                dr = sub.scan_dstr(-1)
+                words.push(dr[0] == RB_T_DSTR ? [:dstr, dr[1]] : dr[1])
+              else
+                words.push(w)
             emit_val((kind == "i" || kind == "I") ? RB_T_SYM_ARRAY : RB_T_WORD_ARRAY, st, @i - st, ln, words)
           next
 
@@ -1055,13 +1198,13 @@ fn rb_scan_hex_end(lc, pos, count)
             if lc == nil
               while @i < @n && is_ident?(@src.byte_at(@i))
                 @i += 1
-          elsif nb == 126 || nb == 38 || nb == 39 || nb == 96 || nb == 33 || nb == 64 || nb == 63 || nb == 36 || nb == 43 || nb == 42 || nb == 58 || nb == 47 || nb == 92 || nb == 44 || nb == 59 || nb == 46 || nb == 60 || nb == 62 || nb == 61 || nb == 45
+          elsif nb == 126 || nb == 38 || nb == 39 || nb == 96 || nb == 33 || nb == 64 || nb == 63 || nb == 36 || nb == 43 || nb == 42 || nb == 58 || nb == 47 || nb == 92 || nb == 44 || nb == 59 || nb == 46 || nb == 60 || nb == 62 || nb == 61 || nb == 45 || nb == 34
             @i += 1
             @i += 1 if nb == 45 && @i < @n && is_ident?(@src.byte_at(@i))
         emit(RB_T_GVAR, st, @i - st, ln)
         next
 
-      # 12. Colon (`::`, `:sym`, `:"dsym"`, `:'sym'`, `:+`, ternary `:`)
+      # 12. Colon (`::`, `:sym`, `:"dsym"`, `:'sym'`, `:+`, `:!=`, `:-@`, ternary `:`)
       if b == 58
         if peek(1) == 58
           @i += 2
@@ -1082,15 +1225,33 @@ fn rb_scan_hex_end(lc, pos, count)
           elsif is_alpha?(nb) || nb == 64 || nb == 36
             @i += 1
             ss = @i
-            @i += 1 if nb == 64 || nb == 36
-            @i += 1 if nb == 64 && @i < @n && @src.byte_at(@i) == 64
-            while @i < @n && is_ident?(@src.byte_at(@i))
+            if nb == 36
               @i += 1
-            if @i < @n && (@src.byte_at(@i) == 63 || @src.byte_at(@i) == 33 || (@src.byte_at(@i) == 61 && peek(1) != 61 && peek(1) != 62))
-              @i += 1
+              if @i < @n
+                gb = @src.byte_at(@i)
+                if is_digit?(gb)
+                  while @i < @n && is_digit?(@src.byte_at(@i))
+                    @i += 1
+                elsif is_alpha?(gb)
+                  while @i < @n && is_ident?(@src.byte_at(@i))
+                    @i += 1
+                elsif gb == 126 || gb == 38 || gb == 39 || gb == 96 || gb == 33 || gb == 64 || gb == 63 || gb == 36 || gb == 43 || gb == 42 || gb == 58 || gb == 47 || gb == 92 || gb == 44 || gb == 59 || gb == 46 || gb == 60 || gb == 62 || gb == 61 || gb == 45 || gb == 34
+                  @i += 1
+                  @i += 1 if gb == 45 && @i < @n && is_ident?(@src.byte_at(@i))
+            else
+              @i += 1 if nb == 64
+              @i += 1 if nb == 64 && @i < @n && @src.byte_at(@i) == 64
+              while @i < @n && is_ident?(@src.byte_at(@i))
+                @i += 1
+              if @i < @n
+                eb = @src.byte_at(@i)
+                if eb == 63 || eb == 33
+                  @i += 1
+                elsif eb == 61 && ((peek(1) != 61 && peek(1) != 62) || (peek(1) == 61 && peek(2) == 62))
+                  @i += 1
             emit(RB_T_SYMBOL, ss, @i - ss, ln)
             next
-          elsif nb == 43 || nb == 45 || nb == 42 || nb == 47 || nb == 37 || nb == 60 || nb == 62 || nb == 61 || nb == 38 || nb == 124 || nb == 94 || nb == 126 || nb == 91 || nb == 96
+          elsif nb == 43 || nb == 45 || nb == 42 || nb == 47 || nb == 37 || nb == 60 || nb == 62 || nb == 61 || nb == 38 || nb == 124 || nb == 94 || nb == 126 || nb == 91 || nb == 96 || nb == 33
             @i += 1
             ss = @i
             if nb == 91 && peek(1) == 93
@@ -1100,7 +1261,7 @@ fn rb_scan_hex_end(lc, pos, count)
               @i += 3
             elsif nb == 61 && peek(1) == 61 && peek(2) == 61
               @i += 3
-            elsif (nb == 42 && peek(1) == 42) || (nb == 60 && peek(1) == 60) || (nb == 62 && peek(1) == 62) || (nb == 61 && peek(1) == 61) || (nb == 60 && peek(1) == 61) || (nb == 62 && peek(1) == 61) || (nb == 61 && peek(1) == 126)
+            elsif (nb == 42 && peek(1) == 42) || (nb == 60 && peek(1) == 60) || (nb == 62 && peek(1) == 62) || (nb == 61 && peek(1) == 61) || (nb == 60 && peek(1) == 61) || (nb == 62 && peek(1) == 61) || (nb == 61 && peek(1) == 126) || (nb == 33 && (peek(1) == 61 || peek(1) == 126 || peek(1) == 64)) || ((nb == 43 || nb == 45 || nb == 126) && peek(1) == 64)
               @i += 2
             else
               @i += 1
@@ -1110,7 +1271,7 @@ fn rb_scan_hex_end(lc, pos, count)
         emit(RB_T_COLON, st, 1, ln)
         next
 
-      # 13. Heredoc `<<EOF`, `<<-EOF`, `<<~EOF`, `<<'EOF'`
+      # 13. Heredoc `<<EOF`, `<<-EOF`, `<<~EOF`, `<<'EOF'`, `<<~"begin;"`, ``<<`EOF` ``
       if b == 60 && peek(1) == 60 && expr_beg?()
         k = @i + 2
         mode = :plain
@@ -1121,20 +1282,27 @@ fn rb_scan_hex_end(lc, pos, count)
           mode = :squiggly
           k += 1
         interp = true
+        is_xstr = false
         q = 0
-        if k < @n && (@src.byte_at(k) == 39 || @src.byte_at(k) == 34)
+        if k < @n && (@src.byte_at(k) == 39 || @src.byte_at(k) == 34 || @src.byte_at(k) == 96)
           q = @src.byte_at(k)
-          interp = q == 34
+          interp = q != 39
+          is_xstr = q == 96
           k += 1
         ts = k
-        while k < @n && is_ident?(@src.byte_at(k))
-          k += 1
-        if k > ts && (q == 0 || (k < @n && @src.byte_at(k) == q))
+        if q != 0
+          while k < @n && @src.byte_at(k) != q && @src.byte_at(k) != 10
+            k += 1
+        else
+          if k < @n && is_alpha?(@src.byte_at(k))
+            while k < @n && is_ident?(@src.byte_at(k))
+              k += 1
+        if (q != 0 && k < @n && @src.byte_at(k) == q) || (q == 0 && k > ts)
           term = @src.slice(ts, k - ts)
           k += 1 if q != 0
           @i = k
           holder = [:string, ""]
-          @heredocs.push([term, mode, interp, holder])
+          @heredocs.push([term, mode, interp, holder, is_xstr])
           emit_val(RB_T_HEREDOC, st, @i - st, ln, holder, @frozen_strings)
           @prev_id = RB_T_STRING
           next

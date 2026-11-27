@@ -17,6 +17,7 @@ JS_GC_WEAK_REFS = []
 JS_GC_FIN_REGS = []
 JS_GC_BASE = [Env.get("BLADE_JS_GC_EVERY", "").size > 0 ? Env.get("BLADE_JS_GC_EVERY", "").to_i : 80000]
 JS_GC_NEXT = [JS_GC_BASE[0]]
+JS_GC_OBSERVER = [nil]  # optional host callback (cause, total/mark/sweep microseconds, live, freed)
 JS_GC_STATS = [0, 0, 0, 0]
 
 # Extract 47-bit aligned pointer key from any heap WValue (fits in immediate 48-bit Int — ZERO WBigint!).

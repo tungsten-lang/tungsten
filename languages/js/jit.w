@@ -4787,12 +4787,14 @@ OSR_RETURN = 2
       return li >= 0 && @info.types[li] == JT_I32
     if k == :binary
       op = e.str
-      return true if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
+      if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
+        return true if e.a.kind == :num || e.b.kind == :num
+        return can_f64?(e.a) && can_f64?(e.b)
       return true if op == "%" && can_i32?(e.a) && e.b.kind == :num && jit_int32_lit?(e.b) && e.b.a.to_i > 0
       return true if op == "+" && e.b.kind == :num && e.b.a == ~1.0 && @no_ovf_p1_li >= 0 && local_idx(e.a) == @no_ovf_p1_li
       return false
     if k == :unary
-      return e.str == "~"
+      return e.str == "~" && can_f64?(e.a)
     if k == :member && !e.has?(F_COMPUTED)
       bli = local_idx(e.a)
       if bli >= 0 && @info.sra_objs[bli] != nil
@@ -4823,17 +4825,23 @@ OSR_RETURN = 2
       return li >= 0 && @info.types[li] == JT_F64
     if k == :binary
       op = e.str
-      return true if op == "-" || op == "*" || op == "/"
+      if op == "-" || op == "*" || op == "/"
+        return true if e.a.kind == :num || e.b.kind == :num
+        return can_f64?(e.a) && can_f64?(e.b)
       return can_i32?(e.a) && can_i32?(e.b) if op == "%"
       return can_f64?(e.a) && can_f64?(e.b) if op == "+"
       return false
     if k == :unary
-      return e.str == "-" || e.str == "+"
+      return true if e.str == "+"
+      return can_f64?(e.a) if e.str == "-"
+      return false
     if k == :member && !e.has?(F_COMPUTED)
       bli = local_idx(e.a)
       if bli >= 0 && @info.sra_objs[bli] != nil
         vs = @info.sra_objs[bli].field_slots[e.b.str]
         return vs != nil && @info.types[vs] == JT_F64
+      if bli >= 0 && @known_shapes[bli] != nil && @mono_arr_num[@known_shapes[bli]] == true
+        return true
     if k == :member && e.has?(F_COMPUTED)
       bli = local_idx(e.a)
       return bli >= 0 && @hoisted_tas[bli] != nil && @hoisted_tas[bli][2] <= 8
@@ -4848,7 +4856,11 @@ OSR_RETURN = 2
       if li >= 0 && @info.sra_clos[li] != nil
         sc = @info.sra_clos[li]
         re = jit_inline_return_expr(sc.inner_jf)
-        return true if re != nil && e.list.size == sc.inner_jf.params.size
+        if re != nil && e.list.size == sc.inner_jf.params.size
+          all_num = true
+          sc.cap_slots.each ->(cs) all_num = false if @info.types[cs] != JT_I32 && @info.types[cs] != JT_F64
+          e.list.each ->(ae) all_num = false if !can_f64?(ae)
+          return true if all_num
     false
 
   # ---- Void Expression (e.g. i++, h = ..., a.x += ...) ----
@@ -6535,9 +6547,48 @@ OSR_RETURN = 2
       @a.movz_x(R_X0, 2)   # true
       @a.bind(l_end)
       return nil
-    if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>" || (op == "%" && can_i32?(e))
+    if can_i32?(e) && (op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>" || op == "%")
       gen_expr_i32(e)
       emit_box_i32(R_X0, R_X0)
+      return nil
+    # Polymorphic bitwise / shift (`a ^ b`, `a & b`, `a | b`, `a << b`, `a >> b`):
+    # Inline fast path when both operands are Numbers; cold stub handles BigInt & objects!
+    if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
+      gen_expr_any(e.a)
+      push_x(R_X0)
+      gen_expr_any(e.b)
+      @a.mov_r(R_X2, R_X0)
+      pop_x(R_X1)
+      l_slow = @a.new_label
+      l_done = @a.new_label
+      @a.sub_r(R_X9, R_X1, R_X20)
+      @a.cmp_r(R_X9, R_X21)
+      @a.b_cond(CC_HS, l_slow)
+      @a.sub_r(R_X10, R_X2, R_X20)
+      @a.cmp_r(R_X10, R_X21)
+      @a.b_cond(CC_HS, l_slow)
+      @a.fmov_d_x(R_D0, R_X9)
+      @a.fmov_d_x(R_D1, R_X10)
+      emit_f64_to_i32(R_X9, R_D0)
+      emit_f64_to_i32(R_X10, R_D1)
+      if op == "|"
+        @a.orr_w(R_X0, R_X9, R_X10)
+      elsif op == "&"
+        @a.and_w(R_X0, R_X9, R_X10)
+      elsif op == "^"
+        @a.eor_w(R_X0, R_X9, R_X10)
+      elsif op == "<<"
+        @a.lsl_w(R_X0, R_X9, R_X10)
+      else
+        @a.asr_w(R_X0, R_X9, R_X10)
+      emit_box_i32(R_X0, R_X0)
+      @a.bind(l_done)
+      rt = op == "|" ? RT_BITOR : (op == "&" ? RT_BITAND : (op == "^" ? RT_BITXOR : (op == "<<" ? RT_SHL : RT_SAR)))
+      cb = ->()
+        @a.bind(l_slow)
+        call_rt(rt)
+        @a.b(l_done)
+      add_cold_stub(cb)
       return nil
     # Fast exact 64-bit integer `(a * K + b) % M` when a, b are i32 and M > 0 int32 literal!
     # Because |a * K + b| < 2^52 (exact in IEEE double AND never overflows i64!), udiv_x + msub_x is 100% exact!
@@ -6803,8 +6854,27 @@ OSR_RETURN = 2
       @a.bind(l_end)
       return nil
     if op == "~"
-      gen_expr_i32(e)
+      if can_f64?(e.a)
+        gen_expr_i32(e)
+        emit_box_i32(R_X0, R_X0)
+        return nil
+      gen_expr_any(e.a)
+      l_slow = @a.new_label
+      l_done = @a.new_label
+      @a.sub_r(R_X9, R_X0, R_X20)
+      @a.cmp_r(R_X9, R_X21)
+      @a.b_cond(CC_HS, l_slow)
+      @a.fmov_d_x(R_D0, R_X9)
+      emit_f64_to_i32(R_X0, R_D0)
+      @a.mvn_w(R_X0, R_X0)
       emit_box_i32(R_X0, R_X0)
+      @a.bind(l_done)
+      cb = ->()
+        @a.bind(l_slow)
+        @a.mov_r(R_X1, R_X0)
+        call_rt(RT_BITNOT)
+        @a.b(l_done)
+      add_cold_stub(cb)
       return nil
     if op == "-" && can_f64?(e.a)
       gen_expr_f64(e.a)

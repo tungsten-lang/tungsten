@@ -30,7 +30,9 @@ typedef struct WString {
     /* The high bit records that every payload byte is ASCII. The remaining
      * 31 bits are the byte length. */
     uint32_t len_flags;
-    _Atomic uint32_t hash_ready;
+    _Atomic uint8_t hash_ready;
+    uint8_t gc_flags;       /* W_GC_* flags (zero when GC is off) */
+    uint8_t _pad[2];
     char data[];  /* UTF-8 bytes, null-terminated */
 } WString;
 
@@ -44,15 +46,44 @@ static inline int w_heap_string_ascii_p(const WString *s) {
     return (s->len_flags & W_STRING_ASCII_FLAG) != 0;
 }
 
+#if defined(__GNUC__) || defined(__clang__)
+#define W_GC_HIDDEN __attribute__((visibility("hidden")))
+#else
+#define W_GC_HIDDEN
+#endif
+
+#if defined(__clang__) && (defined(__aarch64__) || defined(__x86_64__))
+#define W_GC_COLD_SLOW __attribute__((preserve_most, cold, noinline))
+#elif defined(__GNUC__) || defined(__clang__)
+#define W_GC_COLD_SLOW __attribute__((cold, noinline))
+#else
+#define W_GC_COLD_SLOW
+#endif
+
+void w_gc_register_slow(void *ptr, uint8_t kind, size_t bytes) W_GC_COLD_SLOW;
+extern W_GC_HIDDEN uint8_t g_gc_track;
+
 static inline void w_heap_string_set_meta(WString *s, uint32_t len, int ascii) {
     s->len_flags = len | (ascii ? W_STRING_ASCII_FLAG : 0);
     atomic_store_explicit(&s->hash_ready, 0, memory_order_relaxed);
+#ifndef W_COMPILE_NO_GC
+    s->gc_flags = 0;
+    if (__builtin_expect(g_gc_track, 0)) {
+        w_gc_register_slow(s, 6 /* W_GC_KIND_STRING */, sizeof(WString) + (size_t)len + 1u);
+    }
+#endif
 }
 
 static inline void w_heap_string_set_meta_hash(WString *s, uint32_t len, int ascii, uint64_t h) {
     s->len_flags = len | (ascii ? W_STRING_ASCII_FLAG : 0);
     atomic_store_explicit(&s->cached_hash, h, memory_order_relaxed);
     atomic_store_explicit(&s->hash_ready, 1, memory_order_release);
+#ifndef W_COMPILE_NO_GC
+    s->gc_flags = 0;
+    if (__builtin_expect(g_gc_track, 0)) {
+        w_gc_register_slow(s, 6 /* W_GC_KIND_STRING */, sizeof(WString) + (size_t)len + 1u);
+    }
+#endif
 }
 
 /* Mutable append — declared in runtime.c */
@@ -395,7 +426,8 @@ WValue w_ast_children(WValue node);
 typedef struct {
     uint8_t flags;        /* W_FLAG_* bits (renamed from pool_flags) */
     int8_t  ebits;        /* element-type code: 65 (w64) for polymorphic arrays */
-    uint8_t _pad[2];
+    uint8_t _pad[1];      /* _pad[0] carries ByteArray encoding_id */
+    uint8_t gc_flags;     /* W_GC_* flags (zero when GC is off) */
     int32_t start;        /* logical start index — O(1) shift via increment */
     int32_t size;         /* number of live elements (renamed from length) */
     int32_t cap;          /* total allocated slots (renamed from cap) */
@@ -469,9 +501,10 @@ WValue w_tensor_view_f32(WValue t_wv, WValue offset_wv, WValue shape_wv);
 WValue w_tensor_slice0_f32(WValue t_wv, WValue start_wv, WValue stop_wv);
 
 /* ---- Hash table ---- */
-#define W_HASH_FLAG_FROZEN  (1u << 0)
-#define W_HASH_FLAG_POOLED  (1u << 1)  /* set when hash is in the recycle pool */
-#define W_HASH_FLAG_KWARGS  (1u << 2)  /* hash born from a call-site kwargs group */
+#define W_HASH_FLAG_FROZEN    (1u << 0)
+#define W_HASH_FLAG_POOLED    (1u << 1)  /* set when hash is in the recycle pool */
+#define W_HASH_FLAG_KWARGS    (1u << 2)  /* hash born from a call-site kwargs group */
+#define W_HASH_FLAG_OLD_CLEAN (1u << 6)  /* old-gen hash not yet marked dirty */
 
 /* Compact dict (CPython/Ruby-st_table shape): entries live in dense
  * insertion-ordered keys/values arrays sized to 3/4 of cap; a sparse
@@ -488,7 +521,8 @@ typedef struct {
     uint32_t cap;       /* index-table slots (power of 2) */
     uint8_t flags;
     uint8_t iter_depth; /* active each traversals; additions are forbidden */
-    uint8_t pad[2];
+    uint8_t gc_flags;   /* W_GC_* flags (zero when GC is off) */
+    uint8_t pad;
     uint32_t used;      /* dense entries consumed: live + holes */
     WValue *keys;       /* dense, insertion-ordered; W_MEMO_MISS = hole */
     WValue *values;     /* dense, parallel to keys */
@@ -1275,9 +1309,12 @@ typedef struct WObject {
     uint16_t class_id;
     uint8_t  ivar_count;
     uint8_t  flags;             /* W_OBJ_FLAG_* */
-    uint32_t _reserved;
+    uint8_t  _reserved[3];      /* _reserved[0] at offset 4 holds languages/js jsr_kind */
+    uint8_t  gc_flags;          /* W_GC_* flags at offset 7 (zero when GC is off) */
     WValue   ivars[];
 } WObject;
+_Static_assert(offsetof(WObject, ivars) == 8, "WObject ivars must start at byte 8");
+_Static_assert(offsetof(WObject, gc_flags) == 7, "WObject gc_flags must sit at byte 7 (byte 4 is jsr_kind)");
 
 #define W_OBJ_FLAG_FROZEN  (1u << 0)
 #define W_OBJ_FLAG_POOLED  (1u << 1)
@@ -1326,6 +1363,8 @@ typedef struct {
     int capture_count;
     int arity;              /* declared block params; 0 = implicit or legacy */
     int param_count;        /* physical LLVM params (excluding %__captures) */
+    uint8_t gc_flags;       /* W_GC_* flags (zero when GC is off) */
+    uint8_t _pad[3];
 } WClosure;
 
 void *w_closure_cell_new(void);
@@ -2147,6 +2186,7 @@ WValue w_bool_array_size(WValue arr);
  * if a struct field moves. */
 _Static_assert(offsetof(WArray, flags) == 0,  "WArray flags offset");
 _Static_assert(offsetof(WArray, ebits) == 1,  "WArray ebits offset (added for the array unification)");
+_Static_assert(offsetof(WArray, gc_flags) == 3, "WArray gc_flags offset (byte 2 is ByteArray encoding_id / jsr_aflags)");
 _Static_assert(offsetof(WArray, start) == 4,  "WArray start offset");
 _Static_assert(offsetof(WArray, size)  == 8,  "WArray size offset (was length)");
 _Static_assert(offsetof(WArray, cap)   == 12, "WArray cap offset (was cap)");
@@ -2657,7 +2697,8 @@ static inline int w_both_integers_any(WValue a, WValue b) {
  * from offset 0 — the subtag now identifies StringBuffer. */
 typedef struct WStrBuf {
     uint8_t flags;       /* W_FLAG_* bits plus W_STRBUF_FLAG_ASCII */
-    uint8_t _pad[7];     /* keep `data` ptr at offset 8 for natural alignment */
+    uint8_t gc_flags;    /* W_GC_* flags (zero when GC is off) */
+    uint8_t _pad[6];     /* keep `data` ptr at offset 8 for natural alignment */
     char   *data;
     int64_t size;        /* renamed from length */
     int64_t cap;
@@ -2684,7 +2725,8 @@ static inline int w_is_strbuf(WValue v) {
 typedef struct {
     uint8_t type;       /* W_TYPE_ROPE */
     uint8_t flags;
-    uint8_t _pad[6];
+    uint8_t gc_flags;   /* W_GC_* flags (zero when GC is off) */
+    uint8_t _pad[5];
     WValue left;        /* string or rope */
     WValue right;       /* string or rope */
     uint32_t total_len; /* cached byte length */
@@ -2694,6 +2736,42 @@ typedef struct {
 #define W_ROPE_FLAG_ASCII (1 << 0)
 _Static_assert(offsetof(WRope, left) == 8,
                "Rope ASCII flag must remain inside existing header padding");
+
+/* ---- Generational Parallel/Concurrent Garbage Collector ----
+ * Disabled by default with literally zero mutator/allocation cost when off.
+ * Header bits occupy existing struct padding so no field offset changes. */
+#ifdef W_COMPILE_NO_GC
+#define W_GC_TRACKED      0u
+#define W_FLAG_GC_NO_POOL 0u
+#else
+#define W_GC_TRACKED      (1u << 0)  /* registered in GC; skip manual free/pool */
+#define W_FLAG_GC_NO_POOL (1u << 7)  /* bit 7 in WObject/WArray/WHash/WStrBuf flags */
+#endif
+#define W_GC_MARK     (1u << 1)  /* marked reachable in current GC cycle */
+#define W_GC_OLD      (1u << 2)  /* promoted to old generation */
+#define W_GC_DIRTY    (1u << 3)  /* old container mutated since last minor GC */
+#define W_GC_KEEP     (1u << 4)  /* immortal object: never swept */
+
+extern W_GC_HIDDEN uint8_t g_gc_track;
+extern W_GC_HIDDEN uint8_t g_gc_auto;
+extern W_GC_HIDDEN _Atomic int g_gc_safepoint_req;
+
+WValue w_gc_enable(void);
+WValue w_gc_disable(void);
+WValue w_gc_enabled_p(void);
+WValue w_gc_tracking_p(void);
+WValue w_gc_start(WValue full_mark);
+WValue w_gc_minor(void);
+WValue w_gc_major(void);
+WValue w_gc_wait_sweep(void);
+WValue w_gc_keep(WValue val);
+WValue w_gc_keep_all(void);
+WValue w_gc_count(void);
+WValue w_gc_stats(void);
+WValue w_gc_young_threshold_get(void);
+WValue w_gc_young_threshold_set(WValue bytes);
+WValue w_gc_old_threshold_get(void);
+WValue w_gc_old_threshold_set(WValue bytes);
 
 static inline int w_is_rope(WValue v) {
     return __builtin_expect((v & 0xFFFF00000000000FULL) == 0 && v >= 0x10, 0) &&

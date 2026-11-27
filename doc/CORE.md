@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(848 total), grouped by area, with its declaration, a one-line
+(850 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -21,6 +21,7 @@ summary from the source header, and a link to the source.
 | `Base64` | `+ Base64` | Base64 and Base64URL codecs (RFC 4648). | [`core/base64.w`](../core/base64.w) |
 | `BigArray` | `+ BigArray` | Same shape as Array, but i64 fields for >2^32 elements. Used for | [`core/big_array.w`](../core/big_array.w) |
 | `BitOps` | `+ BitOps` | Fixed-width bit operations. | [`core/bit_ops.w`](../core/bit_ops.w) |
+| `Brotli` | `+ Brotli` | — | [`core/brotli.w`](../core/brotli.w) |
 | `BlankSlate` | `+ BlankSlate` | BlankSlate is the parent class of all classes in Tungsten. It's an explicit blank class. | [`core/blank_slate.w`](../core/blank_slate.w) |
 | `Boolean` | `+ Boolean` | Boolean — true (subtag 0x2) and false (subtag 0x1) singletons. | [`core/boolean.w`](../core/boolean.w) |
 | `True` | `+ True < Boolean` | — | [`core/boolean.w`](../core/boolean.w) |
@@ -60,6 +61,7 @@ summary from the source header, and a link to the source.
 | `FileHandle` | `+ FileHandle` | FileHandle — an open file from File.open, read and written incrementally | [`core/file.w`](../core/file.w) |
 | `Future` | `+ Future` | Future — read-only handle for asynchronous settlement and composition. | [`core/future.w`](../core/future.w) |
 | `FutureState` | `+ FutureState` | Future/Promise shared state and read-only Future facade. | [`core/future.w`](../core/future.w) |
+| `GC` | `+ GC` | Tungsten Garbage Collector (mark-and-sweep, generational, parallel mark, concurrent sweep). | [`core/gc.w`](../core/gc.w) |
 | `Gzip` | `+ Gzip` | Gzip - gzip (RFC 1952) and DEFLATE (RFC 1951) in Tungsten. | [`core/gzip.w`](../core/gzip.w) |
 | `GzipError` | `+ GzipError < ParseError` | GzipError - a gzip or Base64 stream that cannot be decoded (see Gzip). | [`core/gzip.w`](../core/gzip.w) |
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |

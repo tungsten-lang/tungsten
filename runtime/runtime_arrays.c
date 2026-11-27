@@ -346,10 +346,11 @@ WValue w_array_new(int64_t element_bits, int64_t cap) {
         if (a->ebits == (int8_t)element_bits && a->cap == actual_cap) {
             a->flags = W_FLAG_OWNED;
             a->_pad[0] = 0;
-            a->_pad[1] = 0;
+            a->gc_flags = 0;
             a->start = 0;
             a->size = 0;
             memset(a->slots, 0, (size_t)byte_size);
+            w_gc_on_array(a, sizeof(WArray) + (size_t)byte_size);
             return w_box_array(a);
         }
         free(a->slots);
@@ -363,15 +364,10 @@ WValue w_array_new(int64_t element_bits, int64_t cap) {
     a->size = 0;
     a->cap = actual_cap;
     a->slots = calloc(1, (size_t)byte_size);
+    w_gc_on_array(a, sizeof(WArray) + (size_t)byte_size);
     return w_box_array(a);
 }
 
-/* Like w_array_new but leaves `slots` UNINITIALIZED (malloc, not calloc).
- * Only safe when the caller writes every element before any read — e.g. the
- * elementwise kernels, which fill all n slots. Avoids a redundant zeroing pass
- * over the result buffer (the buffer is immediately overwritten). For sub-byte
- * tiers (bool=1, i4=4) a partial trailing byte could be left undefined, so the
- * caller must restrict use to whole-byte element widths. */
 WValue w_array_new_uninit(int64_t element_bits, int64_t cap) {
     if (cap > INT32_MAX) {
         w_raise(w_string("typed array: cap exceeds INT32_MAX — use BigArray for >2^31 elements"));
@@ -383,41 +379,35 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap) {
         if (a->ebits == (int8_t)element_bits && a->cap == actual_cap) {
             a->flags = W_FLAG_OWNED;
             a->_pad[0] = 0;
-            a->_pad[1] = 0;
+            a->gc_flags = 0;
             a->start = 0;
             a->size = 0;
+            w_gc_on_array(a, sizeof(WArray) + (size_t)array_byte_size(element_bits, actual_cap));
             return w_box_array(a);
         }
         free(a->slots);
         free(a);
     }
-    w_allocprof(W_ALLOCPROF_ARR, array_byte_size(element_bits, actual_cap));
+    int64_t bsz = array_byte_size(element_bits, actual_cap);
+    w_allocprof(W_ALLOCPROF_ARR, bsz);
     a = calloc(1, sizeof(WArray));   /* header stays zeroed (cheap, fixed size) */
     a->flags = W_FLAG_OWNED;
     a->ebits = (int8_t)element_bits;
     a->start = 0;
     a->size = 0;
     a->cap = actual_cap;
-    a->slots = malloc(array_byte_size(element_bits, a->cap));
+    a->slots = malloc((size_t)bsz);
+    if (element_bits == 65 && bsz > 0) memset(a->slots, 0, (size_t)bsz);
+    w_gc_on_array(a, sizeof(WArray) + (size_t)bsz);
     return w_box_array(a);
 }
 
-/* One-allocation variant for small, fixed typed literals. The WArray header
- * remains 16-byte aligned for pointer tagging and the inline slot payload is
- * independently aligned to 16 bytes. If a caller later grows the array, the
- * regular growth path promotes slots to a standalone allocation and clears
- * W_FLAG_INLINE; semantics are otherwise identical to w_array_new_uninit. */
 WValue w_array_new_inline(int64_t element_bits, int64_t n) {
     if (n < 0 || n > INT32_MAX) {
         w_raise(w_string("typed array: size exceeds INT32_MAX — use BigArray for >2^31 elements"));
     }
     int64_t cap = n > 0 ? n : 8;
     size_t payload = (size_t)array_byte_size(element_bits, cap);
-    /* Darwin's allocator makes the combined 32 KiB allocation materially
-     * slower to allocate/free than separate fixed header + payload blocks;
-     * matched size sweeps retain the one-allocation win through 16 KiB.
-     * Keep this constructor's exact-size semantics while falling back to the
-     * two-allocation uninitialized representation above that crossover. */
 #ifndef W_ARRAY_INLINE_MAX_PAYLOAD
 #if defined(__APPLE__)
 #define W_ARRAY_INLINE_MAX_PAYLOAD (16u * 1024u)
@@ -440,6 +430,10 @@ WValue w_array_new_inline(int64_t element_bits, int64_t n) {
     a->size = (int32_t)n;
     a->cap = (int32_t)cap;
     a->slots = (WValue *)((uint8_t *)a + slot_offset);
+    if (__builtin_expect(g_gc_track && element_bits == 65 && payload > 0, 0)) {
+        memset(a->slots, 0, payload);
+    }
+    w_gc_on_array(a, slot_offset + payload);
     return w_box_array(a);
 }
 
@@ -625,17 +619,12 @@ WValue w_array_new_aligned(WValue element_bits_v, WValue size_v) {
     a->size = (int32_t)size;
     a->cap = (int32_t)size;
     a->slots = (WValue *)base;
+    w_gc_on_array(a, sizeof(WArray) + (size_t)alloc_size);
     return w_box_array(a);
 }
 
 
 
-/* Zero-copy view: WArray that borrows `slots` instead of owning it.
- * size == cap so push/grow paths don't try to realloc. Views over
- * regions with >2^31 elements must go through `w_big_array_view` — this
- * constructor refuses oversized inputs loud and early. This is the low-level
- * form taking a raw data pointer (used by mmap, ccall_nobox, etc.); the
- * high-level slice-of-array form is `w_array_view(arr, lo, len)` below. */
 WValue w_array_view_raw(uint8_t *data, int64_t element_bits, int64_t length) {
     if (length > INT32_MAX) {
         w_raise(w_string("typed array view: length exceeds INT32_MAX — use BigArray.view"));
@@ -647,20 +636,16 @@ WValue w_array_view_raw(uint8_t *data, int64_t element_bits, int64_t length) {
     a->size = (int32_t)length;
     a->cap = (int32_t)length;
     a->slots = (WValue *)data;
+    w_gc_on_array(a, sizeof(WArray));
     return w_box_array(a);
 }
 
-/* Call-site reuse typed-array allocation. Reuses cached buffer if
- * element_bits match and cap is sufficient. On shape mismatch, allocates
- * fresh and leaks the old buffer (rare path — a static allocation site has a
- * single element_bits at compile time). */
 WValue w_array_reuse_or_new(WValue *slot, int64_t element_bits, int64_t cap) {
     WValue v = *slot;
     if (v != W_NIL) {
         WArray *a = w_as_array(v);
         if (a->ebits == (int8_t)element_bits && a->cap >= cap) {
             a->_pad[0] = 0;
-            a->_pad[1] = 0;
             a->start = 0;
             a->size = 0;
             return v;
@@ -668,6 +653,7 @@ WValue w_array_reuse_or_new(WValue *slot, int64_t element_bits, int64_t cap) {
     }
     v = w_array_new(element_bits, cap);
     *slot = v;
+    w_gc_register_reuse_slot(slot);
     return v;
 }
 
@@ -1388,6 +1374,7 @@ static WValue array_elementwise_reuse(WValue *slot, WValue lhs, WValue rhs, EltO
     }
     out = array_elementwise_into(W_NIL, lhs, rhs, op);
     *slot = out;
+    w_gc_register_reuse_slot(slot);
     return out;
 }
 
@@ -1643,6 +1630,62 @@ void w_register_view(WValue parent, WValue view) {
     n->entries[n->count].view         = view;
     n->entries[n->count].offset_bytes = (uint8_t *)v->slots - (uint8_t *)p->slots;
     n->count++;
+}
+
+W_RT_INTERNAL void w_rt_register_string_view(WValue str_parent, WValue view) {
+    if (!w_is_heap_str(str_parent) || !w_is_array(view)) return;
+    g_any_views_registered = 1;
+    WViewNode *n = w_view_find_or_create(str_parent);
+    if (n->count == n->cap) {
+        n->cap *= 2;
+        n->entries = (WViewEntry *)realloc(n->entries,
+                                           (size_t)n->cap * sizeof(WViewEntry));
+    }
+    n->entries[n->count].view = view;
+    n->entries[n->count].offset_bytes = 0;
+    n->count++;
+}
+
+W_RT_INTERNAL int w_rt_gc_propagate_views(WGCRootVisitor mark_fn, void *ctx) {
+    if (!g_any_views_registered) return 0;
+    int added = 0;
+    for (int b = 0; b < W_VIEW_BUCKETS; b++) {
+        for (WViewNode *n = w_view_table[b]; n; n = n->next) {
+            if (w_gc_is_live_marked(n->parent)) continue;
+            for (int32_t i = 0; i < n->count; i++) {
+                if (w_gc_is_live_marked(n->entries[i].view)) {
+                    mark_fn(n->parent, ctx);
+                    added = 1;
+                    break;
+                }
+            }
+        }
+    }
+    return added;
+}
+
+W_RT_INTERNAL void w_rt_gc_prune_views(void) {
+    if (!g_any_views_registered) return;
+    for (int b = 0; b < W_VIEW_BUCKETS; b++) {
+        WViewNode **link = &w_view_table[b];
+        while (*link) {
+            WViewNode *n = *link;
+            int32_t w = 0;
+            for (int32_t i = 0; i < n->count; i++) {
+                if (w_gc_is_live_marked(n->entries[i].view)) {
+                    n->entries[w++] = n->entries[i];
+                }
+            }
+            n->count = w;
+            if (n->count == 0 && !w_gc_is_live_marked(n->parent)) {
+                *link = n->next;
+                free(n->entries);
+                free(n);
+            } else {
+                link = &n->next;
+            }
+        }
+    }
 }
 
 static void w_view_unregister(WValue view) {
@@ -2338,7 +2381,9 @@ WValue w_big_array_new(int64_t ebits, int64_t cap) {
     a->start = 0;
     a->size  = 0;
     a->cap   = cap;
-    a->slots = (uint8_t *)calloc(1, array_byte_size(ebits, cap));
+    int64_t byte_sz = array_byte_size(ebits, cap);
+    a->slots = (uint8_t *)calloc(1, (size_t)byte_sz);
+    w_gc_on_big_array(a, sizeof(WBigArray) + (size_t)byte_sz);
     return w_box_ptr(a, W_SUBTAG_GENERIC);
 }
 
@@ -2351,6 +2396,7 @@ WValue w_big_array_view(uint8_t *data, int64_t ebits, int64_t length) {
     a->size  = length;
     a->cap   = length;
     a->slots = data;
+    w_gc_on_big_array(a, sizeof(WBigArray));
     return w_box_ptr(a, W_SUBTAG_GENERIC);
 }
 
@@ -2535,12 +2581,14 @@ WValue w_small_array_new(int64_t ebits, int64_t size, int64_t bytes_ptr) {
     if (size < 0 || size > 255) w_raise(w_string("SmallArray size must be 0..255"));
     if (!array_ebits_valid(ebits)) w_raise(w_string("SmallArray has an unsupported element type"));
     int64_t byte_count = array_byte_size(ebits, size);
-    WSmallArray *a = (WSmallArray *)calloc(1, sizeof(WSmallArray) + (size_t)byte_count);
+    size_t alloc_bytes = sizeof(WSmallArray) + (size_t)byte_count + 1u;
+    WSmallArray *a = (WSmallArray *)calloc(1, alloc_bytes);
     a->ebits = (uint8_t)ebits;
     a->size  = (uint8_t)size;
     if (bytes_ptr != 0 && byte_count > 0) {
         memcpy(a->slots, (const uint8_t *)(uintptr_t)bytes_ptr, (size_t)byte_count);
     }
+    w_gc_on_small_array(a, alloc_bytes);
     return w_box_ptr(a, W_SUBTAG_SMALL_ARRAY);
 }
 

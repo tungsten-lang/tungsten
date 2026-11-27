@@ -1842,9 +1842,16 @@ WValue w_repl_state_get(WValue name) {
 }
 
 WValue w_repl_state_set(WValue name, WValue value) {
-    if (w_repl_state == W_NIL) w_repl_state = w_hash_new();
+    if (w_repl_state == W_NIL) {
+        w_repl_state = w_hash_new();
+        w_gc_register_reuse_slot(&w_repl_state);
+    }
     w_hash_set(w_repl_state, name, value);
     return value;
+}
+
+W_RT_INTERNAL void w_rt_gc_scan_os_thread_roots(WGCRootVisitor root_fn, void *ctx) {
+    if (w_repl_state != W_NIL) root_fn(w_repl_state, ctx);
 }
 
 /* Resolve a Tungsten fn by its SOURCE name inside a loaded snippet dylib.

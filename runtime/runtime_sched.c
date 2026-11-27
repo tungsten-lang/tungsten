@@ -152,6 +152,14 @@ static void w_memo_load(WMemoTable *t, const char *sha) {
     fclose(f);
 }
 
+typedef struct WMemoNode {
+    WMemoTable *table;
+    struct WMemoNode *next;
+} WMemoNode;
+
+static pthread_mutex_t g_memo_list_lock = PTHREAD_MUTEX_INITIALIZER;
+static WMemoNode *g_memo_list_head = NULL;
+
 void *w_memo_init(const char *sha) {
     WMemoTable *t = calloc(1, sizeof(WMemoTable));
     t->arity = 0;
@@ -166,6 +174,14 @@ void *w_memo_init(const char *sha) {
         strncpy(t->sha, sha, 16);
         t->sha[16] = '\0';
         w_memo_load(t, sha);
+    }
+    WMemoNode *mn = calloc(1, sizeof(WMemoNode));
+    if (mn) {
+        mn->table = t;
+        pthread_mutex_lock(&g_memo_list_lock);
+        mn->next = g_memo_list_head;
+        g_memo_list_head = mn;
+        pthread_mutex_unlock(&g_memo_list_lock);
     }
 
     return t;
@@ -356,15 +372,15 @@ void w_inspect(WValue v) {
 /* ---- Parallel support (libdispatch / GCD) ---- */
 
 void w_init_parallel(void) {
-    /* No-op: GC removed */
 }
 
 void w_thread_register(void) {
-    /* No-op: GC removed */
+    int anchor = 0;
+    if (__builtin_expect(g_gc_track, 0)) w_gc_thread_enter(&anchor);
 }
 
 void w_thread_unregister(void) {
-    /* No-op: GC removed */
+    w_gc_thread_leave();
 }
 
 /* ---- Thread primitives ---- */
@@ -394,13 +410,8 @@ static void w_mutex_release_owned_by_current_thread(void) {
 
 static void w_thread_mark_stopped(void *arg) {
     WThread *t = (WThread *)arg;
+    w_gc_thread_leave();
     w_mutex_release_owned_by_current_thread();
-    /*
-     * Pooled BigInts and arithmetic arenas are already dead, but their
-     * backing allocations are ordinary TLS pointers.  Return all bignum
-     * buffers to the system when a language thread exits instead of retaining
-     * them until process shutdown.
-     */
     w_rt_release_thread_tls();
     t->alive = 0;
 }
@@ -410,6 +421,7 @@ static void *thread_entry(void *arg) {
 
     /* Each thread gets its own exception stack (__thread) */
     w_exception_stack = NULL;
+    if (__builtin_expect(g_gc_track, 0)) w_gc_thread_enter(&t);
 
     /* Call the closure.  Cancellation bypasses ordinary epilogues, so keep
      * alive? accurate with a cleanup handler as well as on normal return. */
@@ -535,7 +547,9 @@ WValue w_thread_join(WValue thread) {
     }
     WThread *t = (WThread *)w_as_ptr(thread);
     if (!t->joined) {
+        W_GC_BLOCKING_BEGIN();
         pthread_join(t->handle, NULL);
+        W_GC_BLOCKING_END();
         t->joined = 1;
         w_thread_release_snapshot(t);
     }
@@ -595,7 +609,9 @@ WValue w_thread_sleep_ms(int64_t ms) {
     struct timespec ts;
     ts.tv_sec = ms / 1000;
     ts.tv_nsec = (ms % 1000) * 1000000;
+    W_GC_BLOCKING_BEGIN();
     nanosleep(&ts, NULL);
+    W_GC_BLOCKING_END();
     return W_NIL;
 }
 
@@ -625,7 +641,9 @@ WValue __w_sleep_ms(int64_t milliseconds) {
     struct timespec ts;
     ts.tv_sec = ms / 1000;
     ts.tv_nsec = (ms % 1000) * 1000000;
+    W_GC_BLOCKING_BEGIN();
     nanosleep(&ts, NULL);
+    W_GC_BLOCKING_END();
     return W_NIL;
 }
 
@@ -1265,7 +1283,11 @@ int w_socket_park_until(int fd, int events, int64_t deadline_ticks) {
             if (events & W_EVENT_READ)  pfd.events |= POLLIN;
             if (events & W_EVENT_WRITE) pfd.events |= POLLOUT;
             int timeout_ms = w_deadline_timeout_ms(deadline_ticks, 100);
-            return poll(&pfd, 1, timeout_ms) > 0;
+            int r;
+            W_GC_BLOCKING_BEGIN();
+            r = poll(&pfd, 1, timeout_ms);
+            W_GC_BLOCKING_END();
+            return r > 0;
         }
 
         /* Running inside a goroutine — park on the event loop */
@@ -1300,7 +1322,11 @@ int w_socket_park_until(int fd, int events, int64_t deadline_ticks) {
     if (events & W_EVENT_READ)  pfd.events |= POLLIN;
     if (events & W_EVENT_WRITE) pfd.events |= POLLOUT;
     int timeout_ms = w_deadline_timeout_ms(deadline_ticks, 100);
-    return poll(&pfd, 1, timeout_ms) > 0;
+    int r;
+    W_GC_BLOCKING_BEGIN();
+    r = poll(&pfd, 1, timeout_ms);
+    W_GC_BLOCKING_END();
+    return r > 0;
 }
 
 void w_socket_park(int fd, int events) {
@@ -2577,16 +2603,15 @@ WValue w_strbuf_new(WValue cap_val) {
     if (cap < 16) cap = 16;
     WStrBuf *sb = malloc(sizeof(WStrBuf));
     sb->flags = W_STRBUF_FLAG_ASCII;  /* empty buffer starts ASCII */
+    sb->gc_flags = 0;
     sb->data = malloc(cap);
     sb->data[0] = '\0';
     sb->size = 0;
     sb->cap = cap;
+    w_gc_on_strbuf(sb, sizeof(WStrBuf) + (size_t)cap);
     return w_box_ptr(sb, W_SUBTAG_STRBUF);
 }
 
-/* Call-site reuse StringBuffer allocation. Cached hit: reset length=0,
- * data[0]='\0', grow cap if requested > current. Miss: allocate fresh
- * and cache. Caller contract: buffer must not escape the call site. */
 WValue w_strbuf_reuse_or_new(WValue *slot, int64_t cap) {
     WValue v = *slot;
     if (v != W_NIL) {
@@ -2603,12 +2628,15 @@ WValue w_strbuf_reuse_or_new(WValue *slot, int64_t cap) {
     if (cap < 16) cap = 16;
     WStrBuf *sb = malloc(sizeof(WStrBuf));
     sb->flags = W_STRBUF_FLAG_ASCII;  /* empty buffer starts ASCII */
+    sb->gc_flags = 0;
     sb->data = malloc(cap);
     sb->data[0] = '\0';
     sb->size = 0;
     sb->cap = cap;
+    w_gc_on_strbuf(sb, sizeof(WStrBuf) + (size_t)cap);
     v = w_box_ptr(sb, W_SUBTAG_STRBUF);
     *slot = v;
+    w_gc_register_reuse_slot(slot);
     return v;
 }
 
@@ -2736,7 +2764,11 @@ WValue w_string_bytes_view(WValue text) {
     w_str_data(text, inline_buf, &data, &len);
     if (data == inline_buf)
         return w_bytes_from_data((const uint8_t *)inline_buf, (int64_t)len);
-    return w_array_view_raw((uint8_t *)data, 8, (int64_t)len);
+    WValue view = w_array_view_raw((uint8_t *)data, 8, (int64_t)len);
+    if (__builtin_expect(g_gc_track && w_is_heap_str(text), 0)) {
+        w_rt_register_string_view(text, view);
+    }
+    return view;
 }
 
 WValue w_base64_encode_input(WValue data) {
@@ -3334,11 +3366,27 @@ typedef struct WGoroutineUnwind {
 static __thread WValue *g_ctx_locals = NULL;
 static _Atomic int64_t g_ctx_locals_next = 0;
 
+typedef struct WCtxLocalsNode {
+    WValue *slots;
+    struct WCtxLocalsNode *next;
+} WCtxLocalsNode;
+
+static pthread_mutex_t g_ctx_locals_lock = PTHREAD_MUTEX_INITIALIZER;
+static WCtxLocalsNode *g_ctx_locals_head = NULL;
+
 static WValue *w_ctx_locals(void) {
     if (__builtin_expect(g_ctx_locals != NULL, 1)) return g_ctx_locals;
     WValue *a = malloc(sizeof(WValue) * W_CTX_LOCALS_MAX);
     for (int i = 0; i < W_CTX_LOCALS_MAX; i++) a[i] = W_NIL;
     g_ctx_locals = a;
+    WCtxLocalsNode *cn = calloc(1, sizeof(WCtxLocalsNode));
+    if (cn) {
+        cn->slots = a;
+        pthread_mutex_lock(&g_ctx_locals_lock);
+        cn->next = g_ctx_locals_head;
+        g_ctx_locals_head = cn;
+        pthread_mutex_unlock(&g_ctx_locals_lock);
+    }
     return a;
 }
 
@@ -4499,6 +4547,14 @@ static inline void w_chan_wake_locked(WChan *ch) {
  * drives cooperative goroutines at the old 1 ms cadence. Returns 0 when it
  * cannot sleep here (single-threaded, or running on a goroutine), so the
  * caller falls back to the yield/spin path. */
+typedef struct WChanNode {
+    WChan *ch;
+    struct WChanNode *next;
+} WChanNode;
+
+static pthread_mutex_t g_chan_list_lock = PTHREAD_MUTEX_INITIALIZER;
+static WChanNode *g_chan_list_head = NULL;
+
 static int w_chan_native_sleep(WChan *ch, int64_t deadline_ns) {
     if (!g_slab_needs_lock || g_current) return 0;
     int64_t cap_ns = g_mp_scheduler_active ? 100000000LL : 1000000LL;  /* 100 ms / 1 ms */
@@ -4508,6 +4564,7 @@ static int w_chan_native_sleep(WChan *ch, int64_t deadline_ns) {
         if (left <= 0) return 1;
         if (left < wait_ns) wait_ns = left;
     }
+    W_GC_BLOCKING_BEGIN();
     pthread_mutex_lock(&ch->lock);
     if (ch->count == 0 && !ch->closed) {
         ch->sleepers++;
@@ -4525,6 +4582,7 @@ static int w_chan_native_sleep(WChan *ch, int64_t deadline_ns) {
         ch->sleepers--;
     }
     pthread_mutex_unlock(&ch->lock);
+    W_GC_BLOCKING_END();
     return 1;
 }
 
@@ -4552,6 +4610,16 @@ static WValue w_chan_allocate(int64_t cap, int unbounded) {
         pthread_mutex_destroy(&ch->lock);
         free(ch);
         w_raise(w_string("Channel buffer allocation failed"));
+    }
+    if (__builtin_expect(g_gc_track, 0)) {
+        WChanNode *cn = calloc(1, sizeof(WChanNode));
+        if (cn) {
+            cn->ch = ch;
+            pthread_mutex_lock(&g_chan_list_lock);
+            cn->next = g_chan_list_head;
+            g_chan_list_head = cn;
+            pthread_mutex_unlock(&g_chan_list_lock);
+        }
     }
     return w_box_ptr(ch, W_SUBTAG_GENERIC);
 }
@@ -4605,6 +4673,7 @@ enum {
  * idle waiter at ~100k wakeups/s — a worker pool parked on a channel burned whole cores. */
 static void w_chan_idle_sleep(int s) {
     if (s < 16) {
+        w_gc_safepoint();
         sched_yield();
         return;
     }
@@ -4612,7 +4681,9 @@ static void w_chan_idle_sleep(int s) {
     long us = k >= 7 ? 1000 : (10L << k);
     if (us > 1000) us = 1000;
     struct timespec ts = {0, us * 1000L};
+    W_GC_BLOCKING_BEGIN();
     nanosleep(&ts, NULL);
+    W_GC_BLOCKING_END();
 }
 
 /* Keep TLS lookup inside a fresh call: inlining into a retry loop lets the C
@@ -4749,6 +4820,7 @@ static inline WValue w_chan_pair_result(WValue v0, WValue v1) {
     WArray *a = g_chan_pair_arr;
     if (__builtin_expect(!a, 0)) {
         WValue wv = w_array_new_inline(65, 2);
+        if (__builtin_expect(g_gc_track, 0)) w_gc_keep(wv);
         a = w_as_array(wv);
         a->size = 2;
         g_chan_pair_arr = a;
@@ -5150,6 +5222,97 @@ W_RT_INTERNAL void w_rt_socket_park_uring(void) { w_socket_park_uring(); }
 W_RT_INTERNAL int w_rt_fd_set_nonblocking(int fd) { return w_fd_set_nonblocking(fd); }
 W_RT_INTERNAL int64_t w_rt_deadline_ticks_after_ms(int64_t ms) { return w_deadline_ticks_after_ms(ms); }
 W_RT_INTERNAL WValue w_rt_socket_read_string(WString *ws, size_t bytes) { return w_socket_read_string(ws, bytes); }
+
+W_RT_INTERNAL void w_rt_gc_scan_goroutines(WGCRootVisitor root_fn, WGCRangeVisitor range_fn, void *ctx) {
+    /* 1. Signal handler closures */
+    for (int i = 0; i < MAX_SIGNAL_HANDLERS; i++) {
+        if (signal_closures[i] != W_NIL) root_fn(signal_closures[i], ctx);
+    }
+
+    /* 2. Memoization tables */
+    if (pthread_mutex_trylock(&g_memo_list_lock) == 0) {
+        for (WMemoNode *mn = g_memo_list_head; mn; mn = mn->next) {
+            WMemoTable *t = mn->table;
+            if (!t || !t->keys || !t->values) continue;
+            int a = t->arity > 0 ? t->arity : 1;
+            for (int i = 0; i < t->cap; i++) {
+                if (t->keys[i * a] == W_UNDEF) continue;
+                for (int j = 0; j < a; j++) root_fn(t->keys[i * a + j], ctx);
+                root_fn(t->values[i], ctx);
+            }
+        }
+        pthread_mutex_unlock(&g_memo_list_lock);
+    }
+
+    /* 3. ThreadLocal context slots */
+    int64_t nctx = atomic_load_explicit(&g_ctx_locals_next, memory_order_acquire);
+    if (nctx > 0 && pthread_mutex_trylock(&g_ctx_locals_lock) == 0) {
+        if (nctx > W_CTX_LOCALS_MAX) nctx = W_CTX_LOCALS_MAX;
+        for (WCtxLocalsNode *cn = g_ctx_locals_head; cn; cn = cn->next) {
+            for (int64_t i = 0; i < nctx; i++) {
+                if (cn->slots[i] != W_NIL) root_fn(cn->slots[i], ctx);
+            }
+        }
+        pthread_mutex_unlock(&g_ctx_locals_lock);
+    }
+
+    /* 4. Live buffered/waiting Channel values */
+    if (pthread_mutex_trylock(&g_chan_list_lock) == 0) {
+        for (WChanNode *cn = g_chan_list_head; cn; cn = cn->next) {
+            WChan *ch = cn->ch;
+            if (!ch) continue;
+            if (pthread_mutex_trylock(&ch->lock) == 0) {
+                if (ch->buffer != NULL && ch->count > 0) {
+                    if (ch->cap == 0) {
+                        root_fn(ch->buffer[0], ctx);
+                    } else {
+                        int64_t idx = ch->head;
+                        for (int64_t k = 0; k < ch->count; k++) {
+                            root_fn(ch->buffer[idx], ctx);
+                            idx++;
+                            if (idx == ch->cap) idx = 0;
+                        }
+                    }
+                }
+                for (WChanWaiter *w = ch->send_waitq; w; w = w->next) root_fn(w->val, ctx);
+                for (WChanWaiter *w = ch->recv_waitq; w; w = w->next) root_fn(w->val, ctx);
+                pthread_mutex_unlock(&ch->lock);
+            }
+        }
+        pthread_mutex_unlock(&g_chan_list_lock);
+    }
+
+    /* 5. Spawned Goroutines (parked contexts, stacks, closures, results) */
+    if (pthread_mutex_trylock(&g_debug_goroutines_lock) == 0) {
+        size_t stk_sz = g_stack_size();
+        for (int i = 0; i < g_debug_goroutine_count; i++) {
+            WGoroutine *g = g_debug_goroutines[i];
+            if (!g) continue;
+            GState st = atomic_load_explicit(&g->state, memory_order_acquire);
+            if (st == G_DEAD) continue;
+            if (g->closure != W_NIL) root_fn(g->closure, ctx);
+            if (g->result != W_NIL)  root_fn(g->result, ctx);
+            range_fn(&g->ctx, (const uint8_t *)&g->ctx + sizeof(WContext), ctx);
+            if (g->stack_base != NULL) {
+                const uint8_t *stk_lo = (const uint8_t *)g->stack_base;
+                const uint8_t *stk_hi = stk_lo + stk_sz;
+#if defined(__aarch64__)
+                uintptr_t gsp = (uintptr_t)g->ctx.sp;
+#elif defined(__x86_64__)
+                uintptr_t gsp = (uintptr_t)g->ctx.rsp;
+#else
+                uintptr_t gsp = 0;
+#endif
+                if (st != G_RUNNING && gsp >= (uintptr_t)stk_lo && gsp < (uintptr_t)stk_hi) {
+                    range_fn((const void *)gsp, stk_hi, ctx);
+                } else {
+                    range_fn(stk_lo, stk_hi, ctx);
+                }
+            }
+        }
+        pthread_mutex_unlock(&g_debug_goroutines_lock);
+    }
+}
 
 #ifndef W_RUNTIME_UNITY_INCLUDE
 #undef die

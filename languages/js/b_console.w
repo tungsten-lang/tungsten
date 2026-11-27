@@ -118,10 +118,16 @@ in JS
           if c == 115
             sb.append(js_string?(a) ? a : js_console_inspect(a, 1, []))
           elsif c == 100 || c == 105
-            n2 = js_to_number(a.is_a?(JS:Symbol) ? js_nan() : a)
-            sb.append(js_number_to_s(c == 105 || true ? js_math_trunc(n2) : n2))
+            if a.is_a?(JS:BigIntValue)
+              sb.append(js_bigint_to_string(a, nil) + "n")
+            else
+              n2 = js_to_number(a.is_a?(JS:Symbol) ? js_nan() : a)
+              sb.append(js_number_to_s(c == 105 || true ? js_math_trunc(n2) : n2))
           elsif c == 102
-            sb.append(js_number_to_s(js_to_number(a)))
+            if a.is_a?(JS:BigIntValue)
+              sb.append("NaN")
+            else
+              sb.append(js_number_to_s(js_to_number(a.is_a?(JS:Symbol) ? js_nan() : a)))
           elsif c == 99
             sb.append("")
           else

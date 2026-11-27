@@ -772,26 +772,33 @@ JT_SRA_RX   = 5   # scalar-replaced non-escaping RegExp exec match result
       return li >= 0 ? @info.types[li] : JT_ANY
     if k == :binary
       op = e.str
-      return JT_I32 if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
-      return JT_F64 if op == ">>>" || op == "/"
+      return JT_F64 if op == ">>>"
       ta = expr_type(e.a)
       tb = expr_type(e.b)
-      if op == "-" || op == "*"
-        return JT_F64
+      both_num = (ta == JT_I32 || ta == JT_F64) && (tb == JT_I32 || tb == JT_F64)
+      any_lit_num = e.a.kind == :num || e.b.kind == :num
+      if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
+        return (both_num || any_lit_num) ? JT_I32 : JT_ANY
+      if op == "-" || op == "*" || op == "/"
+        return (both_num || any_lit_num) ? JT_F64 : JT_ANY
       if op == "+" || op == "%"
         if op == "+" && ta == JT_I32 && jit_small_int_lit?(e.b, 4095) && e.b.a.to_i >= 0
           return JT_I32
-        return JT_F64 if (ta == JT_I32 || ta == JT_F64) && (tb == JT_I32 || tb == JT_F64)
+        return JT_F64 if both_num
       return JT_ANY
     if k == :unary
-      return JT_I32 if e.str == "~"
-      if e.str == "-" || e.str == "+"
+      if e.str == "~"
+        t = expr_type(e.a)
+        return (t == JT_I32 || t == JT_F64) ? JT_I32 : JT_ANY
+      if e.str == "+"
+        return JT_F64
+      if e.str == "-"
         t = expr_type(e.a)
         return JT_F64 if t == JT_I32 || t == JT_F64
       return JT_ANY
     if k == :update
       li = local_idx(e.a)
-      return li >= 0 ? @info.types[li] : JT_F64
+      return li >= 0 ? @info.types[li] : JT_ANY
     if k == :member && !e.has?(F_COMPUTED)
       bli = local_idx(e.a)
       if bli >= 0 && @info.sra_objs[bli] != nil
@@ -828,7 +835,12 @@ JT_SRA_RX   = 5   # scalar-replaced non-escaping RegExp exec match result
         sc = @info.sra_clos[li]
         re = jit_inline_return_expr(sc.inner_jf)
         if re != nil && re.kind == :binary && (re.str == "+" || re.str == "-" || re.str == "*")
-          return JT_F64
+          all_num = true
+          sc.cap_slots.each ->(cs) all_num = false if @info.types[cs] != JT_I32 && @info.types[cs] != JT_F64
+          e.list.each ->(ae)
+            at = expr_type(ae)
+            all_num = false if at != JT_I32 && at != JT_F64
+          return JT_F64 if all_num
     JT_ANY
 
   -> type_join(a, b)
@@ -889,7 +901,8 @@ JT_SRA_RX   = 5   # scalar-replaced non-escaping RegExp exec match result
             elsif wk == :compound
               op = wn.str
               if op == "|=" || op == "&=" || op == "^=" || op == "<<=" || op == ">>="
-                wt = ty == JT_I32 ? JT_I32 : JT_F64
+                rt = expr_type(wn.b)
+                wt = (rt == JT_I32 || rt == JT_F64) ? (ty == JT_I32 ? JT_I32 : JT_F64) : JT_ANY
               elsif op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%="
                 rt = expr_type(wn.b)
                 wt = (rt == JT_I32 || rt == JT_F64) ? JT_F64 : JT_ANY

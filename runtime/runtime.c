@@ -28571,27 +28571,23 @@ WValue w_str_concat(WValue a, WValue b) {
     r->type = W_TYPE_ROPE;
     r->flags = (w_string_ascii_p(a) && w_string_ascii_p(b))
         ? W_ROPE_FLAG_ASCII : 0;
+    r->gc_flags = 0;
     r->left = a;
     r->right = b;
     r->total_len = total;
     r->flat = 0;
+    w_gc_on_rope(r);
     return w_box_ptr(r, W_SUBTAG_GENERIC);
 }
 
 /* Concat variants that FREE one operand when the result did not retain
- * it. The compiler emits these only for operands it proved fresh and
- * anonymous (an unnamed subexpression temp whose producing instruction
- * guarantees an independent allocation, e.g. w_int_to_s, or the previous
- * link of an interpolation concat chain). Retention analysis is exact:
- * every w_str_concat result is either inline/slab/heap-FLAT storage
- * built by copying (never aliasing an operand's buffer) or a rope that
- * references BOTH operands — so "result is not a rope and not the
- * operand itself" proves the operand is dead. Non-heap operands
- * (inline/slab/rope) are left alone. */
+ * it. */
 WValue w_str_concat_free_rhs(WValue a, WValue b) {
     WValue r = w_str_concat(a, b);
-    if (r != b && !w_is_rope(r) && w_is_heap_str(b))
-        free(w_as_heap_str(b));
+    if (r != b && !w_is_rope(r) && w_is_heap_str(b)) {
+        WString *wb = w_as_heap_str(b);
+        if (!(wb->gc_flags & W_GC_TRACKED)) free(wb);
+    }
     return r;
 }
 
@@ -28621,7 +28617,7 @@ WValue w_str_concat_own(WValue a, WValue b, WValue own_mask) {
     WValue r;
     if (total <= W_SLAB_SSO2_MAX) {
         r = w_str_concat(a, b);
-    } else if (own_a && w_is_heap_str(a) && a != b) {
+    } else if (own_a && w_is_heap_str(a) && a != b && !(w_as_heap_str(a)->gc_flags & W_GC_TRACKED)) {
         if (al > W_STRING_LEN_MASK || bl > W_STRING_LEN_MASK - al)
             die("string exceeds 31-bit byte length limit");
         int ascii = w_string_ascii_p(a) && w_string_ascii_p(fb);
@@ -28630,7 +28626,7 @@ WValue w_str_concat_own(WValue a, WValue b, WValue own_mask) {
         memcpy(ws->data + al, bd, bl);
         ws->data[total] = '\0';
         r = w_box_heap_str(ws);
-        if (own_b && r != b && w_is_heap_str(b)) free(w_as_heap_str(b));
+        if (own_b && r != b && w_is_heap_str(b) && !(w_as_heap_str(b)->gc_flags & W_GC_TRACKED)) free(w_as_heap_str(b));
         return r;
     } else {
         if (al > W_STRING_LEN_MASK || bl > W_STRING_LEN_MASK - al)
@@ -28643,14 +28639,14 @@ WValue w_str_concat_own(WValue a, WValue b, WValue own_mask) {
         ws->data[total] = '\0';
         r = w_box_heap_str(ws);
     }
-    if (own_a && r != a && w_is_heap_str(a)) free(w_as_heap_str(a));
-    if (own_b && r != b && w_is_heap_str(b)) free(w_as_heap_str(b));
+    if (own_a && r != a && w_is_heap_str(a) && !(w_as_heap_str(a)->gc_flags & W_GC_TRACKED)) free(w_as_heap_str(a));
+    if (own_b && r != b && w_is_heap_str(b) && !(w_as_heap_str(b)->gc_flags & W_GC_TRACKED)) free(w_as_heap_str(b));
     return r;
 }
 
 WValue w_str_concat_free_lhs(WValue a, WValue b) {
     WValue r = w_str_concat(a, b);
-    if (r != a && !w_is_rope(r) && w_is_heap_str(a))
+    if (r != a && !w_is_rope(r) && w_is_heap_str(a) && !(w_as_heap_str(a)->gc_flags & W_GC_TRACKED))
         free(w_as_heap_str(a));
     return r;
 }
@@ -28745,7 +28741,7 @@ WValue w_str_concat_i64(WValue a, int64_t n, WValue own_a) {
     }
     if (al > W_STRING_LEN_MASK || bl > W_STRING_LEN_MASK - al)
         die("string exceeds 31-bit byte length limit");
-    if (own_a && w_is_heap_str(a)) {
+    if (own_a && w_is_heap_str(a) && !(w_as_heap_str(a)->gc_flags & W_GC_TRACKED)) {
         int ascii = w_string_ascii_p(a);
         WString *ws = (WString *)realloc(w_as_heap_str(a), sizeof(WString) + total + 1);
         w_heap_string_set_meta(ws, (uint32_t)total, ascii);
@@ -29022,7 +29018,7 @@ WValue w_array_new_empty(void) {
         arr->flags = W_FLAG_OWNED;  /* typed-style w_array_push checks this */
         arr->ebits = 65;            /* w64 — recycled arrays still carry the polymorphic ebits */
         arr->_pad[0] = 0;
-        arr->_pad[1] = 0;
+        arr->gc_flags = 0;
         return v;
     }
     WArray *arr = malloc(sizeof(WArray));
@@ -29032,9 +29028,10 @@ WValue w_array_new_empty(void) {
     arr->flags = W_FLAG_OWNED;    /* heap-allocated → owned, push/grow allowed */
     arr->ebits = 65;              /* polymorphic arrays carry ebits=w64 so the */
     arr->_pad[0] = 0;             /* typed-array machinery can drive their reads through */
-    arr->_pad[1] = 0;             /* the same `slots` ptr without a struct re-cast. */
+    arr->gc_flags = 0;            /* the same `slots` ptr without a struct re-cast. */
     w_allocprof(W_ALLOCPROF_ARR, sizeof(WValue) * arr->cap);
     arr->slots = malloc(sizeof(WValue) * arr->cap);
+    w_gc_on_array(arr, sizeof(WArray) + sizeof(WValue) * (size_t)arr->cap);
     return w_box_array(arr);
 }
 
@@ -29183,8 +29180,7 @@ void w_array_recycle_public(WValue v) {
     WArray *arr = w_as_array(v);
     /* Inline payload lifetime is tied to this header; pool reset paths may
      * retag or resize buffers independently, so keep inline arrays out. */
-    if (arr->flags & W_FLAG_INLINE) return;
-    if (arr->flags & W_POOL_FLAG_POOLED) return;
+    if (arr->flags & (W_FLAG_INLINE | W_POOL_FLAG_POOLED | W_FLAG_GC_NO_POOL)) return;
     if (g_array_pool_count < ARRAY_POOL_MAX) {
         arr->flags |= W_POOL_FLAG_POOLED;
         g_array_pool[g_array_pool_count++] = v;
@@ -29215,7 +29211,7 @@ WValue w_hash_recycle_or_new(void) {
 void w_hash_recycle(WValue v) {
     if (!w_is_hash(v)) return;
     WHash *hash = (WHash *)w_as_ptr(v);
-    if (hash->flags & (W_HASH_FLAG_POOLED | W_HASH_FLAG_FROZEN)) return;
+    if (hash->flags & (W_HASH_FLAG_POOLED | W_HASH_FLAG_FROZEN | W_FLAG_GC_NO_POOL)) return;
     if (g_hash_pool_count < ARRAY_POOL_MAX) {
         hash->flags |= W_HASH_FLAG_POOLED;
         g_hash_pool[g_hash_pool_count++] = v;
@@ -29267,8 +29263,7 @@ WValue w_array_recycle_or_new(int64_t element_bits, int64_t cap) {
 void w_array_recycle(WValue v) {
     if (!w_is_array(v)) return;
     WArray *a = w_as_array(v);
-    if (a->flags & W_FLAG_INLINE) return;
-    if (a->flags & W_POOL_FLAG_POOLED) return;
+    if (a->flags & (W_FLAG_INLINE | W_POOL_FLAG_POOLED | W_FLAG_GC_NO_POOL)) return;
     int bucket = bits_to_bucket(a->ebits);
     if (bucket < 0) return;
     if (g_array_typed_pool_count[bucket] < ARRAY_POOL_MAX) {
@@ -29289,6 +29284,7 @@ WValue w_strbuf_recycle_or_new(int64_t cap) {
         WValue v = g_strbuf_pool[--g_strbuf_pool_count];
         WStrBuf *sb = (WStrBuf *)w_as_ptr(v);
         sb->flags = W_STRBUF_FLAG_ASCII;
+        sb->gc_flags = 0;
         sb->size = 0;
         sb->data[0] = '\0';
         if (cap > sb->cap) {
@@ -29301,17 +29297,19 @@ WValue w_strbuf_recycle_or_new(int64_t cap) {
     if (cap < 16) cap = 16;
     WStrBuf *sb = malloc(sizeof(WStrBuf));
     sb->flags = W_STRBUF_FLAG_ASCII;  /* empty buffer starts ASCII */
+    sb->gc_flags = 0;
     sb->data = malloc(cap);
     sb->data[0] = '\0';
     sb->size = 0;
     sb->cap = cap;
+    w_gc_on_strbuf(sb, sizeof(WStrBuf) + (size_t)cap);
     return w_box_ptr(sb, W_SUBTAG_STRBUF);
 }
 
 void w_strbuf_recycle(WValue v) {
     if (!w_is_strbuf(v)) return;
     WStrBuf *sb = (WStrBuf *)w_as_ptr(v);
-    if (sb->flags & W_POOL_FLAG_POOLED) return;
+    if (sb->flags & (W_POOL_FLAG_POOLED | W_FLAG_GC_NO_POOL)) return;
     if (g_strbuf_pool_count < ARRAY_POOL_MAX) {
         sb->flags |= W_POOL_FLAG_POOLED;
         g_strbuf_pool[g_strbuf_pool_count++] = v;
@@ -29335,6 +29333,7 @@ WValue w_array_reuse_or_new_empty(WValue *slot) {
     }
     v = w_array_new_empty();
     *slot = v;
+    w_gc_register_reuse_slot(slot);
     return v;
 }
 
@@ -31719,6 +31718,7 @@ WValue w_hash_new(void) {
     w_allocprof(W_ALLOCPROF_HASH, (long long)sizeof(WHash));
     WHash *hash = calloc(1, sizeof(WHash));
     w_hash_allocate_storage(hash, 8);
+    w_gc_on_hash(hash, sizeof(WHash) + 160u);
     return w_box_ptr(hash, W_SUBTAG_HASH);
 }
 
@@ -31729,6 +31729,7 @@ static WValue w_hash_new_with_cap(uint32_t expected_count) {
     w_allocprof(W_ALLOCPROF_HASH, (long long)sizeof(WHash));
     WHash *hash = calloc(1, sizeof(WHash));
     w_hash_allocate_storage(hash, cap);
+    w_gc_on_hash(hash, sizeof(WHash) + (size_t)cap * 16u);
     return w_box_ptr(hash, W_SUBTAG_HASH);
 }
 
@@ -31768,6 +31769,7 @@ WValue w_hash_reuse_or_new(WValue *slot) {
         WHash *hash = (WHash *)w_as_ptr(v);
         if (hash->flags & W_HASH_FLAG_FROZEN) {
             *slot = w_hash_new();
+            w_gc_register_reuse_slot(slot);
             return *slot;
         }
         w_hash_reset(hash);
@@ -31775,6 +31777,7 @@ WValue w_hash_reuse_or_new(WValue *slot) {
     }
     v = w_hash_new();
     *slot = v;
+    w_gc_register_reuse_slot(slot);
     return v;
 }
 
@@ -31819,14 +31822,20 @@ WValue w_hash_reuse_and_drain_or_new(WValue *slot) {
     }
     v = w_hash_new();
     *slot = v;
+    w_gc_register_reuse_slot(slot);
     return v;
 }
 
 WValue w_hash_set(WValue hash_val, WValue key, WValue val) {
     WHash *hash = as_hash(hash_val);
-    if (hash->flags & W_HASH_FLAG_FROZEN) {
-        w_raise_error_named("FrozenError", "cannot modify frozen Hash");
-        return W_NIL;
+    if (__builtin_expect(hash->flags & (W_HASH_FLAG_FROZEN | W_HASH_FLAG_OLD_CLEAN), 0)) {
+        if (hash->flags & W_HASH_FLAG_FROZEN) {
+            w_raise_error_named("FrozenError", "cannot modify frozen Hash");
+            return W_NIL;
+        }
+#ifndef W_COMPILE_NO_GC
+        w_gc_write_barrier_hash_slow(hash);
+#endif
     }
     /* Match the language/Ruby-host mutation contract: values on live keys may
      * change during iteration, but a new key would extend/rebuild the dense
@@ -32634,19 +32643,15 @@ int w_class_ivar_offset_wv(WValue klass_val, WValue name) {
 WValue w_object_new(WValue klass_val) {
     WClass *klass = as_class(klass_val);
     int slots = klass->ivar_count > 8 ? klass->ivar_count : 8;
-    WObject *obj = calloc(1, sizeof(WObject) + sizeof(WValue) * slots);
+    size_t bytes = sizeof(WObject) + sizeof(WValue) * (size_t)slots;
+    WObject *obj = calloc(1, bytes);
     obj->class_id = klass->class_id;
     obj->ivar_count = (uint8_t)slots;
     obj->flags = 0;
+    w_gc_on_object(obj, bytes);
     return w_box_ptr(obj, W_SUBTAG_INSTANCE);
 }
 
-/* Automatically recycled source-object shells. The ownership pass selects
- * this path only when the exact guarded constructor result cannot escape and
- * inserts w_object_recycle at the proven end of its lifetime. The common
- * eight-slot shape gets a bounded TLS stack, so nested/reentrant lifetimes pop
- * distinct shells and return them in LIFO order. Larger uncommon layouts keep
- * the ordinary calloc/free path until a size-bucket policy is justified. */
 #define OBJECT_POOL_MAX 16
 static __thread WValue g_object_pool[OBJECT_POOL_MAX];
 static __thread int g_object_pool_count = 0;
@@ -32661,7 +32666,7 @@ WValue w_object_recycle_or_new(WValue klass_val) {
         obj->class_id = klass->class_id;
         obj->ivar_count = 8;
         obj->flags = 0;
-        obj->_reserved = 0;
+        memset(obj->_reserved, 0, 4);
         memset(obj->ivars, 0, 8 * sizeof(WValue));
         return value;
     }
@@ -32672,7 +32677,7 @@ WValue w_object_recycle_or_new(WValue klass_val) {
 void w_object_recycle(WValue value) {
     if (!w_is_instance(value)) return;
     WObject *obj = (WObject *)w_as_ptr(value);
-    if (obj->flags & (W_OBJ_FLAG_FROZEN | W_OBJ_FLAG_POOLED)) return;
+    if (obj->flags & (W_OBJ_FLAG_FROZEN | W_OBJ_FLAG_POOLED | W_FLAG_GC_NO_POOL)) return;
     if (obj->ivar_count == 8 && g_object_pool_count < OBJECT_POOL_MAX) {
         obj->flags |= W_OBJ_FLAG_POOLED;
         g_object_pool[g_object_pool_count++] = value;
@@ -33174,6 +33179,11 @@ static WClosure *as_closure(WValue v) {
  * stays valid after the creating frame returns. 16 zeroed bytes covers
  * every slot type (i64/double/i128). */
 void *w_closure_cell_new(void) {
+    if (__builtin_expect(g_gc_track, 0)) {
+        void *cell = calloc(1, 32);
+        w_gc_on_cell(cell);
+        return cell;
+    }
     return calloc(1, 16);
 }
 
@@ -33189,6 +33199,7 @@ WValue w_closure_new(void *fn, WValue *captures, int count) {
         cl->captures = captures;
     }
     cl->capture_count = count;
+    w_gc_on_closure(cl, sizeof(WClosure) + (count > 0 ? sizeof(WValue) * (size_t)count : 0));
     return w_box_ptr(cl, W_SUBTAG_CLOSURE);
 }
 
@@ -42279,6 +42290,7 @@ void w_value_free(WValue v) {
     }
     if (w_is_heap_str(v)) {
         WString *ws = w_as_heap_str(v);
+        if (ws->gc_flags & W_GC_TRACKED) return;
         /* Park small blocks for the decimal formatters instead of freeing:
          * see w_string_small_fresh.  One slot per thread; an occupied slot
          * means a plain free, so this is at most a TLS load + two compares
@@ -42291,21 +42303,10 @@ void w_value_free(WValue v) {
         free(ws);
         return;
     }
-    /* Array (W_SUBTAG_ARRAY). w_array_new mints calloc(WArray) + calloc(slots)
-     * with flags=W_FLAG_OWNED — a fresh, unaliased allocation the compiler
-     * hands us only when escape analysis proved it dead. The `slots` pointer,
-     * however, is BORROWED for several array shapes and must not be free()d:
-     *   - W_FLAG_VIEW         → slots aliases another array's buffer
-     *   - W_FLAG_PAGE_ALIGNED → slots is an mmap region (needs munmap, not free)
-     *   - W_FLAG_BIG          → BigArray-tier layout; different lifetime/struct
-     *   - W_FLAG_POOLED       → the array is live in a recycle pool (g_array_*);
-     *                           freeing it would corrupt the pool. Skip entirely.
-     * So: bail on POOLED/BIG; release owned standalone slots with free or
-     * munmap according to their allocation flag, then free the header. */
     if (w_is_array(v)) {
         WArray *arr = w_as_array(v);
         uint8_t fl = arr->flags;
-        if (fl & (W_FLAG_POOLED | W_FLAG_BIG)) return;
+        if (fl & (W_FLAG_POOLED | W_FLAG_BIG | W_FLAG_GC_NO_POOL)) return;
         if (w_rt_array_has_views(v)) return;
         if (fl == W_FLAG_OWNED && w_arr_park == NULL && arr->cap <= W_ARR_PARK_MAX_CAP) {
             w_arr_park = arr;
@@ -42315,63 +42316,51 @@ void w_value_free(WValue v) {
         free(arr);
         return;
     }
-    /* Hash (W_SUBTAG_HASH). w_hash_new calloc's the WHash plus ONE storage
-     * block (w_hash_allocate_storage) whose base is keys — freeing keys
-     * frees values and index with it; both are private to the hash. Freed WValues inside are NOT recursed into — they may be live
-     * elsewhere, exactly like closure captures below. Bail when the pool
-     * still holds it (W_HASH_FLAG_POOLED) or it was frozen for sharing.
-     * History: this branch was a deliberate no-op for a while — the
-     * ownership pass marked a constructor-stored hash non-escaped
-     * (:ivar_set_idx had no mark_escapes arm) and freeing it was a UAF.
-     * That hole and its siblings (:phi_i64, :store_cvar, view/inline
-     * container stores, cleanup/recycle pushes) are closed in
-     * compiler/lib/ownership.w, gated by spec/compiler/
-     * hash_free_escape_spec.w + ownership_phi_escape_spec.w and the
-     * stage-2 self-host. */
     if (w_is_hash(v)) {
         WHash *h = (WHash *)w_as_ptr(v);
-        if (h->flags & (W_HASH_FLAG_POOLED | W_HASH_FLAG_FROZEN)) return;
+        if (h->flags & (W_HASH_FLAG_POOLED | W_HASH_FLAG_FROZEN | W_FLAG_GC_NO_POOL)) return;
         free(h->keys);  /* storage-block base: values and index live inside */
         free(h);
         return;
     }
-    /* StringBuffer (W_SUBTAG_STRBUF). w_strbuf_new / w_strbuf_recycle_or_new
-     * malloc(WStrBuf) + malloc(data); `data` is always a private heap buffer
-     * (append reallocs it in place). Never free one parked in the recycle pool
-     * (W_POOL_FLAG_POOLED) — the pool still holds it. */
     if (w_is_strbuf(v)) {
         WStrBuf *sb = (WStrBuf *)w_as_ptr(v);
-        if (sb->flags & W_POOL_FLAG_POOLED) return;
+        if (sb->flags & (W_POOL_FLAG_POOLED | W_FLAG_GC_NO_POOL)) return;
         free(sb->data);
         free(sb);
         return;
     }
-    /* Closure (W_SUBTAG_CLOSURE). w_closure_new calloc(WClosure) and, when it
-     * has captures, calloc's a PRIVATE copy of the capture array (see
-     * heap_caps). We free that array + the struct — but NOT the captured
-     * WValues themselves: those may still be live elsewhere, and this function
-     * never recurses. When capture_count == 0 the `captures` pointer is a
-     * borrowed/NULL argument the closure never owns, so leave it. */
     if (w_is_closure(v)) {
         WClosure *cl = (WClosure *)w_as_ptr(v);
+        if (cl->gc_flags & W_GC_TRACKED) return;
         if (cl->capture_count > 0) free(cl->captures);
         free(cl);
         return;
     }
-    /* Source-class instance (W_SUBTAG_INSTANCE). w_object_new is ONE calloc —
-     * header plus inline ivar slots — and nothing else ever owns the block,
-     * so the header is the whole allocation. Ivar VALUES are not recursed
-     * into: the compiler marked them escaped when the initializer stored
-     * them, so they may be live elsewhere. The compiler hands an instance
-     * here only when the guarded `Cls.new` construct arm produced it and
-     * its initializer provably never stored `self` (ownership.w
-     * construct_producer_class). A frozen instance was frozen for sharing
-     * across goroutines — leave it alone, like the frozen-hash bail above. */
     if (w_is_instance(v)) {
         WObject *obj = (WObject *)w_as_ptr(v);
-        if (obj->flags & (W_OBJ_FLAG_FROZEN | W_OBJ_FLAG_POOLED)) return;
+        if (obj->flags & (W_OBJ_FLAG_FROZEN | W_OBJ_FLAG_POOLED | W_FLAG_GC_NO_POOL)) return;
         free(obj);
         return;
+    }
+}
+
+W_RT_INTERNAL void w_rt_gc_scan_runtime_globals(WGCRootVisitor root_fn, void *ctx) {
+    for (uint16_t cid = 0; cid < g_next_class_id; cid++) {
+        WClass *kl = g_class_table[cid];
+        if (!kl) continue;
+        for (int i = 0; i < kl->ivar_count; i++) {
+            root_fn(kl->ivar_names[i], ctx);
+        }
+        for (int i = 0; i < kl->method_capacity; i++) {
+            if (kl->methods && kl->methods[i].name != 0) root_fn(kl->methods[i].name, ctx);
+        }
+        for (int i = 0; i < kl->static_method_capacity; i++) {
+            if (kl->static_methods && kl->static_methods[i].name != 0) root_fn(kl->static_methods[i].name, ctx);
+        }
+    }
+    for (int i = 0; i < W_KWARGS_MAX_SLOTS; i++) {
+        if (g_kwargs_scratch[i] != 0) root_fn(g_kwargs_scratch[i], ctx);
     }
 }
 

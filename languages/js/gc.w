@@ -139,6 +139,7 @@ JS_GC_BACKEDGE_ON = [Env.get("BLADE_JS_GC_BACKEDGE", "") == "1"]
       while stack.size > 0
         js_gc_trace(stack.pop, marks, stack, live_wms)
     ccall("w_value_free_w", heap_keys)
+  mark_end = clock() * ~1000.0
   # Partition heap: live objects get marks[vk] = 2 (deduplicated); dead objects get marks[vk] = false!
   has_weak = live_wms.size > 0 || JS_GC_WEAK_REFS.size > 0 || JS_GC_FIN_REGS.size > 0 || JS_AEXT_KEEP.size > 0 || JS_ROOT_KEEP.size > 0
   live = []
@@ -277,12 +278,15 @@ JS_GC_BACKEDGE_ON = [Env.get("BLADE_JS_GC_BACKEDGE", "") == "1"]
   ccall("w_value_free_w", live_wms)
   ccall("w_value_free_w", marks)
   ccall("w_value_free_w", stack)
-  dt = (clock() * ~1000.0 - t0).to_i
+  finish = clock() * ~1000.0
+  dt = (finish - t0).to_i
   JS_GC_STATS[0] += 1
   JS_GC_STATS[1] += freed
   JS_GC_STATS[2] = dt
   JS_GC_STATS[3] = live_n
   JS_GC_NEXT[0] = live_n + (live_n > JS_GC_BASE[0] ? live_n : JS_GC_BASE[0])
+  observer = JS_GC_OBSERVER[0]
+  observer.call(why, [((finish - t0) * ~1000.0).round, ((mark_end - t0) * ~1000.0).round, ((finish - mark_end) * ~1000.0).round, live_n, freed]) if observer != nil
   ccall("w_eputs", "\[jsn gc " + why + "] freed " + freed.to_s + " live " + live_n.to_s + " in " + dt.to_s + " ms") if JS_GC_LOG[0]
   nil
 

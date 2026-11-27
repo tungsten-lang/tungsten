@@ -46,7 +46,8 @@
   - data (WArray)
       u8    flags
       u8    ebits
-      u8[2] _pad
+      u8    _pad
+      u8    gc_flags
       u32   start
       u32   size
       u32   cap

@@ -420,6 +420,116 @@ W_RT_INTERNAL extern __thread WCleanupEntry *g_cleanup_stack;
 W_RT_INTERNAL extern __thread int g_cleanup_top;
 #endif
 
+/* ---- Internal GC hooks (zero-cost predicted-not-taken when g_gc_track == 0) ---- */
+enum {
+    W_GC_KIND_NONE        = 0,
+    W_GC_KIND_OBJECT      = 1,
+    W_GC_KIND_ARRAY       = 2,
+    W_GC_KIND_HASH        = 3,
+    W_GC_KIND_CLOSURE     = 4,
+    W_GC_KIND_CELL        = 5,
+    W_GC_KIND_STRING      = 6,
+    W_GC_KIND_STRBUF      = 7,
+    W_GC_KIND_ROPE        = 8,
+    W_GC_KIND_CHAN        = 9,
+    W_GC_KIND_SMALL_ARRAY = 10,
+    W_GC_KIND_BIG_ARRAY   = 11
+};
+
+typedef void (*WGCRootVisitor)(WValue val, void *ctx);
+typedef void (*WGCRangeVisitor)(const void *lo, const void *hi, void *ctx);
+
+void w_gc_register_slow(void *ptr, uint8_t kind, size_t bytes) W_GC_COLD_SLOW;
+void w_gc_write_barrier_hash_slow(WHash *h) W_GC_COLD_SLOW;
+void w_gc_register_reuse_slot_slow(WValue *slot) W_GC_COLD_SLOW;
+void w_gc_safepoint_slow(void) W_GC_COLD_SLOW;
+void w_gc_thread_enter(void *stack_anchor);
+void w_gc_thread_leave(void);
+void w_gc_blocking_enter_slow(jmp_buf *jb, void *sp_anchor);
+void w_gc_blocking_leave_slow(void);
+int  w_gc_is_live_marked(WValue v);
+
+/* Runtime subsystem root/view scanners called by runtime_gc.c during STW mark */
+W_RT_INTERNAL void w_rt_gc_scan_goroutines(WGCRootVisitor root_fn, WGCRangeVisitor range_fn, void *ctx);
+W_RT_INTERNAL int  w_rt_gc_propagate_views(WGCRootVisitor mark_fn, void *ctx);
+W_RT_INTERNAL void w_rt_gc_prune_views(void);
+W_RT_INTERNAL void w_rt_gc_scan_runtime_globals(WGCRootVisitor root_fn, void *ctx);
+W_RT_INTERNAL void w_rt_gc_scan_os_thread_roots(WGCRootVisitor root_fn, void *ctx);
+W_RT_INTERNAL void w_rt_register_string_view(WValue str_parent, WValue view);
+
+#ifdef W_COMPILE_NO_GC
+static inline void w_gc_on_object(WObject *o, size_t bytes)       { (void)o; (void)bytes; }
+static inline void w_gc_on_array(WArray *a, size_t bytes)         { (void)a; (void)bytes; }
+static inline void w_gc_on_hash(WHash *h, size_t bytes)           { (void)h; (void)bytes; }
+static inline void w_gc_on_closure(WClosure *cl, size_t bytes)    { (void)cl; (void)bytes; }
+static inline void w_gc_on_cell(void *cell)                       { (void)cell; }
+static inline void w_gc_on_string(WString *ws, size_t bytes)      { (void)ws; (void)bytes; }
+static inline void w_gc_on_strbuf(WStrBuf *sb, size_t bytes)      { (void)sb; (void)bytes; }
+static inline void w_gc_on_rope(WRope *r)                         { (void)r; }
+static inline void w_gc_on_small_array(WSmallArray *a, size_t b)  { (void)a; (void)b; }
+static inline void w_gc_on_big_array(WBigArray *a, size_t b)      { (void)a; (void)b; }
+static inline void w_gc_write_barrier_hash(WHash *h)              { (void)h; }
+static inline void w_gc_register_reuse_slot(WValue *slot)         { (void)slot; }
+static inline void w_gc_safepoint(void)                           {}
+#define W_GC_BLOCKING_BEGIN() do {} while (0)
+#define W_GC_BLOCKING_END()   do {} while (0)
+#else
+static inline void w_gc_on_object(WObject *o, size_t bytes) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_slow(o, W_GC_KIND_OBJECT, bytes);
+}
+static inline void w_gc_on_array(WArray *a, size_t bytes) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_slow(a, W_GC_KIND_ARRAY, bytes);
+}
+static inline void w_gc_on_hash(WHash *h, size_t bytes) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_slow(h, W_GC_KIND_HASH, bytes);
+}
+static inline void w_gc_on_closure(WClosure *cl, size_t bytes) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_slow(cl, W_GC_KIND_CLOSURE, bytes);
+}
+static inline void w_gc_on_cell(void *cell) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_slow(cell, W_GC_KIND_CELL, 32);
+}
+static inline void w_gc_on_string(WString *ws, size_t bytes) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_slow(ws, W_GC_KIND_STRING, bytes);
+}
+static inline void w_gc_on_strbuf(WStrBuf *sb, size_t bytes) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_slow(sb, W_GC_KIND_STRBUF, bytes);
+}
+static inline void w_gc_on_rope(WRope *r) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_slow(r, W_GC_KIND_ROPE, sizeof(WRope));
+}
+static inline void w_gc_on_small_array(WSmallArray *a, size_t bytes) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_slow(a, W_GC_KIND_SMALL_ARRAY, bytes);
+}
+static inline void w_gc_on_big_array(WBigArray *a, size_t bytes) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_slow(a, W_GC_KIND_BIG_ARRAY, bytes);
+}
+static inline void w_gc_write_barrier_hash(WHash *h) {
+    if (__builtin_expect((h->flags & W_HASH_FLAG_OLD_CLEAN) != 0, 0))
+        w_gc_write_barrier_hash_slow(h);
+}
+static inline void w_gc_register_reuse_slot(WValue *slot) {
+    if (__builtin_expect(g_gc_track, 0)) w_gc_register_reuse_slot_slow(slot);
+}
+static inline void w_gc_safepoint(void) {
+    if (__builtin_expect(atomic_load_explicit(&g_gc_safepoint_req, memory_order_relaxed), 0))
+        w_gc_safepoint_slow();
+}
+
+#define W_GC_BLOCKING_BEGIN() \
+    int __gc_blk_active = __builtin_expect(g_gc_track, 0); \
+    jmp_buf __gc_blk_jb; \
+    if (__gc_blk_active) { \
+        (void)W_FAST_SETJMP(__gc_blk_jb); \
+        w_gc_blocking_enter_slow(&__gc_blk_jb, (void *)&__gc_blk_jb); \
+    }
+
+#define W_GC_BLOCKING_END() \
+    if (__gc_blk_active) { \
+        w_gc_blocking_leave_slow(); \
+    }
+#endif
+
 #endif /* TUNGSTEN_RUNTIME_INTERNAL_H */
 
 

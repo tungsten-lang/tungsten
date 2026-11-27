@@ -297,17 +297,22 @@ HPACK_INDEXED_NAMES = [":authority", "user-agent", "accept", "accept-encoding", 
     @pos = 0
     @dead = false
     @requests = 0
-    win = 16 * 1024 * 1024
+    win = 4 * 1024 * 1024
+    conn_wu = 10 * 1024 * 1024
     out = bytes_of("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
     st = ByteArray.new(0)
-    # ENABLE_PUSH = 0, INITIAL_WINDOW_SIZE = 16 MiB
+    # Safari/WebKit order: ENABLE_PUSH=0, INITIAL_WINDOW_SIZE=4 MiB, MAX_CONCURRENT_STREAMS=100, NO_RFC7540_PRIORITIES=1
     bpush16(st, 2)
     bpush32(st, 0)
     bpush16(st, 4)
     bpush32(st, win)
+    bpush16(st, 3)
+    bpush32(st, 100)
+    bpush16(st, 9)
+    bpush32(st, 1)
     bappend(out, h2_frame(4, 0, 0, st))
     wu = ByteArray.new(0)
-    bpush32(wu, win - 65535)
+    bpush32(wu, conn_wu)
     bappend(out, h2_frame(8, 0, 0, wu))
     @conn.write(out)
 
@@ -330,7 +335,7 @@ HPACK_INDEXED_NAMES = [":authority", "user-agent", "accept", "accept-encoding", 
     sid = @sid
     @sid += 2
     @requests += 1
-    hl = [[":method", method], [":scheme", "https"], [":authority", authority], [":path", path]]
+    hl = [[":method", method], [":scheme", "https"], [":path", path], [":authority", authority]]
     headers.each ->(h) hl.push([h[0].downcase, h[1]])
     out = ByteArray.new(0)
     flags = 4

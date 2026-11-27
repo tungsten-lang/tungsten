@@ -818,6 +818,39 @@
     when "w_crypto_aes_gcm_open"
       return ccall("w_crypto_aes_gcm_open", args[1], args[2], args[3], args[4])
 
+    when "w_gc_enable"
+      return ccall("w_gc_enable")
+    when "w_gc_disable"
+      return ccall("w_gc_disable")
+    when "w_gc_enabled_p"
+      return ccall("w_gc_enabled_p")
+    when "w_gc_tracking_p"
+      return ccall("w_gc_tracking_p")
+    when "w_gc_start"
+      return ccall("w_gc_start", args[1])
+    when "w_gc_minor"
+      return ccall("w_gc_minor")
+    when "w_gc_major"
+      return ccall("w_gc_major")
+    when "w_gc_wait_sweep"
+      return ccall("w_gc_wait_sweep")
+    when "w_gc_keep"
+      return ccall("w_gc_keep", args[1])
+    when "w_gc_keep_all"
+      return ccall("w_gc_keep_all")
+    when "w_gc_count"
+      return ccall("w_gc_count")
+    when "w_gc_stats"
+      return ccall("w_gc_stats")
+    when "w_gc_young_threshold_get"
+      return ccall("w_gc_young_threshold_get")
+    when "w_gc_young_threshold_set"
+      return ccall("w_gc_young_threshold_set", args[1])
+    when "w_gc_old_threshold_get"
+      return ccall("w_gc_old_threshold_get")
+    when "w_gc_old_threshold_set"
+      return ccall("w_gc_old_threshold_set", args[1])
+
     when "w_uuid_parse"
       return ccall("w_uuid_parse", args[1])
     when "w_uuid_namespace_nil"

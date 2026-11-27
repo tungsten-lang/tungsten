@@ -24,7 +24,9 @@ use h264_intra
 
 # 4x4 inverse transform of coef[c...c+16] (raster), added to dst; zeroes coef.
 -> h264_idct4_add(dst, d, stride, coef, c) (u8[] i64 i64 i32[] i64) i64
-  t = i64[16]
+  h264_idct4_scratch(dst, d, stride, coef, c, i64[16])
+
+-> h264_idct4_scratch(dst, d, stride, coef, c, t) (u8[] i64 i64 i32[] i64 i64[]) i64
   i = 0 ## i64
   while i < 4
     b = c + i * 4
@@ -89,7 +91,9 @@ use h264_intra
   0
 
 -> h264_idct8_add(dst, d, stride, coef, c) (u8[] i64 i64 i32[] i64) i64
-  t = i64[64]
+  h264_idct8_scratch(dst, d, stride, coef, c, i64[64])
+
+-> h264_idct8_scratch(dst, d, stride, coef, c, t) (u8[] i64 i64 i32[] i64 i64[]) i64
   pass = 0 ## i64
   while pass < 2
     i = 0 ## i64

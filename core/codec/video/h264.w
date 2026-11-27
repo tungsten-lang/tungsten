@@ -136,6 +136,7 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
     h264_fill(@tc0, H264_TC0)
     @qpc_tab_c = i64[H264_QPC.size]
     h264_fill(@qpc_tab_c, H264_QPC)
+    @idct_scratch = i64[64]
     @coef = i32[16 * 16 + 2 * 8 * 16]
     @tmp = i32[24 * 22]
     @emu = u8[32 * 24]

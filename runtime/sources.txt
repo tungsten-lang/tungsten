@@ -35,6 +35,7 @@
 # runtime/test_*.c, runtime/tests/) are not runtime sources.
 
 runtime.c            program,compiler,tests,wasm                 any
+runtime_gc.c         program,compiler,tests,wasm                 any
 runtime_crypto.c     program,compiler,tests,wasm                 any
 runtime_gmp.c        program,compiler,tests,wasm                 any
 runtime_http.c       program,compiler,tests,wasm                 any

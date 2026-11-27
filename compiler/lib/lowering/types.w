@@ -402,6 +402,24 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
 
   m["w_q8_split_blocks"] = true
   m["w_q8_dequant_row"] = true
+
+  # Garbage collector control and statistics (observable runtime state/effects)
+  m["w_gc_enable"] = true
+  m["w_gc_disable"] = true
+  m["w_gc_enabled_p"] = true
+  m["w_gc_tracking_p"] = true
+  m["w_gc_start"] = true
+  m["w_gc_minor"] = true
+  m["w_gc_major"] = true
+  m["w_gc_wait_sweep"] = true
+  m["w_gc_keep"] = true
+  m["w_gc_keep_all"] = true
+  m["w_gc_count"] = true
+  m["w_gc_stats"] = true
+  m["w_gc_young_threshold_get"] = true
+  m["w_gc_young_threshold_set"] = true
+  m["w_gc_old_threshold_get"] = true
+  m["w_gc_old_threshold_set"] = true
   m
 
 known_impure_ccall_targets = init_known_impure_ccall_targets()

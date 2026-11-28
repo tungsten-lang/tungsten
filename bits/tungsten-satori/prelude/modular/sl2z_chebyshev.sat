@@ -760,7 +760,7 @@ import number_theory.quadratic_reciprocity
   have hlogC_le_psi : log (C : ℝ) ≤ chebyshev.psi (2 * n)
     have hpos_f : ∀ p < 2 * n + 1, 1 ≤ (if is_prime_nat p then p ^ vp p C else 1)
       intro p hp; by_cases hpr : is_prime_nat p
-      · rw [if_pos hpr]; have h1 := pow_pos_nat p (vp p C) (by have h := hpr.1; omega); omega
+      · rw [if_pos hpr]; have h1 := pow_pos.nat p (vp p C) (by have h := hpr.1; omega); omega
       · rw [if_neg hpr]; omega
     rw [hC_prod, log_nat_prod_eq_sum (2 * n + 1) _ hpos_f]; unfold chebyshev.psi
     have hsum_le : ∀ (M : ℕ) (f g : ℕ → ℝ), (∀ k < M, f k ≤ g k) → (∑ k < M, f k) ≤ ∑ k < M, g k
@@ -777,7 +777,7 @@ import number_theory.quadratic_reciprocity
     · rw [if_neg hpr, if_neg hpr, cast_one.real, log_one]; linarith
   have hge := choose.central_ge_pow4_div n; rw [← hC_def] at hge
   have h4_pos : 0 < ((4 ^ n : ℕ) : ℝ)
-    have h1 := pow_pos_nat 4 n (by decide)
+    have h1 := pow_pos.nat 4 n (by decide)
     have h2 : (1 : ℝ) ≤ ((4 ^ n : ℕ) : ℝ) := by rw [← cast_one.real]; exact (cast_le.real 1 (4 ^ n)).mpr (by omega)
     linarith
   have h2n1_pos : 0 < ((2 * n + 1 : ℕ) : ℝ)

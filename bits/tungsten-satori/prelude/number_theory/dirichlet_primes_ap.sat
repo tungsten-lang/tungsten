@@ -1708,12 +1708,12 @@ import padic.legendre_fps
           have hk_sp : k0 = (k0 - 1) + 1 := by omega
           have hp_le : p0 ≤ p0 ^ k0
             rw [hk_sp, pow_succ.nat]
-            have hm := mul_le_mul_of_nonneg_left.nat 1 (p0 ^ (k0 - 1)) p0 (by have h := pow_pos_nat p0 (k0 - 1) (by omega); omega) (by omega)
+            have hm := mul_le_mul_of_nonneg_left.nat 1 (p0 ^ (k0 - 1)) p0 (by have h := pow_pos.nat p0 (k0 - 1) (by omega); omega) (by omega)
             omega
           omega
         rw [hpk_eq, von_mangoldt.of_prime_pow p0 k0 hp0_pr hk0_1]
         have hrpow_le : rpow ((p0 ^ k0 : ℕ) : ℝ) (-sigma) ≤ (1 / (p0 : ℝ)) ^ k0
-          have h1 : rpow ((p0 ^ k0 : ℕ) : ℝ) (-sigma) ≤ rpow ((p0 ^ k0 : ℕ) : ℝ) (-1) := rpow.mono_exp ((p0 ^ k0 : ℕ) : ℝ) (-sigma) (-1) ((cast_le.real 1 (p0 ^ k0)).mpr (by have h := pow_pos_nat p0 k0 (by omega); omega)) (by linarith)
+          have h1 : rpow ((p0 ^ k0 : ℕ) : ℝ) (-sigma) ≤ rpow ((p0 ^ k0 : ℕ) : ℝ) (-1) := rpow.mono_exp ((p0 ^ k0 : ℕ) : ℝ) (-sigma) (-1) ((cast_le.real 1 (p0 ^ k0)).mpr (by have h := pow_pos.nat p0 k0 (by omega); omega)) (by linarith)
           have hpow_inv : rpow ((p0 ^ k0 : ℕ) : ℝ) (-1) = (1 / (p0 : ℝ)) ^ k0
             have hcast_pk : ∀ m : ℕ, ((p0 ^ m : ℕ) : ℝ) = (p0 : ℝ) ^ m
               intro m; induction m with l ihl; (rw [pow_zero.nat, pow_zero.real, cast_one.real]); (rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.real, cast_mul.real (p0 ^ l) p0, ihl])
@@ -1797,7 +1797,7 @@ import padic.legendre_fps
           set vk := log (p : ℝ) * (1 / (p : ℝ)) ^ k with hvk_def
           have hvk_nn : 0 ≤ vk := by rw [hvk_def]; exact mul_nonneg.real (log (p : ℝ)) ((1 / (p : ℝ)) ^ k) hlog_nn (pow_nonneg.real (1 / (p : ℝ)) (by linarith [one_div_pos.real (p : ℝ) hp_pos]) k)
           set n0 := p ^ k - 1 with hn0_def
-          have hpk_pos : 1 ≤ p ^ k := by have h := pow_pos_nat p k (by omega); omega
+          have hpk_pos : 1 ≤ p ^ k := by have h := pow_pos.nat p k (by omega); omega
           have hpt : ∀ n < N, (if 2 ≤ p ∧ 2 ≤ k ∧ n + 1 = p ^ k then vk else 0) ≤ (if n = n0 then vk else 0)
             intro n _
             by_cases hc : 2 ≤ p ∧ 2 ≤ k ∧ n + 1 = p ^ k
@@ -1999,7 +1999,7 @@ import padic.legendre_fps
   -- Single dyadic block bound on `[2^k, 2^(k+1))`:
   have hblock : ∀ k : ℕ, (∑ j < 2 ^ k, f_bad (2 ^ k + j)) ≤ (2 * B0 / del) * q_del ^ k
     intro k
-    have h2k_pos : 1 ≤ 2 ^ k := by have h := pow_pos_nat 2 k (by decide); omega
+    have h2k_pos : 1 ≤ 2 ^ k := by have h := pow_pos.nat 2 k (by decide); omega
     have h2k_rge1 : (1 : ℝ) ≤ ((2 ^ k : ℕ) : ℝ) := (cast_le.real 1 (2 ^ k)).mpr h2k_pos
     -- On `d = 2^k + j` (`j < 2^k`), `f_bad d <= ((1 / del) * rpow (2^k) (del - 1)) * ind_bad d`!
     have hpt_k : ∀ j < 2 ^ k, f_bad (2 ^ k + j) ≤ ((1 / del) * rpow ((2 ^ k : ℕ) : ℝ) (del - 1)) * (if is_prime_nat (2 ^ k + j) ∧ (2 ^ k + j) % M = a % M ∧ bad (2 ^ k + j) then (1 : ℝ) else 0)
@@ -2049,7 +2049,7 @@ import padic.legendre_fps
       have hnn2 : 0 ≤ (if is_prime_nat (2 ^ k + 2 ^ k) ∧ (2 ^ k + 2 ^ k) % M = a % M ∧ bad (2 ^ k + 2 ^ k) then (1 : ℝ) else 0)
         by_cases hc : is_prime_nat (2 ^ k + 2 ^ k) ∧ (2 ^ k + 2 ^ k) % M = a % M ∧ bad (2 ^ k + 2 ^ k); (rw [if_pos hc]; linarith); (rw [if_neg hc]; linarith)
       linarith
-    have hcnt_bd := le_trans.real _ _ (B0 * rpow ((2 ^ (k + 1) : ℕ) : ℝ) (1 - 2 * del)) hcnt_sub (hcount_all (2 ^ (k + 1)) (by have h := pow_pos_nat 2 (k + 1) (by decide); omega))
+    have hcnt_bd := le_trans.real _ _ (B0 * rpow ((2 ^ (k + 1) : ℕ) : ℝ) (1 - 2 * del)) hcnt_sub (hcount_all (2 ^ (k + 1)) (by have h := pow_pos.nat 2 (k + 1) (by decide); omega))
     -- Simplify `rpow (2^(k+1)) (1 - 2*del) <= 2 * rpow (2^k) (1 - 2*del)` and `rpow (2^k) (del - 1) * rpow (2^k) (1 - 2*del) = q_del ^ k`!
     have hr_2k1 : rpow ((2 ^ (k + 1) : ℕ) : ℝ) (1 - 2 * del) ≤ 2 * rpow ((2 ^ k : ℕ) : ℝ) (1 - 2 * del)
       have hc2 : ((2 ^ (k + 1) : ℕ) : ℝ) = 2 * ((2 ^ k : ℕ) : ℝ) := by rw [pow_succ.nat, cast_mul.real (2 ^ k) 2]; simp; ring
@@ -2072,7 +2072,7 @@ import padic.legendre_fps
         · rw [pow_zero.nat, pow_zero.real]; unfold rpow; simp [log_one, exp_zero]
         · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.real, ← ihl]
           rw [cast_mul.real (2 ^ l) 2]; simp; unfold rpow
-          rw [log_mul ((2 ^ l : ℕ) : ℝ) 2 ((cast_pos.real (2 ^ l)).mpr (pow_pos_nat 2 l (by decide))) (by decide)]
+          rw [log_mul ((2 ^ l : ℕ) : ℝ) 2 ((cast_pos.real (2 ^ l)).mpr (pow_pos.nat 2 l (by decide))) (by decide)]
           have hd : (-del) * (log ((2 ^ l : ℕ) : ℝ) + log 2) = (-del) * log ((2 ^ l : ℕ) : ℝ) + (-del) * log 2 := by ring
           rw [hd, exp_add]
       exact hrec k

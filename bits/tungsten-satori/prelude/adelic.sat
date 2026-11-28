@@ -84,6 +84,17 @@ import padic
   · rw [real_prod.zero]
   · rw [succ_eq_add_one.nat, real_prod.succ, ih]; ring
 
++ real_prod.const_eq_pow (N : ℕ) (c : ℝ) :
+    real_prod N (fun _ => c) = c ^ N
+  induction N with r ihr
+  · rw [real_prod.zero, pow_zero.real]
+  · rw [succ_eq_add_one.nat, real_prod.succ, pow_succ.real, ihr]
+
++ real_prod.eq_prod_below (n : ℕ) (f : ℕ → ℝ) : real_prod n f = ∏ i < n, f i
+  induction n with r ihr
+  · rw [real_prod.zero, prod_below_zero]
+  · rw [succ_eq_add_one.nat, real_prod.succ, prod_below_succ, ihr]
+
 + nat_prod.congr (n : ℕ) (f g : ℕ → ℕ) (h : ∀ i < n, f i = g i) :
     nat_prod n f = nat_prod n g
   induction n with h r ihr h

@@ -36,51 +36,6 @@ import integral_parameter
 -- ====================================================================================
 
 -- Self-contained finite bijection reindexing & periodicity helpers (reusing Milestone 3.8 pattern).
-+ csum.bij_m39 (q : ℕ) (pi inv : ℕ → ℕ) (f : ℕ → ℂ)
-    (hpi_lt : ∀ a < q, pi a < q) (hinv_lt : ∀ c < q, inv c < q)
-    (hleft : ∀ a < q, inv (pi a) = a) (hright : ∀ c < q, pi (inv c) = c) :
-    csum q (fun a => f (pi a)) = csum q f
-  have h1 : csum q (fun a => f (pi a)) = csum q (fun a => csum q (fun c => if c = pi a then f c else complex.zero))
-    apply csum.congr; intro a ha
-    exact (csum.single q (pi a) f (hpi_lt a ha)).symm
-  rw [h1, csum.swap]
-  apply csum.congr; intro c hc
-  have h2 : csum q (fun a => if c = pi a then f c else complex.zero) = csum q (fun a => if a = inv c then f c else complex.zero)
-    apply csum.congr; intro a ha
-    by_cases heq : a = inv c
-    · have hcpi : c = pi a := by rw [heq, hright c hc]
-      have hif1 : ∀ u v : ℂ, (if c = pi a then u else v) = u := by intro u v; simp [hcpi]
-      have hif2 : ∀ u v : ℂ, (if a = inv c then u else v) = u := by intro u v; simp [heq]
-      rw [hif1 (f c) complex.zero, hif2 (f c) complex.zero]
-    · have hcpi : c ≠ pi a
-        intro hbad; apply heq; rw [hbad, hleft a ha]
-      have hif1 : ∀ u v : ℂ, (if c = pi a then u else v) = v := by intro u v; simp [hcpi]
-      have hif2 : ∀ u v : ℂ, (if a = inv c then u else v) = v := by intro u v; simp [heq]
-      rw [hif1 (f c) complex.zero, hif2 (f c) complex.zero]
-  rw [h2]
-  exact csum.single q (inv c) (fun _ => f c) (hinv_lt c hc)
-
-+ cpow_nat.add_m39 (z : ℂ) (a b : ℕ) : cpow_nat z (a + b) = complex.mul (cpow_nat z a) (cpow_nat z b)
-  induction b with k ih
-  · rw [add_zero.nat]
-    have h0 : cpow_nat z 0 = complex.one := by rfl
-    rw [h0, complex.mul_one]
-  · rw [succ_eq_add_one.nat, ← add_assoc.nat]
-    have hs1 : cpow_nat z (a + k + 1) = complex.mul (cpow_nat z (a + k)) z := by rfl
-    have hs2 : cpow_nat z (k + 1) = complex.mul (cpow_nat z k) z := by rfl
-    rw [hs1, hs2, ih]
-    apply complex.ext <;> simp <;> ring
-
-+ cpow_nat.mod_eq_m39 (z : ℂ) (q n : ℕ) (hq : cpow_nat z q = complex.one) : cpow_nat z (n % q) = cpow_nat z n
-  have hmul : ∀ k : ℕ, cpow_nat z (q * k) = complex.one
-    intro k
-    induction k with j ih
-    · rw [mul_zero.nat]; rfl
-    · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, cpow_nat.add_m39, ih, hq, complex.mul_one]
-  have hdiv := div_add_mod.nat n q
-  have h1 : cpow_nat z (q * (n / q) + n % q) = cpow_nat z n := by rw [hdiv]
-  rw [← h1, cpow_nat.add_m39, hmul (n / q), complex.one_mul]
-
 + dchar.mod_eq_m39 (q : ℕ) (chi : ℕ → ℂ) (hper : ∀ a, chi (a + q) = chi a) (n : ℕ) : chi (n % q) = chi n
   have hmul : ∀ k m : ℕ, chi (m + q * k) = chi m
     intro k
@@ -126,7 +81,7 @@ import integral_parameter
   -- Reindex S := sum_{a < q} chi(a) zeta^(a * b) via a |-> (a * u) % q:
   set S := csum q (fun a => complex.mul (chi a) (cpow_nat zeta (a * b))) with hS
   have hreidx : S = complex.mul (chi u) S
-    have hbij := csum.bij_m39 q (fun a => (a * u) % q) (fun c => (c * iu) % q) (fun a => complex.mul (chi a) (cpow_nat zeta (a * b))) hpi_lt hinv_lt hleft hright
+    have hbij := csum.bij q (fun a => (a * u) % q) (fun c => (c * iu) % q) (fun a => complex.mul (chi a) (cpow_nat zeta (a * b))) hpi_lt hinv_lt hleft hright
     have hstep : csum q (fun a => complex.mul (chi ((a * u) % q)) (cpow_nat zeta ((a * u) % q * b))) = complex.mul (chi u) (csum q (fun a => complex.mul (chi a) (cpow_nat zeta (a * b))))
       rw [← csum.scale_left]
       apply csum.congr; intro a ha
@@ -136,7 +91,7 @@ import integral_parameter
         rw [mul_mod.nat ((a * u) % q) b q, zmod.mod_mod (a * u) q, ← mul_mod.nat (a * u) b q]
         have hre : a * u * b = a * (u * b) := by ring
         rw [hre, mul_mod.nat a (u * b) q, hfix, ← mul_mod.nat a b q]
-      rw [← cpow_nat.mod_eq_m39 zeta q ((a * u) % q * b) hzeta, hmod_ab, cpow_nat.mod_eq_m39 zeta q (a * b) hzeta]
+      rw [← cpow_nat.pow_mod zeta q ((a * u) % q * b) hzeta, hmod_ab, cpow_nat.pow_mod zeta q (a * b) hzeta]
       apply complex.ext <;> simp <;> ring
     calc S
       = csum q (fun a => complex.mul (chi a) (cpow_nat zeta (a * b))) := hS

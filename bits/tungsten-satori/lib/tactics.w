@@ -435,7 +435,7 @@
     when "apply"
       tac_apply(g, args)
     when "refine"
-      tac_apply(g, args)
+      tac_refine(g, args)
     when "assumption"
       tac_assumption(g)
     when "rfl"
@@ -1911,6 +1911,70 @@
         refs = refine(g, [goal.with_concl(conv.concl.b)], ->(ts) @k.eq_mp(@k.sym(conv), ts[0]))
         return tac_constructor(refs[0])
     fail("constructor: goal is not ∧, ↔ or True")
+
+  # `refine ⟨h1, ?_, h3⟩`: an anonymous constructor whose `?_` (or bare `_`) items stay open as
+  # new goals, left to right. Nested `⟨...⟩` items may hold holes too. Any other argument is `apply`.
+  -> tac_refine(g, args)
+    e = nil
+    begin
+      e = parse_expr_toks(args)
+    rescue _e
+      e = nil
+    while e != nil && e.kind == :paren
+      e = e.kids[0]
+    if e == nil || e.kind != :anon || !refine_has_hole?(e)
+      return tac_apply(g, args)
+    goal = g.goal
+    holes = []
+    build = refine_anon(goal, e.kids, goal.concl, holes)
+    refine(g, holes.map(->(c) goal.with_concl(c)), build)
+
+  -> refine_has_hole?(e)
+    while e.kind == :paren
+      e = e.kids[0]
+    if refine_hole?(e)
+      return true
+    if e.kind != :anon
+      return false
+    e.kids.any?(->(k) refine_has_hole?(k))
+
+  -> refine_hole?(e)
+    e.kind == :hole || (e.kind == :id && (e.s == "_" || e.s == "?_"))
+
+  -> refine_item(goal, item, expected, holes)
+    while item.kind == :paren
+      item = item.kids[0]
+    if refine_hole?(item)
+      idx = holes.size
+      holes.push(expected)
+      return ->(ts) ts[idx]
+    if item.kind == :anon && refine_has_hole?(item)
+      return refine_anon(goal, item.kids, expected, holes)
+    th = fit_concl(proof_ast(goal, item, expected), expected)
+    ->(ts) th
+
+  -> refine_anon(goal, items, c, holes)
+    if items.size < 2
+      fail("refine ⟨...⟩ needs at least two components")
+    tail = arr_sub(items, 1, items.size - 1)
+    ex = dest_unop(c, "∃")
+    if ex != nil && ex.tag == :lam
+      if refine_hole?(items[0])
+        fail("refine ⟨...⟩: an existential witness cannot be a hole")
+      w = elab_term_ast(goal, items[0], ex.ty)
+      body = tm_instantiate(ex.b, w, 0)
+      rest = items.size == 2 ? refine_item(goal, items[1], body, holes) : refine_anon(goal, tail, body, holes)
+      return ->(ts) @k.exists_intro(c, w, fit_concl(rest.call(ts), body))
+    pq = dest_binop(c, "∧")
+    if pq != nil
+      a = refine_item(goal, items[0], pq[0], holes)
+      b = items.size == 2 ? refine_item(goal, items[1], pq[1], holes) : refine_anon(goal, tail, pq[1], holes)
+      return ->(ts) @k.conj(fit_concl(a.call(ts), pq[0]), fit_concl(b.call(ts), pq[1]))
+    conv = proof_head_conv(c, ["∃", "∧"])
+    if conv != nil
+      inner = refine_anon(goal, items, conv.concl.b, holes)
+      return ->(ts) @k.eq_mp(@k.sym(conv), inner.call(ts))
+    fail("refine ⟨...⟩: goal is not ∃ or ∧: " + tm_show(c))
 
   -> tac_left_right(g, left)
     goal = g.goal

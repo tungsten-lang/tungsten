@@ -112,7 +112,7 @@ import number_theory.quadratic_reciprocity
 
 + sernau.m81a_cpow_mod_eq (q : ℕ) (z : ℂ) (n : ℕ) (hq : cpow_nat z q = complex.one) :
     cpow_nat z n = cpow_nat z (n % q)
-  exact (cpow_nat.mod_eq_m39 z q n hq).symm
+  exact (cpow_nat.pow_mod z q n hq).symm
 
 + sernau.m81a_zeta_pow_eq_exp (M k : ℕ) :
     cpow_nat (zeta_q M) k = complex.exp (complex.mk 0 (2 * pi * (k : ℝ) / (M : ℝ)))

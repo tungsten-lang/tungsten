@@ -957,7 +957,7 @@ import analysis.mellin_zeta_strip
     rw [hmul_conj]
     have hpow_neg : complex.conj (cpow_nat (zeta_q chi.level) a) = cpow_nat (zeta_q chi.level) (a * (chi.level - 1))
       rw [cpow_nat.conj_eq_pow_neg chi.level (zeta_q chi.level) a hzns hzq (by omega)]
-      rw [← cpow_nat.mod_eq_m39 (zeta_q chi.level) chi.level (chi.level - a) hzq, ← cpow_nat.mod_eq_m39 (zeta_q chi.level) chi.level (a * (chi.level - 1)) hzq]
+      rw [← cpow_nat.pow_mod (zeta_q chi.level) chi.level (chi.level - a) hzq, ← cpow_nat.pow_mod (zeta_q chi.level) chi.level (a * (chi.level - 1)) hzq]
       have hmod : (chi.level - a) % chi.level = (a * (chi.level - 1)) % chi.level
         by_cases ha0 : a = 0
         · rw [ha0]; simp

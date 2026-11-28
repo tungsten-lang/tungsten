@@ -55,12 +55,6 @@ import matrix
 + complex.mul_of_real (a b : ℝ) : complex.mul (complex.of_real a) (complex.of_real b) = complex.of_real (a * b)
   apply complex.ext <;> simp <;> ring
 
-+ complex.conj_of_real (a : ℝ) : complex.conj (complex.of_real a) = complex.of_real a
-  apply complex.ext <;> simp
-
-+ complex.of_real_add (a b : ℝ) : complex.of_real (a + b) = complex.add (complex.of_real a) (complex.of_real b)
-  apply complex.ext <;> simp
-
 + complex.of_real_sub (a b : ℝ) : complex.of_real (a - b) = complex.sub (complex.of_real a) (complex.of_real b)
   apply complex.ext <;> simp
 
@@ -468,6 +462,13 @@ import matrix
   · rw [cprod_c.zero_eq, cprod_c.zero_eq]
   · rw [succ_eq_add_one.nat] at h ⊢
     rw [cprod_c.succ_eq, cprod_c.succ_eq, ih (by intro i hi; exact h i (by omega)), h m (by omega)]
+
++ cprod_c.mul (n : ℕ) (f g : ℕ → ℂ) :
+    cprod_c n (fun i => complex.mul (f i) (g i)) = complex.mul (cprod_c n f) (cprod_c n g)
+  induction n with r ihr
+  · rw [cprod_c.zero_eq, cprod_c.zero_eq, cprod_c.zero_eq, complex.mul_one_l]
+  · rw [succ_eq_add_one.nat, cprod_c.succ_eq, cprod_c.succ_eq, cprod_c.succ_eq, ihr]
+    apply complex.ext <;> simp <;> ring
 
 + cprod_c.ne_zero (n : ℕ) (f : ℕ → ℂ) (h : ∀ i < n, f i ≠ complex.zero) : cprod_c n f ≠ complex.zero
   intro hz; induction n with h hz m ih h hz

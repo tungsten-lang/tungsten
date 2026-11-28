@@ -50,12 +50,6 @@ import complex_analysis
   obtain ⟨q2, hq2⟩ := (dvd.iff_exists d b hd).mp hb
   exact (dvd.iff_exists d (a + b) hd).mpr ⟨q1 + q2, by rw [hq1, hq2]; ring⟩
 
-+ pow_pos.nat (p k : ℕ) (hp : 0 < p) : 0 < p ^ k
-  induction k with j ih
-  · rw [pow_zero.nat]; decide
-  · rw [succ_eq_add_one.nat, pow_succ.nat]
-    exact mul_pos.nat (p ^ j) p ih hp
-
 + pow_dvd_pow_of_le (p a b : ℕ) (hp : 0 < p) (hab : a ≤ b) : p ^ a ∣ p ^ b
   have hba : b = a + (b - a) := by omega
   rw [hba, pow_add.nat]

@@ -25,37 +25,6 @@ import analysis.landau_gauss_hecke
 -- 1. Exact Derivative of 1/x & Change of Variable u = 1/t on [1/B, 1] <-> [1, B]
 -- ====================================================================================
 
-+ continuous_at.inv_pos (x : ℝ) (hx : 0 < x) : continuous_at (fun y => 1 / y) x
-  unfold continuous_at
-  intro e he
-  set d := min (x / 2) (e * (x * x) / 2) with hd
-  have hd_pos : 0 < d
-    rw [hd]
-    apply lt_min.real
-    · linarith
-    · have hxx : 0 < x * x := mul_pos.real x x hx hx
-      have hm := mul_pos.real e (x * x) he hxx
-      linarith
-  use d; constructor
-  · exact hd_pos
-  · intro y hy
-    have hd1 : |y - x| < x / 2 := by linarith [min_le_left.real (x / 2) (e * (x * x) / 2)]
-    have hd2 : |y - x| < e * (x * x) / 2 := by linarith [min_le_right.real (x / 2) (e * (x * x) / 2)]
-    have hy_gt : x / 2 < y := by linarith [neg_le_abs.real (y - x)]
-    have hy_pos : 0 < y := by linarith
-    have hyx_pos : 0 < y * x := mul_pos.real y x hy_pos hx
-    have hdiff : 1 / y - 1 / x = -(y - x) / (y * x) := by field_simp
-    rw [hdiff]
-    have habs_div : |-(y - x) / (y * x)| = |y - x| / (y * x)
-      rw [div_def.real (-(y - x)) (y * x), abs_mul.real, abs_of_pos.real (1 / (y * x)) (one_div_pos.real (y * x) hyx_pos)]
-      have hneg : |-(y - x)| = |y - x|
-        have h0 : -(y - x) = 0 - (y - x) := by ring
-        rw [h0]; exact abs_neg.real (y - x)
-      rw [hneg, ← div_def.real (|y - x|) (y * x)]
-    rw [habs_div]
-    have hlt_mul : |y - x| < e * (y * x) := by nlinarith
-    exact (div_lt_iff.real (|y - x|) e (y * x) hyx_pos).mpr hlt_mul
-
 + has_deriv_within.inv_pos (S : set ℝ) (x : ℝ) (hx : 0 < x) (hS : ∀ y ∈ S, 0 < y) :
     has_deriv_within (fun y => 1 / y) S x (-1 / (x * x))
   apply has_deriv_within.of_factor (fun y => 1 / y) (fun y => -(1 / x) * (1 / y)) S x (-1 / (x * x))

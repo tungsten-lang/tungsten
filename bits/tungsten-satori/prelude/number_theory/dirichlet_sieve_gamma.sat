@@ -474,26 +474,6 @@ import number_theory.dirichlet_conductor
     apply complex.ext <;> simp <;> ring
   rw [hfeq, hveq] at hadd; exact hadd
 
-+ fact_pos (k : ℕ) : 0 < fact k
-  induction k with j ihj
-  · unfold fact; omega
-  · rw [succ_eq_add_one.nat]
-    have hf : fact (j + 1) = (j + 1) * fact j := by rfl
-    rw [hf]; nlinarith
-
-+ complex.mul_ne_zero (a b : ℂ) (ha : a ≠ complex.zero) (hb : b ≠ complex.zero) :
-    complex.mul a b ≠ complex.zero
-  intro hz
-  have h0 : complex.abs (complex.mul a b) = 0 := (complex.abs_eq_zero (complex.mul a b)).mpr hz
-  rw [complex.abs_mul] at h0
-  have ha_pos : 0 < complex.abs a
-    have hnn := complex.abs_nonneg a
-    by_contra hle; exact ha ((complex.abs_eq_zero a).mp (by linarith))
-  have hb_pos : 0 < complex.abs b
-    have hnn := complex.abs_nonneg b
-    by_contra hle; exact hb ((complex.abs_eq_zero b).mp (by linarith))
-  nlinarith
-
 -- Elementary exponential-power decay bound: t^a * exp(-t) <= (2^K * K!) * exp(-t/2) for a >= 0, a <= K, t > 0!
 + exp_ge_pow_div_fact (m : ℕ) (u : ℝ) (hu : 0 ≤ u) :
     u ^ m / ((fact m : ℕ) : ℝ) ≤ exp u

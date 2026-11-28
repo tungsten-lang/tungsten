@@ -88,34 +88,6 @@ import measure
   cpow_nat zeta q = complex.one ∧
   (∀ r : ℕ, 0 < r → r < q → cpow_nat zeta r ≠ complex.one)
 
-+ cpow_nat.add (z : ℂ) (a b : ℕ) :
-    cpow_nat z (a + b) = complex.mul (cpow_nat z a) (cpow_nat z b)
-  induction b with k ih
-  · have h0 : a + 0 = a := by ring
-    rw [h0]; simp [cpow_nat]; rw [complex.mul_one]
-  · rw [succ_eq_add_one.nat]
-    have hs : a + (k + 1) = (a + k) + 1 := by ring
-    rw [hs]
-    simp [cpow_nat]
-    rw [ih, complex.mul_assoc]
-
-+ cpow_nat.mul (z : ℂ) (a b : ℕ) :
-    cpow_nat z (a * b) = cpow_nat (cpow_nat z a) b
-  induction b with k ih
-  · have h0 : a * 0 = 0 := by ring
-    rw [h0]; simp [cpow_nat]
-  · rw [succ_eq_add_one.nat]
-    have hs : a * (k + 1) = a * k + a := by ring
-    rw [hs, cpow_nat.add, ih]
-    simp [cpow_nat]
-
-+ cpow_nat.mod_eq (q : ℕ) (zeta : ℂ) (hq : cpow_nat zeta q = complex.one) (a : ℕ) :
-    cpow_nat zeta a = cpow_nat zeta (a % q)
-  have hdiv := div_add_mod.nat a q
-  have h1 : cpow_nat zeta (q * (a / q) + a % q) = cpow_nat zeta (a % q) := by rw [cpow_nat.add, cpow_nat.mul, hq, cpow_nat.one, complex.one_mul]
-  rw [hdiv] at h1
-  exact h1
-
 -- Complete discrete Fourier indicator identity on Z/qZ for any primitive q-th root zeta:
 --   sum_{h < q} zeta^(h * a) = q   if a % q = 0
 --   sum_{h < q} zeta^(h * a) = 0   if a % q != 0

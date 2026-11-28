@@ -25,6 +25,21 @@ import complex
   · rw [csum.re, complex.add_re, csum.re, sum_range_succ'.real]; ring
   · rw [csum.im, complex.add_im, csum.im, sum_range_succ'.real]; ring
 
+-- Splitting `csum (m + n) f = csum m f + csum n (fun j => f (m + j))`.
++ csum.split_add (m n : ℕ) (f : ℕ → ℂ) :
+    csum (m + n) f = complex.add (csum m f) (csum n (fun j => f (m + j)))
+  induction n with k ih
+  · have hm0 : m + 0 = m := by omega
+    rw [hm0]
+    have h0 : csum 0 (fun j => f (m + j)) = complex.zero := by rfl
+    rw [h0, complex.add_zero]
+  · rw [succ_eq_add_one.nat]
+    have h1 : m + (k + 1) = (m + k) + 1 := by omega
+    rw [h1]
+    have hs1 : csum ((m + k) + 1) f = complex.add (csum (m + k) f) (f (m + k)) := by rfl
+    have hs2 : csum (k + 1) (fun j => f (m + j)) = complex.add (csum k (fun j => f (m + j))) (f (m + k)) := by rfl
+    rw [hs1, hs2, ih, complex.add_assoc]
+
 + csum.congr (n : ℕ) (f g : ℕ → ℂ) (h : ∀ i < n, f i = g i) : csum n f = csum n g
   apply complex.ext
   · simp; apply sum_below.congr; intro i hi; rw [h i hi]
@@ -374,6 +389,62 @@ import complex
   induction h with k ih
   · simp [cpow_nat]
   · rw [succ_eq_add_one.nat]; simp [cpow_nat]; rw [ih, complex.mul_one]
+
++ cpow_nat.add (z : ℂ) (a b : ℕ) :
+    cpow_nat z (a + b) = complex.mul (cpow_nat z a) (cpow_nat z b)
+  induction b with k ih
+  · have h0 : a + 0 = a := by ring
+    rw [h0]; simp [cpow_nat]; rw [complex.mul_one]
+  · rw [succ_eq_add_one.nat]
+    have hs : a + (k + 1) = (a + k) + 1 := by ring
+    rw [hs]; simp [cpow_nat]; rw [ih, complex.mul_assoc]
+
++ cpow_nat.mul (z : ℂ) (a b : ℕ) :
+    cpow_nat z (a * b) = cpow_nat (cpow_nat z a) b
+  induction b with k ih
+  · have h0 : a * 0 = 0 := by ring
+    rw [h0]; simp [cpow_nat]
+  · rw [succ_eq_add_one.nat]
+    have hs : a * (k + 1) = a * k + a := by ring
+    rw [hs, cpow_nat.add, ih]; simp [cpow_nat]
+
++ cpow_nat.mod_eq (q : ℕ) (zeta : ℂ) (hq : cpow_nat zeta q = complex.one) (a : ℕ) :
+    cpow_nat zeta a = cpow_nat zeta (a % q)
+  have hdiv := div_add_mod.nat a q
+  have h1 : cpow_nat zeta (q * (a / q) + a % q) = cpow_nat zeta (a % q) := by rw [cpow_nat.add, cpow_nat.mul, hq, cpow_nat.one, complex.one_mul]
+  rw [hdiv] at h1
+  exact h1
+
++ cpow_nat.pow_mod (z : ℂ) (q n : ℕ) (hq : cpow_nat z q = complex.one) : cpow_nat z (n % q) = cpow_nat z n :=
+  (cpow_nat.mod_eq q z hq n).symm
+
+-- General finite bijection reindexing of complex sums (via `csum.single` + `csum.swap`).
++ csum.bij (q : ℕ) (pi inv : ℕ → ℕ) (f : ℕ → ℂ)
+    (hpi_lt : ∀ a < q, pi a < q)
+    (hinv_lt : ∀ c < q, inv c < q)
+    (hleft : ∀ a < q, inv (pi a) = a)
+    (hright : ∀ c < q, pi (inv c) = c) :
+    csum q (fun a => f (pi a)) = csum q f
+  have h1 : csum q (fun a => f (pi a)) = csum q (fun a => csum q (fun c => if c = pi a then f c else complex.zero))
+    apply csum.congr; intro a ha
+    exact (csum.single q (pi a) f (hpi_lt a ha)).symm
+  rw [h1, csum.swap]
+  apply csum.congr; intro c hc
+  have h2 : csum q (fun a => if c = pi a then f c else complex.zero) = csum q (fun a => if a = inv c then f c else complex.zero)
+    apply csum.congr; intro a ha
+    by_cases heq : a = inv c
+    · have hcpi : c = pi a := by rw [heq, hright c hc]
+      have hif1 : ∀ u v : ℂ, (if c = pi a then u else v) = u := by intro u v; simp [hcpi]
+      have hif2 : ∀ u v : ℂ, (if a = inv c then u else v) = u := by intro u v; simp [heq]
+      rw [hif1 (f c) complex.zero, hif2 (f c) complex.zero]
+    · have hcpi : c ≠ pi a
+        intro hbad; apply heq
+        rw [hbad, hleft a ha]
+      have hif1 : ∀ u v : ℂ, (if c = pi a then u else v) = v := by intro u v; simp [hcpi]
+      have hif2 : ∀ u v : ℂ, (if a = inv c then u else v) = v := by intro u v; simp [heq]
+      rw [hif1 (f c) complex.zero, hif2 (f c) complex.zero]
+  rw [h2]
+  exact csum.single q (inv c) (fun _ => f c) (hinv_lt c hc)
 
 -- Character orthogonality when r = e_q(a): if e_q(a) = 1 then sum = q, else if e_q(q*a) = 1 then sum = 0.
 + e_q.sum_eq_q_of_one (q a : ℕ) (h1 : e_q q a = complex.one) :

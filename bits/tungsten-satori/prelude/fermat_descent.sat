@@ -92,48 +92,6 @@ import von_mangoldt
   rw [hd_eq]; decide
 -- ====================================================================================
 
-+ int.nearest_quot (u d : ℤ) (hd : 0 < d) :
-    ∃ q : ℤ, 2 * (u - q * d) ≤ d ∧ -d ≤ 2 * (u - q * d)
-  set K := nat_of_int (|u| + 1) with hK_def
-  have hK_eq : (K : ℤ) = |u| + 1
-    rw [hK_def]; exact int_of_nat_of_int (|u| + 1) (by linarith [abs_nonneg.int u])
-  have hu_nn : 0 ≤ u + (K : ℤ) * d
-    have habs : -(|u|) ≤ u
-      obtain ⟨e, _⟩ | ⟨e, _⟩ := abs_cases.int u <;> linarith
-    have hK_nn : (0 : ℤ) ≤ (K : ℤ) := (cast_le.int 0 K).mpr (by omega)
-    have hKd : (K : ℤ) ≤ (K : ℤ) * d
-      have h2 := mul_le_mul_of_nonneg_left.int 1 d (K : ℤ) (by omega) hK_nn
-      linarith
-    linarith
-  set dn := nat_of_int d with hdn_def
-  have hdn : (dn : ℤ) = d := by rw [hdn_def]; exact int_of_nat_of_int d (by omega)
-  have hdn_pos : 0 < dn
-    by_contra h0; have hz : dn = 0 := by omega
-    rw [hz, cast_zero.int] at hdn; omega
-  set un := nat_of_int (u + (K : ℤ) * d) with hun_def
-  have hun : (un : ℤ) = u + (K : ℤ) * d := by rw [hun_def]; exact int_of_nat_of_int (u + (K : ℤ) * d) hu_nn
-  have hdm := div_add_mod.nat un dn
-  have hrem := mod_lt.nat un dn hdn_pos
-  have hcast : ((dn * (un / dn) + un % dn : ℕ) : ℤ) = (un : ℤ) := by rw [hdm]
-  rw [cast_add.int, cast_mul.int, hdn, hun] at hcast
-  by_cases hhalf : 2 * (un % dn) ≤ dn
-  · use ((un / dn : ℕ) : ℤ) - (K : ℤ)
-    have hr_nn : (0 : ℤ) ≤ ((un % dn : ℕ) : ℤ) := (cast_le.int 0 (un % dn)).mpr (by omega)
-    have hr2 : 2 * ((un % dn : ℕ) : ℤ) ≤ d
-      have hc : ((2 * (un % dn) : ℕ) : ℤ) ≤ (dn : ℤ) := (cast_le.int (2 * (un % dn)) dn).mpr hhalf
-      rw [cast_mul.int, hdn] at hc
-      have h2 : ((2 : ℕ) : ℤ) = 2 := by decide
-      rw [h2] at hc; exact hc
-    constructor <;> linarith
-  · use ((un / dn : ℕ) : ℤ) + 1 - (K : ℤ)
-    have hr_lt : ((un % dn : ℕ) : ℤ) < d := by rw [← hdn]; exact (cast_lt.int (un % dn) dn).mpr hrem
-    have hr2 : d < 2 * ((un % dn : ℕ) : ℤ)
-      have hc : (dn : ℤ) < ((2 * (un % dn) : ℕ) : ℤ) := (cast_lt.int dn (2 * (un % dn))).mpr (by omega)
-      rw [cast_mul.int, hdn] at hc
-      have h2 : ((2 : ℕ) : ℤ) = 2 := by decide
-      rw [h2] at hc; exact hc
-    constructor <;> linarith
-
 + int.sq_le_of_two_bounds (r d : ℤ) (hhi : 2 * r ≤ d) (hlo : -d ≤ 2 * r) :
     4 * (r * r) ≤ d * d
   have h1 := mul_nonneg.int (d - 2 * r) (d + 2 * r) (by linarith) (by linarith)

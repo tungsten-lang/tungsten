@@ -4,26 +4,6 @@
 
 import arith
 
-+ sum_congr.rat (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i) :
-    (∑ i < n, f i) = ∑ i < n, g i := sum_below.congr f g n h
-
-+ sum_range_succ'.rat (f : ℕ → ℚ) (n : ℕ) :
-    (∑ i < n + 1, f i) = (∑ i < n, f (i + 1)) + f 0
-  induction n with k ih
-  · rw [sum_below_succ 0, sum_below_zero, sum_below_zero]
-  · rw [succ_eq_add_one.nat, sum_below_succ (k + 1), ih, sum_below_succ k]; ring
-
-+ sum_swap.rat (F : ℕ → ℕ → ℚ) (m n : ℕ) :
-    (∑ i < m, ∑ j < n, F i j) = ∑ j < n, ∑ i < m, F i j
-  induction m with k ih
-  · rw [sum_below_zero]
-    symm
-    have hz : (∑ j < n, ∑ i < 0, F i j) = ∑ j < n, (0 : ℚ)
-      apply sum_congr.rat; intro j hj; exact sum_below_zero (fun i => F i j)
-    rw [hz, sum_const.rat]; ring
-  · rw [succ_eq_add_one.nat, sum_below_succ k, ih, ← sum_add.rat]
-    apply sum_congr.rat; intro j hj; rw [sum_below_succ k]
-
 -> qpoly.eval (d : ℕ) (c : ℕ → ℚ) (x : ℚ) : ℚ := ∑ k < d + 1, c k * x ^ k
 -> qpoly.add (c1 c2 : ℕ → ℚ) (k : ℕ) : ℚ := c1 k + c2 k
 -> qpoly.scale (s : ℚ) (c : ℕ → ℚ) (k : ℕ) : ℚ := s * c k

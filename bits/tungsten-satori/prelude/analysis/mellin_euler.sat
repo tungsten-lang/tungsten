@@ -175,54 +175,11 @@ import integral_parameter
 -- ====================================================================================
 
 -- General finite bijection reindexing of complex sums (proved in 10 lines via csum.single + swap!).
-+ csum.bij (q : ℕ) (pi inv : ℕ → ℕ) (f : ℕ → ℂ)
-    (hpi_lt : ∀ a < q, pi a < q)
-    (hinv_lt : ∀ c < q, inv c < q)
-    (hleft : ∀ a < q, inv (pi a) = a)
-    (hright : ∀ c < q, pi (inv c) = c) :
-    csum q (fun a => f (pi a)) = csum q f
-  have h1 : csum q (fun a => f (pi a)) = csum q (fun a => csum q (fun c => if c = pi a then f c else complex.zero))
-    apply csum.congr; intro a ha
-    exact (csum.single q (pi a) f (hpi_lt a ha)).symm
-  rw [h1, csum.swap]
-  apply csum.congr; intro c hc
-  have h2 : csum q (fun a => if c = pi a then f c else complex.zero) = csum q (fun a => if a = inv c then f c else complex.zero)
-    apply csum.congr; intro a ha
-    by_cases heq : a = inv c
-    · have hcpi : c = pi a := by rw [heq, hright c hc]
-      have hif1 : ∀ u v : ℂ, (if c = pi a then u else v) = u := by intro u v; simp [hcpi]
-      have hif2 : ∀ u v : ℂ, (if a = inv c then u else v) = u := by intro u v; simp [heq]
-      rw [hif1 (f c) complex.zero, hif2 (f c) complex.zero]
-    · have hcpi : c ≠ pi a
-        intro hbad; apply heq
-        rw [hbad, hleft a ha]
-      have hif1 : ∀ u v : ℂ, (if c = pi a then u else v) = v := by intro u v; simp [hcpi]
-      have hif2 : ∀ u v : ℂ, (if a = inv c then u else v) = v := by intro u v; simp [heq]
-      rw [hif1 (f c) complex.zero, hif2 (f c) complex.zero]
-  rw [h2]
-  exact csum.single q (inv c) (fun _ => f c) (hinv_lt c hc)
-
 -- Helper: periodicity of cpow_nat zeta when cpow_nat zeta q = 1.
-+ cpow_nat.add (z : ℂ) (a b : ℕ) : cpow_nat z (a + b) = complex.mul (cpow_nat z a) (cpow_nat z b)
-  induction b with k ih
-  · rw [add_zero.nat]
-    have h0 : cpow_nat z 0 = complex.one := by rfl
-    rw [h0, complex.mul_one]
-  · rw [succ_eq_add_one.nat, ← add_assoc.nat]
-    have hs1 : cpow_nat z (a + k + 1) = complex.mul (cpow_nat z (a + k)) z := by rfl
-    have hs2 : cpow_nat z (k + 1) = complex.mul (cpow_nat z k) z := by rfl
-    rw [hs1, hs2, ih]
-    apply complex.ext <;> simp <;> ring
-
 + cpow_nat.mul_pow (z : ℂ) (q k : ℕ) (hq : cpow_nat z q = complex.one) : cpow_nat z (q * k) = complex.one
   induction k with j ih
   · rw [mul_zero.nat]; rfl
   · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, cpow_nat.add, ih, hq, complex.mul_one]
-
-+ cpow_nat.mod_eq_m38 (z : ℂ) (q n : ℕ) (hq : cpow_nat z q = complex.one) : cpow_nat z (n % q) = cpow_nat z n
-  have hdiv := div_add_mod.nat n q
-  have h1 : cpow_nat z (q * (n / q) + n % q) = cpow_nat z n := by rw [hdiv]
-  rw [← h1, cpow_nat.add, cpow_nat.mul_pow z q (n / q) hq, complex.one_mul]
 
 -- Helper: Dirichlet character periodicity mod q.
 + dchar.mod_eq (q : ℕ) (chi : ℕ → ℂ) (hper : ∀ a, chi (a + q) = chi a) (n : ℕ) : chi (n % q) = chi n
@@ -289,7 +246,7 @@ import integral_parameter
   -- Reindex c = (a * b) % q, so a = (c * ib) % q!
   have hterm : csum q (fun a => complex.mul (chi a) (cpow_nat zeta (a * b))) = csum q (fun a => complex.mul (chi ((((a * b) % q) * ib) % q)) (cpow_nat zeta ((a * b) % q)))
     apply csum.congr; intro a ha
-    rw [hleft a ha, cpow_nat.mod_eq_m38 zeta q (a * b) hzeta]
+    rw [hleft a ha, cpow_nat.pow_mod zeta q (a * b) hzeta]
   rw [hterm]
   rw [csum.bij q (fun a => (a * b) % q) (fun c => (c * ib) % q) (fun c => complex.mul (chi ((c * ib) % q)) (cpow_nat zeta c)) hpi_lt hinv_lt hleft hright]
   rw [← csum.scale_left]

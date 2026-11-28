@@ -1,0 +1,21 @@
+-- Every declaration here must fail: holes are goals, not admissions.
+import arith
+
++ refine_unsolved (p q : Prop) (hp : p) : p ∧ q
+  refine ⟨hp, ?_⟩
+
++ refine_wrong_item (p q : Prop) (hq : q) : p ∧ q
+  refine ⟨hq, ?_⟩
+  · exact hq
+
++ refine_wrong_hole (p q : Prop) (hp : p) : p ∧ q
+  refine ⟨hp, ?_⟩
+  · exact hp
+
++ refine_witness_hole : ∃ n : ℕ, 0 < n
+  refine ⟨?_, by omega⟩
+
++ refine_too_many (p q : Prop) (hp : p) (hq : q) : p ∧ q
+  refine ⟨hp, ?_, ?_⟩
+  · exact hq
+  · exact hq

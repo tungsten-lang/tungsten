@@ -1785,11 +1785,6 @@ import analysis.power_series
 -- ====================================================================================
 
 -- Compact elementary helpers (eliminating duplication & avoiding nonlinear solver blowups):
-+ complex.abs_of_real_nonneg (r : ℝ) (hr : 0 ≤ r) :
-    complex.abs (complex.of_real r) = r
-  have hsq : complex.abs (complex.of_real r) * complex.abs (complex.of_real r) = r * r := by rw [complex.abs_sq]; unfold complex.norm_sq complex.of_real; simp
-  exact eq_of_sq_eq_nonneg (complex.abs (complex.of_real r)) r (complex.abs_nonneg (complex.of_real r)) hr hsq
-
 + complex.inv_of_real (r : ℝ) (hr : r ≠ 0) :
     complex.inv (complex.of_real r) = complex.of_real (1 / r)
   have hne : complex.of_real r ≠ complex.zero

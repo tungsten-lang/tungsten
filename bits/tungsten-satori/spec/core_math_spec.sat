@@ -11,6 +11,7 @@ import algebra.compressed_gram
 import algebra.finite_fourier
 import algebra.finite_weil
 import algebra.gram_legendre
+import algebra.hilbert_comparison
 import algebra.polynomial_fermat
 import algebra.spectral_det
 import algebra.vandermonde_siegel
@@ -38,6 +39,7 @@ import number_theory.classical_L_log_deriv
 import number_theory.dirichlet_nonvanishing
 import number_theory.minkowski_lattice
 import number_theory.polya_vinogradov
+import number_theory.prime_rationals
 import number_theory.dirichlet_L_deriv_bound
 import number_theory.dirichlet_primes_ap
 import number_theory.jacobi_symbol
@@ -91,3 +93,18 @@ import padic.mvps_pderiv_ult
 #axioms cmat.compressed_gram_det_identity
 #axioms cmat.compressed_gram_arch_det_le
 #axioms cmat.compressed_gram_ultrametric_det_le_of_in_span
+#axioms cmat.comparison_form_of_adjoint_invariance
+#axioms cmat.comparison_form_seminorm_ratio
+#axioms cmat.rallis_chain_of_single_lifts
+#axioms cmat.det_gram_cols_le_exp_mul
+#axioms cmat.covolume_block_cols_le
+#axioms cmat.det_block_diag_scalar
+#axioms cmat.stacked_det_two_sided_subst
+#axioms cmat.stacked_det_prod_two_sided_subst
+#axioms cmat.comparison_data_of_scaled_adjoint_pairing
+#axioms is_mult_seminorm.rallis_chain_volume
+#axioms rat.exists_prime_factor_log_and_padic
+#axioms real_prod.bij
+#axioms group.exists_factorisation_abs_le
+#axioms group.exists_twisted_sum_ge
+#axioms group.exists_factorisation_twisted_sum_ge

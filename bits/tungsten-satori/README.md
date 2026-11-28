@@ -203,7 +203,7 @@ user-defined conjunctions, and `⟨w,hw⟩` supplies a witness for a named exist
 `trivial` · `constructor` · `left` · `right` · `use t` · `exfalso` · `by_contra h` · `by_cases h : P` ·
 `contradiction` · `have h : P := proof` / `have h : P` + block · `show P` ·
 `obtain ⟨x, hx⟩ := h` · `obtain a | b := h` · `cases h with …` ·
-`induction n with x xs ih` · `rw [h, ← g] at h'` · `simp [lemmas, *] at h` ·
+`induction n with x xs ih` · `refine ⟨h, ?_⟩` · `rw [h, ← g] at h'` · `simp [lemmas, *] at h` ·
 `simp only […]` · `simpa [lemmas] using e` · `unfold f` · `decide` · `norm_num` · `ring` · `linarith [extra]` ·
 `nlinarith [extra]` · `linear_combination 2 * h₁ - x * h₂` · `positivity` · `omega` · `t1 <;> t2` · `all_goals t` ·
 `sat` · `auto` · `specialize h a` · `symm` · `calc` · `funext x` · `subst h` ·
@@ -233,6 +233,11 @@ Nested blocks stay within their parent's goal; they cannot consume a sibling
 outside that block. Bullets remain available for explicit focus. `have h : P`
 and `calc` retain their existing proof blocks.
 
+* `refine ⟨h, ?_, e⟩` supplies the known components of a conjunction or an
+  existential and leaves each `?_` as a new goal, in order. A bare `_` works
+  the same way, and nested `⟨…⟩` items may hold holes. A witness cannot be a
+  hole. With no hole, `refine e` is `apply e`.
+  [Examples](spec/refine_holes.sat)
 * `interval_cases i` reads the bounds on a natural or integer variable and
   substitutes each possible value, in increasing order, throughout the goal
   and its hypotheses. For instance, `interval_cases i <;> decide` checks a

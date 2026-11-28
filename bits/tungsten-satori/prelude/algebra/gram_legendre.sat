@@ -244,12 +244,6 @@ import realx
   have hge := integrality.abs_ge_of_dvd a D hne hD hdvd
   linarith
 
-+ pow_pos_nat (p k : ℕ) (hp : 0 < p) : 0 < p ^ k
-  induction k with n ih
-  · rw [pow_zero.nat]; decide
-  · rw [succ_eq_add_one.nat, pow_succ.nat]
-    exact mul_pos.nat (p ^ n) p ih hp
-
 -- Helper: (p^v : ℝ) = exp(v * log p) for p >= 1.
 + pow_eq_exp_mul_log (p v : ℕ) (hp : 1 ≤ p) :
     ((p ^ v : ℕ) : ℝ) = exp ((v : ℝ) * log (p : ℝ))
@@ -273,7 +267,7 @@ import realx
     (hheight : |(a : ℝ)| ≤ exp H)
     (hbeat : H < (v : ℝ) * log (p : ℝ)) :
     a = 0
-  have hpow_pos : 0 < p ^ v := pow_pos_nat p v (by omega)
+  have hpow_pos : 0 < p ^ v := pow_pos.nat p v (by omega)
   have hlt : |(a : ℝ)| < ((p ^ v : ℕ) : ℝ)
     rw [pow_eq_exp_mul_log p v (by omega)]
     have hexp := (exp_lt_exp H ((v : ℝ) * log (p : ℝ))).mpr hbeat
@@ -356,7 +350,7 @@ import realx
     omega
   · rw [succ_eq_add_one.nat]
     simp [legendre.sum]
-    have hpk_pos : 0 < p ^ (k + 1) := pow_pos_nat p (k + 1) (by omega)
+    have hpk_pos : 0 < p ^ (k + 1) := pow_pos.nat p (k + 1) (by omega)
     have hdiv_step := succ_div_eq (m - 1) (p ^ (k + 1)) hpk_pos
     rw [← hm1] at hdiv_step
     by_cases hd : (p ^ (k + 1)) ∣ m
@@ -379,7 +373,7 @@ import realx
             _ = (p ^ c * p ^ (k + 1 - c)) * qm := by rw [← hsplit_pow]
             _ = 0 + p ^ c * (p ^ (k + 1 - c) * qm) := by ring
         rw [hm_eq, add_mul_mod.nat]
-        have hpc_pos : 0 < p ^ c := pow_pos_nat p c (by omega)
+        have hpc_pos : 0 < p ^ c := pow_pos.nat p c (by omega)
         exact (div_mod_of_lt.nat 0 (p ^ c) hpc_pos).2
       · constructor
         · rw [hdiv_step]; omega
@@ -399,7 +393,7 @@ import realx
       induction L with j ihj
       · simp [legendre.sum]
       · rw [succ_eq_add_one.nat]; simp [legendre.sum]
-        have hpj_pos : 0 < p ^ (j + 1) := pow_pos_nat p (j + 1) (by omega)
+        have hpj_pos : 0 < p ^ (j + 1) := pow_pos.nat p (j + 1) (by omega)
         have h0d : 0 / p ^ (j + 1) = 0 := (div_mod_of_lt.nat 0 (p ^ (j + 1)) hpj_pos).1
         rw [h0d, ihj]
         decide
@@ -412,8 +406,8 @@ import realx
     rw [hm1] at hstep
     have hsum_eq : legendre.sum p L (m + 1) = (legendre.sum p L (m + 1) - legendre.sum p L m) + legendre.sum p L m := by omega
     rw [hsum_eq, pow_add.nat]
-    have hpa : 0 < p ^ (legendre.sum p L (m + 1) - legendre.sum p L m) := pow_pos_nat p (legendre.sum p L (m + 1) - legendre.sum p L m) (by omega)
-    have hpb : 0 < p ^ (legendre.sum p L m) := pow_pos_nat p (legendre.sum p L m) (by omega)
+    have hpa : 0 < p ^ (legendre.sum p L (m + 1) - legendre.sum p L m) := pow_pos.nat p (legendre.sum p L (m + 1) - legendre.sum p L m) (by omega)
+    have hpb : 0 < p ^ (legendre.sum p L m) := pow_pos.nat p (legendre.sum p L m) (by omega)
     exact dvd_mul_dvd.nat (p ^ (legendre.sum p L (m + 1) - legendre.sum p L m)) (p ^ (legendre.sum p L m)) (m + 1) (fact m) hpa hpb hstep.1 ih
 
 -- THEOREM 3C (Legendre Upper Bound): (p - 1) * v_p^(L)(n!) <= n for ALL p >= 2, L, n!
@@ -428,7 +422,7 @@ import realx
       rw [h1]; omega
     · rw [succ_eq_add_one.nat]
       simp [legendre.sum]
-      have hpk_pos : 0 < p ^ k := pow_pos_nat p k (by omega)
+      have hpk_pos : 0 < p ^ k := pow_pos.nat p k (by omega)
       have hdiv_le : p * (n / p ^ (k + 1)) ≤ n / p ^ k
         have h1 := div_add_mod.nat n (p ^ (k + 1))
         have h2 := div_add_mod.nat n (p ^ k)

@@ -867,7 +867,7 @@ import number_theory.dirichlet_twists
   have habs : summable (fun n => complex.abs (gen_dseries_term c s n))
     apply summable.of_nonneg_le (fun n => complex.abs (gen_dseries_term c s n)) (fun n => 1 * pseries.term (complex.re s - 1 + 1) (n + 1))
     · intro n; exact complex.abs_nonneg (gen_dseries_term c s n)
-    · intro n; unfold gen_dseries_term; rw [complex.abs_mul, cpow_real.abs_eq ((n + 1 : ℕ) : ℝ) (complex.neg s) ((cast_pos.real (n + 1)).mpr (by omega))]
+    · intro n; unfold gen_dseries_term; rw [complex.abs_mul, cpow_real.abs_eq ((n + 1 : ℕ) : ℝ) (complex.neg s)]
       have hpt : pseries.term (complex.re s - 1 + 1) (n + 1) = rpow ((n + 1 : ℕ) : ℝ) (-(complex.re s)) := by
         unfold pseries.term; rw [if_neg (by omega)]; have he : -(complex.re s - 1 + 1) = -(complex.re s) := by ring; rw [he]
       have hre_neg : complex.re (complex.neg s) = -(complex.re s) := by simp; ring

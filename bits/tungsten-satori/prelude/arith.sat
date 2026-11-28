@@ -2928,3 +2928,58 @@ import finite_sum
   induction n with n ih
   · rw [sum_below_zero]; exact base
   · rw [succ_eq_add_one.nat, step, sum_below_succ, ih]
+
+-- Nearest-integer quotient: `u = q d + r` with `|2 r| ≤ d`.
++ int.nearest_quot (u d : ℤ) (hd : 0 < d) :
+    ∃ q : ℤ, 2 * (u - q * d) ≤ d ∧ -d ≤ 2 * (u - q * d)
+  set K := nat_of_int (-u) with hK_def
+  have hu_nn : 0 ≤ u + (K : ℤ) * d
+    have h1 := self_le_nat_of_int (-u); rw [← hK_def] at h1
+    have hK_nn : (0 : ℤ) ≤ (K : ℤ) := (cast_le.int 0 K).mpr (by omega)
+    have hKd := mul_le_mul_of_nonneg_left.int 1 d (K : ℤ) (by omega) hK_nn
+    linarith
+  set dn := nat_of_int d with hdn_def
+  have hdn : (dn : ℤ) = d := by rw [hdn_def]; exact int_of_nat_of_int d (by omega)
+  have hdn_pos : 0 < dn
+    by_contra h0; have hz : dn = 0 := by omega; rw [hz, cast_zero.int] at hdn; omega
+  set un := nat_of_int (u + (K : ℤ) * d) with hun_def
+  have hun : (un : ℤ) = u + (K : ℤ) * d := by rw [hun_def]; exact int_of_nat_of_int (u + (K : ℤ) * d) hu_nn
+  have hdm := div_add_mod.nat un dn
+  have hrem := mod_lt.nat un dn hdn_pos
+  have hcast : ((dn * (un / dn) + un % dn : ℕ) : ℤ) = (un : ℤ) := by rw [hdm]
+  rw [cast_add.int, cast_mul.int, hdn, hun] at hcast
+  by_cases hhalf : 2 * (un % dn) ≤ dn
+  · use ((un / dn : ℕ) : ℤ) - (K : ℤ)
+    have hr_nn : (0 : ℤ) ≤ ((un % dn : ℕ) : ℤ) := (cast_le.int 0 (un % dn)).mpr (by omega)
+    have hc : ((2 * (un % dn) : ℕ) : ℤ) ≤ (dn : ℤ) := (cast_le.int (2 * (un % dn)) dn).mpr hhalf
+    rw [cast_mul.int, hdn] at hc
+    have h2 : ((2 : ℕ) : ℤ) = 2 := by decide
+    rw [h2] at hc
+    constructor <;> linarith
+  · use ((un / dn : ℕ) : ℤ) + 1 - (K : ℤ)
+    have hr_lt : ((un % dn : ℕ) : ℤ) < d := by rw [← hdn]; exact (cast_lt.int (un % dn) dn).mpr hrem
+    have hc : (dn : ℤ) < ((2 * (un % dn) : ℕ) : ℤ) := (cast_lt.int dn (2 * (un % dn))).mpr (by omega)
+    rw [cast_mul.int, hdn] at hc
+    have h2 : ((2 : ℕ) : ℤ) = 2 := by decide
+    rw [h2] at hc
+    constructor <;> linarith
+
++ sum_congr.rat (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i) :
+    (∑ i < n, f i) = ∑ i < n, g i := sum_below.congr f g n h
+
++ sum_range_succ'.rat (f : ℕ → ℚ) (n : ℕ) :
+    (∑ i < n + 1, f i) = (∑ i < n, f (i + 1)) + f 0
+  induction n with k ih
+  · rw [sum_below_succ 0, sum_below_zero, sum_below_zero]
+  · rw [succ_eq_add_one.nat, sum_below_succ (k + 1), ih, sum_below_succ k]; ring
+
++ sum_swap.rat (F : ℕ → ℕ → ℚ) (m n : ℕ) :
+    (∑ i < m, ∑ j < n, F i j) = ∑ j < n, ∑ i < m, F i j
+  induction m with k ih
+  · rw [sum_below_zero]
+    symm
+    have hz : (∑ j < n, ∑ i < 0, F i j) = ∑ j < n, (0 : ℚ)
+      apply sum_congr.rat; intro j hj; exact sum_below_zero (fun i => F i j)
+    rw [hz, sum_const.rat]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ k, ih, ← sum_add.rat]
+    apply sum_congr.rat; intro j hj; rw [sum_below_succ k]

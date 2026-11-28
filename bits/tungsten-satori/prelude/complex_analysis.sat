@@ -504,12 +504,6 @@ import power
 -- 5. Exponential Taylor Partial Sums & Exact Uniform Remainder (For Landau's Theorem!)
 -- ====================================================================================
 
-+ pow_nonneg.real (u : ℝ) (hu : 0 ≤ u) (n : ℕ) : 0 ≤ u ^ n
-  induction n with j ih
-  · rw [pow_zero.real]; decide
-  · rw [succ_eq_add_one.nat, pow_succ.real]
-    exact mul_nonneg.real (u ^ j) u ih hu
-
 + fact_cast_pos (k : ℕ) : (0 : ℝ) < ((fact k : ℕ) : ℝ)
   exact (cast_pos.real (fact k)).mpr (fact_pos k)
 

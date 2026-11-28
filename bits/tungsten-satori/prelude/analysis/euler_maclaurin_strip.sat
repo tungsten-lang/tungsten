@@ -82,21 +82,6 @@ import analysis.mertens_poussin
   by_contra hsum_ne
   exact complex.mul_ne_zero (complex.sub (chi u) complex.one) (csum q chi) hsub_ne hsum_ne hdiff
 
--- Helper: splitting csum (m + n) f = csum m f + csum n (fun j => f (m + j)).
-+ csum.split_add (m n : ℕ) (f : ℕ → ℂ) :
-    csum (m + n) f = complex.add (csum m f) (csum n (fun j => f (m + j)))
-  induction n with k ih
-  · have hm0 : m + 0 = m := by omega
-    rw [hm0]
-    have h0 : csum 0 (fun j => f (m + j)) = complex.zero := by rfl
-    rw [h0, complex.add_zero]
-  · rw [succ_eq_add_one.nat]
-    have h1 : m + (k + 1) = (m + k) + 1 := by omega
-    rw [h1]
-    have hs1 : csum ((m + k) + 1) f = complex.add (csum (m + k) f) (f (m + k)) := by rfl
-    have hs2 : csum (k + 1) (fun j => f (m + j)) = complex.add (csum k (fun j => f (m + j))) (f (m + k)) := by rfl
-    rw [hs1, hs2, ih, complex.add_assoc]
-
 -- Helper: triangle inequality |csum n f| <= sum_{i < n} |f i|.
 + csum.abs_le_sum (n : ℕ) (f : ℕ → ℂ) :
     complex.abs (csum n f) ≤ ∑ i < n, complex.abs (f i)

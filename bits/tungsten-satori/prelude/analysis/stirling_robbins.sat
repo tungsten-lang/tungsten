@@ -35,40 +35,6 @@ import analysis.mellin_zeta_strip
 + pi_pos : 0 < pi := by linarith [pi_bounds.1]
 + pi_lt_four : pi < 4 := by linarith [pi_bounds.2]
 
-+ continuous_at.inv_pos (x : ℝ) (hx : 0 < x) : continuous_at (fun y => 1 / y) x
-  unfold continuous_at
-  intro e he
-  have h1 : 0 < x / 2 := by linarith
-  have h2 : 0 < e * (x * (x / 2)) := mul_pos.real e (x * (x / 2)) he (mul_pos.real x (x / 2) hx h1)
-  have hd_ex : ∃ d : ℝ, 0 < d ∧ d ≤ x / 2 ∧ d ≤ e * (x * (x / 2))
-    by_cases hcmp : x / 2 ≤ e * (x * (x / 2))
-    · exact ⟨x / 2, h1, by linarith, hcmp⟩
-    · exact ⟨e * (x * (x / 2)), h2, by linarith, by linarith⟩
-  obtain ⟨d, hd_pos, hd_le1, hd_le2⟩ := hd_ex
-  use d
-  constructor
-  · exact hd_pos
-  · intro y hy
-    have hy_gt : x / 2 < y := by linarith [neg_le_abs.real (y - x)]
-    have hy_pos : 0 < y := by linarith
-    have hxy_pos : 0 < x * y := mul_pos.real x y hx hy_pos
-    have hdiff : 1 / y - 1 / x = (x - y) / (x * y) := by field_simp
-    rw [hdiff]
-    have hnum_lt : |x - y| < e * (x * y)
-      have hneg : x - y = 0 - (y - x) := by ring
-      rw [hneg, abs_neg.real]
-      have hxy_ge : x * (x / 2) ≤ x * y := mul_le_mul_of_nonneg_left.real (x / 2) y x (by linarith) (by linarith)
-      have hm := mul_le_mul_of_nonneg_left.real (x * (x / 2)) (x * y) e hxy_ge (by linarith)
-      linarith
-    have hlo : -(e * (x * y)) < x - y := by linarith [neg_le_abs.real (x - y)]
-    have hhi : x - y < e * (x * y) := by linarith [le_abs_self.real (x - y)]
-    have hdiv_hi : (x - y) / (x * y) < e := (div_lt_iff.real (x - y) e (x * y) hxy_pos).mpr (by linarith)
-    have hdiv_lo : -e < (x - y) / (x * y)
-      have h1 : -(x - y) / (x * y) < e := (div_lt_iff.real (-(x - y)) e (x * y) hxy_pos).mpr (by linarith)
-      have h2 : -(x - y) / (x * y) = -((x - y) / (x * y)) := by rw [div_def.real (-(x - y)) (x * y), div_def.real (x - y) (x * y)]; ring
-      linarith
-    exact abs_lt_of.real ((x - y) / (x * y)) e (by linarith) hdiv_hi
-
 -> ph (y : ℝ) : ℝ := y * log y - y
 
 + ph.lower_bound (y : ℝ) (hy : 0 ≤ y) : -1 ≤ ph y

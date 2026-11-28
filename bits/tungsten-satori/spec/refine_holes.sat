@@ -1,0 +1,28 @@
+-- `refine ⟨..., ?_, ...⟩` leaves each hole as a goal, in order.
+import arith
+
++ refine_and (p q r : Prop) (hp : p) (hq : q) (hr : r) : p ∧ q ∧ r
+  refine ⟨hp, ?_, ?_⟩
+  · exact hq
+  · exact hr
+
++ refine_underscore (a b : ℕ) (h : a ≤ b) : a ≤ b ∧ a ≤ b + 1 ∧ 0 ≤ a
+  refine ⟨h, _, _⟩
+  · omega
+  · omega
+
++ refine_exists (n : ℕ) (h : 2 ≤ n) : ∃ m : ℕ, m < n ∧ 0 < m ∧ m + 1 ≤ n
+  refine ⟨1, ?_, by omega, ?_⟩
+  · omega
+  · omega
+
++ refine_nested (p q r s : Prop) (hp : p) (hq : q) (hr : r) (hs : s) : (p ∧ q) ∧ (r ∧ s)
+  refine ⟨⟨hp, ?_⟩, ⟨?_, hs⟩⟩
+  · exact hq
+  · exact hr
+
+-- Without holes `refine` is still `apply`.
++ refine_apply (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : 0 ≤ a * b
+  refine mul_nonneg.real a b ha hb
+
+#axioms refine_exists

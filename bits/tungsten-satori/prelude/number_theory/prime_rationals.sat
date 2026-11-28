@@ -1,0 +1,338 @@
+-- Prime-Exponent Rational Realization, Finite-Group Multiplicative Pigeonhole,
+-- and Ultrametric Twisted Class-Sum Lower Bounds.
+--
+-- Proved unconditionally on Satori's HOL kernel (0 custom axioms).
+
+import padic.product_formula
+import algebra.hilbert_comparison
+
+-- ====================================================================================
+-- SECTION 1: PRIME-POWER p-ADIC NORM & RATIONAL EXPONENT REALIZATION
+-- ====================================================================================
+
++ int.exists_nat_sub (z : ℤ) :
+    ∃ (a b : ℕ), z = (a : ℤ) - (b : ℤ) ∧ ((z : ℤ) : ℝ) = (a : ℝ) - (b : ℝ)
+  by_cases hz : 0 ≤ z
+  · use nat_of_int z; use 0
+    have heq : ((nat_of_int z : ℕ) : ℤ) = z := int_of_nat_of_int z hz
+    have hz1 : z = ((nat_of_int z : ℕ) : ℤ) - ((0 : ℕ) : ℤ) := by linarith
+    have hcast : ((z : ℤ) : ℝ) = ((nat_of_int z : ℕ) : ℝ) - ((0 : ℕ) : ℝ) := by linarith [hz1]
+    exact ⟨hz1, hcast⟩
+  · use 0; use nat_of_int (0 - z)
+    have hnn : 0 ≤ 0 - z := by linarith
+    have heq : ((nat_of_int (0 - z) : ℕ) : ℤ) = 0 - z := int_of_nat_of_int (0 - z) hnn
+    have hz1 : z = ((0 : ℕ) : ℤ) - ((nat_of_int (0 - z) : ℕ) : ℤ) := by linarith
+    have hcast : ((z : ℤ) : ℝ) = ((0 : ℕ) : ℝ) - ((nat_of_int (0 - z) : ℕ) : ℝ) := by linarith [hz1]
+    exact ⟨hz1, hcast⟩
+
++ padic.abs_prime_pow_self (p e : ℕ) (hp : is_prime_nat p) :
+    padic.abs p (p ^ e) = rpow (p : ℝ) (-((e : ℕ) : ℝ))
+  have hp2 : 2 ≤ p := hp.1
+  have hpe_pos : 0 < p ^ e := pow_pos.nat p e (by omega)
+  have hvp1 : vp p 1 = 0
+    apply vp.eq_zero_of_not_dvd p 1 hp2 (by omega); intro hd
+    obtain ⟨q, hq⟩ := (dvd.iff_exists p 1 (by omega)).mp hd
+    by_cases hq0 : q = 0
+    · rw [hq0] at hq; omega
+    · have hq1 : 1 ≤ q := by omega
+      nlinarith
+  have hvp_p : vp p p = 1
+    have h := vp.mul_p p 1 hp2 (by omega)
+    rw [hvp1, mul_one.nat] at h; omega
+  have hvp_pe : vp p (p ^ e) = e
+    rw [vp.pow p p e hp (by omega), hvp_p]; omega
+  rw [padic.abs_pos_val p (p ^ e) (by omega), hvp_pe]
+
+-- Exponential form: a loss of `e` at `p` costs exactly `exp(-e log p)`.
++ padic.exp_neg_mul_log_eq_abs_pow (p e : ℕ) (hp : is_prime_nat p) :
+    exp (-(((e : ℕ) : ℝ) * log (p : ℝ))) = padic.abs p (p ^ e)
+  rw [padic.abs_prime_pow_self p e hp]; unfold rpow
+  have h : -(((e : ℕ) : ℝ) * log (p : ℝ)) = -((e : ℕ) : ℝ) * log (p : ℝ) := by ring
+  rw [h]
+
++ padic.abs_prime_pow_other (p q e : ℕ) (hp : is_prime_full p) (hq : is_prime_full q) (hne : p ≠ q) :
+    padic.abs p (q ^ e) = 1
+  have hq_pos : 0 < q := by have := hq.1.1; omega
+  have hnd_q : ¬ (p ∣ q) := prime_not_dvd_distinct_prime p q hp hq hne
+  have hnd_qe : ¬ (p ∣ q ^ e) := prime_not_dvd_pow p q e hp.1 hnd_q
+  exact padic.abs_eq_one_of_not_dvd p (q ^ e) hp.1.1 (pow_pos.nat q e hq_pos) hnd_qe
+
++ padic.abs_nat_prod (p k : ℕ) (f : ℕ → ℕ) (hp : is_prime_nat p) :
+    padic.abs p (nat_prod k f) = real_prod k (fun i => padic.abs p (f i))
+  induction k with r ihr
+  · rw [nat_prod.zero, real_prod.zero]; exact padic.abs_one_eq p hp.1
+  · rw [succ_eq_add_one.nat, nat_prod.succ, real_prod.succ, padic.abs_mul p (nat_prod r f) (f r) hp, ihr]
+
+-- Constructive rational prime-factor realization (`exists_rat_log_eq_and_padic_norm_eq`):
+-- For any finite list of pairwise distinct primes `p 0, ..., p (k-1)` and integer exponents `g`,
+-- there exist positive integers `n_num, n_den` (`q = n_num / n_den`) whose logarithm is
+-- `∑ i < k, g(p i) * log(p i)` and whose `l`-adic absolute value is `l^(-g(p i))` at `p i`
+-- and `1` at every prime `l` outside `{p 0, ..., p (k-1)}`.
++ rat.exists_prime_factor_log_and_padic (k : ℕ) (p : ℕ → ℕ) (g : ℕ → ℤ)
+    (hp : ∀ i < k, is_prime_full (p i))
+    (hdist : ∀ i < k, ∀ j < k, i ≠ j → p i ≠ p j) :
+    ∃ (n_num n_den : ℕ), 0 < n_num ∧ 0 < n_den ∧
+      log ((n_num : ℝ) / (n_den : ℝ)) = (∑ i < k, ((g (p i) : ℤ) : ℝ) * log (p i : ℝ)) ∧
+      (∀ l : ℕ, is_prime_full l → (∀ i < k, l ≠ p i) → padic.abs l n_num / padic.abs l n_den = 1) ∧
+      (∀ i < k, padic.abs (p i) n_num / padic.abs (p i) n_den = rpow (p i : ℝ) (-((g (p i) : ℤ) : ℝ)))
+  induction k with hp hdist r ihr hp hdist
+  · use 1; use 1
+    have h1ne : (1 : ℝ) ≠ 0 := by norm_num
+    constructor
+    · omega
+    constructor
+    · omega
+    constructor
+    · rw [sum_below_zero, cast_one.real, div_self.real 1 h1ne, log_one]
+    constructor
+    · intro l hl _; rw [padic.abs_one_eq l hl.1.1, div_self.real 1 h1ne]
+    · intro i hi; omega
+  · rw [succ_eq_add_one.nat] at hp hdist ⊢
+    obtain ⟨n0, d0, hn0, hd0, hlog0, hoth0, hhit0⟩ := ihr (by intro i hi; exact hp i (by omega)) (by intro i hi j hj hne; exact hdist i (by omega) j (by omega) hne)
+    obtain ⟨a, b, hab_z, hab_r⟩ := int.exists_nat_sub (g (p r))
+    have hpr : is_prime_full (p r) := hp r (by omega)
+    have hpr_pos : 0 < p r := by have := hpr.1.1; omega
+    have hpa_pos : 0 < (p r) ^ a := pow_pos.nat (p r) a hpr_pos
+    have hpb_pos : 0 < (p r) ^ b := pow_pos.nat (p r) b hpr_pos
+    use n0 * ((p r) ^ a); use d0 * ((p r) ^ b)
+    have hn0r : (0 : ℝ) < (n0 : ℝ) := (cast_pos.real n0).mpr hn0
+    have hd0r : (0 : ℝ) < (d0 : ℝ) := (cast_pos.real d0).mpr hd0
+    have hpar : (0 : ℝ) < (((p r) ^ a : ℕ) : ℝ) := (cast_pos.real ((p r) ^ a)).mpr hpa_pos
+    have hpbr : (0 : ℝ) < (((p r) ^ b : ℕ) : ℝ) := (cast_pos.real ((p r) ^ b)).mpr hpb_pos
+    constructor
+    · exact mul_pos.nat n0 ((p r) ^ a) hn0 hpa_pos
+    constructor
+    · exact mul_pos.nat d0 ((p r) ^ b) hd0 hpb_pos
+    constructor
+    · rw [sum_below_succ, cast_mul.real, cast_mul.real]
+      rw [log_div ((n0 : ℝ) * (((p r) ^ a : ℕ) : ℝ)) ((d0 : ℝ) * (((p r) ^ b : ℕ) : ℝ)) (mul_pos.real (n0 : ℝ) (((p r) ^ a : ℕ) : ℝ) hn0r hpar) (mul_pos.real (d0 : ℝ) (((p r) ^ b : ℕ) : ℝ) hd0r hpbr)]
+      rw [log_mul (n0 : ℝ) (((p r) ^ a : ℕ) : ℝ) hn0r hpar, log_mul (d0 : ℝ) (((p r) ^ b : ℕ) : ℝ) hd0r hpbr]
+      rw [log_pow.nat (p r) a (by omega), log_pow.nat (p r) b (by omega)]
+      rw [log_div (n0 : ℝ) (d0 : ℝ) hn0r hd0r] at hlog0
+      rw [← hlog0, hab_r]; ring
+    constructor
+    · intro l hl hne
+      rw [padic.abs_mul l n0 ((p r) ^ a) hl.1, padic.abs_mul l d0 ((p r) ^ b) hl.1]
+      rw [padic.abs_prime_pow_other l (p r) a hl hpr (hne r (by omega)), padic.abs_prime_pow_other l (p r) b hl hpr (hne r (by omega))]
+      rw [mul_one.real, mul_one.real]
+      exact hoth0 l hl (by intro i hi; exact hne i (by omega))
+    · intro i hi
+      by_cases hir : i = r
+      · rw [hir]
+        rw [padic.abs_mul (p r) n0 ((p r) ^ a) hpr.1, padic.abs_mul (p r) d0 ((p r) ^ b) hpr.1]
+        have hpr_oth := hoth0 (p r) hpr (by intro j hj; exact hdist r (by omega) j (by omega) (by omega))
+        have hd0_pos : 0 < padic.abs (p r) d0 := padic.abs_pos (p r) d0 hd0
+        have hd0_ne : padic.abs (p r) d0 ≠ 0 := by linarith
+        have hn0_eq : padic.abs (p r) n0 = 1 * padic.abs (p r) d0 := (div_eq_iff.real (padic.abs (p r) n0) 1 (padic.abs (p r) d0) hd0_ne).mp hpr_oth
+        rw [hn0_eq, one_mul.real, padic.abs_prime_pow_self (p r) a hpr.1, padic.abs_prime_pow_self (p r) b hpr.1]
+        rw [mul_div_mul_left.real (rpow ((p r : ℕ) : ℝ) (-((a : ℕ) : ℝ))) (rpow ((p r : ℕ) : ℝ) (-((b : ℕ) : ℝ))) (padic.abs (p r) d0) hd0_ne]
+        have hb_pos := rpow.pos ((p r : ℕ) : ℝ) (-((b : ℕ) : ℝ))
+        have hb_ne : rpow ((p r : ℕ) : ℝ) (-((b : ℕ) : ℝ)) ≠ 0 := by linarith
+        have hr_add := rpow.add ((p r : ℕ) : ℝ) (-((g (p r) : ℤ) : ℝ)) (-((b : ℕ) : ℝ))
+        have hexp_eq : -((g (p r) : ℤ) : ℝ) + -((b : ℕ) : ℝ) = -((a : ℕ) : ℝ) := by linarith [hab_r]
+        rw [hexp_eq] at hr_add
+        exact (div_eq_iff.real (rpow ((p r : ℕ) : ℝ) (-((a : ℕ) : ℝ))) (rpow ((p r : ℕ) : ℝ) (-((g (p r) : ℤ) : ℝ))) (rpow ((p r : ℕ) : ℝ) (-((b : ℕ) : ℝ))) hb_ne).mpr hr_add
+      · have hilt : i < r := by omega
+        have hpi : is_prime_full (p i) := hp i (by omega)
+        have hne : p i ≠ p r := hdist i (by omega) r (by omega) hir
+        rw [padic.abs_mul (p i) n0 ((p r) ^ a) hpi.1, padic.abs_mul (p i) d0 ((p r) ^ b) hpi.1]
+        rw [padic.abs_prime_pow_other (p i) (p r) a hpi hpr hne, padic.abs_prime_pow_other (p i) (p r) b hpi hpr hne]
+        rw [mul_one.real, mul_one.real]
+        exact hhit0 i hilt
+
+-- ====================================================================================
+-- SECTION 2: FINITE-GROUP MULTIPLICATIVE PIGEONHOLE & ULTRAMETRIC TWISTED SUMS
+-- ====================================================================================
+
++ fin_argmax (N : ℕ) (hN : 1 ≤ N) (f : ℕ → ℝ) :
+    ∃ i < N, ∀ j < N, f j ≤ f i
+  induction N with hN r ihr hN
+  · omega
+  · by_cases hr : r = 0
+    · rw [hr]; use 0; constructor; omega
+      intro j hj; have hj0 : j = 0 := by omega
+      rw [hj0]; linarith
+    · obtain ⟨i0, hi0_lt, hi0_max⟩ := ihr (by omega)
+      rw [succ_eq_add_one.nat]
+      by_cases hcmp : f i0 ≤ f r
+      · use r; constructor; omega
+        intro j hj
+        by_cases hjr : j = r
+        · rw [hjr]; linarith
+        · have := hi0_max j (by omega); linarith
+      · use i0; constructor; omega
+        intro j hj
+        by_cases hjr : j = r
+        · rw [hjr]; linarith
+        · exact hi0_max j (by omega)
+
++ real_prod.skip_index (m j : ℕ) (hj : j < m + 1) (f : ℕ → ℝ) :
+    real_prod (m + 1) f = f j * real_prod m (fun i => if i < j then f i else f (i + 1))
+  induction m with hj r ihr hj
+  · have hj0 : j = 0 := by omega
+    rw [hj0, real_prod.succ, real_prod.zero, real_prod.zero]; ring
+  · rw [succ_eq_add_one.nat] at hj ⊢
+    by_cases hjr : j = r + 1
+    · rw [hjr, real_prod.succ (r + 1) f]
+      have hcon : real_prod (r + 1) (fun i => if i < r + 1 then f i else f (i + 1)) = real_prod (r + 1) f
+        apply real_prod.congr; intro i hi; rw [if_pos hi]
+      rw [hcon]; ring
+    · rw [real_prod.succ (r + 1) f, real_prod.succ r (fun i => if i < j then f i else f (i + 1))]
+      have hnr : ¬ (r < j) := by omega
+      rw [if_neg hnr, ihr (by omega)]; ring
+
+-- Finite bijection invariance of `real_prod`:
+-- Any bijection `sigma : {0, ..., N-1} -> {0, ..., N-1}` preserves `real_prod N`.
++ real_prod.bij (N : ℕ) :
+    ∀ (f : ℕ → ℝ) (sig : ℕ → ℕ),
+      (∀ i < N, sig i < N) →
+      (∀ i < N, ∀ j < N, sig i = sig j → i = j) →
+      real_prod N (fun i => f (sig i)) = real_prod N f
+  induction N with f sig hlt hinj r ihr f sig hlt hinj
+  · rw [real_prod.zero, real_prod.zero]
+  · rw [succ_eq_add_one.nat] at hlt hinj ⊢
+    have hj0_lt : sig r < r + 1 := hlt r (by omega)
+    rw [real_prod.succ r (fun i => f (sig i)), real_prod.skip_index r (sig r) hj0_lt f]
+    have hlt' : ∀ i < r, (if sig i < sig r then sig i else sig i - 1) < r
+      intro i hi
+      have hne : sig i ≠ sig r := by intro heq; have := hinj i (by omega) r (by omega) heq; omega
+      have hsi : sig i < r + 1 := hlt i (by omega)
+      by_cases hcmp : sig i < sig r
+      · rw [if_pos hcmp]; omega
+      · rw [if_neg hcmp]; omega
+    have hinj' : ∀ i < r, ∀ j < r, (if sig i < sig r then sig i else sig i - 1) = (if sig j < sig r then sig j else sig j - 1) → i = j
+      intro i hi j hj heq
+      have hni : sig i ≠ sig r := by intro h; have := hinj i (by omega) r (by omega) h; omega
+      have hnj : sig j ≠ sig r := by intro h; have := hinj j (by omega) r (by omega) h; omega
+      by_cases hci : sig i < sig r
+      · by_cases hcj : sig j < sig r
+        · rw [if_pos hci, if_pos hcj] at heq; exact hinj i (by omega) j (by omega) heq
+        · rw [if_pos hci, if_neg hcj] at heq; omega
+      · by_cases hcj : sig j < sig r
+        · rw [if_neg hci, if_pos hcj] at heq; omega
+        · rw [if_neg hci, if_neg hcj] at heq
+          have hseq : sig i = sig j := by omega
+          exact hinj i (by omega) j (by omega) hseq
+    have hstep : real_prod r (fun i => f (sig i)) = real_prod r (fun i => (fun k => if k < sig r then f k else f (k + 1)) ((fun i => if sig i < sig r then sig i else sig i - 1) i))
+      apply real_prod.congr; intro i hi
+      have hni : sig i ≠ sig r := by intro h; have := hinj i (by omega) r (by omega) h; omega
+      by_cases hci : sig i < sig r
+      · rw [if_pos hci, if_pos hci]
+      · have hnlt : ¬ (sig i - 1 < sig r) := by omega
+        have hadd : sig i - 1 + 1 = sig i := by omega
+        rw [if_neg hci, if_neg hnlt, hadd]
+    have hih := ihr (fun k => if k < sig r then f k else f (k + 1)) (fun i => if sig i < sig r then sig i else sig i - 1) hlt' hinj'
+    rw [hstep, hih]; ring
+
++ pow_le_pow_cancel.real (a b : ℝ) (N : ℕ) (hN : 1 ≤ N) (hb : 0 ≤ b) (hpow : a ^ N ≤ b ^ N) :
+    a ≤ b
+  by_contra hlt
+  have hba : b < a := by linarith
+  have hstrict := pow_lt_pow_left.real b a N hb hba (by omega)
+  linarith
+
+-- Multiplicative group pigeonhole (`exists_factorisation_le` in `HeckeValueHeight.lean`):
+-- If `V^N = ∏_{chi < N} a(chi) * b(chi)` and `inv_l` is a bijection on `{0,...,N-1}` with
+-- `op (inv_l chi) chi = psi`, then for any multiplicative seminorm `v` there exist `phi, chi < N`
+-- with `op phi chi = psi` and `v V ≤ v (a phi * b chi)`.
++ group.exists_factorisation_le (N : ℕ) (hN : 1 ≤ N) (v : ℂ → ℝ) (hv : is_mult_seminorm v)
+    (op : ℕ → ℕ → ℕ) (psi : ℕ) (inv_l : ℕ → ℕ)
+    (hinv_lt : ∀ chi < N, inv_l chi < N)
+    (hinv_op : ∀ chi < N, op (inv_l chi) chi = psi)
+    (hinv_inj : ∀ i < N, ∀ j < N, inv_l i = inv_l j → i = j)
+    (a b : ℕ → ℂ) (V : ℂ)
+    (hV : cpow_nat V N = cprod_c N (fun chi => complex.mul (a chi) (b chi))) :
+    ∃ (phi chi : ℕ), phi < N ∧ chi < N ∧ op phi chi = psi ∧ v V ≤ v (complex.mul (a phi) (b chi))
+  obtain ⟨chi0, hchi0_lt, hchi0_max⟩ := fin_argmax N hN (fun chi => v (complex.mul (a (inv_l chi)) (b chi)))
+  use inv_l chi0; use chi0
+  have hmain : v V ≤ v (complex.mul (a (inv_l chi0)) (b chi0))
+    apply pow_le_pow_cancel.real (v V) (v (complex.mul (a (inv_l chi0)) (b chi0))) N hN (hv.2.2.1 (complex.mul (a (inv_l chi0)) (b chi0)))
+    rw [← is_mult_seminorm.cpow_nat v hv V N, hV, is_mult_seminorm.cprod_c v hv N]
+    have hsplit : real_prod N (fun chi => v (complex.mul (a chi) (b chi))) = real_prod N (fun chi => v (a chi)) * real_prod N (fun chi => v (b chi))
+      rw [← real_prod.mul N (fun chi => v (a chi)) (fun chi => v (b chi))]
+      apply real_prod.congr; intro chi _; exact hv.2.2.2 (a chi) (b chi)
+    have hbij : real_prod N (fun chi => v (a (inv_l chi))) = real_prod N (fun chi => v (a chi)) := real_prod.bij N (fun chi => v (a chi)) inv_l hinv_lt hinv_inj
+    have hmerge : real_prod N (fun chi => v (a (inv_l chi))) * real_prod N (fun chi => v (b chi)) = real_prod N (fun chi => v (complex.mul (a (inv_l chi)) (b chi)))
+      rw [← real_prod.mul N (fun chi => v (a (inv_l chi))) (fun chi => v (b chi))]
+      apply real_prod.congr; intro chi _; exact (hv.2.2.2 (a (inv_l chi)) (b chi)).symm
+    rw [hsplit, ← hbij, hmerge, ← real_prod.const_eq_pow N (v (complex.mul (a (inv_l chi0)) (b chi0)))]
+    apply real_prod.le_of_le
+    · intro chi _; exact hv.2.2.1 (complex.mul (a (inv_l chi)) (b chi))
+    · intro chi hchi; exact hchi0_max chi hchi
+  exact ⟨hinv_lt chi0 hchi0_lt, hchi0_lt, hinv_op chi0 hchi0_lt, hmain⟩
+
++ group.exists_factorisation_abs_le (N : ℕ) (hN : 1 ≤ N)
+    (op : ℕ → ℕ → ℕ) (psi : ℕ) (inv_l : ℕ → ℕ)
+    (hinv_lt : ∀ chi < N, inv_l chi < N)
+    (hinv_op : ∀ chi < N, op (inv_l chi) chi = psi)
+    (hinv_inj : ∀ i < N, ∀ j < N, inv_l i = inv_l j → i = j)
+    (a b : ℕ → ℂ) (V : ℂ)
+    (hV : cpow_nat V N = cprod_c N (fun chi => complex.mul (a chi) (b chi))) :
+    ∃ (phi chi : ℕ), phi < N ∧ chi < N ∧ op phi chi = psi ∧ complex.abs V ≤ complex.abs (complex.mul (a phi) (b chi))
+  exact group.exists_factorisation_le N hN complex.abs complex.abs_is_mult_seminorm op psi inv_l hinv_lt hinv_op hinv_inj a b V hV
+
+-- Ultrametric sum maximizer & twisted class-sum lower bound (`exists_twisted_classSum_ge`):
++ is_ultrametric_norm.exists_le_csum (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (N : ℕ) (hN : 1 ≤ N) (f : ℕ → ℂ) :
+    ∃ i < N, v (csum N f) ≤ v (f i)
+  obtain ⟨i0, hi0_lt, hi0_max⟩ := fin_argmax N hN (fun i => v (f i))
+  use i0; constructor; exact hi0_lt
+  exact is_ultrametric_norm.csum_le v hv N f (v (f i0)) (hv.1.2.2.1 (f i0)) hi0_max
+
++ group.exists_twisted_sum_ge (N g0 : ℕ) (hN : 1 ≤ N) (hg0 : g0 < N)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (chi : ℕ → ℕ → ℂ)
+    (horth : ∀ g < N, csum N (fun r => chi r g) = if g = g0 then complex.of_real (N : ℝ) else complex.zero)
+    (s : ℕ → ℂ) :
+    ∃ r < N, v (s g0) ≤ v (complex.mul (complex.inv (complex.of_real (N : ℝ))) (csum N (fun g => complex.mul (chi r g) (s g))))
+  have hNne : complex.of_real (N : ℝ) ≠ complex.zero
+    intro heq
+    have hre : complex.re (complex.of_real (N : ℝ)) = complex.re complex.zero := by rw [heq]
+    simp at hre
+    have hNp : (0 : ℝ) < (N : ℝ) := (cast_pos.real N).mpr (by omega)
+    linarith
+  have hinner : csum N (fun r => csum N (fun g => complex.mul (chi r g) (s g))) = complex.mul (complex.of_real (N : ℝ)) (s g0)
+    rw [csum.swap N N (fun r g => complex.mul (chi r g) (s g))]
+    have hcon : csum N (fun g => csum N (fun r => complex.mul (chi r g) (s g))) = csum N (fun g => if g = g0 then complex.mul (complex.of_real (N : ℝ)) (s g) else complex.zero)
+      apply csum.congr; intro g hg
+      rw [csum.scale_right N (s g) (fun r => chi r g), horth g hg]
+      by_cases hgg : g = g0
+      · rw [if_pos hgg, if_pos hgg]
+      · rw [if_neg hgg, if_neg hgg, complex.mul_zero_l]
+    rw [hcon, csum.single N g0 (fun g => complex.mul (complex.of_real (N : ℝ)) (s g)) hg0]
+  have hsum_eq : csum N (fun r => complex.mul (complex.inv (complex.of_real (N : ℝ))) (csum N (fun g => complex.mul (chi r g) (s g)))) = s g0
+    rw [csum.scale_left N (complex.inv (complex.of_real (N : ℝ))) (fun r => csum N (fun g => complex.mul (chi r g) (s g))), hinner]
+    rw [← complex.mul_assoc, complex.inv_mul_cancel (complex.of_real (N : ℝ)) hNne, complex.mul_one_l]
+  obtain ⟨r, hr_lt, hr_le⟩ := is_ultrametric_norm.exists_le_csum v hv N hN (fun r => complex.mul (complex.inv (complex.of_real (N : ℝ))) (csum N (fun g => complex.mul (chi r g) (s g))))
+  rw [hsum_eq] at hr_le
+  exact ⟨r, hr_lt, hr_le⟩
+
+-- Pigeonhole + twisted class sum: if `V^N = ∏ a(chi) b(chi)` and each product `a(phi) b(chi)`
+-- is the value at `g0` of a class function `s phi chi`, then `v V` is bounded by the `v`-norm of
+-- one normalized twisted class sum of one factorisation `phi * chi = psi`.
++ group.exists_factorisation_twisted_sum_ge (N Ncl g0 : ℕ) (hN : 1 ≤ N) (hNcl : 1 ≤ Ncl) (hg0 : g0 < Ncl)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (op : ℕ → ℕ → ℕ) (psi : ℕ) (inv_l : ℕ → ℕ)
+    (hinv_lt : ∀ chi < N, inv_l chi < N)
+    (hinv_op : ∀ chi < N, op (inv_l chi) chi = psi)
+    (hinv_inj : ∀ i < N, ∀ j < N, inv_l i = inv_l j → i = j)
+    (a b : ℕ → ℂ) (V : ℂ)
+    (hV : cpow_nat V N = cprod_c N (fun chi => complex.mul (a chi) (b chi)))
+    (cchar : ℕ → ℕ → ℂ) (s : ℕ → ℕ → ℕ → ℂ)
+    (horth : ∀ g < Ncl, csum Ncl (fun r => cchar r g) = if g = g0 then complex.of_real (Ncl : ℝ) else complex.zero)
+    (hs : ∀ phi < N, ∀ chi < N, s phi chi g0 = complex.mul (a phi) (b chi)) :
+    ∃ (phi chi r : ℕ), phi < N ∧ chi < N ∧ op phi chi = psi ∧ r < Ncl ∧
+      v V ≤ v (complex.mul (complex.inv (complex.of_real (Ncl : ℝ))) (csum Ncl (fun g => complex.mul (cchar r g) (s phi chi g))))
+  obtain ⟨phi, chi, hphi, hchi, hop, hle⟩ := group.exists_factorisation_le N hN v hv.1 op psi inv_l hinv_lt hinv_op hinv_inj a b V hV
+  obtain ⟨r, hr, hge⟩ := group.exists_twisted_sum_ge Ncl g0 hNcl hg0 v hv cchar horth (s phi chi)
+  rw [hs phi hphi chi hchi] at hge
+  exact ⟨phi, chi, r, hphi, hchi, hop, hr, by linarith⟩
+
+-- ====================================================================================
+-- AXIOM AUDIT: ZERO CUSTOM AXIOMS!
+-- ====================================================================================
+
+#axioms rat.exists_prime_factor_log_and_padic
+#axioms real_prod.bij
+#axioms group.exists_factorisation_le
+#axioms group.exists_twisted_sum_ge
+#axioms group.exists_factorisation_twisted_sum_ge

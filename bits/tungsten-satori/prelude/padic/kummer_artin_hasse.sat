@@ -368,17 +368,6 @@ import algebra.gram_legendre
 -> fps.monomial (r : ℕ) (c : ℚ) (n : ℕ) : ℚ := if n = r then c else 0
 
 -- Helper sum lemmas on Q:
-+ sum_range_succ'.rat (f : ℕ → ℚ) (n : ℕ) : ∑ i < n + 1, f i = (∑ i < n, f (i + 1)) + f 0
-  induction n with m ih
-  · rw [sum_below_succ]; simp
-  · rw [succ_eq_add_one.nat, sum_below_succ, ih, sum_below_succ]; ring
-
-+ sum_congr.rat (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i) : ∑ i < n, f i = ∑ i < n, g i
-  induction n with h m ih h
-  · simp
-  · rw [succ_eq_add_one.nat] at h ⊢
-    rw [sum_below_succ, sum_below_succ, ih (by intro i hi; exact h i (by omega)), h m (by omega)]
-
 + sum_rev.rat (f : ℕ → ℚ) (n : ℕ) : ∑ k < n + 1, f (n - k) = ∑ k < n + 1, f k
   induction n with m ih
   · rw [sum_below_succ, sum_below_succ]; simp
@@ -491,13 +480,6 @@ import algebra.gram_legendre
 
 + fps.mul_def (f g : ℕ → ℚ) (n : ℕ) : fps.mul f g n = ∑ k < n + 1, f k * g (n - k) := by rfl
 + fps.mul_comm_fun (f g : ℕ → ℚ) : fps.mul f g = fps.mul g f := by funext n; exact fps.mul_comm f g n
-
-+ sum_swap.rat (F : ℕ → ℕ → ℚ) (m n : ℕ) : (∑ i < m, ∑ j < n, F i j) = ∑ j < n, ∑ i < m, F i j
-  induction m with r ih
-  · simp; rw [sum_const.rat]; ring
-  · rw [succ_eq_add_one.nat, sum_below_succ, ih]
-    have h1 : (∑ j < n, ∑ i < r + 1, F i j) = ∑ j < n, ((∑ i < r, F i j) + F r j) := by apply sum_congr.rat; intro j hj; rw [sum_below_succ]
-    rw [h1, sum_add.rat]
 
 -- Binomial theorem in the formal power series ring Q[[T]]!
 + fps.add_pow (A B : ℕ → ℚ) (m : ℕ) :
@@ -1463,12 +1445,6 @@ import algebra.gram_legendre
 
 -> sep (n : ℕ) (lam nu nu' : ℕ → ℤ) : ℤ := ∏ i < n, sep_row n lam nu nu' i
 
-+ sum_nonneg.int (f : ℕ → ℤ) (n : ℕ) (hf : ∀ i < n, 0 ≤ f i) : 0 ≤ ∑ i < n, f i
-  induction n with hf m ih hf
-  · simp
-  · rw [succ_eq_add_one.nat] at hf ⊢; rw [sum_below_succ]
-    linarith [ih (by intro i hi; exact hf i (by omega)), hf m (by omega)]
-
 + term_le_sum_nonneg.int (f : ℕ → ℤ) (n k : ℕ) (hk : k < n) (hf : ∀ i < n, 0 ≤ f i) : f k ≤ ∑ i < n, f i
   induction n with hk hf m ih hk hf
   · omega
@@ -1504,8 +1480,6 @@ import algebra.gram_legendre
         nlinarith [abs_nonneg.int (g r), pow_nonneg.int M (r - 1) hM]
   have h1 := hgen (k + 1) ht0 hg; have hksub : (k + 1) - 1 = k := by omega
   rw [hksub] at h1; exact h1
-
-+ le_min.int (a b c : ℤ) (h1 : c ≤ a) (h2 : c ≤ b) : c ≤ min a b := by omega
 
 + interlacing_separation (n : ℕ) (lam nu : ℕ → ℤ) (hlam_nu : interlace n lam nu) :
     (∀ nu' : ℕ → ℤ, interlace n lam nu' → B0 n lam nu' = B0 n lam nu → ∀ i < n, Iset_mem lam (B0 n lam nu) i (nu' i)) ∧

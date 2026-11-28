@@ -16,12 +16,6 @@ import l_function
   rw [h1] at h2
   exact h2
 
-+ pow_pos_nat (p k : ℕ) (hp : 0 < p) : 0 < p ^ k
-  induction k with n ih
-  · rw [pow_zero.nat]; decide
-  · rw [succ_eq_add_one.nat, pow_succ.nat]
-    exact mul_pos.nat (p ^ n) p ih hp
-
 + log_pow.nat (p a : ℕ) (hp : 1 ≤ p) : log ((p ^ a : ℕ) : ℝ) = (a : ℝ) * log (p : ℝ)
   have hp_pos : (0 : ℝ) < (p : ℝ)
     have h1 : p = (p - 1) + 1 := by omega
@@ -31,7 +25,7 @@ import l_function
   · rw [succ_eq_add_one.nat, pow_succ.nat]
     simp
     have hpj_pos : (0 : ℝ) < ((p ^ j : ℕ) : ℝ)
-      have hpos := pow_pos_nat p j (by omega)
+      have hpos := pow_pos.nat p j (by omega)
       have h1 : p ^ j = (p ^ j - 1) + 1 := by omega
       rw [h1]; simp; linarith [cast_nonneg.real (p ^ j - 1)]
     rw [log_mul.real ((p ^ j : ℕ) : ℝ) (p : ℝ) hpj_pos hp_pos, ih]
@@ -129,7 +123,7 @@ import l_function
   have hpk2 : 2 ≤ p ^ k
     have hk1 : k = (k - 1) + 1 := by omega
     rw [hk1, pow_succ.nat]
-    have hpos := pow_pos_nat p (k - 1) (by omega)
+    have hpos := pow_pos.nat p (k - 1) (by omega)
     nlinarith
   have hs := min_fac.spec (p ^ k) hpk2
   have hm_prime : prime (min_fac (p ^ k)) := min_fac.prime (p ^ k) hpk2
@@ -208,7 +202,7 @@ import l_function
   induction k with j ih
   · rw [pow_zero.nat]; omega
   · rw [succ_eq_add_one.nat, pow_succ.nat]
-    have hpos := pow_pos_nat p j (by omega)
+    have hpos := pow_pos.nat p j (by omega)
     nlinarith
 
 + is_prime_power.iff (n : ℕ) :
@@ -231,7 +225,7 @@ import l_function
     have hpk2 : 2 ≤ p ^ k
       have h1 : k = (k - 1) + 1 := by omega
       rw [h1, pow_succ.nat]
-      have hpos := pow_pos_nat p (k - 1) (by omega)
+      have hpos := pow_pos.nat p (k - 1) (by omega)
       nlinarith
     have hk_le : k ≤ p ^ k := nat_le_pow p k hp2
     rw [hneq]
@@ -334,7 +328,7 @@ import l_function
             have hcancel : p * t' = q ^ u * w := by nlinarith
             linarith
           rw [hpt', add_mul_mod.nat]
-          exact (div_mod_of_lt.nat 0 (q ^ u) (pow_pos_nat q u (by omega))).2
+          exact (div_mod_of_lt.nat 0 (q ^ u) (pow_pos.nat q u (by omega))).2
         have hqu_t' := ihu t' hqu_dvd
         unfold dvd at hqu_t' ⊢
         have hdiv' := div_add_mod.nat t' (q ^ u)
@@ -344,7 +338,7 @@ import l_function
           have h1 : t' = q ^ u * s := by linarith
           rw [ht_eq, h1]; ring
         rw [hteq2, add_mul_mod.nat]
-        exact (div_mod_of_lt.nat 0 (q ^ u * q) (mul_pos.nat (q ^ u) q (pow_pos_nat q u (by omega)) (by omega))).2
+        exact (div_mod_of_lt.nat 0 (q ^ u * q) (mul_pos.nat (q ^ u) q (pow_pos.nat q u (by omega)) (by omega))).2
     have hre : p ^ j * p * m = p * (p ^ j * m) := by ring
     rw [hre] at hdvd
     exact ih m k (hstrip1 k (p ^ j * m) hdvd)
@@ -385,7 +379,7 @@ import l_function
           have h2 : p ^ j * m = p ^ (k - 1) * w := by nlinarith
           linarith
         rw [hcancel, add_mul_mod.nat]
-        exact (div_mod_of_lt.nat 0 (p ^ (k - 1)) (pow_pos_nat p (k - 1) (by omega))).2
+        exact (div_mod_of_lt.nat 0 (p ^ (k - 1)) (pow_pos.nat p (k - 1) (by omega))).2
       have hle := ih (k - 1) hdvd'
       rw [succ_eq_add_one.nat]; omega
 
@@ -418,14 +412,14 @@ import l_function
   set N0 := p ^ a * m with hN0
   have hN0_pos : 0 < N0
     rw [hN0]
-    exact mul_pos.nat (p ^ a) m (pow_pos_nat p a (by omega)) (by omega)
+    exact mul_pos.nat (p ^ a) m (pow_pos.nat p a (by omega)) (by omega)
   have hN1_eq : N1 = p * N0
     rw [hN1, hN0, pow_succ.nat]; ring
   have hN0_le_N1 : N0 ≤ N1
     have hp2 : 2 ≤ p := hp.1
     rw [hN1_eq]; nlinarith
   have hpa1_le_N1 : p ^ (a + 1) ≤ N1
-    rw [hN1]; nlinarith [pow_pos_nat p (a + 1) (by omega)]
+    rw [hN1]; nlinarith [pow_pos.nat p (a + 1) (by omega)]
   -- Extend the N0 sum up to N1 + 1 (since no d > N0 divides N0 > 0!):
   have hext : (∑ d < N1 + 1, if d ∣ N0 then von_mangoldt d else 0) = ∑ d < N0 + 1, if d ∣ N0 then von_mangoldt d else 0
     apply sum_below_extend_zero (fun d => if d ∣ N0 then von_mangoldt d else 0) (N0 + 1) (N1 + 1) (by omega)
@@ -447,7 +441,7 @@ import l_function
         rw [hN1]; unfold dvd
         have h0 := add_mul_mod.nat 0 m (p ^ (a + 1))
         have h1 : 0 + p ^ (a + 1) * m = p ^ (a + 1) * m := by ring
-        have h0p : 0 % p ^ (a + 1) = 0 := (div_mod_of_lt.nat 0 (p ^ (a + 1)) (pow_pos_nat p (a + 1) (by omega))).2
+        have h0p : 0 % p ^ (a + 1) = 0 := (div_mod_of_lt.nat 0 (p ^ (a + 1)) (pow_pos.nat p (a + 1) (by omega))).2
         rw [h1, h0p] at h0; exact h0
       have hnd0 : ¬ ((p ^ (a + 1)) ∣ N0)
         intro hdvd0
@@ -479,7 +473,7 @@ import l_function
                 rw [← hsp]; ring
               unfold dvd
               rw [hmul, add_mul_mod.nat]
-              exact (div_mod_of_lt.nat 0 (p ^ k) (pow_pos_nat p k (by omega))).2
+              exact (div_mod_of_lt.nat 0 (p ^ k) (pow_pos.nat p k (by omega))).2
             have hd1' : d ∣ N1 := by rw [hdq, hN1]; exact hd1
             simp [hd1', hd0]
           · have hnd0 : ¬ (d ∣ N0)
@@ -617,7 +611,7 @@ import l_function
           have ha_s : a = (a - 1) + 1 := by omega
           rw [ha_s, pow_succ.nat]
           have hp2 : 2 ≤ p := hp.1
-          nlinarith [pow_pos_nat p (a - 1) (by omega)]
+          nlinarith [pow_pos.nat p (a - 1) (by omega)]
         rw [hneq]; nlinarith
       have hm_le : m ≤ k := by rw [succ_eq_add_one.nat] at hnle; omega
       have ihm := ih m hm1 hm_le
@@ -631,7 +625,7 @@ import l_function
         have h1 : p = (p - 1) + 1 := by omega
         rw [h1]; simp; linarith [cast_nonneg.real (p - 1)]
       have hpa_pos : (0 : ℝ) < ((p ^ a : ℕ) : ℝ)
-        have hpos := pow_pos_nat p a (by omega)
+        have hpos := pow_pos.nat p a (by omega)
         have h1 : p ^ a = (p ^ a - 1) + 1 := by omega
         rw [h1]; simp; linarith [cast_nonneg.real (p ^ a - 1)]
       have hlog_pa : log ((p ^ a : ℕ) : ℝ) = (a : ℝ) * log (p : ℝ) := log_pow.nat p a (by have hp2 := hp.1; omega)

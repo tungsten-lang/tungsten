@@ -44,13 +44,6 @@ import analysis.poisson_jacobi_theta
     rw [complex.abs_sq]; unfold complex.norm_sq complex.of_real; simp; exact (sq_abs.real x).symm
   exact eq_of_sq_eq_nonneg (complex.abs (complex.of_real x)) (|x|) (complex.abs_nonneg (complex.of_real x)) (abs_nonneg.real x) hsq
 
-+ cpow_real.abs_eq (u : ℝ) (w : ℂ) (hu : 0 < u) : complex.abs (cpow_real u w) = rpow u (complex.re w)
-  have hsq : complex.abs (cpow_real u w) * complex.abs (cpow_real u w) = rpow u (complex.re w) * rpow u (complex.re w)
-    rw [complex.abs_sq]; unfold complex.norm_sq cpow_real rpow; simp
-    have h1 : log u * complex.re w = complex.re w * log u := by ring
-    rw [h1]; linear_combination (exp (complex.re w * log u) * exp (complex.re w * log u)) * sin_sq_add_cos_sq (log u * complex.im w)
-  exact eq_of_sq_eq_nonneg (complex.abs (cpow_real u w)) (rpow u (complex.re w)) (complex.abs_nonneg (cpow_real u w)) (by linarith [rpow.pos u (complex.re w)]) hsq
-
 -- Elementary Fundamental Theorem of Calculus (derivative of indefinite Darboux integral):
 -- For any continuous f on [a, b], F(x) = rint f a x satisfies has_deriv_within F [a, b] t (f t)!
 + darboux.ftc_deriv (f : ℝ → ℝ) (a b : ℝ) (hab : a ≤ b)
@@ -714,7 +707,7 @@ import analysis.poisson_jacobi_theta
           have hdiv : exp (-pi * u) / (1 - exp (-pi * u)) ≤ 2 * exp (-pi * u) := by exact (div_le_iff.real (exp (-pi * u)) (2 * exp (-pi * u)) (1 - exp (-pi * u)) (by linarith)).mpr (by nlinarith [exp_pos (-pi * u)])
           have he2 : exp (-pi * u) ≤ exp (-2 * u) := (exp_le_exp (-pi * u) (-2 * u)).mpr (by nlinarith)
           linarith [hpsi.2.2]
-        have habs_p : ∀ w : ℂ, complex.abs (cpow_real u w) = rpow u (complex.re w) := by intro w; exact cpow_real.abs_eq u w (by linarith)
+        have habs_p : ∀ w : ℂ, complex.abs (cpow_real u w) = rpow u (complex.re w) := by intro w; exact cpow_real.abs_eq u w
         have hp1 : rpow u (complex.re w1) ≤ rpow u a := rpow.mono_exp u (complex.re w1) a hu ha_w1
         have hp2 : rpow u (complex.re w2) ≤ rpow u a := rpow.mono_exp u (complex.re w2) a hu ha_w2
         have hrti_eq : riemann_theta_integrand s u = complex.smul (jacobi_psi u) (complex.add (cpow_real u w1) (cpow_real u w2))

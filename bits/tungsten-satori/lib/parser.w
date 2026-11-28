@@ -261,7 +261,7 @@
     if t.kind == :id || t.kind == :num || t.kind == :dec || t.kind == :str
       return true
     if t.kind == :sym
-      return ["(", "\[", "⟨", "{", "_", "|"].include?(t.text) && !(t.text == "|" && @in_abs)
+      return ["(", "\[", "⟨", "{", "_", "?_", "|"].include?(t.text) && !(t.text == "|" && @in_abs)
     false
 
   -> parse_app
@@ -392,6 +392,8 @@
       return ast(:str, t.text, [])
     if t.text == "_"
       return ast(:hole, "_", [])
+    if t.text == "?_"
+      return ast(:hole, "?_", [])
     if t.kind == :kw && t.text == "by"
       # tactic block inside a term: collect tokens up to the enclosing bracket
       start = @pos

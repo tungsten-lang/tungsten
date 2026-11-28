@@ -8,6 +8,7 @@ import algebra.bourbaki_witt
 import algebra.char_p_frobenius
 import algebra.cholesky_hadamard
 import algebra.compressed_arch
+import algebra.comparison_table
 import algebra.compressed_gram
 import algebra.field_aut
 import algebra.dyad_spread
@@ -15,6 +16,7 @@ import algebra.finite_fourier
 import algebra.finite_weil
 import algebra.frame_transport
 import algebra.projection_denominator
+import algebra.metric_frame
 import algebra.local_operator_denominator
 import algebra.gram_legendre
 import algebra.hilbert_comparison
@@ -134,6 +136,12 @@ import tested_denominators
 #axioms cmat.project_frame_normal
 #axioms cmat.project_frame_idempotent
 #axioms cmat.projected_det_clear
+#axioms MetricFrame.project_normal
+#axioms MetricFrame.project_idempotent
+#axioms MetricFrame.mem_iff_project_eq
+#axioms MetricFrame.coordinates_synthesize
+#axioms MetricFrame.project_unique
+#axioms projection_test.on_frame_det
 #axioms cmat.projected_det_change_of_basis
 #axioms cmat.projected_denominator_iff
 #axioms cmat.not_denominator_le_of_cross_gram
@@ -197,6 +205,15 @@ import tested_denominators
 #axioms cmat.frame_compression_arch_det_le
 #axioms cfield_aut.abs_det_frame_compression_le
 #axioms cmat.frame_compression_det_identity
+#axioms cmat.table_tests_separate
+#axioms cmat.table_tests_integral
+#axioms cmat.table_tests_pass
+#axioms cmat.metric_schur_size
+#axioms cmat.ultrametric_integral_matvec
+#axioms cmat.metric_norm_det_sq_ratio
+#axioms cmat.metric_norm_det_sq_rebase
+#axioms cmat.comparison_frame_nonsingular
+#axioms cmat.scaled_table_dual_mul
 #axioms pos_type.fixer_energy_identity
 #axioms pos_type.pair_char_sum_le
 #axioms pos_type.card_mul_sum_singular_le

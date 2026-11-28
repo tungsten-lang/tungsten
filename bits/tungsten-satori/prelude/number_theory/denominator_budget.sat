@@ -1,5 +1,5 @@
 -- One budget per prime for a family of projected determinant tests.
-import algebra.projection_denominator
+import algebra.metric_frame
 import number_theory.prime_scaling
 
 structure ProjectionTest :=
@@ -142,6 +142,24 @@ structure ProjectionTest :=
     (N d r : ℕ) (H U E : ℕ → ℕ → ℂ) (eligible : β → Prop) (op : β → ℕ → ℕ → ℂ) : ProjectionTest :=
   ProjectionTest.mk N d r H U (fun y => ∀ t, p t = p s → integral t y) (integral s)
     (cmat.passes_kernel_tests N d H U E eligible op)
+
+-- Project the right columns onto the stored frame before pairing them with Y.
+-- This is the same determinant used by the place's denominator tests.
+-> projection_test.on_frame (p : α → ℕ) (s : α) (F : MetricFrame) (r : ℕ)
+    (integral : α → (ℕ → ℂ) → Prop) (E : ℕ → ℕ → ℂ) (eligible : β → Prop) (op : β → ℕ → ℕ → ℂ) : ProjectionTest :=
+  projection_test.at_embedding p s integral F.ambient F.dim r F.metric F.basis E eligible op
+
++ projection_test.on_frame_det (p : α → ℕ) (s : α) (F : MetricFrame) (r : ℕ)
+    (integral : α → (ℕ → ℂ) → Prop) (E : ℕ → ℕ → ℂ) (eligible : β → Prop) (op : β → ℕ → ℕ → ℂ)
+    (Y Z : ℕ → ℕ → ℂ) :
+    projection_test.det (projection_test.on_frame p s F r integral E eligible op) Y Z =
+      cmat.det F.dim (fun a b => cmat.pairing F.ambient F.metric (fun i => Y i a) (F.project (fun i => Z i b)))
+  change cmat.det F.dim (cmat.cross_gram F.ambient F.metric Y (cmat.project_frame F.ambient F.dim F.metric F.basis Z)) = cmat.det F.dim (fun a b => cmat.pairing F.ambient F.metric (fun i => Y i a) (F.project (fun i => Z i b)))
+  apply cmat.det_congr; intro a _ b _
+  rw [cmat.cross_gram_entry]
+  have e : (fun i => cmat.project_frame F.ambient F.dim F.metric F.basis Z i b) = F.project (fun i => Z i b)
+    funext i; exact (MetricFrame.project_column F Z b i).symm
+  rw [e]
 
 + padic.reciprocal_prime_power_norm (p k : ℕ) (hp : is_prime_nat p) :
     padic.abs p 1 / padic.abs p (p ^ k) = exp ((k : ℝ) * log (p : ℝ))

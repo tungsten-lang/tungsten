@@ -1,0 +1,234 @@
+-- Comparison forms and their table tests in finite Hilbert spaces.
+-- The rows of B* encode test functionals on the table space. A reconstruction
+-- J B* = h I clears their common denominator (the hook factor in LiftVolumeHeight).
+import algebra.compressed_arch
+import algebra.positive_type_sieve
+import algebra.valuation_torsion
+
++ cmat.metric_schur_size (N M : ℕ) (H L G : ℕ → ℕ → ℂ) (h B row col : ℝ)
+    (hL : ∀ i < N, ∀ j < N, H i j = cmat.mul N (cmat.adj L) L i j)
+    (hh : 0 ≤ h) (hr : 0 ≤ row) (hc : 0 ≤ col)
+    (hrow : ∀ i < N, (∑ j < M, complex.abs (cmat.mul N L G i j)) ≤ row)
+    (hcol : ∀ j < M, (∑ i < N, complex.abs (cmat.mul N L G i j)) ≤ col)
+    (hbudget : h * (row * col) ≤ B) (z : ℕ → ℂ) :
+    h * complex.re (cmat.pairing N H (cmat.apply M G z) (cmat.apply M G z)) ≤ B * complex.re (cdot M z z)
+  have hs := pos_type.schur_test_op_norm N M (cmat.mul N L G) row col hr hc hrow hcol z
+  rw [cmat.apply_mul_fun N M L G z, cmat.cdot_factor N H L (cmat.apply M G z) hL] at hs
+  have he := mul_le_mul_of_nonneg_left.real _ _ h hs hh
+  have hb := mul_le_mul_of_nonneg_right.real _ _ (complex.re (cdot M z z)) hbudget (cdot.self_re_nonneg M z)
+  linarith [mul_assoc.real h (row * col) (complex.re (cdot M z z))]
+
++ cmat.table_test_moments (N M : ℕ) (H U G B : ℕ → ℕ → ℂ) (i c : ℕ) :
+    cmat.cross_gram N H (cmat.mul M G B) U i c =
+      cmat.mul M (cmat.adj B) (cmat.mul N (cmat.adj G) (cmat.mul N H U)) i c
+  unfold cmat.cross_gram cmat.frame_dual
+  rw [cmat.mul_assoc, ← cmat.mul_rect_assoc M N]
+  apply cmat.mul_congr_left; intro k _
+  exact cmat.adj_mul M G B i k
+
++ cmat.recover_table_moments (N M F : ℕ) (H U G B J : ℕ → ℕ → ℂ) (h : ℂ)
+    (hdual : ∀ a < M, ∀ b < M, cmat.mul F J (cmat.adj B) a b = complex.mul h (cmat.id a b))
+    (a c : ℕ) (ha : a < M) :
+    cmat.mul F J (cmat.cross_gram N H (cmat.mul M G B) U) a c =
+      complex.mul h (cmat.mul N (cmat.adj G) (cmat.mul N H U) a c)
+  set V := cmat.mul N (cmat.adj G) (cmat.mul N H U) with hV
+  have e : cmat.mul F J (cmat.cross_gram N H (cmat.mul M G B) U) a c = cmat.mul F J (cmat.mul M (cmat.adj B) V) a c
+    apply cmat.mul_congr_right; intro i _; rw [hV]; exact cmat.table_test_moments N M H U G B i c
+  rw [e, ← cmat.mul_rect_assoc F M]
+  have e2 : cmat.mul M (cmat.mul F J (cmat.adj B)) V a c = complex.mul h (cmat.mul M cmat.id V a c)
+    unfold cmat.mul; rw [← csum.scale_left]
+    apply csum.congr; intro b hb
+    have he := hdual a ha b hb; unfold cmat.mul at he
+    rw [he, complex.mul_assoc]
+  rw [e2, cmat.mul_id_left M V a c ha]
+
++ cmat.comparison_adjoint_entry (N M d : ℕ) (H U G A : ℕ → ℕ → ℂ) (gam : ℂ)
+    (hH : cmat.is_hermitian N H)
+    (had : ∀ i < d, ∀ a < M, cmat.cross_gram N H U G i a = complex.mul gam (A i a))
+    (a c : ℕ) (ha : a < M) (hc : c < d) :
+    cmat.mul N (cmat.adj G) (cmat.mul N H U) a c = complex.mul (complex.conj gam) (cmat.adj A a c)
+  rw [← cmat.adj_cross_gram N H U G hH a c]; unfold cmat.adj
+  rw [had c hc a ha, complex.conj_mul]
+
+-- Separation is a consequence of the common surjective comparison map.
++ cmat.table_tests_separate (N M F d : ℕ) (H U G B J A : ℕ → ℕ → ℂ) (h gam : ℂ)
+    (hh : h ≠ complex.zero) (hg : gam ≠ complex.zero) (hH : cmat.is_hermitian N H)
+    (hA : cmat.det d (cmat.mul M A (cmat.adj A)) ≠ complex.zero)
+    (had : ∀ i < d, ∀ a < M, cmat.cross_gram N H U G i a = complex.mul gam (A i a))
+    (hdual : ∀ a < M, ∀ b < M, cmat.mul F J (cmat.adj B) a b = complex.mul h (cmat.id a b)) :
+    ∃ S : ℕ → ℕ, (∀ i < d, S i < F) ∧ cmat.det d (fun i c => cmat.cross_gram N H (cmat.mul M G B) U (S i) c) ≠ complex.zero
+  set T := cmat.cross_gram N H (cmat.mul M G B) U with hT
+  set w := complex.mul h (complex.conj gam) with hw
+  have hw0 : w ≠ complex.zero
+    rw [hw]; apply complex.mul_ne_zero h (complex.conj gam) hh
+    intro hz; apply hg; rw [← complex.conj_conj gam, hz]; apply complex.ext <;> simp
+  have he : ∀ i < d, ∀ c < d, cmat.mul F (cmat.mul M A J) T i c = complex.mul w (cmat.mul M A (cmat.adj A) i c)
+    intro i _ c hc
+    rw [cmat.mul_rect_assoc M F, ← cmat.mul_scale_right M A (cmat.adj A) w]
+    apply cmat.mul_congr_right; intro a ha
+    rw [hT, cmat.recover_table_moments N M F H U G B J h hdual a c ha, cmat.comparison_adjoint_entry N M d H U G A gam hH had a c ha hc, hw, complex.mul_assoc]
+  have hdet : cmat.det d (cmat.mul F (cmat.mul M A J) T) ≠ complex.zero
+    rw [cmat.det_congr d (cmat.mul F (cmat.mul M A J) T) (fun i c => complex.mul w (cmat.mul M A (cmat.adj A) i c)) he, cmat.det_const_scale]
+    exact complex.mul_ne_zero _ _ (cprod_c.ne_zero d (fun _ => w) (by intro i _; exact hw0)) hA
+  exact cmat.exists_nonzero_minor_of_left_prod_det_ne_zero F d (cmat.mul M A J) T hdet
+
+-- Any table matrix T whose first d columns are the hook-scaled adjoint
+-- coordinates of U reconstructs the image of the compressed operator before projection.
++ cmat.compressed_image_of_table (N M d : ℕ) (h : ℝ) (H U G T : ℕ → ℕ → ℂ)
+    (ht : ∀ a < M, ∀ c < d, T a c = complex.mul (complex.of_real h) (cmat.mul N (cmat.adj G) (cmat.mul N H U) a c))
+    (x : ℕ → ℂ) :
+    cmat.apply d (cmat.compressed_image N M h H U G) x = cmat.apply M G (cmat.apply d T x)
+  rw [← cmat.apply_mul_fun M d G T x]
+  funext i; unfold cmat.apply; apply csum.congr; intro c hc
+  have e : cmat.mul M G T i c = cmat.compressed_image N M h H U G i c
+    unfold cmat.compressed_image; rw [← cmat.mul_scale_right]
+    apply cmat.mul_congr_right; intro a ha; exact ht a ha c hc
+  rw [e]
+
+-- Integrality only concerns the reconstructed Weyl table. Its gauge may depend
+-- on the place and need not be the coordinate supremum in the displayed basis.
++ cmat.table_tests_integral (N M F d : ℕ) (h : ℝ) (H U G B J : ℕ → ℕ → ℂ)
+    (v : ℂ → ℝ) (lattice integral : (ℕ → ℂ) → Prop)
+    (hdual : ∀ a < M, ∀ b < M, cmat.mul F J (cmat.adj B) a b = complex.mul (complex.of_real h) (cmat.id a b))
+    (hJ : ∀ y : ℕ → ℂ, (∀ i < F, v (y i) ≤ 1) → lattice (cmat.apply F J y))
+    (hint : ∀ z : ℕ → ℂ, lattice z → integral (cmat.apply M G z))
+    (x : ℕ → ℂ) (hx : ∀ i < F, v (cmat.apply d (cmat.cross_gram N H (cmat.mul M G B) U) x i) ≤ 1) :
+    integral (cmat.apply d (cmat.compressed_image N M h H U G) x)
+  set T := cmat.cross_gram N H (cmat.mul M G B) U with hT
+  have he : ∀ a < M, ∀ c < d, cmat.mul F J T a c = complex.mul (complex.of_real h) (cmat.mul N (cmat.adj G) (cmat.mul N H U) a c)
+    intro a ha c _; rw [hT]; exact cmat.recover_table_moments N M F H U G B J (complex.of_real h) hdual a c ha
+  rw [cmat.compressed_image_of_table N M d h H U G (cmat.mul F J T) he x, cmat.apply_mul_fun F d J T x]
+  apply hint; exact hJ (cmat.apply d T x) hx
+
+-- The comparison identity puts each right vector in G(range A*).
++ cmat.table_tests_pass (N M d : ℕ) (h : ℝ) (H U G A : ℕ → ℕ → ℂ) (gam : ℂ)
+    (hH : cmat.is_hermitian N H)
+    (had : ∀ i < d, ∀ a < M, cmat.cross_gram N H U G i a = complex.mul gam (A i a))
+    (tested : (ℕ → ℂ) → Prop) (htest : ∀ y : ℕ → ℂ, tested (cmat.apply M G (cmat.apply d (cmat.adj A) y)))
+    (x : ℕ → ℂ) : tested (cmat.apply d (cmat.compressed_image N M h H U G) x)
+  set w := complex.mul (complex.of_real h) (complex.conj gam) with hw
+  set T := fun a c => complex.mul w (cmat.adj A a c) with hT
+  have he : ∀ a < M, ∀ c < d, T a c = complex.mul (complex.of_real h) (cmat.mul N (cmat.adj G) (cmat.mul N H U) a c)
+    intro a ha c hc
+    rw [hT, hw, cmat.comparison_adjoint_entry N M d H U G A gam hH had a c ha hc, complex.mul_assoc]
+  have esc : cmat.apply d T x = cmat.apply d (cmat.adj A) (fun c => complex.mul w (x c))
+    funext a; unfold cmat.apply; apply csum.congr; intro c _; rw [hT]
+    apply complex.ext <;> simp <;> ring
+  rw [cmat.compressed_image_of_table N M d h H U G T he x, esc]
+  exact htest (fun c => complex.mul w (x c))
+
+-- In a general source basis with metric Q the matrix of u* u is Q⁻¹ U* H U.
+-> cmat.metric_norm_det_sq (N d : ℕ) (Q H U : ℕ → ℕ → ℂ) : ℂ :=
+  cmat.det d (cmat.mul d (cmat.inv d Q) (cmat.cross_gram N H U U))
+
++ cmat.metric_norm_det_sq_eq (N d : ℕ) (Q H U : ℕ → ℕ → ℂ) (hQ : cmat.det d Q ≠ complex.zero) :
+    cmat.metric_norm_det_sq N d Q H U = complex.mul (cmat.det d (cmat.cross_gram N H U U)) (complex.inv (cmat.det d Q))
+  unfold cmat.metric_norm_det_sq; rw [cmat.det_mul, cmat.det_inv d Q hQ, complex.mul_comm]
+
+-- A fixed good-form space may be expressed in any basis at both twists.
++ cmat.metric_norm_det_sq_ratio (N0 Nt d : ℕ) (Q H0 Ht U0 Ut : ℕ → ℕ → ℂ)
+    (hQ : cmat.det d Q ≠ complex.zero) (ht : cmat.det d (cmat.cross_gram Nt Ht Ut Ut) ≠ complex.zero) :
+    complex.mul (cmat.metric_norm_det_sq N0 d Q H0 U0) (complex.inv (cmat.metric_norm_det_sq Nt d Q Ht Ut)) =
+      complex.mul (cmat.det d (cmat.cross_gram N0 H0 U0 U0)) (complex.inv (cmat.det d (cmat.cross_gram Nt Ht Ut Ut)))
+  rw [cmat.metric_norm_det_sq_eq N0 d Q H0 U0 hQ, cmat.metric_norm_det_sq_eq Nt d Q Ht Ut hQ]
+  apply complex.div_eq_div
+  · exact complex.mul_ne_zero _ _ ht (complex.inv_ne_zero _ hQ)
+  · exact ht
+  · apply complex.ext <;> simp <;> ring
+
++ cmat.ultrametric_integral_matvec (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (M F : ℕ) (J : ℕ → ℕ → ℂ) (y : ℕ → ℂ)
+    (hJ : ∀ a < M, ∀ i < F, v (J a i) ≤ 1) (hy : ∀ i < F, v (y i) ≤ 1) :
+    ∀ a < M, v (cmat.apply F J y a) ≤ 1
+  intro a ha; unfold cmat.apply
+  apply is_ultrametric_norm.csum_le v hv F _ 1 (by linarith)
+  intro i hi; rw [hv.1.2.2.2]
+  have h := mul_le_mul_of_nonneg_right.real (v (J a i)) 1 (v (y i)) (hJ a ha i hi) (hv.1.2.2.1 (y i))
+  linarith [hy i hi, one_mul.real (v (y i))]
+
+-- The source basis and both target frames may all be nonorthonormal.
++ cmat.metric_norm_det_sq_rebase (N d : ℕ) (Q H U C : ℕ → ℕ → ℂ)
+    (hQ : cmat.det d Q ≠ complex.zero) (hC : cmat.det d C ≠ complex.zero) :
+    cmat.metric_norm_det_sq N d (cmat.cross_gram d Q C C) H (cmat.mul d U C) = cmat.metric_norm_det_sq N d Q H U
+  set b := cmat.det d C with hb
+  set a := cmat.det d (cmat.adj C) with ha
+  have han : a ≠ complex.zero
+    rw [ha, cmat.det_adj]; intro he; apply hC
+    rw [hb, ← complex.conj_conj (cmat.det d C), he]; apply complex.ext <;> simp
+  have es : cmat.det d (cmat.cross_gram d Q C C) = complex.mul a (complex.mul (cmat.det d Q) b)
+    unfold cmat.cross_gram cmat.frame_dual; rw [cmat.det_mul, cmat.det_mul, ha, hb, complex.mul_assoc]
+  have hs : cmat.det d (cmat.cross_gram d Q C C) ≠ complex.zero
+    rw [es]; exact complex.mul_ne_zero _ _ han (complex.mul_ne_zero _ _ hQ hC)
+  rw [cmat.metric_norm_det_sq_eq N d (cmat.cross_gram d Q C C) H (cmat.mul d U C) hs, cmat.metric_norm_det_sq_eq N d Q H U hQ]
+  apply complex.div_eq_div _ _ _ _ hs hQ
+  rw [cmat.cross_gram_det_left_mul, cmat.cross_gram_det_right_mul, es, ha, hb]
+  apply complex.ext <;> simp <;> ring
+
+-- A rectangular frame has positive Gram determinant whenever one left
+-- multiple is nonsingular. This also applies to a rectangular metric factor.
++ cmat.gram_det_ne_zero_of_left_product (N d : ℕ) (C V : ℕ → ℕ → ℂ)
+    (hp : cmat.det d (cmat.mul N C V) ≠ complex.zero) :
+    cmat.det d (cmat.gram_cols N V) ≠ complex.zero
+  set P := cmat.mul N C V with hP
+  set W := cmat.mul d (cmat.inv d P) C with hW
+  have hI : ∀ i < d, ∀ j < d, cmat.mul N W V i j = cmat.id i j
+    intro i hi j hj; rw [hW, cmat.mul_rect_assoc d N, ← hP]
+    exact cmat.inv_mul_eq_id d P hp i hi j hj
+  have hpd : cmat.is_pd d (cmat.gram_cols N V)
+    constructor
+    · exact (cmat.gram_cols_is_psd N d V).1
+    · intro x hsome; obtain ⟨i, hi, hxi⟩ := hsome
+      rw [cmat.gram_pairing N d V x x, cdot.self_re]
+      by_contra hn
+      have hz : ∀ a < N, cmat.apply d V x a = complex.zero
+        intro a ha
+        have hle := single_le_sum.real (fun j => complex.norm_sq (cmat.apply d V x j)) N a (by intro j _; exact complex.norm_sq_nonneg (cmat.apply d V x j)) ha
+        apply (complex.norm_sq_eq_zero (cmat.apply d V x a)).mp
+        linarith [complex.norm_sq_nonneg (cmat.apply d V x a)]
+      have e : cmat.apply d (cmat.mul N W V) x i = cmat.apply d cmat.id x i
+        unfold cmat.apply; apply csum.congr; intro j hj; rw [hI i hi j hj]
+      have z : cmat.apply N W (cmat.apply d V x) i = complex.zero
+        unfold cmat.apply; apply csum.zero_of_all_zero; intro a ha
+        have hh := hz a ha; unfold cmat.apply at hh; rw [hh, complex.mul_zero]
+      rw [cmat.apply_mul_fun N d W V x] at e
+      rw [cmat.apply_id_m50 d x i hi, z] at e; exact hxi e.symm
+  have hs := (cmat.pd_det_pos d (cmat.gram_cols N V) hpd).2
+  intro hz; rw [hz] at hs; have h0 : complex.re complex.zero = 0 := by rfl; linarith
+
++ cmat.comparison_frame_nonsingular (N M d : ℕ) (H U G A : ℕ → ℕ → ℂ) (gam : ℂ)
+    (hH : cmat.is_psd N H) (hg : gam ≠ complex.zero)
+    (hA : cmat.det d (cmat.mul M A (cmat.adj A)) ≠ complex.zero)
+    (had : ∀ i < d, ∀ a < M, cmat.cross_gram N H U G i a = complex.mul gam (A i a)) :
+    cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero
+  obtain ⟨L, hL⟩ := cmat.psd_exists_factor N H hH
+  set V := cmat.mul N L U with hV
+  set C := cmat.mul M A (cmat.adj (cmat.mul N L G)) with hC
+  have ep : ∀ i < d, ∀ j < d, cmat.mul N C V i j = complex.mul (complex.conj gam) (cmat.mul M A (cmat.adj A) i j)
+    intro i _ j hj
+    rw [hC, hV, cmat.mul_rect_assoc M N, ← cmat.mul_scale_right M A (cmat.adj A) (complex.conj gam)]
+    apply cmat.mul_congr_right; intro a ha
+    rw [cmat.cross_factor N H L G U hL, cmat.cross_gram, cmat.frame_dual, cmat.mul_assoc]
+    exact cmat.comparison_adjoint_entry N M d H U G A gam hH.1 had a j ha hj
+  have hp : cmat.det d (cmat.mul N C V) ≠ complex.zero
+    rw [cmat.det_congr d (cmat.mul N C V) (fun i j => complex.mul (complex.conj gam) (cmat.mul M A (cmat.adj A) i j)) ep, cmat.det_const_scale]
+    have hgc : complex.conj gam ≠ complex.zero
+      intro hz; apply hg; rw [← complex.conj_conj gam, hz]; apply complex.ext <;> simp
+    exact complex.mul_ne_zero _ _ (cprod_c.ne_zero d (fun _ => complex.conj gam) (by intro i _; exact hgc)) hA
+  have e : cmat.det d (cmat.gram_cols N V) = cmat.det d (cmat.cross_gram N H U U)
+    apply cmat.det_congr; intro i _ j _; rw [hV]
+    exact cmat.cross_factor N H L U U hL i j
+  rw [← e]; exact cmat.gram_det_ne_zero_of_left_product N d C V hp
+
+-- In a square table chart the scaled dual is computed by cofactors.
+-> cmat.scaled_table_dual (M : ℕ) (h : ℂ) (B : ℕ → ℕ → ℂ) (a i : ℕ) : ℂ :=
+  complex.mul h (cmat.inv M (cmat.adj B) a i)
+
++ cmat.scaled_table_dual_mul (M : ℕ) (h : ℂ) (B : ℕ → ℕ → ℂ)
+    (hB : cmat.det M B ≠ complex.zero) (a b : ℕ) (ha : a < M) (hb : b < M) :
+    cmat.mul M (cmat.scaled_table_dual M h B) (cmat.adj B) a b = complex.mul h (cmat.id a b)
+  have had : cmat.det M (cmat.adj B) ≠ complex.zero
+    rw [cmat.det_adj]; intro hz; apply hB
+    rw [← complex.conj_conj (cmat.det M B), hz]; apply complex.ext <;> simp
+  rw [← cmat.inv_mul_eq_id M (cmat.adj B) had a ha b hb]
+  unfold cmat.mul cmat.scaled_table_dual
+  rw [← csum.scale_left]; apply csum.congr; intro i _; rw [complex.mul_assoc]

@@ -1,0 +1,97 @@
+-- A finite metric space and a basis for a subspace in it. Finite vectors are
+-- functions on ℕ read only below the ambient dimension; coordinates are read
+-- below dim. The basis may be nonorthonormal. F.project x solves the normal
+-- equations in the stored metric.
+import algebra.projection_denominator
+
+structure MetricFrame :=
+  (ambient dim : ℕ)
+  (metric basis : ℕ → ℕ → ℂ)
+
+-> MetricFrame.gram (F : MetricFrame) : ℕ → ℕ → ℂ :=
+  cmat.cross_gram F.ambient F.metric F.basis F.basis
+
+-> MetricFrame.regular (F : MetricFrame) : Prop :=
+  cmat.det F.dim F.gram ≠ complex.zero
+
+-> MetricFrame.compress (F : MetricFrame) (images : ℕ → ℕ → ℂ) : ℕ → ℕ → ℂ :=
+  cmat.frame_compression F.ambient F.dim F.metric F.basis images
+
+-> MetricFrame.coordinates (F : MetricFrame) (x : ℕ → ℂ) : ℕ → ℂ :=
+  fun a => F.compress (fun i _ => x i) a 0
+
+-> MetricFrame.synthesize (F : MetricFrame) (c : ℕ → ℂ) : ℕ → ℂ :=
+  cmat.apply F.dim F.basis c
+
+-> MetricFrame.project (F : MetricFrame) (x : ℕ → ℂ) : ℕ → ℂ :=
+  F.synthesize (F.coordinates x)
+
+-> MetricFrame.contains (F : MetricFrame) (x : ℕ → ℂ) : Prop :=
+  ∃ c : ℕ → ℂ, ∀ i < F.ambient, x i = F.synthesize c i
+
++ MetricFrame.project_column (F : MetricFrame) (Z : ℕ → ℕ → ℂ) (j i : ℕ) :
+    F.project (fun r => Z r j) i = cmat.project_frame F.ambient F.dim F.metric F.basis Z i j
+  unfold MetricFrame.project MetricFrame.synthesize MetricFrame.coordinates MetricFrame.compress cmat.project_frame cmat.frame_compression cmat.cross_gram cmat.apply cmat.mul; trivial
+
++ MetricFrame.project_mem (F : MetricFrame) (x : ℕ → ℂ) : F.contains (F.project x)
+  use F.coordinates x; intro i _; rfl
+
+-- The projection depends only on the finite ambient vector, including when
+-- two representations use different padding outside its dimension.
++ MetricFrame.project_congr (F : MetricFrame) (x y : ℕ → ℂ) (h : ∀ i < F.ambient, x i = y i) :
+    F.project x = F.project y
+  funext i; unfold MetricFrame.project MetricFrame.synthesize cmat.apply
+  apply csum.congr; intro a _
+  have e : F.coordinates x a = F.coordinates y a
+    unfold MetricFrame.coordinates MetricFrame.compress cmat.frame_compression
+    apply cmat.mul_congr_right; intro b _
+    unfold cmat.cross_gram; apply cmat.mul_congr_right; intro t ht; exact h t ht
+  rw [e]
+
++ MetricFrame.project_synthesize (F : MetricFrame) (hF : F.regular) (c : ℕ → ℂ) :
+    F.project (F.synthesize c) = F.synthesize c
+  funext i
+  exact cmat.project_frame_fixes_span F.ambient F.dim F.metric F.basis (fun k _ => c k) hF i 0
+
++ MetricFrame.project_idempotent (F : MetricFrame) (hF : F.regular) (x : ℕ → ℂ) :
+    F.project (F.project x) = F.project x
+  exact MetricFrame.project_synthesize F hF (F.coordinates x)
+
++ MetricFrame.mem_iff_project_eq (F : MetricFrame) (hF : F.regular) (x : ℕ → ℂ) :
+    F.contains x ↔ ∀ i < F.ambient, F.project x i = x i
+  constructor
+  · intro hx; obtain ⟨c, hc⟩ := hx
+    have e := MetricFrame.project_congr F x (F.synthesize c) hc
+    rw [MetricFrame.project_synthesize F hF c] at e; intro i hi; rw [e, hc i hi]
+  · intro he; use F.coordinates x; intro i hi; exact (he i hi).symm
+
+-- Each basis vector pairs equally with x and its projection. For a Hermitian
+-- metric this says the residual is orthogonal to the subspace.
++ MetricFrame.project_normal (F : MetricFrame) (hF : F.regular) (x : ℕ → ℂ) (a : ℕ) (ha : a < F.dim) :
+    cmat.pairing F.ambient F.metric (fun i => F.basis i a) (F.project x) =
+      cmat.pairing F.ambient F.metric (fun i => F.basis i a) x
+  have h := cmat.project_frame_normal F.ambient F.dim F.metric F.basis (fun i _ => x i) hF a 0 ha
+  rw [cmat.cross_gram_entry, cmat.cross_gram_entry] at h; exact h
+
+-- Coordinates in a regular frame are unique, on the active coordinate range.
++ MetricFrame.coordinates_synthesize (F : MetricFrame) (hF : F.regular) (c : ℕ → ℂ) (a : ℕ) (ha : a < F.dim) :
+    F.coordinates (F.synthesize c) a = c a
+  set V := fun k (_ : ℕ) => c k with hV
+  have he : ∀ t : ℕ, cmat.cross_gram F.ambient F.metric F.basis (cmat.mul F.dim F.basis V) t 0 = cmat.mul F.dim F.gram V t 0
+    intro t; exact (cmat.mul_rect_assoc F.ambient F.dim (cmat.frame_dual F.ambient F.metric F.basis) F.basis V t 0).symm
+  have e := cmat.mul_congr_right F.dim (cmat.inv F.dim F.gram) (cmat.cross_gram F.ambient F.metric F.basis (cmat.mul F.dim F.basis V)) (cmat.mul F.dim F.gram V) a 0 (by intro t _; exact he t)
+  rw [← cmat.mul_assoc] at e
+  have eid := cmat.mul_congr_left F.dim (cmat.mul F.dim (cmat.inv F.dim F.gram) F.gram) cmat.id V a 0 (by intro t ht; exact cmat.inv_mul_eq_id F.dim F.gram hF a ha t ht)
+  rw [eid, cmat.mul_id_left F.dim V a 0 ha, hV] at e; exact e
+
++ MetricFrame.project_unique (F : MetricFrame) (hF : F.regular) (x y : ℕ → ℂ) (hy : F.contains y)
+    (hm : ∀ a < F.dim, cmat.pairing F.ambient F.metric (fun i => F.basis i a) x =
+      cmat.pairing F.ambient F.metric (fun i => F.basis i a) y) :
+    ∀ i < F.ambient, F.project x i = y i
+  have ec : F.coordinates x = F.coordinates y
+    funext a; unfold MetricFrame.coordinates MetricFrame.compress cmat.frame_compression
+    apply cmat.mul_congr_right; intro b hb
+    rw [cmat.cross_gram_entry, cmat.cross_gram_entry]; exact hm b hb
+  intro i hi
+  have ey := ((MetricFrame.mem_iff_project_eq F hF y).mp hy) i hi
+  unfold MetricFrame.project at ey ⊢; rw [ec]; exact ey

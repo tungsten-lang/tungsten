@@ -19,6 +19,7 @@ import algebra.local_operator_denominator
 import algebra.gram_legendre
 import algebra.hilbert_comparison
 import algebra.polynomial_fermat
+import algebra.positive_type_sieve
 import algebra.smith_hecke
 import algebra.spectral_det
 import algebra.ultrametric_fourier
@@ -196,3 +197,10 @@ import tested_denominators
 #axioms cmat.frame_compression_arch_det_le
 #axioms cfield_aut.abs_det_frame_compression_le
 #axioms cmat.frame_compression_det_identity
+#axioms pos_type.fixer_energy_identity
+#axioms pos_type.pair_char_sum_le
+#axioms pos_type.card_mul_sum_singular_le
+#axioms pos_type.group_factorization_pigeonhole
+#axioms pos_type.energy_add_le
+#axioms pos_type.weighted_cauchy_schwarz_sq
+#axioms pos_type.schur_test_op_norm

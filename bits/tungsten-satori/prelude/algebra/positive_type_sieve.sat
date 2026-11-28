@@ -1,0 +1,572 @@
+-- Positive-Type Singular-Minor Avoidance over Finite Fourier Systems
+-- (`New/Heights/OneDeterminant.lean:25-55`, `card_mul_sum_det_le`),
+-- Multiplicative Group-Factorization Pigeonhole (`HeckeValueHeight.lean:52`),
+-- Weighted Energy Triangle Inequality (`SchurTest.lean:35`), and Finite-Matrix
+-- Schur's Test (`‖K v‖₂² ≤ M_row * M_col * ‖v‖₂²`).
+--
+-- Proved unconditionally on Satori's HOL kernel (0 custom axioms).
+
+import algebra.dyad_spread
+import algebra.smith_hecke
+import number_theory.one_determinant
+import number_theory.prime_rationals
+
+-- ====================================================================================
+-- SECTION 1: TENSOR-PRODUCT HILBERT–SCHMIDT INNER PRODUCTS & FIXER MASS IDENTITY
+-- ====================================================================================
+
+-> pos_type.tensor_mat (c u : ℕ → ℂ) (ζ r : ℕ) : ℂ :=
+  complex.mul (c ζ) (u r)
+
++ pos_type.hs_inner_tensor (Q N : ℕ) (c1 u1 c2 u2 : ℕ → ℂ) :
+    cmat.hs_inner Q N (pos_type.tensor_mat c1 u1) (pos_type.tensor_mat c2 u2) =
+    complex.mul (cdot Q c1 c2) (cdot N u1 u2)
+  unfold cmat.hs_inner pos_type.tensor_mat cdot
+  have h1 : csum Q (fun ζ => csum N (fun r => complex.mul (complex.conj (complex.mul (c1 ζ) (u1 r))) (complex.mul (c2 ζ) (u2 r)))) =
+      csum Q (fun ζ => complex.mul (complex.mul (complex.conj (c1 ζ)) (c2 ζ)) (csum N (fun r => complex.mul (complex.conj (u1 r)) (u2 r))))
+    apply csum.congr; intro ζ _
+    rw [← csum.scale_left]
+    apply csum.congr; intro r _
+    apply complex.ext <;> simp <;> ring
+  rw [h1, csum.scale_right]
+
+-- Sum of tensor-product matrices: `⟨∑_a c_L a ⊗ u a, ∑_b c_R b ⊗ u b⟩_HS = ∑_{a,b} ⟨c_L a, c_R b⟩ ⟨u a, u b⟩`.
++ pos_type.hs_inner_sum_tensor (G Q N : ℕ) (c_L c_R u : ℕ → ℕ → ℂ) :
+    cmat.hs_inner Q N (fun ζ r => csum G (fun a => pos_type.tensor_mat (c_L a) (u a) ζ r)) (fun ζ r => csum G (fun b => pos_type.tensor_mat (c_R b) (u b) ζ r)) =
+    csum G (fun a => csum G (fun b => complex.mul (cdot Q (c_L a) (c_R b)) (cdot N (u a) (u b))))
+  rw [cmat.hs_inner_sum_left]
+  apply csum.congr; intro a _
+  rw [cmat.hs_inner_sum_right]
+  apply csum.congr; intro b _
+  exact pos_type.hs_inner_tensor Q N (c_L a) (u a) (c_R b) (u b)
+
+-- Fixer energy identity (`OneDeterminant.lean:34-38`):
+-- If `c` is an orthonormal family on `ℂ^Q`, `⟨u a, u b⟩ = Θ(a⁻¹ b)`, and `act` is an action on `< Q`
+-- with `act a x = act b x ↔ x = act (a⁻¹ b) x`, then
+-- `‖∑_{a < G} c(act a x) ⊗ u a‖_HS² = G * ∑_{s < G, x = act s x} Θ s`.
++ pos_type.fixer_energy_identity (G Q N : ℕ) (c : ℕ → ℕ → ℂ) (u : ℕ → ℕ → ℂ) (Theta : ℕ → ℝ)
+    (shift inv_shift : ℕ → ℕ → ℕ) (act : ℕ → ℕ → ℕ) (x : ℕ) (hx : x < Q)
+    (hc : ∀ y1 < Q, ∀ y2 < Q, cdot Q (c y1) (c y2) = if y1 = y2 then complex.one else complex.zero)
+    (hshift_lt : ∀ a < G, ∀ b < G, shift a b < G)
+    (hinv_lt : ∀ a < G, ∀ b < G, inv_shift a b < G)
+    (hleft : ∀ a < G, ∀ b < G, inv_shift a (shift a b) = b)
+    (hright : ∀ a < G, ∀ b < G, shift a (inv_shift a b) = b)
+    (hcorr : ∀ a < G, ∀ b < G, cdot N (u a) (u b) = complex.of_real (Theta (shift a b)))
+    (hact_lt : ∀ a < G, ∀ y < Q, act a y < Q)
+    (hact_eq : ∀ a < G, ∀ b < G, act a x = act b x ↔ x = act (shift a b) x) :
+    cmat.hs_norm_sq Q N (fun ζ r => csum G (fun a => pos_type.tensor_mat (c (act a x)) (u a) ζ r)) =
+    (G : ℝ) * (∑ s < G, if x = act s x then Theta s else 0)
+  rw [← cmat.hs_inner_self_re, pos_type.hs_inner_sum_tensor]
+  have hinner : csum G (fun a => csum G (fun b => complex.mul (cdot Q (c (act a x)) (c (act b x))) (cdot N (u a) (u b)))) =
+      csum G (fun _ => csum G (fun s => complex.of_real (if x = act s x then Theta s else 0)))
+    apply csum.congr; intro a ha
+    have hb_eq : csum G (fun b => complex.mul (cdot Q (c (act a x)) (c (act b x))) (cdot N (u a) (u b))) =
+        csum G (fun b => (fun s => complex.of_real (if x = act s x then Theta s else 0)) (shift a b))
+      apply csum.congr; intro b hb
+      rw [hc (act a x) (hact_lt a ha x hx) (act b x) (hact_lt b hb x hx), hcorr a ha b hb]
+      by_cases heq : act a x = act b x
+      · have h2 : x = act (shift a b) x := (hact_eq a ha b hb).mp heq
+        rw [if_pos heq, if_pos h2, complex.mul_one_l]
+      · have h2 : ¬ (x = act (shift a b) x) := by intro h; exact heq ((hact_eq a ha b hb).mpr h)
+        rw [if_neg heq, if_neg h2, complex.mul_zero_l, complex.of_real_zero]
+    rw [hb_eq]
+    exact csum.bij G (shift a) (inv_shift a) (fun s => complex.of_real (if x = act s x then Theta s else 0)) (hshift_lt a ha) (hinv_lt a ha) (hleft a ha) (hright a ha)
+  rw [hinner, csum.const, csum.of_real_eq]
+  simp
+
+-- ====================================================================================
+-- SECTION 2: POSITIVE-TYPE SINGULAR-MINOR AVOIDANCE (`OneDeterminant.lean:25-55`)
+-- ====================================================================================
+
+-- Single nonzero character-pair bound:
+-- For a unitary Fourier kernel `psi` on `Q × Q` (`Q ≥ 1`), positive-type `Theta`, and
+-- adjoint group actions `act_L, act_R`, any `(xl, xr)` with fixer masses `≤ Y_L, Y_R` satisfies
+--   `Re ∑_{s < G} psi xl (act_R s xr) * Θ s ≤ sqrt Q * (Y_L + Y_R) / 2`.
++ pos_type.pair_char_sum_le (G Q N : ℕ) (hG : 1 ≤ G) (hQ : 1 ≤ Q)
+    (psi : ℕ → ℕ → ℂ) (u : ℕ → ℕ → ℂ) (Theta : ℕ → ℝ)
+    (shift inv_shift : ℕ → ℕ → ℕ) (act_L act_R : ℕ → ℕ → ℕ)
+    (xl xr : ℕ) (hxl : xl < Q) (hxr : xr < Q) (Y_L Y_R : ℝ)
+    (hpsi_orth : ∀ y1 < Q, ∀ y2 < Q,
+      csum Q (fun ζ => complex.mul (psi y1 ζ) (complex.conj (psi y2 ζ))) =
+      if y1 = y2 then complex.of_real (Q : ℝ) else complex.zero)
+    (hshift_lt : ∀ a < G, ∀ b < G, shift a b < G)
+    (hinv_lt : ∀ a < G, ∀ b < G, inv_shift a b < G)
+    (hleft : ∀ a < G, ∀ b < G, inv_shift a (shift a b) = b)
+    (hright : ∀ a < G, ∀ b < G, shift a (inv_shift a b) = b)
+    (hcorr : ∀ a < G, ∀ b < G, cdot N (u a) (u b) = complex.of_real (Theta (shift a b)))
+    (hactL_lt : ∀ a < G, ∀ y < Q, act_L a y < Q)
+    (hactR_lt : ∀ a < G, ∀ y < Q, act_R a y < Q)
+    (hactL_eq : ∀ a < G, ∀ b < G, act_L a xl = act_L b xl ↔ xl = act_L (shift a b) xl)
+    (hactR_eq : ∀ a < G, ∀ b < G, act_R a xr = act_R b xr ↔ xr = act_R (shift a b) xr)
+    (hadj : ∀ a < G, ∀ b < G, psi (act_L a xl) (act_R b xr) = psi xl (act_R (shift a b) xr))
+    (hfixL : (∑ s < G, if xl = act_L s xl then Theta s else 0) ≤ Y_L)
+    (hfixR : (∑ s < G, if xr = act_R s xr then Theta s else 0) ≤ Y_R) :
+    complex.re (csum G (fun s => complex.mul (psi xl (act_R s xr)) (complex.of_real (Theta s)))) ≤
+    sqrt (Q : ℝ) * ((Y_L + Y_R) / 2)
+  have hQ_pos : (0 : ℝ) < (Q : ℝ) := (cast_pos.real Q).mpr (by omega)
+  have hG_pos : (0 : ℝ) < (G : ℝ) := (cast_pos.real G).mpr (by omega)
+  have hr_pos : 0 < sqrt (Q : ℝ) := sqrt_pos (Q : ℝ) hQ_pos
+  have hr_sq : sqrt (Q : ℝ) * sqrt (Q : ℝ) = (Q : ℝ)
+    have h := sq_sqrt (Q : ℝ) (by linarith); nlinarith
+  set rQ : ℝ := sqrt (Q : ℝ) with hrQ_def
+  set c_L : ℕ → ℕ → ℂ := fun y ζ => complex.mul (complex.of_real (1 / rQ)) (complex.conj (psi y ζ)) with hcL_def
+  set c_R : ℕ → ℕ → ℂ := fun y ζ => if ζ = y then complex.one else complex.zero with hcR_def
+  have hcL_orth : ∀ y1 < Q, ∀ y2 < Q, cdot Q (c_L y1) (c_L y2) = if y1 = y2 then complex.one else complex.zero
+    intro y1 hy1 y2 hy2
+    unfold cdot
+    have h1 : csum Q (fun ζ => complex.mul (complex.conj (c_L y1 ζ)) (c_L y2 ζ)) =
+        complex.mul (complex.of_real (1 / (Q : ℝ))) (csum Q (fun ζ => complex.mul (psi y1 ζ) (complex.conj (psi y2 ζ))))
+      rw [← csum.scale_left]
+      apply csum.congr; intro ζ _
+      rw [hcL_def]
+      have hinv_sq : (1 / rQ) * (1 / rQ) = 1 / (Q : ℝ)
+        have hne1 : rQ ≠ 0 := by linarith
+        have hne2 : (Q : ℝ) ≠ 0 := by linarith
+        rw [← hr_sq]; field_simp
+      have hre : complex.mul (complex.conj (complex.mul (complex.of_real (1 / rQ)) (complex.conj (psi y1 ζ)))) (complex.mul (complex.of_real (1 / rQ)) (complex.conj (psi y2 ζ))) =
+          complex.mul (complex.of_real ((1 / rQ) * (1 / rQ))) (complex.mul (psi y1 ζ) (complex.conj (psi y2 ζ)))
+        apply complex.ext <;> simp <;> ring
+      rw [hre, hinv_sq]
+    rw [h1, hpsi_orth y1 hy1 y2 hy2]
+    by_cases h12 : y1 = y2
+    · rw [if_pos h12, if_pos h12, ← complex.of_real_mul]
+      have hcancel : (1 / (Q : ℝ)) * (Q : ℝ) = 1 := by field_simp
+      rw [hcancel, complex.of_real_one]
+    · rw [if_neg h12, if_neg h12, complex.mul_zero_r]
+  have hcR_orth : ∀ y1 < Q, ∀ y2 < Q, cdot Q (c_R y1) (c_R y2) = if y1 = y2 then complex.one else complex.zero
+    intro y1 hy1 y2 hy2
+    unfold cdot
+    have h1 : csum Q (fun ζ => complex.mul (complex.conj (c_R y1 ζ)) (c_R y2 ζ)) =
+        csum Q (fun ζ => if ζ = y1 then (if y1 = y2 then complex.one else complex.zero) else complex.zero)
+      apply csum.congr; intro ζ _
+      rw [hcR_def]
+      by_cases h1z : ζ = y1
+      · rw [if_pos h1z, if_pos h1z, h1z]
+        by_cases h12 : y1 = y2
+        · rw [if_pos h12, complex.conj_one, complex.mul_one_l]
+        · rw [if_neg h12, complex.mul_zero_r]
+      · rw [if_neg h1z, if_neg h1z]
+        have hc0 : complex.conj complex.zero = complex.zero := by apply complex.ext <;> simp
+        rw [hc0, complex.mul_zero_l]
+    rw [h1, csum.single Q y1 (fun _ => if y1 = y2 then complex.one else complex.zero) hy1]
+  have hcLR : ∀ y1 < Q, ∀ y2 < Q, cdot Q (c_L y1) (c_R y2) = complex.mul (complex.of_real (1 / rQ)) (psi y1 y2)
+    intro y1 hy1 y2 hy2
+    unfold cdot
+    have h1 : csum Q (fun ζ => complex.mul (complex.conj (c_L y1 ζ)) (c_R y2 ζ)) =
+        csum Q (fun ζ => if ζ = y2 then complex.mul (complex.of_real (1 / rQ)) (psi y1 ζ) else complex.zero)
+      apply csum.congr; intro ζ _
+      rw [hcL_def, hcR_def]
+      by_cases hz : ζ = y2
+      · rw [if_pos hz, if_pos hz, complex.mul_one_r]
+        apply complex.ext <;> simp <;> ring
+      · rw [if_neg hz, if_neg hz, complex.mul_zero_r]
+    rw [h1, csum.single Q y2 (fun ζ => complex.mul (complex.of_real (1 / rQ)) (psi y1 ζ)) hy2]
+  set X_L : ℕ → ℕ → ℂ := fun ζ r => csum G (fun a => pos_type.tensor_mat (c_L (act_L a xl)) (u a) ζ r) with hXL_def
+  set X_R : ℕ → ℕ → ℂ := fun ζ r => csum G (fun b => pos_type.tensor_mat (c_R (act_R b xr)) (u b) ζ r) with hXR_def
+  -- Compute `hs_inner Q N X_L X_R = (G / rQ) * ∑_{s < G} psi xl (act_R s xr) * Θ s`
+  have h_ip : cmat.hs_inner Q N X_L X_R =
+      complex.mul (complex.of_real ((G : ℝ) / rQ)) (csum G (fun s => complex.mul (psi xl (act_R s xr)) (complex.of_real (Theta s))))
+    rw [hXL_def, hXR_def, pos_type.hs_inner_sum_tensor]
+    have h1 : csum G (fun a => csum G (fun b => complex.mul (cdot Q (c_L (act_L a xl)) (c_R (act_R b xr))) (cdot N (u a) (u b)))) =
+        csum G (fun _ => complex.mul (complex.of_real (1 / rQ)) (csum G (fun s => complex.mul (psi xl (act_R s xr)) (complex.of_real (Theta s)))))
+      apply csum.congr; intro a ha
+      have h2 : csum G (fun b => complex.mul (cdot Q (c_L (act_L a xl)) (c_R (act_R b xr))) (cdot N (u a) (u b))) =
+          complex.mul (complex.of_real (1 / rQ)) (csum G (fun b => (fun s => complex.mul (psi xl (act_R s xr)) (complex.of_real (Theta s))) (shift a b)))
+        rw [← csum.scale_left]
+        apply csum.congr; intro b hb
+        rw [hcLR (act_L a xl) (hactL_lt a ha xl hxl) (act_R b xr) (hactR_lt b hb xr hxr), hadj a ha b hb, hcorr a ha b hb]
+        exact complex.mul_assoc _ _ _
+      rw [h2, csum.bij G (shift a) (inv_shift a) (fun s => complex.mul (psi xl (act_R s xr)) (complex.of_real (Theta s))) (hshift_lt a ha) (hinv_lt a ha) (hleft a ha) (hright a ha)]
+    rw [h1, csum.const]
+    have hdiv : (G : ℝ) * (1 / rQ) = (G : ℝ) / rQ := by field_simp
+    rw [← hdiv]
+    apply complex.ext <;> simp <;> ring
+  -- Bound `‖X_L‖_HS²` and `‖X_R‖_HS²` via `pos_type.fixer_energy_identity`!
+  have hXL_eq : cmat.hs_norm_sq Q N X_L = (G : ℝ) * (∑ s < G, if xl = act_L s xl then Theta s else 0)
+    rw [hXL_def]
+    exact pos_type.fixer_energy_identity G Q N c_L u Theta shift inv_shift act_L xl hxl hcL_orth hshift_lt hinv_lt hleft hright hcorr hactL_lt hactL_eq
+  have hXR_eq : cmat.hs_norm_sq Q N X_R = (G : ℝ) * (∑ s < G, if xr = act_R s xr then Theta s else 0)
+    rw [hXR_def]
+    exact pos_type.fixer_energy_identity G Q N c_R u Theta shift inv_shift act_R xr hxr hcR_orth hshift_lt hinv_lt hleft hright hcorr hactR_lt hactR_eq
+  have hcs := cmat.hs_inner_re_le_sqrt Q N X_L X_R
+  have hamgm := sqrt_mul_le_half_add (cmat.hs_norm_sq Q N X_L) (cmat.hs_norm_sq Q N X_R) (cmat.hs_norm_sq_nonneg Q N X_L) (cmat.hs_norm_sq_nonneg Q N X_R)
+  have hre_ip : complex.re (cmat.hs_inner Q N X_L X_R) =
+      ((G : ℝ) / rQ) * complex.re (csum G (fun s => complex.mul (psi xl (act_R s xr)) (complex.of_real (Theta s))))
+    rw [h_ip]; simp; ring
+  have hle_XL : cmat.hs_norm_sq Q N X_L ≤ (G : ℝ) * Y_L
+    rw [hXL_eq]; exact mul_le_mul_of_nonneg_left.real _ _ (G : ℝ) hfixL (by linarith)
+  have hle_XR : cmat.hs_norm_sq Q N X_R ≤ (G : ℝ) * Y_R
+    rw [hXR_eq]; exact mul_le_mul_of_nonneg_left.real _ _ (G : ℝ) hfixR (by linarith)
+  have hcomb : ((G : ℝ) / rQ) * complex.re (csum G (fun s => complex.mul (psi xl (act_R s xr)) (complex.of_real (Theta s)))) ≤
+      (G : ℝ) * ((Y_L + Y_R) / 2) := by linarith
+  have hscale_pos : 0 < rQ / (G : ℝ) := div_pos.real rQ (G : ℝ) hr_pos hG_pos
+  have hfin := mul_le_mul_of_nonneg_left.real _ _ (rQ / (G : ℝ)) hcomb (by linarith)
+  have hL_simp : (rQ / (G : ℝ)) * (((G : ℝ) / rQ) * complex.re (csum G (fun s => complex.mul (psi xl (act_R s xr)) (complex.of_real (Theta s))))) =
+      complex.re (csum G (fun s => complex.mul (psi xl (act_R s xr)) (complex.of_real (Theta s))))
+    have h1 : (G : ℝ) ≠ 0 := by linarith
+    have h2 : rQ ≠ 0 := by linarith
+    field_simp
+  have hR_simp : (rQ / (G : ℝ)) * ((G : ℝ) * ((Y_L + Y_R) / 2)) = rQ * ((Y_L + Y_R) / 2)
+    have h1 : (G : ℝ) ≠ 0 := by linarith
+    field_simp
+  rw [hL_simp, hR_simp] at hfin
+  exact hfin
+
+-- Positive-Type Singular-Minor Avoidance (`New/Heights/OneDeterminant.lean:28-55`, `card_mul_sum_det_le`):
+-- Let `Θ ≥ 0` be of positive type on `G`, `psi` a unitary Fourier pairing on `Q_n × Q_n`,
+-- `A_L, A_R : Q_m → Q_n` maps sending `0` to trivial characters, and `act_L, act_R` adjoint actions
+-- whose fixers of nonzero `A_L y, A_R v` have `Θ`-mass `≤ Y`. If every `s ∈ sing` has character
+-- sum `≥ q * Q_m` (and every `s < G` has character sum `≥ 0`), then:
+--   `q * ∑_{s ∈ sing} Θ s ≤ 2 * ∑_{s < G} Θ s + Q_m * sqrt Q_n * Y`.
++ pos_type.card_mul_sum_singular_le (G Q_n Q_m N : ℕ) (hG : 1 ≤ G) (hQn : 1 ≤ Q_n) (hQm : 1 ≤ Q_m)
+    (q Y : ℝ) (psi : ℕ → ℕ → ℂ) (u : ℕ → ℕ → ℂ) (Theta : ℕ → ℝ)
+    (hTheta_nn : ∀ s < G, 0 ≤ Theta s)
+    (hY_nn : 0 ≤ Y)
+    (shift inv_shift : ℕ → ℕ → ℕ) (act_L act_R : ℕ → ℕ → ℕ) (A_L A_R : ℕ → ℕ)
+    (hAL_lt : ∀ y < Q_m, A_L y < Q_n) (hAR_lt : ∀ v < Q_m, A_R v < Q_n)
+    (hpsi_orth : ∀ y1 < Q_n, ∀ y2 < Q_n,
+      csum Q_n (fun ζ => complex.mul (psi y1 ζ) (complex.conj (psi y2 ζ))) =
+      if y1 = y2 then complex.of_real (Q_n : ℝ) else complex.zero)
+    (hshift_lt : ∀ a < G, ∀ b < G, shift a b < G)
+    (hinv_lt : ∀ a < G, ∀ b < G, inv_shift a b < G)
+    (hleft : ∀ a < G, ∀ b < G, inv_shift a (shift a b) = b)
+    (hright : ∀ a < G, ∀ b < G, shift a (inv_shift a b) = b)
+    (hcorr : ∀ a < G, ∀ b < G, cdot N (u a) (u b) = complex.of_real (Theta (shift a b)))
+    (hactL_lt : ∀ a < G, ∀ y < Q_n, act_L a y < Q_n)
+    (hactR_lt : ∀ a < G, ∀ y < Q_n, act_R a y < Q_n)
+    (hactL_eq : ∀ y < Q_m, ∀ a < G, ∀ b < G, act_L a (A_L y) = act_L b (A_L y) ↔ A_L y = act_L (shift a b) (A_L y))
+    (hactR_eq : ∀ v < Q_m, ∀ a < G, ∀ b < G, act_R a (A_R v) = act_R b (A_R v) ↔ A_R v = act_R (shift a b) (A_R v))
+    (hadj : ∀ y < Q_m, ∀ v < Q_m, ∀ a < G, ∀ b < G, psi (act_L a (A_L y)) (act_R b (A_R v)) = psi (A_L y) (act_R (shift a b) (A_R v)))
+    (h0_L : ∀ s < G, ∀ v < Q_m, psi (A_L 0) (act_R s (A_R v)) = complex.one)
+    (h0_R : ∀ s < G, ∀ y < Q_m, psi (A_L y) (act_R s (A_R 0)) = complex.one)
+    (hfixL : ∀ y < Q_m, y ≠ 0 → (∑ s < G, if A_L y = act_L s (A_L y) then Theta s else 0) ≤ Y)
+    (hfixR : ∀ v < Q_m, v ≠ 0 → (∑ s < G, if A_R v = act_R s (A_R v) then Theta s else 0) ≤ Y)
+    (sing : ℕ → Prop)
+    (h_ker_nn : ∀ s < G, 0 ≤ ∑ y < Q_m, ∑ v < Q_m, complex.re (psi (A_L y) (act_R s (A_R v))))
+    (h_ker_sing : ∀ s < G, sing s → q * (Q_m : ℝ) ≤ ∑ y < Q_m, ∑ v < Q_m, complex.re (psi (A_L y) (act_R s (A_R v)))) :
+    q * (∑ s < G, if sing s then Theta s else 0) ≤
+    2 * (∑ s < G, Theta s) + (Q_m : ℝ) * sqrt (Q_n : ℝ) * Y
+  set S_tot : ℝ := ∑ s < G, Theta s with hStot_def
+  have hStot_nn : 0 ≤ S_tot := by rw [hStot_def]; exact sum_nonneg.real Theta G hTheta_nn
+  have hQn_nn : (0 : ℝ) ≤ (Q_n : ℝ) := cast_nonneg.real Q_n
+  have hrQ_nn : 0 ≤ sqrt (Q_n : ℝ) := by rw [← sqrt_zero]; exact sqrt_le_sqrt 0 (Q_n : ℝ) (by linarith) hQn_nn
+  have hQm_pos : (0 : ℝ) < (Q_m : ℝ) := (cast_pos.real Q_m).mpr (by omega)
+  -- Upper bound for each `(y, v)` pair:
+  -- `∑_{s < G} Re(psi (A_L y) (act_R s (A_R v))) * Θ s ≤ (if y = 0 then S_tot else 0) + (if v = 0 then S_tot else 0) + sqrt Q_n * Y`.
+  have hpair : ∀ y < Q_m, ∀ v < Q_m,
+      (∑ s < G, complex.re (psi (A_L y) (act_R s (A_R v))) * Theta s) ≤
+      (if y = 0 then S_tot else 0) + (if v = 0 then S_tot else 0) + sqrt (Q_n : ℝ) * Y
+    intro y hy v hv
+    have hre_eq : (∑ s < G, complex.re (psi (A_L y) (act_R s (A_R v))) * Theta s) =
+        complex.re (csum G (fun s => complex.mul (psi (A_L y) (act_R s (A_R v))) (complex.of_real (Theta s))))
+      rw [csum.re_eq]; apply sum_below.congr; intro s _; simp; ring
+    by_cases hy0 : y = 0
+    · rw [if_pos hy0]
+      have h1 : (∑ s < G, complex.re (psi (A_L y) (act_R s (A_R v))) * Theta s) = S_tot
+        rw [hStot_def]; apply sum_below.congr; intro s hs
+        rw [hy0, h0_L s hs v hv]; simp
+      have hv_nn : 0 ≤ (if v = 0 then S_tot else 0)
+        by_cases hv0 : v = 0
+        · rw [if_pos hv0]; exact hStot_nn
+        · rw [if_neg hv0]; linarith
+      have hsq_nn : 0 ≤ sqrt (Q_n : ℝ) * Y := mul_nonneg.real _ _ hrQ_nn hY_nn
+      linarith
+    · rw [if_neg hy0]
+      by_cases hv0 : v = 0
+      · rw [if_pos hv0]
+        have h1 : (∑ s < G, complex.re (psi (A_L y) (act_R s (A_R v))) * Theta s) = S_tot
+          rw [hStot_def]; apply sum_below.congr; intro s hs
+          rw [hv0, h0_R s hs y hy]; simp
+        have hsq_nn : 0 ≤ sqrt (Q_n : ℝ) * Y := mul_nonneg.real _ _ hrQ_nn hY_nn
+        linarith
+      · rw [if_neg hv0, hre_eq]
+        have hb := pos_type.pair_char_sum_le G Q_n N hG hQn psi u Theta shift inv_shift act_L act_R (A_L y) (A_R v) (hAL_lt y hy) (hAR_lt v hv) Y Y hpsi_orth hshift_lt hinv_lt hleft hright hcorr hactL_lt hactR_lt (hactL_eq y hy) (hactR_eq v hv) (hadj y hy v hv) (hfixL y hy hy0) (hfixR v hv hv0)
+        linarith
+  -- Double sum lower bound vs upper bound:
+  have hLHS : (Q_m : ℝ) * (q * (∑ s < G, if sing s then Theta s else 0)) ≤
+      ∑ y < Q_m, ∑ v < Q_m, ∑ s < G, complex.re (psi (A_L y) (act_R s (A_R v))) * Theta s
+    have hsw : (∑ y < Q_m, ∑ v < Q_m, ∑ s < G, complex.re (psi (A_L y) (act_R s (A_R v))) * Theta s) =
+        ∑ s < G, (∑ y < Q_m, ∑ v < Q_m, complex.re (psi (A_L y) (act_R s (A_R v)))) * Theta s
+      have h1 : (∑ y < Q_m, ∑ v < Q_m, ∑ s < G, complex.re (psi (A_L y) (act_R s (A_R v))) * Theta s) =
+          ∑ y < Q_m, ∑ s < G, ∑ v < Q_m, complex.re (psi (A_L y) (act_R s (A_R v))) * Theta s
+        apply sum_below.congr; intro y _; exact sum_below_swap_real Q_m G _
+      rw [h1, sum_below_swap_real Q_m G]
+      apply sum_below.congr; intro s _
+      have hfact : ∀ (M1 M2 : ℕ) (f : ℕ → ℕ → ℝ) (c : ℝ), (∑ y < M1, ∑ v < M2, f y v * c) = (∑ y < M1, ∑ v < M2, f y v) * c
+        intro M1 M2 f c
+        have hin : ∀ y : ℕ, (∑ v < M2, f y v * c) = (∑ v < M2, f y v) * c
+          intro y
+          have hcm := sum_const_mul.real c (fun v => f y v) M2
+          have hcon : (∑ v < M2, f y v * c) = ∑ v < M2, c * f y v
+            apply sum_below.congr; intro v _; ring
+          rw [hcon, hcm]; ring
+        have hcon1 : (∑ y < M1, ∑ v < M2, f y v * c) = ∑ y < M1, c * (∑ v < M2, f y v)
+          apply sum_below.congr; intro y _; rw [hin y]; ring
+        rw [hcon1, sum_const_mul.real]; ring
+      exact hfact Q_m Q_m (fun y v => complex.re (psi (A_L y) (act_R s (A_R v)))) (Theta s)
+    rw [hsw]
+    have hmul_sum : (Q_m : ℝ) * (q * (∑ s < G, if sing s then Theta s else 0)) =
+        ∑ s < G, (q * (Q_m : ℝ)) * (if sing s then Theta s else 0)
+      rw [sum_const_mul.real]; ring
+    rw [hmul_sum]
+    apply sum_le.real; intro s hs
+    by_cases hsing : sing s
+    · rw [if_pos hsing]
+      exact mul_le_mul_of_nonneg_right.real _ _ (Theta s) (h_ker_sing s hs hsing) (hTheta_nn s hs)
+    · rw [if_neg hsing, mul_zero.real]
+      exact mul_nonneg.real _ _ (h_ker_nn s hs) (hTheta_nn s hs)
+  have hRHS : (∑ y < Q_m, ∑ v < Q_m, ∑ s < G, complex.re (psi (A_L y) (act_R s (A_R v))) * Theta s) ≤
+      (Q_m : ℝ) * (2 * S_tot + (Q_m : ℝ) * sqrt (Q_n : ℝ) * Y)
+    have hstep1 : (∑ y < Q_m, ∑ v < Q_m, ∑ s < G, complex.re (psi (A_L y) (act_R s (A_R v))) * Theta s) ≤
+        ∑ y < Q_m, ∑ v < Q_m, ((if y = 0 then S_tot else 0) + (if v = 0 then S_tot else 0) + sqrt (Q_n : ℝ) * Y)
+      apply sum_le.real; intro y hy
+      apply sum_le.real; intro v hv
+      exact hpair y hy v hv
+    have hzero_sum : (∑ idx < Q_m, if idx = 0 then S_tot else 0) = S_tot
+      have h1 : (∑ idx < Q_m, if idx = 0 then S_tot else 0) = ∑ idx < Q_m, S_tot * (if idx = 0 then (1 : ℝ) else 0)
+        apply sum_below.congr; intro idx _
+        by_cases h0 : idx = 0
+        · rw [if_pos h0, if_pos h0]; ring
+        · rw [if_neg h0, if_neg h0]; ring
+      rw [h1]
+      exact sum_below.single.real (fun _ => S_tot) Q_m 0 (by omega)
+    have heval : (∑ y < Q_m, ∑ v < Q_m, ((if y = 0 then S_tot else 0) + (if v = 0 then S_tot else 0) + sqrt (Q_n : ℝ) * Y)) =
+        (Q_m : ℝ) * (2 * S_tot + (Q_m : ℝ) * sqrt (Q_n : ℝ) * Y)
+      have hrow : ∀ y < Q_m, (∑ v < Q_m, ((if y = 0 then S_tot else 0) + (if v = 0 then S_tot else 0) + sqrt (Q_n : ℝ) * Y)) =
+          (Q_m : ℝ) * (if y = 0 then S_tot else 0) + S_tot + (Q_m : ℝ) * (sqrt (Q_n : ℝ) * Y)
+        intro y _
+        rw [sum_add.real, sum_add.real, sum_const.real, hzero_sum, sum_const.real]
+      have hcon : (∑ y < Q_m, ∑ v < Q_m, ((if y = 0 then S_tot else 0) + (if v = 0 then S_tot else 0) + sqrt (Q_n : ℝ) * Y)) =
+          ∑ y < Q_m, ((Q_m : ℝ) * (if y = 0 then S_tot else 0) + S_tot + (Q_m : ℝ) * (sqrt (Q_n : ℝ) * Y))
+        apply sum_below.congr; exact hrow
+      rw [hcon, sum_add.real, sum_add.real, sum_const_mul.real, hzero_sum, sum_const.real, sum_const.real]
+      ring
+    linarith
+  nlinarith
+
+-- ====================================================================================
+-- SECTION 3: MULTIPLICATIVE GROUP-FACTORIZATION PIGEONHOLE (`HeckeValueHeight.lean:52`)
+-- ====================================================================================
+
+-- If `V^G = ∏_{χ < G} (a χ * b χ)` in `ℂ`, `G ≥ 1`, `v` is a multiplicative seminorm,
+-- and `shift` is a bijection on `{0, ..., G-1}` (modeling `χ ↦ ψ * χ⁻¹`), then some `χ < G`
+-- satisfies `v V ≤ v (a (shift χ) * b χ)`.
++ pos_type.group_factorization_pigeonhole (G : ℕ) (hG : 1 ≤ G) (v : ℂ → ℝ) (hv : is_mult_seminorm v)
+    (a b : ℕ → ℂ) (V : ℂ) (shift inv_shift : ℕ → ℕ)
+    (hshift_lt : ∀ i < G, shift i < G) (hinv_lt : ∀ i < G, inv_shift i < G)
+    (hleft : ∀ i < G, inv_shift (shift i) = i) (hright : ∀ i < G, shift (inv_shift i) = i)
+    (he : cpow_nat V G = cprod_c G (fun i => complex.mul (a i) (b i))) :
+    ∃ χ < G, v V ≤ v (complex.mul (a (shift χ)) (b χ))
+  obtain ⟨χ0, hχ0, hmax⟩ := exists_argmax_real G hG (fun i => v (complex.mul (a (shift i)) (b i)))
+  refine ⟨χ0, hχ0, ?_⟩
+  set M : ℝ := v (complex.mul (a (shift χ0)) (b χ0)) with hM_def
+  have hV_nn : 0 ≤ v V := hv.2.2.1 V
+  have hM_nn : 0 ≤ M := by rw [hM_def]; exact hv.2.2.1 _
+  have hpow_le : (v V) ^ G ≤ M ^ G
+    rw [← is_mult_seminorm.cpow_nat v hv V G, he, is_mult_seminorm.cprod_c v hv G]
+    have hsplit : real_prod G (fun i => v (complex.mul (a i) (b i))) =
+        real_prod G (fun i => v (a i)) * real_prod G (fun i => v (b i))
+      have hcon : real_prod G (fun i => v (complex.mul (a i) (b i))) = real_prod G (fun i => v (a i) * v (b i))
+        have hall : ∀ m : ℕ, real_prod m (fun i => v (complex.mul (a i) (b i))) = real_prod m (fun i => v (a i) * v (b i))
+          intro m; induction m with r ihr
+          · rw [real_prod.zero, real_prod.zero]
+          · rw [succ_eq_add_one.nat, real_prod.succ, real_prod.succ, hv.2.2.2, ihr]
+        exact hall G
+      have hmul_prod : ∀ m : ℕ, real_prod m (fun i => v (a i) * v (b i)) = real_prod m (fun i => v (a i)) * real_prod m (fun i => v (b i))
+        intro m; induction m with r ihr
+        · rw [real_prod.zero, real_prod.zero, real_prod.zero]; ring
+        · rw [succ_eq_add_one.nat, real_prod.succ, real_prod.succ, real_prod.succ, ihr]; ring
+      rw [hcon, hmul_prod G]
+    have hbij : real_prod G (fun i => v (a i)) = real_prod G (fun i => v (a (shift i)))
+      have hshift_inj : ∀ i < G, ∀ j < G, shift i = shift j → i = j
+        intro i hi j hj heq
+        have h1 := hleft i hi
+        have h2 := hleft j hj
+        rw [heq] at h1; omega
+      exact (real_prod.bij G (fun i => v (a i)) shift hshift_lt hshift_inj).symm
+    have hrecomb : real_prod G (fun i => v (a (shift i))) * real_prod G (fun i => v (b i)) =
+        real_prod G (fun i => v (complex.mul (a (shift i)) (b i)))
+      have hall : ∀ m : ℕ, real_prod m (fun i => v (a (shift i))) * real_prod m (fun i => v (b i)) = real_prod m (fun i => v (complex.mul (a (shift i)) (b i)))
+        intro m; induction m with r ihr
+        · rw [real_prod.zero, real_prod.zero, real_prod.zero]; ring
+        · rw [succ_eq_add_one.nat, real_prod.succ, real_prod.succ, real_prod.succ, hv.2.2.2, ← ihr]; ring
+      exact hall G
+    rw [hsplit, hbij, hrecomb]
+    have hprod_le : ∀ m : ℕ, m ≤ G → real_prod m (fun i => v (complex.mul (a (shift i)) (b i))) ≤ M ^ m
+      intro m; induction m with hm r ihr hm
+      · rw [real_prod.zero, pow_zero.real]; linarith
+      · rw [succ_eq_add_one.nat] at hm ⊢
+        rw [real_prod.succ, pow_succ.real]
+        have hprev := ihr (by omega)
+        have hcur : v (complex.mul (a (shift r)) (b r)) ≤ M := hmax r (by omega)
+        have hprev_nn : 0 ≤ real_prod r (fun i => v (complex.mul (a (shift i)) (b i)))
+          have hall : ∀ k : ℕ, 0 ≤ real_prod k (fun i => v (complex.mul (a (shift i)) (b i)))
+            intro k; induction k with t iht; (rw [real_prod.zero]; linarith)
+            · rw [succ_eq_add_one.nat, real_prod.succ]; exact mul_nonneg.real _ _ iht (hv.2.2.1 (complex.mul (a (shift t)) (b t)))
+          exact hall r
+        have hm1 := mul_le_mul_of_nonneg_right.real _ (M ^ r) _ hprev (hv.2.2.1 (complex.mul (a (shift r)) (b r)))
+        have hm2 := mul_le_mul_of_nonneg_left.real _ M (M ^ r) hcur (pow_nonneg.real M hM_nn r)
+        linarith
+    exact hprod_le G (by omega)
+  by_contra hgt
+  have hlt : M < v V := by linarith
+  have hpow_lt : ∀ m : ℕ, 1 ≤ m → M ^ m < (v V) ^ m
+    intro m; induction m with hm r ihr hm
+    · omega
+    · rw [succ_eq_add_one.nat] at hm ⊢
+      rw [pow_succ.real, pow_succ.real]
+      by_cases hr0 : r = 0
+      · rw [hr0, pow_zero.real, pow_zero.real]; linarith
+      · have hprev := ihr (by omega)
+        have h1 : M ^ r * M ≤ M ^ r * v V := mul_le_mul_of_nonneg_left.real M (v V) (M ^ r) (by linarith) (pow_nonneg.real M hM_nn r)
+        have h2 : M ^ r * v V < (v V) ^ r * v V := mul_lt_mul_of_pos_right.real (M ^ r) ((v V) ^ r) (v V) hprev (by linarith)
+        linarith
+  have hc := hpow_lt G hG
+  linarith
+
+-- ====================================================================================
+-- SECTION 4: WEIGHTED ENERGY TRIANGLE (`SchurTest.lean:35`) & FINITE SCHUR'S TEST
+-- ====================================================================================
+
+-- `‖z + w‖² ≤ (1 + ε) ‖z‖² + (1 + ε⁻¹) ‖w‖²` for `ε > 0` (`SchurTest.lean:35`).
++ pos_type.norm_sq_add_le_weighted (z w : ℂ) (eps : ℝ) (heps : 0 < eps) :
+    complex.norm_sq (complex.add z w) ≤ (1 + eps) * complex.norm_sq z + (1 + 1 / eps) * complex.norm_sq w
+  have hsq : 0 ≤ (eps * complex.re z - complex.re w) * (eps * complex.re z - complex.re w) +
+      (eps * complex.im z - complex.im w) * (eps * complex.im z - complex.im w) := by nlinarith
+  have hdiv : 0 ≤ ((eps * complex.re z - complex.re w) * (eps * complex.re z - complex.re w) +
+      (eps * complex.im z - complex.im w) * (eps * complex.im z - complex.im w)) / eps :=
+    div_nonneg.real _ eps hsq (by linarith)
+  have hident : (1 + eps) * complex.norm_sq z + (1 + 1 / eps) * complex.norm_sq w - complex.norm_sq (complex.add z w) =
+      ((eps * complex.re z - complex.re w) * (eps * complex.re z - complex.re w) +
+       (eps * complex.im z - complex.im w) * (eps * complex.im z - complex.im w)) / eps
+    unfold complex.norm_sq; simp; field_simp
+  linarith
+
++ pos_type.energy_add_le (n : ℕ) (A B : ℕ → ℂ) (eps : ℝ) (heps : 0 < eps) :
+    (∑ i < n, complex.norm_sq (complex.add (A i) (B i))) ≤
+    (1 + eps) * (∑ i < n, complex.norm_sq (A i)) + (1 + 1 / eps) * (∑ i < n, complex.norm_sq (B i))
+  rw [← sum_const_mul.real, ← sum_const_mul.real, ← sum_add.real]
+  apply sum_le.real; intro i _
+  exact pos_type.norm_sq_add_le_weighted (A i) (B i) eps heps
+
+-- Weighted Cauchy–Schwarz (squared, no square roots):
+-- For `w j ≥ 0`, `(∑_{j < M} w j * x j)² ≤ (∑_{j < M} w j) * (∑_{j < M} w j * x j²)`.
++ pos_type.weighted_cauchy_schwarz_sq (M : ℕ) (w x : ℕ → ℝ) (hw : ∀ j < M, 0 ≤ w j) :
+    (∑ j < M, w j * x j) * (∑ j < M, w j * x j) ≤
+    (∑ j < M, w j) * (∑ j < M, w j * (x j * x j))
+  set W := ∑ j < M, w j with hW_def
+  set S := ∑ j < M, w j * x j with hS_def
+  set Q := ∑ j < M, w j * (x j * x j) with hQ_def
+  have hW_nn : 0 ≤ W := by rw [hW_def]; exact sum_nonneg.real w M hw
+  by_cases hW0 : W = 0
+  · have hw0 : ∀ j < M, w j = 0
+      intro j hj
+      have hle := single_le_sum.real w M j hw hj
+      have hnn := hw j hj
+      linarith
+    have hS0 : S = 0
+      rw [hS_def]
+      have hcon : (∑ j < M, w j * x j) = ∑ j < M, (0 : ℝ)
+        apply sum_below.congr; intro j hj; rw [hw0 j hj]; ring
+      rw [hcon, sum_const.real]; ring
+    rw [hW0, hS0]; linarith
+  · have hW_pos : 0 < W := by linarith
+    have hnn : 0 ≤ ∑ j < M, w j * ((W * x j - S) * (W * x j - S))
+      apply sum_nonneg.real; intro j hj
+      exact mul_nonneg.real (w j) _ (hw j hj) (by nlinarith)
+    have hexp : (∑ j < M, w j * ((W * x j - S) * (W * x j - S))) = W * (W * Q - S * S)
+      have h1 : (∑ j < M, w j * ((W * x j - S) * (W * x j - S))) =
+          (W * W) * Q - 2 * W * S * S + S * S * W
+        have hrow : ∀ K : ℕ, (∑ j < K, w j * ((W * x j - S) * (W * x j - S))) =
+            (W * W) * (∑ j < K, w j * (x j * x j)) - 2 * W * S * (∑ j < K, w j * x j) + (S * S) * (∑ j < K, w j)
+          intro K; induction K with r ihr
+          · rw [sum_below_zero, sum_below_zero, sum_below_zero, sum_below_zero]; ring
+          · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, sum_below_succ, ihr]; ring
+        rw [hrow M, ← hQ_def, ← hS_def, ← hW_def]
+      rw [h1]; ring
+    rw [hexp] at hnn
+    nlinarith
+
+-- Finite-Matrix Schur's Test:
+-- If `∑_{j < M} |K i j| ≤ M_row` for all `i < N` and `∑_{i < N} |K i j| ≤ M_col` for all `j < M`,
+-- then `‖K v‖₂² ≤ M_row * M_col * ‖v‖₂²` for every vector `v : ℕ → ℂ`!
++ pos_type.schur_test_op_norm (N M : ℕ) (K : ℕ → ℕ → ℂ) (M_row M_col : ℝ)
+    (hMr : 0 ≤ M_row) (hMc : 0 ≤ M_col)
+    (hrow : ∀ i < N, (∑ j < M, complex.abs (K i j)) ≤ M_row)
+    (hcol : ∀ j < M, (∑ i < N, complex.abs (K i j)) ≤ M_col)
+    (v : ℕ → ℂ) :
+    complex.re (cdot N (cmat.apply M K v) (cmat.apply M K v)) ≤
+    M_row * M_col * complex.re (cdot M v v)
+  rw [cdot.self_re, cdot.self_re]
+  have htri : ∀ (m : ℕ) (f : ℕ → ℂ), complex.abs (csum m f) ≤ ∑ j < m, complex.abs (f j)
+    intro m f; induction m with r ihr
+    · rw [csum.zero, sum_below_zero]; unfold complex.abs complex.norm_sq; simp [sqrt_zero]
+    · rw [succ_eq_add_one.nat, csum.succ, sum_below_succ]
+      have h1 := complex.abs_add_le (csum r f) (f r)
+      linarith
+  have hpt : ∀ i < N, complex.norm_sq (cmat.apply M K v i) ≤
+      M_row * (∑ j < M, complex.abs (K i j) * complex.norm_sq (v j))
+    intro i hi
+    unfold cmat.apply
+    have habs_le : complex.abs (csum M (fun j => complex.mul (K i j) (v j))) ≤ ∑ j < M, complex.abs (K i j) * complex.abs (v j)
+      have h1 := htri M (fun j => complex.mul (K i j) (v j))
+      have h2 : (∑ j < M, complex.abs (complex.mul (K i j) (v j))) = ∑ j < M, complex.abs (K i j) * complex.abs (v j)
+        apply sum_below.congr; intro j _; exact complex.abs_is_mult_seminorm.2.2.2 (K i j) (v j)
+      linarith
+    have hsum_nn : 0 ≤ ∑ j < M, complex.abs (K i j) * complex.abs (v j)
+      apply sum_nonneg.real; intro j _
+      exact mul_nonneg.real _ _ (complex.abs_nonneg (K i j)) (complex.abs_nonneg (v j))
+    have hns_eq : complex.norm_sq (csum M (fun j => complex.mul (K i j) (v j))) =
+        complex.abs (csum M (fun j => complex.mul (K i j) (v j))) * complex.abs (csum M (fun j => complex.mul (K i j) (v j)))
+      unfold complex.abs
+      have h := sq_sqrt (complex.norm_sq (csum M (fun j => complex.mul (K i j) (v j)))) (complex.norm_sq_nonneg _)
+      nlinarith
+    have hsq_le : complex.norm_sq (csum M (fun j => complex.mul (K i j) (v j))) ≤
+        (∑ j < M, complex.abs (K i j) * complex.abs (v j)) * (∑ j < M, complex.abs (K i j) * complex.abs (v j))
+      rw [hns_eq]
+      have ha := complex.abs_nonneg (csum M (fun j => complex.mul (K i j) (v j)))
+      nlinarith
+    have hcs := pos_type.weighted_cauchy_schwarz_sq M (fun j => complex.abs (K i j)) (fun j => complex.abs (v j)) (by intro j _; exact complex.abs_nonneg (K i j))
+    have hnorm_eq : (∑ j < M, complex.abs (K i j) * (complex.abs (v j) * complex.abs (v j))) =
+        ∑ j < M, complex.abs (K i j) * complex.norm_sq (v j)
+      apply sum_below.congr; intro j _
+      have hvsq : complex.abs (v j) * complex.abs (v j) = complex.norm_sq (v j)
+        unfold complex.abs
+        have h := sq_sqrt (complex.norm_sq (v j)) (complex.norm_sq_nonneg (v j))
+        nlinarith
+      rw [hvsq]
+    rw [hnorm_eq] at hcs
+    have hsum2_nn : 0 ≤ ∑ j < M, complex.abs (K i j) * complex.norm_sq (v j)
+      apply sum_nonneg.real; intro j _
+      exact mul_nonneg.real _ _ (complex.abs_nonneg (K i j)) (complex.norm_sq_nonneg (v j))
+    have hrow_mul := mul_le_mul_of_nonneg_right.real _ M_row _ (hrow i hi) hsum2_nn
+    linarith
+  have hsum1 : (∑ i < N, complex.norm_sq (cmat.apply M K v i)) ≤
+      M_row * (∑ i < N, ∑ j < M, complex.abs (K i j) * complex.norm_sq (v j))
+    rw [← sum_const_mul.real]
+    exact sum_le.real _ _ N hpt
+  rw [sum_below_swap_real N M] at hsum1
+  have hcol_sum : (∑ j < M, ∑ i < N, complex.abs (K i j) * complex.norm_sq (v j)) ≤
+      M_col * (∑ j < M, complex.norm_sq (v j))
+    rw [← sum_const_mul.real]
+    apply sum_le.real; intro j hj
+    have hfact : (∑ i < N, complex.abs (K i j) * complex.norm_sq (v j)) = (∑ i < N, complex.abs (K i j)) * complex.norm_sq (v j)
+      have hcon : (∑ i < N, complex.abs (K i j) * complex.norm_sq (v j)) = ∑ i < N, complex.norm_sq (v j) * complex.abs (K i j)
+        apply sum_below.congr; intro i _; ring
+      rw [hcon, sum_const_mul.real]; ring
+    rw [hfact]
+    exact mul_le_mul_of_nonneg_right.real _ M_col _ (hcol j hj) (complex.norm_sq_nonneg (v j))
+  have hfin := mul_le_mul_of_nonneg_left.real _ _ M_row hcol_sum hMr
+  linarith
+
+-- ====================================================================================
+-- AXIOM AUDIT: ZERO CUSTOM AXIOMS!
+-- ====================================================================================
+
+#axioms pos_type.fixer_energy_identity
+#axioms pos_type.pair_char_sum_le
+#axioms pos_type.card_mul_sum_singular_le
+#axioms pos_type.group_factorization_pigeonhole
+#axioms pos_type.energy_add_le
+#axioms pos_type.weighted_cauchy_schwarz_sq
+#axioms pos_type.schur_test_op_norm

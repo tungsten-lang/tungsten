@@ -2983,3 +2983,15 @@ import finite_sum
     rw [hz, sum_const.rat]; ring
   · rw [succ_eq_add_one.nat, sum_below_succ k, ih, ← sum_add.rat]
     apply sum_congr.rat; intro j hj; rw [sum_below_succ k]
+
++ pow_le_pow_cancel.real (a b : ℝ) (N : ℕ) (hN : 1 ≤ N) (hb : 0 ≤ b) (hpow : a ^ N ≤ b ^ N) :
+    a ≤ b
+  by_contra hlt
+  have hba : b < a := by linarith
+  have hstrict := pow_lt_pow_left.real b a N hb hba (by omega)
+  linarith
+
++ pow_eq_cancel.real (a b : ℝ) (N : ℕ) (hN : 1 ≤ N) (ha : 0 ≤ a) (hb : 0 ≤ b) (h : a ^ N = b ^ N) : a = b
+  have h1 := pow_le_pow_cancel.real a b N hN hb (by linarith)
+  have h2 := pow_le_pow_cancel.real b a N hN ha (by linarith)
+  linarith

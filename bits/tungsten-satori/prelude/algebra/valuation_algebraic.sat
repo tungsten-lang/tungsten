@@ -1,0 +1,161 @@
+-- The algebraic step for valuation rings of ℂ: a dominant term among finitely many numbers, and
+-- torsion of the value group: an element with a nontrivial polynomial relation over a subfield
+-- `L` has a positive power equal to an element of `L` times a unit of the valuation ring.
+--
+-- Proved on Satori's HOL kernel (0 custom axioms).
+
+import algebra.valuation_torsion
+
+-- ====================================================================================
+-- SECTION 1: DOMINANT TERMS
+-- ====================================================================================
+
+-- Among finitely many numbers, not all zero, there is a nonzero one of which every other is a
+-- `B`-multiple.
++ cvaluation_ring.exists_dominant (B : ℂ → Prop) (hB : cvaluation_ring B) (N : ℕ) (t : ℕ → ℂ)
+    (hex : ∃ i < N, t i ≠ complex.zero) :
+    ∃ a < N, t a ≠ complex.zero ∧ ∀ j < N, B (complex.mul (t j) (complex.inv (t a)))
+  induction N with hex r ihr hex
+  · obtain ⟨i, hi, _⟩ := hex; omega
+  · rw [succ_eq_add_one.nat] at hex ⊢
+    by_cases hprev : ∃ i < r, t i ≠ complex.zero
+    · obtain ⟨a, ha, hta, hdom⟩ := ihr hprev
+      by_cases htr : t r = complex.zero
+      · have hall : ∀ j < r + 1, B (complex.mul (t j) (complex.inv (t a)))
+          intro j hj
+          by_cases hjr : j = r
+          · rw [hjr, htr, complex.zero_mul]; exact hB.1.1
+          · exact hdom j (by omega)
+        exact ⟨a, by omega, hta, hall⟩
+      · obtain h1 | h2 := cvaluation_ring.div_or B hB (t r) (t a) htr hta
+        · have hall : ∀ j < r + 1, B (complex.mul (t j) (complex.inv (t a)))
+            intro j hj
+            by_cases hjr : j = r
+            · rw [hjr]; exact h1
+            · exact hdom j (by omega)
+          exact ⟨a, by omega, hta, hall⟩
+        · have hall : ∀ j < r + 1, B (complex.mul (t j) (complex.inv (t r)))
+            intro j hj
+            by_cases hjr : j = r
+            · rw [hjr, complex.mul_inv_cancel (t r) htr]; exact hB.1.2.1
+            · have hj' := hdom j (by omega)
+              have r1 : complex.mul (complex.mul (t j) (complex.inv (t a))) (complex.mul (t a) (complex.inv (t r))) = complex.mul (complex.mul (t j) (complex.inv (t r))) (complex.mul (t a) (complex.inv (t a)))
+                apply complex.ext <;> simp <;> ring
+              have he : complex.mul (t j) (complex.inv (t r)) = complex.mul (complex.mul (t j) (complex.inv (t a))) (complex.mul (t a) (complex.inv (t r)))
+                rw [r1, complex.mul_inv_cancel (t a) hta, complex.mul_one]
+              rw [he]
+              exact hB.1.2.2.2.2 (complex.mul (t j) (complex.inv (t a))) (complex.mul (t a) (complex.inv (t r))) hj' h2
+          exact ⟨r, by omega, htr, hall⟩
+    · have htr : t r ≠ complex.zero
+        obtain ⟨i, hi, hti⟩ := hex
+        by_cases hir : i = r
+        · rw [← hir]; exact hti
+        · exfalso; apply hprev; exact ⟨i, by omega, hti⟩
+      have hall : ∀ j < r + 1, B (complex.mul (t j) (complex.inv (t r)))
+        intro j hj
+        by_cases hjr : j = r
+        · rw [hjr, complex.mul_inv_cancel (t r) htr]; exact hB.1.2.1
+        · have htj : t j = complex.zero
+            by_contra hne
+            apply hprev; exact ⟨j, by omega, hne⟩
+          rw [htj, complex.zero_mul]; exact hB.1.1
+      exact ⟨r, by omega, htr, hall⟩
+
+-- ====================================================================================
+-- SECTION 2: TORSION OF THE VALUE GROUP OVER A SUBFIELD
+-- ====================================================================================
+
+-- `z^d` is an element `q` of `L` times a unit of `B`.
+-> cval_commensurable (L B : ℂ → Prop) (z : ℂ) : Prop :=
+  ∃ (d : ℕ) (q : ℂ), 1 ≤ d ∧ L q ∧ q ≠ complex.zero ∧
+    B (complex.mul (cpow_nat z d) (complex.inv q)) ∧ B (complex.mul q (complex.inv (cpow_nat z d)))
+
++ cvaluation_ring.torsion_aux (L B : ℂ → Prop) (hL : csubfield L) (z : ℂ) (hz : z ≠ complex.zero)
+    (lo hi : ℕ) (hlt : lo < hi) (clo chi : ℂ) (hclo : L clo) (hchi : L chi)
+    (hclo0 : clo ≠ complex.zero) (hchi0 : chi ≠ complex.zero)
+    (h1 : B (complex.mul (complex.mul chi (cpow_nat z hi)) (complex.inv (complex.mul clo (cpow_nat z lo)))))
+    (h2 : B (complex.mul (complex.mul clo (cpow_nat z lo)) (complex.inv (complex.mul chi (cpow_nat z hi))))) :
+    cval_commensurable L B z
+  have hA : cpow_nat z lo ≠ complex.zero := cpow_nat.ne_zero z hz lo
+  have hD : cpow_nat z (hi - lo) ≠ complex.zero := cpow_nat.ne_zero z hz (hi - lo)
+  have hhi : cpow_nat z hi = complex.mul (cpow_nat z (hi - lo)) (cpow_nat z lo)
+    have h := cpow_nat.add z (hi - lo) lo
+    have hs : hi - lo + lo = hi := by omega
+    rw [hs] at h; exact h
+  have hq0 : complex.mul clo (complex.inv chi) ≠ complex.zero := complex.mul_ne_zero clo (complex.inv chi) hclo0 (complex.inv_ne_zero chi hchi0)
+  have hqL : L (complex.mul clo (complex.inv chi)) := hL.1.2.2.2.2 clo (complex.inv chi) hclo (hL.2 chi hchi hchi0)
+  have hY1 : complex.mul clo (cpow_nat z lo) ≠ complex.zero := complex.mul_ne_zero clo (cpow_nat z lo) hclo0 hA
+  have hY2 : complex.mul chi (complex.mul (cpow_nat z (hi - lo)) (cpow_nat z lo)) ≠ complex.zero := complex.mul_ne_zero chi (complex.mul (cpow_nat z (hi - lo)) (cpow_nat z lo)) hchi0 (complex.mul_ne_zero (cpow_nat z (hi - lo)) (cpow_nat z lo) hD hA)
+  have hc1 : complex.mul (complex.mul chi (complex.mul (cpow_nat z (hi - lo)) (cpow_nat z lo))) (complex.mul clo (complex.inv chi)) = complex.mul (cpow_nat z (hi - lo)) (complex.mul clo (cpow_nat z lo))
+    have r1 : complex.mul (complex.mul chi (complex.mul (cpow_nat z (hi - lo)) (cpow_nat z lo))) (complex.mul clo (complex.inv chi)) = complex.mul (complex.mul chi (complex.inv chi)) (complex.mul (cpow_nat z (hi - lo)) (complex.mul clo (cpow_nat z lo)))
+      apply complex.ext <;> simp <;> ring
+    rw [r1, complex.mul_inv_cancel chi hchi0, complex.one_mul]
+  have hc2 : complex.mul (complex.mul clo (cpow_nat z lo)) (cpow_nat z (hi - lo)) = complex.mul (complex.mul clo (complex.inv chi)) (complex.mul chi (complex.mul (cpow_nat z (hi - lo)) (cpow_nat z lo)))
+    have r2 : complex.mul (complex.mul clo (complex.inv chi)) (complex.mul chi (complex.mul (cpow_nat z (hi - lo)) (cpow_nat z lo))) = complex.mul (complex.mul chi (complex.inv chi)) (complex.mul (complex.mul clo (cpow_nat z lo)) (cpow_nat z (hi - lo)))
+      apply complex.ext <;> simp <;> ring
+    rw [r2, complex.mul_inv_cancel chi hchi0, complex.one_mul]
+  have f1 := complex.div_eq_div (complex.mul chi (complex.mul (cpow_nat z (hi - lo)) (cpow_nat z lo))) (complex.mul clo (cpow_nat z lo)) (cpow_nat z (hi - lo)) (complex.mul clo (complex.inv chi)) hY1 hq0 hc1
+  have f2 := complex.div_eq_div (complex.mul clo (cpow_nat z lo)) (complex.mul chi (complex.mul (cpow_nat z (hi - lo)) (cpow_nat z lo))) (complex.mul clo (complex.inv chi)) (cpow_nat z (hi - lo)) hY2 hD hc2
+  rw [hhi, f1] at h1
+  rw [hhi, f2] at h2
+  exact ⟨hi - lo, complex.mul clo (complex.inv chi), by omega, hqL, hq0, h1, h2⟩
+
+-- A nonzero `z` with a nontrivial polynomial relation over the subfield `L` is commensurable
+-- with `L` in any valuation ring `B` of ℂ.
++ cvaluation_ring.commensurable_of_relation (L B : ℂ → Prop) (hL : csubfield L)
+    (hB : cvaluation_ring B) (z : ℂ) (hz : z ≠ complex.zero) (N : ℕ) (c : ℕ → ℂ)
+    (hc : ∀ i < N, L (c i)) (hnz : ∃ i < N, c i ≠ complex.zero)
+    (hrel : csum N (fun i => complex.mul (c i) (cpow_nat z i)) = complex.zero) :
+    cval_commensurable L B z
+  have hext : ∃ i < N, (fun i => complex.mul (c i) (cpow_nat z i)) i ≠ complex.zero
+    obtain ⟨i, hi, hci⟩ := hnz
+    exact ⟨i, hi, complex.mul_ne_zero (c i) (cpow_nat z i) hci (cpow_nat.ne_zero z hz i)⟩
+  obtain ⟨a, ha, hta0, hdom0⟩ := cvaluation_ring.exists_dominant B hB N (fun i => complex.mul (c i) (cpow_nat z i)) hext
+  have hta : (complex.mul (c a) (cpow_nat z a)) ≠ complex.zero := hta0
+  have hdom : ∀ j < N, B (complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a))))
+    intro j hj; exact hdom0 j hj
+  have hca : c a ≠ complex.zero
+    intro h0; apply hta; rw [h0, complex.zero_mul]
+  have hclaim : ∃ j : ℕ, j < N ∧ j ≠ a ∧ (complex.mul (c j) (cpow_nat z j)) ≠ complex.zero ∧ B (complex.mul (complex.mul (c a) (cpow_nat z a)) (complex.inv (complex.mul (c j) (cpow_nat z j))))
+    by_contra hno
+    have hmax : ∀ j < N, cval_max B ((fun j => if j = a then complex.zero else complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a)))) j)
+      intro j hj
+      by_cases hja : j = a
+      · rw [if_pos hja]; exact cval_max.zero B hB
+      · rw [if_neg hja]
+        by_cases htj : (complex.mul (c j) (cpow_nat z j)) = complex.zero
+        · rw [htj, complex.zero_mul]; exact cval_max.zero B hB
+        · have hnot : ¬ B (complex.inv (complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a)))))
+            intro hinv
+            rw [complex.inv_div (complex.mul (c j) (cpow_nat z j)) (complex.mul (c a) (cpow_nat z a)) htj hta] at hinv
+            apply hno; exact ⟨j, hj, hja, htj, hinv⟩
+          have hor : complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a))) = complex.zero ∨ ¬ B (complex.inv (complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a))))) := by right; exact hnot
+          exact ⟨hdom j hj, hor⟩
+    have hsum' := cval_max.csum B hB N (fun j => if j = a then complex.zero else complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a)))) hmax
+    have hzero : csum N (fun j => complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a)))) = complex.zero
+      rw [csum.scale_right N (complex.inv (complex.mul (c a) (cpow_nat z a))) (fun j => (complex.mul (c j) (cpow_nat z j))), hrel, complex.zero_mul]
+    have hsplit : csum N (fun j => complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a)))) = complex.add (csum N (fun j => if j = a then complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a))) else complex.zero)) (csum N (fun j => if j = a then complex.zero else complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a)))))
+      rw [← csum.add N (fun j => if j = a then complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a))) else complex.zero) (fun j => if j = a then complex.zero else complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a))))]
+      apply csum.congr; intro j _
+      by_cases hja : j = a
+      · rw [if_pos hja, if_pos hja, complex.add_zero]
+      · rw [if_neg hja, if_neg hja, complex.zero_add]
+    rw [csum.single N a (fun j => complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a)))) ha, complex.mul_inv_cancel (complex.mul (c a) (cpow_nat z a)) hta, hzero] at hsplit
+    have hS : csum N (fun j => if j = a then complex.zero else complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a)))) = complex.neg complex.one
+      have hre : complex.re complex.zero = complex.re (complex.add complex.one (csum N (fun j => if j = a then complex.zero else complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a)))))) := by rw [← hsplit]
+      have him : complex.im complex.zero = complex.im (complex.add complex.one (csum N (fun j => if j = a then complex.zero else complex.mul (complex.mul (c j) (cpow_nat z j)) (complex.inv (complex.mul (c a) (cpow_nat z a)))))) := by rw [← hsplit]
+      simp at hre him
+      apply complex.ext <;> simp <;> linarith
+    rw [hS] at hsum'
+    exact cval_max.neg_one_not_mem B hB hsum'
+  obtain ⟨j, hj, hja, htj, hBaj⟩ := hclaim
+  have hcj : c j ≠ complex.zero
+    intro h0; apply htj; rw [h0, complex.zero_mul]
+  have hBja := hdom j hj
+  by_cases hlt : a < j
+  · exact cvaluation_ring.torsion_aux L B hL z hz a j hlt (c a) (c j) (hc a ha) (hc j hj) hca hcj hBja hBaj
+  · have hlt2 : j < a := by omega
+    exact cvaluation_ring.torsion_aux L B hL z hz j a hlt2 (c j) (c a) (hc j hj) (hc a ha) hcj hca hBaj hBja
+
+#axioms cvaluation_ring.exists_dominant
+#axioms cvaluation_ring.commensurable_of_relation

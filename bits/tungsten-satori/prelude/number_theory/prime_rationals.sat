@@ -224,13 +224,6 @@ import algebra.hilbert_comparison
     have hih := ihr (fun k => if k < sig r then f k else f (k + 1)) (fun i => if sig i < sig r then sig i else sig i - 1) hlt' hinj'
     rw [hstep, hih]; ring
 
-+ pow_le_pow_cancel.real (a b : ℝ) (N : ℕ) (hN : 1 ≤ N) (hb : 0 ≤ b) (hpow : a ^ N ≤ b ^ N) :
-    a ≤ b
-  by_contra hlt
-  have hba : b < a := by linarith
-  have hstrict := pow_lt_pow_left.real b a N hb hba (by omega)
-  linarith
-
 -- Multiplicative group pigeonhole (`exists_factorisation_le` in `HeckeValueHeight.lean`):
 -- If `V^N = ∏_{chi < N} a(chi) * b(chi)` and `inv_l` is a bijection on `{0,...,N-1}` with
 -- `op (inv_l chi) chi = psi`, then for any multiplicative seminorm `v` there exist `phi, chi < N`

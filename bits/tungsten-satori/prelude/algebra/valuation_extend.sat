@@ -1,0 +1,144 @@
+-- Extending a non-archimedean absolute value from a subfield `K` of ℂ to the elements
+-- commensurable with `K` in a dominating valuation ring `B`: if `z^d = q u` with `q ∈ K` and `u`
+-- a unit of `B`, the value of `z` is the `d`-th root of `v q`. The value is well defined,
+-- multiplicative, at most 1 on `B`, and agrees with `v` on `K`.
+--
+-- Proved on Satori's HOL kernel (0 custom axioms).
+
+import algebra.valuation_algebraic
+
+-- ====================================================================================
+-- SECTION 1: UNITS OF A SUBRING
+-- ====================================================================================
+
+-> cunit (B : ℂ → Prop) (u : ℂ) : Prop := u ≠ complex.zero ∧ B u ∧ B (complex.inv u)
+
++ cunit.one (B : ℂ → Prop) (hB : csubring B) : cunit B complex.one
+  have hinv : complex.inv complex.one = complex.one := complex.inv_unique complex.one complex.one (complex.mul_one complex.one)
+  exact ⟨complex.one_ne_zero, hB.2.1, by rw [hinv]; exact hB.2.1⟩
+
++ cunit.mul (B : ℂ → Prop) (hB : csubring B) (a b : ℂ) (ha : cunit B a) (hb : cunit B b) :
+    cunit B (complex.mul a b)
+  have hne : complex.mul a b ≠ complex.zero := complex.mul_ne_zero a b ha.1 hb.1
+  have hinv : B (complex.inv (complex.mul a b))
+    rw [complex.inv_mul a b ha.1 hb.1]; exact hB.2.2.2.2 (complex.inv a) (complex.inv b) ha.2.2 hb.2.2
+  exact ⟨hne, hB.2.2.2.2 a b ha.2.1 hb.2.1, hinv⟩
+
++ complex.inv_inv (a : ℂ) (ha : a ≠ complex.zero) : complex.inv (complex.inv a) = a
+  exact complex.inv_unique (complex.inv a) a (complex.inv_mul_cancel a ha)
+
++ cunit.inv (B : ℂ → Prop) (a : ℂ) (ha : cunit B a) : cunit B (complex.inv a)
+  exact ⟨complex.inv_ne_zero a ha.1, ha.2.2, by rw [complex.inv_inv a ha.1]; exact ha.2.1⟩
+
++ cunit.pow (B : ℂ → Prop) (hB : csubring B) (a : ℂ) (ha : cunit B a) (n : ℕ) : cunit B (cpow_nat a n)
+  induction n with r ihr
+  · rw [cpow_nat.zero_def]; exact cunit.one B hB
+  · rw [succ_eq_add_one.nat, cpow_nat.succ_def]; exact cunit.mul B hB (cpow_nat a r) a ihr ha
+
+-- A unit of a dominating ring that lies in `K` has absolute value 1.
++ cunit.abs_eq_one (K : ℂ → Prop) (v : ℂ → ℝ) (B : ℂ → Prop) (hK : csubfield K)
+    (hv : cnonarch_abs K v) (hD : cdominates K v B) (u : ℂ) (hu : cunit B u) (huK : K u) : v u = 1
+  have h1 := hD.2.2 u huK hu.2.1
+  have h2 := hD.2.2 (complex.inv u) (hK.2 u huK hu.1) hu.2.2
+  rw [cnonarch_abs.inv K v hK hv u huK hu.1] at h2
+  have hpos := hv.2.2.1 u huK hu.1
+  have h3 := (div_le_one.real 1 (v u) hpos).mp h2
+  linarith
+
++ cnonarch_abs.pow (K : ℂ → Prop) (v : ℂ → ℝ) (hK : csubfield K) (hv : cnonarch_abs K v) (a : ℂ)
+    (ha : K a) (n : ℕ) : v (cpow_nat a n) = (v a) ^ n
+  induction n with r ihr
+  · rw [cpow_nat.zero_def, pow_zero.real]; exact hv.2.1
+  · rw [succ_eq_add_one.nat, cpow_nat.succ_def, pow_succ.real, hv.2.2.2.1 (cpow_nat a r) a (csubring.cpow_mem K hK.1 a ha r) ha, ihr]
+
++ cpow_nat.pow_pow (z : ℂ) (a b : ℕ) : cpow_nat (cpow_nat z a) b = cpow_nat z (a * b) :=
+  (cpow_nat.mul z a b).symm
+
+-- ====================================================================================
+-- SECTION 2: THE VALUE OF A COMMENSURABLE ELEMENT
+-- ====================================================================================
+
+-- `r` is the value of `z`: some power `z^d` is `q u` with `q ∈ K`, `u` a unit of `B`, and `r^d = v q`.
+-> cval_ext_spec (K : ℂ → Prop) (v : ℂ → ℝ) (B : ℂ → Prop) (z : ℂ) (r : ℝ) : Prop :=
+  0 < r ∧ ∃ (d : ℕ) (q : ℂ), 1 ≤ d ∧ K q ∧ q ≠ complex.zero ∧ cunit B (complex.mul (cpow_nat z d) (complex.inv q)) ∧ r ^ d = v q
+
++ one_pow.real (n : ℕ) : (1 : ℝ) ^ n = 1
+  induction n with r ihr
+  · exact pow_zero.real 1
+  · rw [succ_eq_add_one.nat, pow_succ.real, ihr]; ring
+
++ cpow_nat.zero_base (d : ℕ) (hd : 1 ≤ d) : cpow_nat complex.zero d = complex.zero
+  have h1 : d = (d - 1) + 1 := by omega
+  rw [h1, cpow_nat.succ_def, complex.mul_zero]
+
++ cval_ext_spec.ne_zero (K : ℂ → Prop) (v : ℂ → ℝ) (B : ℂ → Prop) (z : ℂ) (r : ℝ)
+    (h : cval_ext_spec K v B z r) : z ≠ complex.zero
+  obtain ⟨_, d, q, hd, _, _, hu, _⟩ := h
+  intro h0
+  apply hu.1
+  rw [h0, cpow_nat.zero_base d hd, complex.zero_mul]
+
++ cval_ext_spec.exists (K : ℂ → Prop) (v : ℂ → ℝ) (B : ℂ → Prop) (hv : cnonarch_abs K v)
+    (z : ℂ) (hz : z ≠ complex.zero) (hc : cval_commensurable K B z) : ∃ r : ℝ, cval_ext_spec K v B z r
+  obtain ⟨d, q, hd, hq, hq0, hB1, hB2⟩ := hc
+  have hvq : 0 < v q := hv.2.2.1 q hq hq0
+  have hZ : cpow_nat z d ≠ complex.zero := cpow_nat.ne_zero z hz d
+  have hunit : cunit B (complex.mul (cpow_nat z d) (complex.inv q))
+    have hinv : complex.inv (complex.mul (cpow_nat z d) (complex.inv q)) = complex.mul q (complex.inv (cpow_nat z d)) := complex.inv_div (cpow_nat z d) q hZ hq0
+    exact ⟨complex.mul_ne_zero (cpow_nat z d) (complex.inv q) hZ (complex.inv_ne_zero q hq0), hB1, by rw [hinv]; exact hB2⟩
+  have hdr : (0 : ℝ) < (d : ℝ) := (cast_pos.real d).mpr (by omega)
+  have hdne : (d : ℝ) ≠ 0 := by linarith
+  have hpow : (exp (log (v q) / (d : ℝ))) ^ d = v q
+    rw [← exp_nat_mul (log (v q) / (d : ℝ)) d]
+    have he : (d : ℝ) * (log (v q) / (d : ℝ)) = log (v q) := by field_simp
+    rw [he, exp_log (v q) hvq]
+  use exp (log (v q) / (d : ℝ))
+  exact ⟨exp_pos (log (v q) / (d : ℝ)), d, q, hd, hq, hq0, hunit, hpow⟩
+
++ cval_ext_spec.unique (K : ℂ → Prop) (v : ℂ → ℝ) (B : ℂ → Prop) (hK : csubfield K)
+    (hv : cnonarch_abs K v) (hD : cdominates K v B) (z : ℂ) (r r' : ℝ)
+    (h : cval_ext_spec K v B z r) (h' : cval_ext_spec K v B z r') : r = r'
+  obtain ⟨hr, d, q, hd, hq, hq0, hu, hrd⟩ := h
+  obtain ⟨hr', d', q', hd', hq', hq0', hu', hrd'⟩ := h'
+  have hZd : cpow_nat z d ≠ complex.zero
+    intro h0; apply hu.1; rw [h0, complex.zero_mul]
+  have hQ : cpow_nat q d' ≠ complex.zero := cpow_nat.ne_zero q hq0 d'
+  have hQ' : cpow_nat q' d ≠ complex.zero := cpow_nat.ne_zero q' hq0' d
+  have hZ : cpow_nat z (d * d') ≠ complex.zero
+    rw [← cpow_nat.pow_pow z d d']; exact cpow_nat.ne_zero (cpow_nat z d) hZd d'
+  have e1 : cpow_nat (complex.mul (cpow_nat z d) (complex.inv q)) d' = complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q d'))
+    rw [cpow_nat.mul_dist (cpow_nat z d) (complex.inv q) d', cpow_nat.pow_pow z d d', cpow_nat.inv q hq0 d']
+  have e2 : cpow_nat (complex.mul (cpow_nat z d') (complex.inv q')) d = complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q' d))
+    have hcomm : d' * d = d * d' := by ring
+    rw [cpow_nat.mul_dist (cpow_nat z d') (complex.inv q') d, cpow_nat.pow_pow z d' d, cpow_nat.inv q' hq0' d, hcomm]
+  have hu1 := cunit.pow B hD.1 (complex.mul (cpow_nat z d) (complex.inv q)) hu d'
+  rw [e1] at hu1
+  have hu2 := cunit.pow B hD.1 (complex.mul (cpow_nat z d') (complex.inv q')) hu' d
+  rw [e2] at hu2
+  have hw := cunit.mul B hD.1 (complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q d'))) (complex.inv (complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q' d)))) hu1 (cunit.inv B (complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q' d))) hu2)
+  have hcross : complex.mul (complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q d'))) (cpow_nat q d') = complex.mul (cpow_nat q' d) (complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q' d)))
+    have r2 : complex.mul (cpow_nat q' d) (complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q' d))) = complex.mul (cpow_nat z (d * d')) (complex.mul (cpow_nat q' d) (complex.inv (cpow_nat q' d)))
+      apply complex.ext <;> simp <;> ring
+    rw [complex.mul_assoc, complex.inv_mul_cancel (cpow_nat q d') hQ, r2, complex.mul_inv_cancel (cpow_nat q' d) hQ']
+  have hY : complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q' d)) ≠ complex.zero := complex.mul_ne_zero (cpow_nat z (d * d')) (complex.inv (cpow_nat q' d)) hZ (complex.inv_ne_zero (cpow_nat q' d) hQ')
+  have hfrac := complex.div_eq_div (complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q d'))) (complex.mul (cpow_nat z (d * d')) (complex.inv (cpow_nat q' d))) (cpow_nat q' d) (cpow_nat q d') hY hQ hcross
+  rw [hfrac] at hw
+  have hKQ : K (cpow_nat q d') := csubring.cpow_mem K hK.1 q hq d'
+  have hKQ' : K (cpow_nat q' d) := csubring.cpow_mem K hK.1 q' hq' d
+  have hKinv : K (complex.inv (cpow_nat q d')) := hK.2 (cpow_nat q d') hKQ hQ
+  have hv1 := cunit.abs_eq_one K v B hK hv hD (complex.mul (cpow_nat q' d) (complex.inv (cpow_nat q d'))) hw (hK.1.2.2.2.2 (cpow_nat q' d) (complex.inv (cpow_nat q d')) hKQ' hKinv)
+  rw [hv.2.2.2.1 (cpow_nat q' d) (complex.inv (cpow_nat q d')) hKQ' hKinv, cnonarch_abs.inv K v hK hv (cpow_nat q d') hKQ hQ, cnonarch_abs.pow K v hK hv q' hq' d, cnonarch_abs.pow K v hK hv q hq d', ← div_def.real] at hv1
+  have hposQ : 0 < (v q) ^ d' := pow_pos.real (v q) d' (hv.2.2.1 q hq hq0)
+  have hne : (v q) ^ d' ≠ 0 := by linarith
+  have heq := (div_eq_iff.real ((v q') ^ d) 1 ((v q) ^ d') hne).mp hv1
+  have h1 : r ^ (d * d') = (v q) ^ d' := by rw [pow_mul.real r d d', hrd]
+  have h2 : r' ^ (d * d') = (v q') ^ d
+    have hc : d * d' = d' * d := by ring
+    rw [hc, pow_mul.real r' d' d, hrd']
+  have hdd : 1 ≤ d * d' := by nlinarith
+  apply pow_eq_cancel.real r r' (d * d') hdd (by linarith) (by linarith)
+  rw [h1, h2]; linarith
+
+#axioms cunit.abs_eq_one
+#axioms cval_ext_spec.exists
+#axioms cval_ext_spec.unique

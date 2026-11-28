@@ -1,0 +1,307 @@
+-- Subrings of ℂ, polynomial spans `I + I x + ... + I x^(n-1)`, the adjoined ring `B[x]`,
+-- and the degree-reduction lemma behind Chevalley's extension theorem.
+--
+-- Proved on Satori's HOL kernel (0 custom axioms).
+
+import algebra.valuation_zorn
+import determinant
+
+-- ====================================================================================
+-- SECTION 1: SUBRINGS, MODULES OVER A SUBRING, POLYNOMIAL SPANS
+-- ====================================================================================
+
+-> csubring (B : ℂ → Prop) : Prop :=
+  B complex.zero ∧ B complex.one ∧ (∀ a b : ℂ, B a → B b → B (complex.add a b)) ∧
+  (∀ a : ℂ, B a → B (complex.neg a)) ∧ (∀ a b : ℂ, B a → B b → B (complex.mul a b))
+
+-- `I` is a `B`-submodule of ℂ: it contains 0 and is closed under addition and `B`-scaling.
+-> csubmodule (B I : ℂ → Prop) : Prop :=
+  I complex.zero ∧ (∀ a b : ℂ, I a → I b → I (complex.add a b)) ∧ (∀ b a : ℂ, B b → I a → I (complex.mul b a))
+
+-> cpoly_eval (c : ℕ → ℂ) (n : ℕ) (x : ℂ) : ℂ := csum n (fun i => complex.mul (c i) (cpow_nat x i))
+
+-- `z` lies in `I + I x + ... + I x^(n-1)`.
+-> cspan_pow (I : ℂ → Prop) (n : ℕ) (x z : ℂ) : Prop :=
+  ∃ c : ℕ → ℂ, (∀ i < n, I (c i)) ∧ z = cpoly_eval c n x
+
++ csubring.self_submodule (B : ℂ → Prop) (hB : csubring B) : csubmodule B B :=
+  ⟨hB.1, hB.2.2.1, hB.2.2.2.2⟩
+
++ cpow_nat.zero_def (x : ℂ) : cpow_nat x 0 = complex.one := by rfl
+
++ cpow_nat.succ_def (x : ℂ) (k : ℕ) : cpow_nat x (k + 1) = complex.mul (cpow_nat x k) x
+  have h : cpow_nat x (succ k) = complex.mul (cpow_nat x k) x := by rfl
+  rw [succ_eq_add_one.nat] at h; exact h
+
++ csum.truncate (k n : ℕ) (hkn : k ≤ n) (f : ℕ → ℂ) :
+    csum n (fun i => if i < k then f i else complex.zero) = csum k f
+  have hn : n = k + (n - k) := by omega
+  rw [hn, csum.split_add k (n - k) (fun i => if i < k then f i else complex.zero)]
+  have h1 : csum k (fun i => if i < k then f i else complex.zero) = csum k f
+    apply csum.congr; intro i hi; rw [if_pos hi]
+  have h2 : csum (n - k) (fun j => if k + j < k then f (k + j) else complex.zero) = complex.zero
+    apply csum.zero_of_all_zero; intro j _
+    have hnl : ¬ (k + j < k) := by omega
+    rw [if_neg hnl]
+  rw [h1, h2, complex.add_zero]
+
++ cspan_pow.zero (I : ℂ → Prop) (hI0 : I complex.zero) (n : ℕ) (x : ℂ) : cspan_pow I n x complex.zero
+  use (fun _ => complex.zero); constructor
+  · intro i _; exact hI0
+  · unfold cpoly_eval
+    have h : csum n (fun i => complex.mul complex.zero (cpow_nat x i)) = complex.zero
+      apply csum.zero_of_all_zero; intro i _; exact complex.zero_mul (cpow_nat x i)
+    rw [h]
+
++ cspan_pow.add (B I : ℂ → Prop) (hI : csubmodule B I) (n : ℕ) (x z1 z2 : ℂ)
+    (h1 : cspan_pow I n x z1) (h2 : cspan_pow I n x z2) : cspan_pow I n x (complex.add z1 z2)
+  obtain ⟨c1, hc1, e1⟩ := h1
+  obtain ⟨c2, hc2, e2⟩ := h2
+  use (fun i => complex.add (c1 i) (c2 i)); constructor
+  · intro i hi; exact hI.2.1 (c1 i) (c2 i) (hc1 i hi) (hc2 i hi)
+  · rw [e1, e2]; unfold cpoly_eval
+    rw [← csum.add n (fun i => complex.mul (c1 i) (cpow_nat x i)) (fun i => complex.mul (c2 i) (cpow_nat x i))]
+    apply csum.congr; intro i _
+    rw [complex.right_distrib]
+
++ cspan_pow.scale (B I : ℂ → Prop) (hI : csubmodule B I) (n : ℕ) (x b z : ℂ)
+    (hb : B b) (h : cspan_pow I n x z) : cspan_pow I n x (complex.mul b z)
+  obtain ⟨c, hc, e⟩ := h
+  use (fun i => complex.mul b (c i)); constructor
+  · intro i hi; exact hI.2.2 b (c i) hb (hc i hi)
+  · rw [e]; unfold cpoly_eval
+    rw [← csum.scale_left n b (fun i => complex.mul (c i) (cpow_nat x i))]
+    apply csum.congr; intro i _
+    rw [complex.mul_assoc]
+
++ cspan_pow.mono (I : ℂ → Prop) (hI0 : I complex.zero) (k n : ℕ) (hkn : k ≤ n) (x z : ℂ)
+    (h : cspan_pow I k x z) : cspan_pow I n x z
+  obtain ⟨c, hc, e⟩ := h
+  use (fun i => if i < k then c i else complex.zero); constructor
+  · intro i _
+    by_cases hik : i < k
+    · rw [if_pos hik]; exact hc i hik
+    · rw [if_neg hik]; exact hI0
+  · rw [e]; unfold cpoly_eval
+    rw [← csum.truncate k n hkn (fun i => complex.mul (c i) (cpow_nat x i))]
+    apply csum.congr; intro i _
+    by_cases hik : i < k
+    · rw [if_pos hik, if_pos hik]
+    · rw [if_neg hik, if_neg hik, complex.zero_mul]
+
++ cspan_pow.monomial (I : ℂ → Prop) (hI0 : I complex.zero) (n d : ℕ) (hd : d < n) (x c : ℂ)
+    (hc : I c) : cspan_pow I n x (complex.mul c (cpow_nat x d))
+  use (fun i => if i = d then c else complex.zero); constructor
+  · intro i _
+    by_cases hid : i = d
+    · rw [if_pos hid]; exact hc
+    · rw [if_neg hid]; exact hI0
+  · unfold cpoly_eval
+    have h : csum n (fun i => complex.mul (if i = d then c else complex.zero) (cpow_nat x i)) = csum n (fun i => if i = d then complex.mul c (cpow_nat x i) else complex.zero)
+      apply csum.congr; intro i _
+      by_cases hid : i = d
+      · rw [if_pos hid, if_pos hid]
+      · rw [if_neg hid, if_neg hid, complex.zero_mul]
+    rw [h, csum.single n d (fun i => complex.mul c (cpow_nat x i)) hd]
+
++ cspan_pow.shift (I : ℂ → Prop) (hI0 : I complex.zero) (n : ℕ) (x z : ℂ)
+    (h : cspan_pow I n x z) : cspan_pow I (n + 1) x (complex.mul x z)
+  obtain ⟨c, hc, e⟩ := h
+  use (fun i => if i = 0 then complex.zero else c (i - 1)); constructor
+  · intro i hi
+    by_cases hi0 : i = 0
+    · rw [if_pos hi0]; exact hI0
+    · rw [if_neg hi0]; exact hc (i - 1) (by omega)
+  · rw [e]; unfold cpoly_eval
+    rw [csum.succ_zero n (fun i => complex.mul (if i = 0 then complex.zero else c (i - 1)) (cpow_nat x i))]
+    have h0 : complex.mul (if 0 = 0 then complex.zero else c (0 - 1)) (cpow_nat x 0) = complex.zero
+      have ht : (0 : ℕ) = 0 := by rfl
+      rw [if_pos ht, complex.zero_mul]
+    have hs : csum n (fun i => complex.mul (if i + 1 = 0 then complex.zero else c (i + 1 - 1)) (cpow_nat x (i + 1))) = csum n (fun i => complex.mul x (complex.mul (c i) (cpow_nat x i)))
+      apply csum.congr; intro i _
+      have hne : ¬ (i + 1 = 0) := by omega
+      have hsub : i + 1 - 1 = i := by omega
+      rw [if_neg hne, hsub, cpow_nat.succ_def]
+      apply complex.ext <;> simp <;> ring
+    rw [h0, hs, complex.zero_add, csum.scale_left]
+
++ cspan_pow.csum (B I : ℂ → Prop) (hI : csubmodule B I) (n : ℕ) (x : ℂ) (m : ℕ) (t : ℕ → ℂ)
+    (ht : ∀ j < m, cspan_pow I n x (t j)) : cspan_pow I n x (csum m t)
+  induction m with ht r ihr ht
+  · rw [csum.zero]; exact cspan_pow.zero I hI.1 n x
+  · rw [succ_eq_add_one.nat] at ht ⊢
+    rw [csum.succ]
+    exact cspan_pow.add B I hI n x (csum r t) (t r) (ihr (by intro j hj; exact ht j (by omega))) (ht r (by omega))
+
+-- ====================================================================================
+-- SECTION 2: THE ADJOINED RING `B[x]`
+-- ====================================================================================
+
+-> cadjoin (B : ℂ → Prop) (x z : ℂ) : Prop := ∃ n : ℕ, cspan_pow B n x z
+
++ cadjoin.of_mem (B : ℂ → Prop) (hB : csubring B) (x b : ℂ) (hb : B b) : cadjoin B x b
+  use 1
+  have h := cspan_pow.monomial B hB.1 1 0 (by omega) x b hb
+  rw [cpow_nat.zero_def, complex.mul_one] at h; exact h
+
++ cadjoin.gen (B : ℂ → Prop) (hB : csubring B) (x : ℂ) : cadjoin B x x
+  use 2
+  have h := cspan_pow.monomial B hB.1 2 1 (by omega) x complex.one hB.2.1
+  have h1 : cpow_nat x 1 = complex.mul (cpow_nat x 0) x := cpow_nat.succ_def x 0
+  rw [h1, cpow_nat.zero_def, complex.one_mul, complex.one_mul] at h; exact h
+
++ cadjoin.add (B : ℂ → Prop) (hB : csubring B) (x z1 z2 : ℂ)
+    (h1 : cadjoin B x z1) (h2 : cadjoin B x z2) : cadjoin B x (complex.add z1 z2)
+  obtain ⟨n1, s1⟩ := h1
+  obtain ⟨n2, s2⟩ := h2
+  use n1 + n2
+  exact cspan_pow.add B B (csubring.self_submodule B hB) (n1 + n2) x z1 z2 (cspan_pow.mono B hB.1 n1 (n1 + n2) (by omega) x z1 s1) (cspan_pow.mono B hB.1 n2 (n1 + n2) (by omega) x z2 s2)
+
++ cadjoin.scale (B : ℂ → Prop) (hB : csubring B) (x b z : ℂ)
+    (hb : B b) (h : cadjoin B x z) : cadjoin B x (complex.mul b z)
+  obtain ⟨n, s1⟩ := h
+  use n
+  exact cspan_pow.scale B B (csubring.self_submodule B hB) n x b z hb s1
+
++ cadjoin.mul_gen_pow (B : ℂ → Prop) (hB : csubring B) (x z : ℂ) (h : cadjoin B x z) (m : ℕ) :
+    cadjoin B x (complex.mul (cpow_nat x m) z)
+  induction m with r ihr
+  · rw [cpow_nat.zero_def, complex.one_mul]; exact h
+  · rw [succ_eq_add_one.nat, cpow_nat.succ_def]
+    obtain ⟨n, s1⟩ := ihr
+    have hsh := cspan_pow.shift B hB.1 n x (complex.mul (cpow_nat x r) z) s1
+    have he : complex.mul (complex.mul (cpow_nat x r) x) z = complex.mul x (complex.mul (cpow_nat x r) z)
+      apply complex.ext <;> simp <;> ring
+    rw [he]; exact ⟨n + 1, hsh⟩
+
++ cadjoin.mul (B : ℂ → Prop) (hB : csubring B) (x z1 z2 : ℂ)
+    (h1 : cadjoin B x z1) (h2 : cadjoin B x z2) : cadjoin B x (complex.mul z1 z2)
+  obtain ⟨n2, c2, hc2, e2⟩ := h2
+  have hrec : ∀ m : ℕ, m ≤ n2 → cadjoin B x (complex.mul z1 (cpoly_eval c2 m x))
+    intro m; induction m with h0 r ihr hr
+    · unfold cpoly_eval; rw [csum.zero, complex.mul_zero]
+      exact ⟨0, cspan_pow.zero B hB.1 0 x⟩
+    · rw [succ_eq_add_one.nat] at hr ⊢
+      have hprev := ihr (by omega)
+      have hstep : cpoly_eval c2 (r + 1) x = complex.add (cpoly_eval c2 r x) (complex.mul (c2 r) (cpow_nat x r))
+        unfold cpoly_eval; rw [csum.succ]
+      have he : complex.mul z1 (complex.add (cpoly_eval c2 r x) (complex.mul (c2 r) (cpow_nat x r))) = complex.add (complex.mul z1 (cpoly_eval c2 r x)) (complex.mul (c2 r) (complex.mul (cpow_nat x r) z1))
+        apply complex.ext <;> simp <;> ring
+      rw [hstep, he]
+      exact cadjoin.add B hB x (complex.mul z1 (cpoly_eval c2 r x)) (complex.mul (c2 r) (complex.mul (cpow_nat x r) z1)) hprev (cadjoin.scale B hB x (c2 r) (complex.mul (cpow_nat x r) z1) (hc2 r (by omega)) (cadjoin.mul_gen_pow B hB x z1 h1 r))
+  rw [e2]; exact hrec n2 (by omega)
+
++ cadjoin.subring (B : ℂ → Prop) (hB : csubring B) (x : ℂ) : csubring (cadjoin B x)
+  have hneg : ∀ a : ℂ, cadjoin B x a → cadjoin B x (complex.neg a)
+    intro a ha
+    have h := cadjoin.scale B hB x (complex.neg complex.one) a (hB.2.2.2.1 complex.one hB.2.1) ha
+    rw [complex.mul_neg_l, complex.one_mul] at h; exact h
+  exact ⟨cadjoin.of_mem B hB x complex.zero hB.1, cadjoin.of_mem B hB x complex.one hB.2.1, cadjoin.add B hB x, hneg, cadjoin.mul B hB x⟩
+
+-- ====================================================================================
+-- SECTION 3: DEGREE REDUCTION (THE CORE OF CHEVALLEY'S LEMMA)
+-- ====================================================================================
+
+-- Every `1 - w` with `w ∈ I` is a unit of `B`.
+-> cunits_one_sub (B I : ℂ → Prop) : Prop :=
+  ∀ w : ℂ, I w → ∃ t : ℂ, B t ∧ complex.mul t (complex.sub complex.one w) = complex.one
+
++ cpow_nat.mul_pow_inv (x y : ℂ) (hxy : complex.mul x y = complex.one) (j : ℕ) :
+    ∀ k : ℕ, j ≤ k → complex.mul (cpow_nat x k) (cpow_nat y j) = cpow_nat x (k - j)
+  induction j with k hk r ihr k hk
+  · have hk0 : k - 0 = k := by omega
+    rw [cpow_nat.zero_def, complex.mul_one, hk0]
+  · rw [succ_eq_add_one.nat] at hk ⊢
+    have hk1 : k = (k - 1) + 1 := by omega
+    have hsub : k - (r + 1) = (k - 1) - r := by omega
+    have hih := ihr (k - 1) (by omega)
+    have hx : cpow_nat x k = complex.mul (cpow_nat x (k - 1)) x
+      have h := cpow_nat.succ_def x (k - 1); rw [← hk1] at h; exact h
+    have he : complex.mul (complex.mul (cpow_nat x (k - 1)) x) (complex.mul (cpow_nat y r) y) = complex.mul (complex.mul (cpow_nat x (k - 1)) (cpow_nat y r)) (complex.mul x y)
+      apply complex.ext <;> simp <;> ring
+    rw [hx, cpow_nat.succ_def y r, he, hxy, complex.mul_one, hih, hsub]
+
++ complex.eq_mul_of_one_sub (a w T t : ℂ) (h : a = complex.add (complex.mul w a) T)
+    (ht : complex.mul t (complex.sub complex.one w) = complex.one) : a = complex.mul t T
+  have hT : T = complex.mul (complex.sub complex.one w) a
+    have hre : complex.re a = complex.re (complex.add (complex.mul w a) T) := by rw [← h]
+    have him : complex.im a = complex.im (complex.add (complex.mul w a) T) := by rw [← h]
+    simp at hre him
+    apply complex.ext <;> simp <;> linarith
+  rw [hT, ← complex.mul_assoc, ht, complex.one_mul]
+
+-- If `1 ∈ I + I x + ... + I x^k` and `1 ∈ I + I y + ... + I y^m` with `x y = 1` and `m ≤ k`,
+-- then already `1 ∈ I + I x + ... + I x^(k-1)`.
++ cspan_pow.reduce (B I : ℂ → Prop) (hB : csubring B) (hI : csubmodule B I)
+    (hIB : ∀ a : ℂ, I a → B a) (hunit : cunits_one_sub B I)
+    (x y : ℂ) (hxy : complex.mul x y = complex.one) (k m : ℕ) (hmk : m ≤ k)
+    (hx : cspan_pow I (k + 1) x complex.one) (hy : cspan_pow I (m + 1) y complex.one) :
+    cspan_pow I k x complex.one
+  obtain ⟨u, hu, ex⟩ := hx
+  obtain ⟨w, hw, ey⟩ := hy
+  unfold cpoly_eval at ex ey
+  have hunit0 : ∃ t : ℂ, B t ∧ complex.mul t (complex.sub complex.one (w 0)) = complex.one
+    unfold cunits_one_sub at hunit; exact hunit (w 0) (hw 0 (by omega))
+  obtain ⟨t, htB, ht⟩ := hunit0
+  have hT_span : cspan_pow I k x (csum m (fun j => complex.mul (w (j + 1)) (cpow_nat x (k - (j + 1)))))
+    have hall : ∀ j < m, cspan_pow I k x ((fun j => complex.mul (w (j + 1)) (cpow_nat x (k - (j + 1)))) j)
+      intro j hj
+      exact cspan_pow.monomial I hI.1 k (k - (j + 1)) (by omega) x (w (j + 1)) (hw (j + 1) (by omega))
+    exact cspan_pow.csum B I hI k x m (fun j => complex.mul (w (j + 1)) (cpow_nat x (k - (j + 1)))) hall
+  have hxk : cpow_nat x k = complex.add (complex.mul (w 0) (cpow_nat x k)) (csum m (fun j => complex.mul (w (j + 1)) (cpow_nat x (k - (j + 1)))))
+    have h1 : cpow_nat x k = complex.mul (cpow_nat x k) (csum (m + 1) (fun j => complex.mul (w j) (cpow_nat y j))) := by rw [← ey, complex.mul_one]
+    rw [← csum.scale_left (m + 1) (cpow_nat x k) (fun j => complex.mul (w j) (cpow_nat y j)), csum.succ_zero m (fun j => complex.mul (cpow_nat x k) (complex.mul (w j) (cpow_nat y j)))] at h1
+    have ha : complex.mul (cpow_nat x k) (complex.mul (w 0) (cpow_nat y 0)) = complex.mul (w 0) (cpow_nat x k)
+      rw [cpow_nat.zero_def, complex.mul_one, complex.mul_comm]
+    have hb : csum m (fun j => complex.mul (cpow_nat x k) (complex.mul (w (j + 1)) (cpow_nat y (j + 1)))) = csum m (fun j => complex.mul (w (j + 1)) (cpow_nat x (k - (j + 1))))
+      apply csum.congr; intro j hj
+      rw [← cpow_nat.mul_pow_inv x y hxy (j + 1) k (by omega)]
+      apply complex.ext <;> simp <;> ring
+    rw [ha, hb] at h1; exact h1
+  have hpow : cspan_pow I k x (cpow_nat x k)
+    have he := complex.eq_mul_of_one_sub (cpow_nat x k) (w 0) (csum m (fun j => complex.mul (w (j + 1)) (cpow_nat x (k - (j + 1))))) t hxk ht
+    have h2 := cspan_pow.scale B I hI k x t (csum m (fun j => complex.mul (w (j + 1)) (cpow_nat x (k - (j + 1))))) htB hT_span
+    rw [← he] at h2; exact h2
+  have hfirst : cspan_pow I k x (csum k (fun i => complex.mul (u i) (cpow_nat x i)))
+    use u; constructor
+    · intro i hi; exact hu i (by omega)
+    · unfold cpoly_eval; trivial
+  have hsecond := cspan_pow.scale B I hI k x (u k) (cpow_nat x k) (hIB (u k) (hu k (by omega))) hpow
+  rw [csum.succ] at ex
+  have hsum := cspan_pow.add B I hI k x (csum k (fun i => complex.mul (u i) (cpow_nat x i))) (complex.mul (u k) (cpow_nat x k)) hfirst hsecond
+  rw [← ex] at hsum; exact hsum
+
+-- Chevalley's dichotomy: with every `1 - w` (`w ∈ I`) a unit of `B` and `x y = 1`, the unit `1`
+-- cannot lie in both `I[x]` and `I[y]`.
++ cspan_pow.not_both (B I : ℂ → Prop) (hB : csubring B) (hI : csubmodule B I)
+    (hIB : ∀ a : ℂ, I a → B a) (hunit : cunits_one_sub B I) (N : ℕ) :
+    ∀ (n m : ℕ) (x y : ℂ), n + m = N → complex.mul x y = complex.one →
+      cspan_pow I n x complex.one → cspan_pow I m y complex.one → False
+  have hzero : ∀ z : ℂ, cspan_pow I 0 z complex.one → False
+    intro z hz
+    obtain ⟨c, _, e⟩ := hz
+    unfold cpoly_eval at e; rw [csum.zero] at e
+    exact complex.one_ne_zero e
+  induction N with n m x y hN hxy hx hy r ihr n m x y hN hxy hx hy
+  · have hn0 : n = 0 := by omega
+    rw [hn0] at hx; exact hzero x hx
+  · rw [succ_eq_add_one.nat] at hN
+    by_cases hn0 : n = 0
+    · rw [hn0] at hx; exact hzero x hx
+    · by_cases hm0 : m = 0
+      · rw [hm0] at hy; exact hzero y hy
+      · have hn1 : n = (n - 1) + 1 := by omega
+        have hm1 : m = (m - 1) + 1 := by omega
+        rw [hn1] at hx
+        rw [hm1] at hy
+        by_cases hmn : m ≤ n
+        · have hred := cspan_pow.reduce B I hB hI hIB hunit x y hxy (n - 1) (m - 1) (by omega) hx hy
+          rw [← hm1] at hy
+          exact ihr (n - 1) m x y (by omega) hxy hred hy
+        · have hyx : complex.mul y x = complex.one := by rw [complex.mul_comm]; exact hxy
+          have hred := cspan_pow.reduce B I hB hI hIB hunit y x hyx (m - 1) (n - 1) (by omega) hy hx
+          rw [← hn1] at hx
+          exact ihr n (m - 1) x y (by omega) hxy hx hred
+
+#axioms cadjoin.subring
+#axioms cspan_pow.not_both

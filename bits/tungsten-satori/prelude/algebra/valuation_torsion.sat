@@ -1,0 +1,153 @@
+-- Valuation rings of ℂ: the non-units form an ideal, finitely many elements have a dominant
+-- one, and an element satisfying a nontrivial polynomial relation over a subfield `L` has a
+-- positive power equal to an element of `L` times a unit (the value group is torsion over `L`).
+--
+-- Proved on Satori's HOL kernel (0 custom axioms).
+
+import algebra.valuation_lindep
+
+-- ====================================================================================
+-- SECTION 1: INVERSES AND FRACTIONS IN ℂ
+-- ====================================================================================
+
++ complex.inv_unique (x y : ℂ) (h : complex.mul x y = complex.one) : complex.inv x = y
+  have hx : x ≠ complex.zero
+    intro h0; rw [h0, complex.zero_mul] at h; exact complex.one_ne_zero h.symm
+  have h1 : complex.mul (complex.inv x) (complex.mul x y) = complex.inv x := by rw [h, complex.mul_one]
+  rw [← complex.mul_assoc, complex.inv_mul_cancel x hx, complex.one_mul] at h1
+  exact h1.symm
+
++ complex.inv_ne_zero (x : ℂ) (hx : x ≠ complex.zero) : complex.inv x ≠ complex.zero
+  intro h0
+  have h := complex.mul_inv_cancel x hx
+  rw [h0, complex.mul_zero] at h
+  exact complex.one_ne_zero h.symm
+
+-- `X / Y = W / V` from the cross-multiplied identity.
++ complex.div_eq_div (X Y W V : ℂ) (hY : Y ≠ complex.zero) (hV : V ≠ complex.zero)
+    (h : complex.mul X V = complex.mul W Y) :
+    complex.mul X (complex.inv Y) = complex.mul W (complex.inv V)
+  have e1 : complex.mul X (complex.inv Y) = complex.mul (complex.mul X V) (complex.mul (complex.inv Y) (complex.inv V))
+    have r : complex.mul (complex.mul X V) (complex.mul (complex.inv Y) (complex.inv V)) = complex.mul (complex.mul X (complex.inv Y)) (complex.mul V (complex.inv V))
+      apply complex.ext <;> simp <;> ring
+    rw [r, complex.mul_inv_cancel V hV, complex.mul_one]
+  have e2 : complex.mul (complex.mul W Y) (complex.mul (complex.inv Y) (complex.inv V)) = complex.mul W (complex.inv V)
+    have r : complex.mul (complex.mul W Y) (complex.mul (complex.inv Y) (complex.inv V)) = complex.mul (complex.mul W (complex.inv V)) (complex.mul Y (complex.inv Y))
+      apply complex.ext <;> simp <;> ring
+    rw [r, complex.mul_inv_cancel Y hY, complex.mul_one]
+  rw [e1, h, e2]
+
++ complex.inv_div (a b : ℂ) (ha : a ≠ complex.zero) (hb : b ≠ complex.zero) :
+    complex.inv (complex.mul a (complex.inv b)) = complex.mul b (complex.inv a)
+  apply complex.inv_unique
+  have r : complex.mul (complex.mul a (complex.inv b)) (complex.mul b (complex.inv a)) = complex.mul (complex.mul a (complex.inv a)) (complex.mul b (complex.inv b))
+    apply complex.ext <;> simp <;> ring
+  rw [r, complex.mul_inv_cancel a ha, complex.mul_inv_cancel b hb, complex.mul_one]
+
++ complex.div_self (a : ℂ) (ha : a ≠ complex.zero) : complex.mul a (complex.inv a) = complex.one :=
+  complex.mul_inv_cancel a ha
+
++ cpow_nat.ne_zero (z : ℂ) (hz : z ≠ complex.zero) (n : ℕ) : cpow_nat z n ≠ complex.zero
+  induction n with h0 r ihr h1
+  · rw [cpow_nat.zero_def] at h0; exact complex.one_ne_zero h0
+  · rw [succ_eq_add_one.nat, cpow_nat.succ_def] at h1
+    exact complex.mul_ne_zero (cpow_nat z r) z ihr hz h1
+
++ complex.inv_mul (a b : ℂ) (ha : a ≠ complex.zero) (hb : b ≠ complex.zero) :
+    complex.inv (complex.mul a b) = complex.mul (complex.inv a) (complex.inv b)
+  apply complex.inv_unique
+  have r : complex.mul (complex.mul a b) (complex.mul (complex.inv a) (complex.inv b)) = complex.mul (complex.mul a (complex.inv a)) (complex.mul b (complex.inv b))
+    apply complex.ext <;> simp <;> ring
+  rw [r, complex.mul_inv_cancel a ha, complex.mul_inv_cancel b hb, complex.mul_one]
+
++ cpow_nat.inv (a : ℂ) (ha : a ≠ complex.zero) (d : ℕ) :
+    cpow_nat (complex.inv a) d = complex.inv (cpow_nat a d)
+  have h : complex.mul (cpow_nat a d) (cpow_nat (complex.inv a) d) = complex.one
+    rw [← cpow_nat.mul_dist a (complex.inv a) d, complex.mul_inv_cancel a ha, cpow_nat.one]
+  exact (complex.inv_unique (cpow_nat a d) (cpow_nat (complex.inv a) d) h).symm
+
+-- ====================================================================================
+-- SECTION 2: THE MAXIMAL IDEAL OF A VALUATION RING
+-- ====================================================================================
+
+-> cvaluation_ring (B : ℂ → Prop) : Prop :=
+  csubring B ∧ ∀ x : ℂ, x ≠ complex.zero → B x ∨ B (complex.inv x)
+
+-- `u` is a non-unit of `B` (zero included).
+-> cval_max (B : ℂ → Prop) (u : ℂ) : Prop := B u ∧ (u = complex.zero ∨ ¬ B (complex.inv u))
+
++ cvaluation_ring.div_or (B : ℂ → Prop) (hB : cvaluation_ring B) (a b : ℂ)
+    (ha : a ≠ complex.zero) (hb : b ≠ complex.zero) :
+    B (complex.mul a (complex.inv b)) ∨ B (complex.mul b (complex.inv a))
+  have hx : complex.mul a (complex.inv b) ≠ complex.zero := complex.mul_ne_zero a (complex.inv b) ha (complex.inv_ne_zero b hb)
+  obtain h1 | h2 := hB.2 (complex.mul a (complex.inv b)) hx
+  · left; exact h1
+  · right; rw [complex.inv_div a b ha hb] at h2; exact h2
+
++ cval_max.zero (B : ℂ → Prop) (hB : cvaluation_ring B) : cval_max B complex.zero
+  have h : complex.zero = complex.zero ∨ ¬ B (complex.inv complex.zero) := by left; rfl
+  exact ⟨hB.1.1, h⟩
+
+-- If `a / b ∈ B` and `1 / (a + b) ∈ B` then `1 / b ∈ B`.
++ cvaluation_ring.inv_of_sum (B : ℂ → Prop) (hB : cvaluation_ring B) (a b : ℂ)
+    (hb : b ≠ complex.zero) (hs : complex.add a b ≠ complex.zero)
+    (hq : B (complex.mul a (complex.inv b))) (hinv : B (complex.inv (complex.add a b))) :
+    B (complex.inv b)
+  have h1 : B (complex.add complex.one (complex.mul a (complex.inv b))) := hB.1.2.2.1 complex.one (complex.mul a (complex.inv b)) hB.1.2.1 hq
+  have hprod := hB.1.2.2.2.2 (complex.add complex.one (complex.mul a (complex.inv b))) (complex.inv (complex.add a b)) h1 hinv
+  have he1 : complex.add complex.one (complex.mul a (complex.inv b)) = complex.mul (complex.add a b) (complex.inv b)
+    rw [complex.right_distrib, complex.mul_inv_cancel b hb, complex.add_comm]
+  have he2 : complex.mul (complex.mul (complex.add a b) (complex.inv b)) (complex.inv (complex.add a b)) = complex.mul (complex.inv b) (complex.mul (complex.add a b) (complex.inv (complex.add a b)))
+    apply complex.ext <;> simp <;> ring
+  rw [he1, he2, complex.mul_inv_cancel (complex.add a b) hs, complex.mul_one] at hprod
+  exact hprod
+
++ cval_max.add (B : ℂ → Prop) (hB : cvaluation_ring B) (a b : ℂ)
+    (ha : cval_max B a) (hb : cval_max B b) : cval_max B (complex.add a b)
+  have hsum : B (complex.add a b) := hB.1.2.2.1 a b ha.1 hb.1
+  by_cases ha0 : a = complex.zero
+  · rw [ha0, complex.zero_add]; exact hb
+  · by_cases hb0 : b = complex.zero
+    · rw [hb0, complex.add_zero]; exact ha
+    · by_cases hs : complex.add a b = complex.zero
+      · have h : complex.add a b = complex.zero ∨ ¬ B (complex.inv (complex.add a b)) := by left; exact hs
+        exact ⟨hsum, h⟩
+      · have hna : ¬ B (complex.inv a)
+          obtain h0 | hn := ha.2
+          · exfalso; exact ha0 h0
+          · exact hn
+        have hnb : ¬ B (complex.inv b)
+          obtain h0 | hn := hb.2
+          · exfalso; exact hb0 h0
+          · exact hn
+        have hno : ¬ B (complex.inv (complex.add a b))
+          intro hinv
+          obtain h1 | h2 := cvaluation_ring.div_or B hB a b ha0 hb0
+          · exact hnb (cvaluation_ring.inv_of_sum B hB a b hb0 hs h1 hinv)
+          · have hs2 : complex.add b a ≠ complex.zero := by rw [complex.add_comm]; exact hs
+            have hinv2 : B (complex.inv (complex.add b a)) := by rw [complex.add_comm]; exact hinv
+            exact hna (cvaluation_ring.inv_of_sum B hB b a ha0 hs2 h2 hinv2)
+        have h : complex.add a b = complex.zero ∨ ¬ B (complex.inv (complex.add a b)) := by right; exact hno
+        exact ⟨hsum, h⟩
+
++ cval_max.csum (B : ℂ → Prop) (hB : cvaluation_ring B) (n : ℕ) (f : ℕ → ℂ)
+    (hf : ∀ i < n, cval_max B (f i)) : cval_max B (csum n f)
+  induction n with hf r ihr hf
+  · rw [csum.zero]; exact cval_max.zero B hB
+  · rw [succ_eq_add_one.nat] at hf ⊢
+    rw [csum.succ]
+    exact cval_max.add B hB (csum r f) (f r) (ihr (by intro i hi; exact hf i (by omega))) (hf r (by omega))
+
++ cval_max.neg_one_not_mem (B : ℂ → Prop) (hB : cvaluation_ring B) :
+    ¬ cval_max B (complex.neg complex.one)
+  intro h
+  have hinv : complex.inv (complex.neg complex.one) = complex.neg complex.one
+    apply complex.inv_unique; apply complex.ext <;> simp
+  have hmem : B (complex.neg complex.one) := hB.1.2.2.2.1 complex.one hB.1.2.1
+  obtain h0 | hn := h.2
+  · have hre : complex.re (complex.neg complex.one) = complex.re complex.zero := by rw [h0]
+    simp at hre
+  · rw [hinv] at hn; exact hn hmem
+
+#axioms cval_max.add
+#axioms cval_max.neg_one_not_mem

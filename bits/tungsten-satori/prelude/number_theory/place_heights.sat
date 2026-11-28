@@ -1,0 +1,216 @@
+-- Heights of families of complex numbers indexed by p-adic places of ℂ, after
+-- `New/Heights/Heights.lean` (`HeightLe`): a family `y` has height at most `c` when one nonzero
+-- number `H` has all conjugates bounded by `exp α`, every place `s` has
+-- `v_s(H y_s) ≤ exp(e_{p(s)})`, and `α + ∑_{primes l < M} e_l ≤ c` for all large `M`.
+--
+-- The places are an arbitrary indexed family `(p s, v s)`; the Lean indexes by the pairs of a
+-- prime `l` and an isomorphism `ℂ ≅ PadicAlgCl l`.
+--
+-- Proved on Satori's HOL kernel (0 custom axioms).
+
+import algebra.compressed_gram
+import padic.legendre_fps
+
+-- ====================================================================================
+-- SECTION 1: PLACES AND AUTOMORPHISMS
+-- ====================================================================================
+
+-- `v` is an absolute value on ℂ extending the `l`-adic one, positive off zero.
+-> cpadic_place (l : ℕ) (v : ℂ → ℝ) : Prop :=
+  is_prime_nat l ∧ sernau.is_padic_val_on_C l v ∧ ∀ z : ℂ, z ≠ complex.zero → 0 < v z
+
+-> place_family (p : α → ℕ) (v : α → ℂ → ℝ) : Prop := ∀ s : α, cpadic_place (p s) (v s)
+
+-- A field automorphism of ℂ.
+-> cfield_aut (f : ℂ → ℂ) : Prop :=
+  f complex.one = complex.one ∧ (∀ a b : ℂ, f (complex.add a b) = complex.add (f a) (f b)) ∧
+  (∀ a b : ℂ, f (complex.mul a b) = complex.mul (f a) (f b)) ∧
+  ∃ g : ℂ → ℂ, ∀ z : ℂ, f (g z) = z ∧ g (f z) = z
+
++ place_family.at (p : α → ℕ) (v : α → ℂ → ℝ) (hpl : place_family p v) (s : α) :
+    cpadic_place (p s) (v s)
+  unfold place_family at hpl; exact hpl s
+
++ cpadic_place.mul (l : ℕ) (v : ℂ → ℝ) (h : cpadic_place l v) (w z : ℂ) :
+    v (complex.mul w z) = v w * v z := h.2.1.2.2.2.2.2.1 w z
+
++ cpadic_place.nonneg (l : ℕ) (v : ℂ → ℝ) (h : cpadic_place l v) (z : ℂ) : 0 ≤ v z :=
+  h.2.1.2.2.1 z
+
++ cpadic_place.one (l : ℕ) (v : ℂ → ℝ) (h : cpadic_place l v) : v complex.one = 1 := h.2.1.2.1
+
+-- ====================================================================================
+-- SECTION 2: HEIGHT BOUNDS
+-- ====================================================================================
+
+-> height_le (p : α → ℕ) (v : α → ℂ → ℝ) (c : ℝ) (y : α → ℂ) : Prop :=
+  ∃ (H : ℂ) (alpha : ℝ) (e : ℕ → ℝ), H ≠ complex.zero ∧
+    (∀ f : ℂ → ℂ, cfield_aut f → complex.abs (f H) ≤ exp alpha) ∧
+    (∀ s : α, v s (complex.mul H (y s)) ≤ exp (e (p s))) ∧
+    ∃ M0 : ℕ, ∀ M : ℕ, M0 ≤ M → alpha + (∑ l < M, if is_prime_nat l then e l else 0) ≤ c
+
+-- Monotonicity (`HeightLe.mono`).
++ height_le.mono (p : α → ℕ) (v : α → ℂ → ℝ) (hpl : place_family p v) (c c' : ℝ) (y y' : α → ℂ)
+    (h : height_le p v c y) (hc : c ≤ c') (hy : ∀ s : α, v s (y' s) ≤ v s (y s)) :
+    height_le p v c' y'
+  obtain ⟨H, alpha, e, hH, harch, hloc, hev⟩ := h
+  obtain ⟨M0, hM0⟩ := hev
+  have hloc' : ∀ s : α, v s (complex.mul H (y' s)) ≤ exp (e (p s))
+    intro s
+    have hm := mul_le_mul_of_nonneg_left.real (v s (y' s)) (v s (y s)) (v s H) (hy s) (cpadic_place.nonneg (p s) (v s) (place_family.at p v hpl s) H)
+    have h1 := hloc s
+    rw [cpadic_place.mul (p s) (v s) (place_family.at p v hpl s) H (y s)] at h1
+    rw [cpadic_place.mul (p s) (v s) (place_family.at p v hpl s) H (y' s)]
+    linarith
+  have hev' : ∃ M1 : ℕ, ∀ M : ℕ, M1 ≤ M → alpha + (∑ l < M, if is_prime_nat l then e l else 0) ≤ c'
+    use M0; intro M hM
+    have h1 := hM0 M hM; linarith
+  exact ⟨H, alpha, e, hH, harch, hloc', hev'⟩
+
+-- Height from place-by-place bounds (`HeightLe.of_le`).
++ height_le.of_le (p : α → ℕ) (v : α → ℂ → ℝ) (c : ℝ) (y : α → ℂ) (e : ℕ → ℝ)
+    (he : ∀ M : ℕ, (∑ l < M, if is_prime_nat l then e l else 0) ≤ c)
+    (h : ∀ s : α, v s (y s) ≤ exp (e (p s))) : height_le p v c y
+  have harch : ∀ f : ℂ → ℂ, cfield_aut f → complex.abs (f complex.one) ≤ exp 0
+    intro f hf
+    rw [hf.1, complex.abs_is_mult_seminorm.2.1, exp_zero]; linarith
+  have hloc : ∀ s : α, v s (complex.mul complex.one (y s)) ≤ exp (e (p s))
+    intro s; rw [complex.one_mul]; exact h s
+  have hev : ∃ M0 : ℕ, ∀ M : ℕ, M0 ≤ M → 0 + (∑ l < M, if is_prime_nat l then e l else 0) ≤ c
+    use 0; intro M _
+    have h1 := he M; linarith
+  exact ⟨complex.one, 0, e, complex.one_ne_zero, harch, hloc, hev⟩
+
+-- A quotient `u_s / H` by one fixed nonzero number with bounded conjugates.
++ height_le.of_ratio (p : α → ℕ) (v : α → ℂ → ℝ) (c : ℝ) (H : ℂ) (alpha : ℝ) (e : ℕ → ℝ)
+    (u : α → ℂ) (hH : H ≠ complex.zero)
+    (harch : ∀ f : ℂ → ℂ, cfield_aut f → complex.abs (f H) ≤ exp alpha)
+    (hu : ∀ s : α, v s (u s) ≤ exp (e (p s)))
+    (hev : ∃ M0 : ℕ, ∀ M : ℕ, M0 ≤ M → alpha + (∑ l < M, if is_prime_nat l then e l else 0) ≤ c) :
+    height_le p v c (fun s => complex.mul (u s) (complex.inv H))
+  have hloc : ∀ s : α, v s (complex.mul H (complex.mul (u s) (complex.inv H))) ≤ exp (e (p s))
+    intro s
+    have he : complex.mul H (complex.mul (u s) (complex.inv H)) = complex.mul (u s) (complex.mul H (complex.inv H))
+      apply complex.ext <;> simp <;> ring
+    rw [he, complex.mul_inv_cancel H hH, complex.mul_one]; exact hu s
+  exact ⟨H, alpha, e, hH, harch, hloc, hev⟩
+
++ sum_below.if_add (P : ℕ → Prop) (e f : ℕ → ℝ) (M : ℕ) :
+    (∑ l < M, if P l then e l + f l else 0) = (∑ l < M, if P l then e l else 0) + (∑ l < M, if P l then f l else 0)
+  rw [← sum_add.real (fun l => if P l then e l else 0) (fun l => if P l then f l else 0) M]
+  apply sum_below.congr; intro l _
+  by_cases hl : P l
+  · rw [if_pos hl, if_pos hl, if_pos hl]
+  · rw [if_neg hl, if_neg hl, if_neg hl]; linarith
+
+-- Subadditivity in products (`HeightLe.mul`).
++ height_le.mul (p : α → ℕ) (v : α → ℂ → ℝ) (hpl : place_family p v) (c c' : ℝ) (y y' : α → ℂ)
+    (h : height_le p v c y) (h' : height_le p v c' y') :
+    height_le p v (c + c') (fun s => complex.mul (y s) (y' s))
+  obtain ⟨H, alpha, e, hH, harch, hloc, hev⟩ := h
+  obtain ⟨K, beta, f, hK, harch', hloc', hev'⟩ := h'
+  obtain ⟨M0, hM0⟩ := hev
+  obtain ⟨M1, hM1⟩ := hev'
+  have h1 : complex.mul H K ≠ complex.zero := complex.mul_ne_zero H K hH hK
+  have h2 : ∀ g : ℂ → ℂ, cfield_aut g → complex.abs (g (complex.mul H K)) ≤ exp (alpha + beta)
+    intro g hg
+    rw [hg.2.2.1 H K, complex.abs_is_mult_seminorm.2.2.2, exp_add]
+    exact mul_le_mul.real (complex.abs (g H)) (exp alpha) (complex.abs (g K)) (exp beta) (harch g hg) (harch' g hg) (complex.abs_nonneg (g K)) (exp_nonneg alpha)
+  have h3 : ∀ s : α, v s (complex.mul (complex.mul H K) (complex.mul (y s) (y' s))) ≤ exp ((fun l => e l + f l) (p s))
+    intro s
+    have he : complex.mul (complex.mul H K) (complex.mul (y s) (y' s)) = complex.mul (complex.mul H (y s)) (complex.mul K (y' s))
+      apply complex.ext <;> simp <;> ring
+    rw [he, cpadic_place.mul (p s) (v s) (place_family.at p v hpl s), exp_add]
+    exact mul_le_mul.real (v s (complex.mul H (y s))) (exp (e (p s))) (v s (complex.mul K (y' s))) (exp (f (p s))) (hloc s) (hloc' s) (cpadic_place.nonneg (p s) (v s) (place_family.at p v hpl s) (complex.mul K (y' s))) (exp_nonneg (e (p s)))
+  have h4 : ∃ M2 : ℕ, ∀ M : ℕ, M2 ≤ M → (alpha + beta) + (∑ l < M, if is_prime_nat l then (fun l => e l + f l) l else 0) ≤ c + c'
+    use M0 + M1; intro M hM
+    have ha := hM0 M (by omega)
+    have hb := hM1 M (by omega)
+    have hs := sum_below.if_add is_prime_nat e f M
+    linarith
+  exact ⟨complex.mul H K, alpha + beta, fun l => e l + f l, h1, h2, h3, h4⟩
+
++ height_le.one (p : α → ℕ) (v : α → ℂ → ℝ) (hpl : place_family p v) :
+    height_le p v 0 (fun _ => complex.one)
+  apply height_le.of_le p v 0 (fun _ => complex.one) (fun _ => 0)
+  · intro M
+    have h : (∑ l < M, if is_prime_nat l then (0 : ℝ) else 0) = ∑ l < M, (0 : ℝ)
+      apply sum_below.congr; intro l _
+      by_cases hl : is_prime_nat l
+      · rw [if_pos hl]
+      · rw [if_neg hl]
+    rw [h, sum_const.real]; linarith
+  · intro s; rw [cpadic_place.one (p s) (v s) (place_family.at p v hpl s), exp_zero]; linarith
+
+-- Powers (`HeightLe.pow`).
++ height_le.pow (p : α → ℕ) (v : α → ℂ → ℝ) (hpl : place_family p v) (c : ℝ) (y : α → ℂ)
+    (h : height_le p v c y) (n : ℕ) : height_le p v ((n : ℝ) * c) (fun s => cpow_nat (y s) n)
+  induction n with r ihr
+  · have hf : (fun s : α => cpow_nat (y s) 0) = (fun _ : α => complex.one) := by funext s; rfl
+    rw [hf, cast_zero.real, zero_mul.real]
+    exact height_le.one p v hpl
+  · have hf : (fun s : α => cpow_nat (y s) (succ r)) = (fun s : α => complex.mul (cpow_nat (y s) r) (y s)) := by funext s; rfl
+    have hm := height_le.mul p v hpl ((r : ℝ) * c) c (fun s => cpow_nat (y s) r) y ihr h
+    have hc : ((succ r : ℕ) : ℝ) * c = (r : ℝ) * c + c := by rw [succ_eq_add_one.nat, cast_succ.real]; ring
+    rw [hf, hc]; exact hm
+
+-- ====================================================================================
+-- SECTION 3: SUMS OVER PRIMES BELOW A BOUND
+-- ====================================================================================
+
++ sum_below.if_scale (P : ℕ → Prop) (c : ℝ) (g : ℕ → ℝ) (M : ℕ) :
+    (∑ l < M, if P l then c * g l else 0) = c * (∑ l < M, if P l then g l else 0)
+  rw [← sum_const_mul.real c (fun l => if P l then g l else 0) M]
+  apply sum_below.congr; intro l _
+  by_cases hl : P l
+  · rw [if_pos hl, if_pos hl]
+  · rw [if_neg hl, if_neg hl]; linarith
+
+-- The primes below `M`, as a list without repetition carrying the same sum.
++ prime_segment.enumerate (g : ℕ → ℝ) (M : ℕ) :
+    ∃ (k : ℕ) (q : ℕ → ℕ), (∀ i < k, is_prime_nat (q i) ∧ q i < M) ∧
+      (∀ i < k, ∀ j < k, i ≠ j → q i ≠ q j) ∧
+      (∑ l < M, if is_prime_nat l then g l else 0) = ∑ i < k, g (q i)
+  induction M with r ihr
+  · use 0, (fun _ => 0)
+    have h1 : ∀ i < 0, is_prime_nat ((fun _ : ℕ => 0) i) ∧ (fun _ : ℕ => 0) i < 0 := by intro i hi; omega
+    have h2 : ∀ i < 0, ∀ j < 0, i ≠ j → (fun _ : ℕ => 0) i ≠ (fun _ : ℕ => 0) j := by intro i hi; omega
+    have h3 : (∑ l < 0, if is_prime_nat l then g l else 0) = ∑ i < 0, g ((fun _ : ℕ => 0) i) := by rw [sum_below_zero, sum_below_zero]
+    exact ⟨h1, h2, h3⟩
+  · obtain ⟨k, q, hq, hdist, hsum⟩ := ihr
+    rw [succ_eq_add_one.nat]
+    by_cases hr : is_prime_nat r
+    · use k + 1, (fun i => if i < k then q i else r)
+      have h1 : ∀ i < k + 1, is_prime_nat (if i < k then q i else r) ∧ (if i < k then q i else r) < r + 1
+        intro i hi
+        by_cases hik : i < k
+        · rw [if_pos hik]; have h := hq i hik; exact ⟨h.1, by omega⟩
+        · rw [if_neg hik]; exact ⟨hr, by omega⟩
+      have h2 : ∀ i < k + 1, ∀ j < k + 1, i ≠ j → (if i < k then q i else r) ≠ (if j < k then q j else r)
+        intro i hi j hj hne
+        by_cases hik : i < k
+        · by_cases hjk : j < k
+          · rw [if_pos hik, if_pos hjk]; exact hdist i hik j hjk hne
+          · rw [if_pos hik, if_neg hjk]; have h := (hq i hik).2; omega
+        · by_cases hjk : j < k
+          · rw [if_neg hik, if_pos hjk]; have h := (hq j hjk).2; omega
+          · exfalso; omega
+      have h3 : (∑ l < r + 1, if is_prime_nat l then g l else 0) = ∑ i < k + 1, g (if i < k then q i else r)
+        rw [sum_below_succ r (fun l => if is_prime_nat l then g l else 0), sum_below_succ k (fun i => g (if i < k then q i else r))]
+        have hc : (∑ i < k, g (if i < k then q i else r)) = ∑ i < k, g (q i)
+          apply sum_below.congr; intro i hi; rw [if_pos hi]
+        have hnk : ¬ (k < k) := by omega
+        rw [hc, if_pos hr, if_neg hnk, hsum]
+      exact ⟨h1, h2, h3⟩
+    · use k, q
+      have h1 : ∀ i < k, is_prime_nat (q i) ∧ q i < r + 1
+        intro i hi; have h := hq i hi; exact ⟨h.1, by omega⟩
+      have h3 : (∑ l < r + 1, if is_prime_nat l then g l else 0) = ∑ i < k, g (q i)
+        rw [sum_below_succ r (fun l => if is_prime_nat l then g l else 0), if_neg hr, hsum]; linarith
+      exact ⟨h1, hdist, h3⟩
+
+#axioms height_le.mono
+#axioms height_le.mul
+#axioms height_le.pow
+#axioms height_le.of_ratio
+#axioms prime_segment.enumerate

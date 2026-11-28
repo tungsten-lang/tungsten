@@ -1,0 +1,198 @@
+-- Linear dependence over a subfield of ℂ: an `(n+1) × n` matrix with entries in a subfield `L`
+-- has a nonzero left kernel vector with entries in `L` (Gaussian elimination), hence any
+-- `n + 1` elements of an `L`-span of `n` complex numbers are `L`-linearly dependent.
+--
+-- Proved on Satori's HOL kernel (0 custom axioms).
+
+import algebra.valuation_chevalley
+
+-- ====================================================================================
+-- SECTION 1: ROW SWAPS
+-- ====================================================================================
+
+-> nat_swap (p q i : ℕ) : ℕ := if i = p then q else if i = q then p else i
+
++ nat_swap.lt (p q m i : ℕ) (hp : p < m) (hq : q < m) (hi : i < m) : nat_swap p q i < m
+  unfold nat_swap
+  by_cases hip : i = p
+  · rw [if_pos hip]; exact hq
+  · rw [if_neg hip]
+    by_cases hiq : i = q
+    · rw [if_pos hiq]; exact hp
+    · rw [if_neg hiq]; exact hi
+
++ nat_swap.right (p q : ℕ) : nat_swap p q q = p
+  unfold nat_swap
+  by_cases hqp : q = p
+  · rw [if_pos hqp]; exact hqp
+  · rw [if_neg hqp]
+
++ nat_swap.left (p q : ℕ) : nat_swap p q p = q
+  unfold nat_swap; trivial
+
++ nat_swap.other (p q i : ℕ) (hip : i ≠ p) (hiq : i ≠ q) : nat_swap p q i = i
+  unfold nat_swap; rw [if_neg hip, if_neg hiq]
+
++ nat_swap.invol (p q i : ℕ) : nat_swap p q (nat_swap p q i) = i
+  by_cases hip : i = p
+  · rw [hip, nat_swap.left, nat_swap.right]
+  · by_cases hiq : i = q
+    · rw [hiq, nat_swap.right, nat_swap.left]
+    · rw [nat_swap.other p q i hip hiq, nat_swap.other p q i hip hiq]
+
+-- ====================================================================================
+-- SECTION 2: LEFT KERNELS OVER A SUBFIELD
+-- ====================================================================================
+
+-- `a` (rows `i < m`, columns `j < n`) has a nonzero left kernel vector with entries in `L`.
+-> clkernel (L : ℂ → Prop) (m n : ℕ) (a : ℕ → ℕ → ℂ) : Prop :=
+  ∃ c : ℕ → ℂ, (∀ i < m, L (c i)) ∧ (∃ i < m, c i ≠ complex.zero) ∧
+    ∀ j < n, csum m (fun i => complex.mul (c i) (a i j)) = complex.zero
+
+-> cmat_swap_rows (a : ℕ → ℕ → ℂ) (p q i j : ℕ) : ℂ := a (nat_swap p q i) j
+
+-> cmat_reduce (b : ℕ → ℕ → ℂ) (m r i j : ℕ) : ℂ :=
+  complex.sub (b i j) (complex.mul (complex.mul (b i r) (complex.inv (b m r))) (b m j))
+
++ clkernel.swap (L : ℂ → Prop) (m n : ℕ) (a : ℕ → ℕ → ℂ) (p q : ℕ) (hp : p < m) (hq : q < m)
+    (h : clkernel L m n (cmat_swap_rows a p q)) : clkernel L m n a
+  obtain ⟨c, hcL, hnz, hker⟩ := h
+  obtain ⟨i0, hi0, hne⟩ := hnz
+  use (fun i => c (nat_swap p q i))
+  have h1 : ∀ i < m, L (c (nat_swap p q i))
+    intro i hi; exact hcL (nat_swap p q i) (nat_swap.lt p q m i hp hq hi)
+  have h2 : ∃ i < m, c (nat_swap p q i) ≠ complex.zero
+    use nat_swap p q i0; constructor
+    · exact nat_swap.lt p q m i0 hp hq hi0
+    · rw [nat_swap.invol]; exact hne
+  have h3 : ∀ j < n, csum m (fun i => complex.mul (c (nat_swap p q i)) (a i j)) = complex.zero
+    intro j hj
+    have hb := csum.bij m (nat_swap p q) (nat_swap p q) (fun k => complex.mul (c k) (a (nat_swap p q k) j)) (by intro i hi; exact nat_swap.lt p q m i hp hq hi) (by intro i hi; exact nat_swap.lt p q m i hp hq hi) (by intro i _; exact nat_swap.invol p q i) (by intro i _; exact nat_swap.invol p q i)
+    have hcon : csum m (fun i => complex.mul (c (nat_swap p q i)) (a i j)) = csum m (fun i => complex.mul (c (nat_swap p q i)) (a (nat_swap p q (nat_swap p q i)) j))
+      apply csum.congr; intro i _; rw [nat_swap.invol]
+    have hk := hker j hj
+    unfold cmat_swap_rows at hk
+    rw [hcon, hb]; exact hk
+  exact ⟨h1, h2, h3⟩
+
++ complex.add_neg_mul_inv_cancel (S p : ℂ) (hp : p ≠ complex.zero) :
+    complex.add S (complex.mul (complex.neg (complex.mul S (complex.inv p))) p) = complex.zero
+  have h1 : complex.mul (complex.neg (complex.mul S (complex.inv p))) p = complex.neg (complex.mul S (complex.mul (complex.inv p) p))
+    apply complex.ext <;> simp <;> ring
+  rw [h1, complex.inv_mul_cancel p hp, complex.mul_one, complex.add_neg]
+
+-- Elimination with a pivot in the last row and last column.
++ clkernel.pivot_last (L : ℂ → Prop) (hL : csubfield L) (m r : ℕ) (b : ℕ → ℕ → ℂ)
+    (hb : ∀ i < m + 1, ∀ j < r + 1, L (b i j)) (hp : b m r ≠ complex.zero)
+    (hih : clkernel L m r (cmat_reduce b m r)) : clkernel L (m + 1) (r + 1) b
+  obtain ⟨c, hcL, hnz, hker⟩ := hih
+  obtain ⟨i1, hi1, hne⟩ := hnz
+  have hinvL : L (complex.inv (b m r)) := hL.2 (b m r) (hb m (by omega) r (by omega)) hp
+  have hSL : L (csum m (fun i => complex.mul (c i) (b i r)))
+    apply csubring.csum_mem L hL.1 m
+    intro i hi; exact hL.1.2.2.2.2 (c i) (b i r) (hcL i hi) (hb i (by omega) r (by omega))
+  have hgL : L (complex.neg (complex.mul (csum m (fun i => complex.mul (c i) (b i r))) (complex.inv (b m r))))
+    exact hL.1.2.2.2.1 (complex.mul (csum m (fun i => complex.mul (c i) (b i r))) (complex.inv (b m r))) (hL.1.2.2.2.2 (csum m (fun i => complex.mul (c i) (b i r))) (complex.inv (b m r)) hSL hinvL)
+  use (fun i => if i < m then c i else complex.neg (complex.mul (csum m (fun i => complex.mul (c i) (b i r))) (complex.inv (b m r))))
+  have h1 : ∀ i < m + 1, L (if i < m then c i else complex.neg (complex.mul (csum m (fun i => complex.mul (c i) (b i r))) (complex.inv (b m r))))
+    intro i hi
+    by_cases him : i < m
+    · rw [if_pos him]; exact hcL i him
+    · rw [if_neg him]; exact hgL
+  have h2 : ∃ i < m + 1, (if i < m then c i else complex.neg (complex.mul (csum m (fun i => complex.mul (c i) (b i r))) (complex.inv (b m r)))) ≠ complex.zero
+    use i1; constructor
+    · omega
+    · rw [if_pos hi1]; exact hne
+  have h3 : ∀ j < r + 1, csum (m + 1) (fun i => complex.mul (if i < m then c i else complex.neg (complex.mul (csum m (fun i => complex.mul (c i) (b i r))) (complex.inv (b m r)))) (b i j)) = complex.zero
+    intro j hj
+    have hfirst : csum m (fun i => complex.mul (if i < m then c i else complex.neg (complex.mul (csum m (fun i => complex.mul (c i) (b i r))) (complex.inv (b m r)))) (b i j)) = csum m (fun i => complex.mul (c i) (b i j))
+      apply csum.congr; intro i hi; rw [if_pos hi]
+    have hnl : ¬ (m < m) := by omega
+    rw [csum.succ, hfirst, if_neg hnl]
+    by_cases hjr : j = r
+    · rw [hjr]
+      exact complex.add_neg_mul_inv_cancel (csum m (fun i => complex.mul (c i) (b i r))) (b m r) hp
+    · have hk := hker j (by omega)
+      unfold cmat_reduce at hk
+      have hterm : csum m (fun i => complex.mul (c i) (complex.sub (b i j) (complex.mul (complex.mul (b i r) (complex.inv (b m r))) (b m j)))) = csum m (fun i => complex.sub (complex.mul (c i) (b i j)) (complex.mul (complex.mul (c i) (b i r)) (complex.mul (complex.inv (b m r)) (b m j))))
+        apply csum.congr; intro i _
+        apply complex.ext <;> simp <;> ring
+      rw [hterm, csum.sub m (fun i => complex.mul (c i) (b i j)) (fun i => complex.mul (complex.mul (c i) (b i r)) (complex.mul (complex.inv (b m r)) (b m j))), csum.scale_right m (complex.mul (complex.inv (b m r)) (b m j)) (fun i => complex.mul (c i) (b i r))] at hk
+      have he : complex.add (csum m (fun i => complex.mul (c i) (b i j))) (complex.mul (complex.neg (complex.mul (csum m (fun i => complex.mul (c i) (b i r))) (complex.inv (b m r)))) (b m j)) = complex.sub (csum m (fun i => complex.mul (c i) (b i j))) (complex.mul (csum m (fun i => complex.mul (c i) (b i r))) (complex.mul (complex.inv (b m r)) (b m j)))
+        apply complex.ext <;> simp <;> ring
+      rw [he]; exact hk
+  exact ⟨h1, h2, h3⟩
+
+-- Gaussian elimination: more rows than columns gives a nonzero left kernel vector over `L`.
++ clkernel.exists (L : ℂ → Prop) (hL : csubfield L) (n : ℕ) :
+    ∀ (m : ℕ) (a : ℕ → ℕ → ℂ), n ≤ m → (∀ i < m + 1, ∀ j < n, L (a i j)) → clkernel L (m + 1) n a
+  induction n with m a hm ha r ihr m a hm ha
+  · use (fun i => if i = 0 then complex.one else complex.zero)
+    have h1 : ∀ i < m + 1, L (if i = 0 then complex.one else complex.zero)
+      intro i _
+      by_cases hi0 : i = 0
+      · rw [if_pos hi0]; exact hL.1.2.1
+      · rw [if_neg hi0]; exact hL.1.1
+    have h2 : ∃ i < m + 1, (if i = 0 then complex.one else complex.zero) ≠ complex.zero
+      use 0; constructor
+      · omega
+      · have h00 : (0 : ℕ) = 0 := by rfl
+        rw [if_pos h00]; exact complex.one_ne_zero
+    have h3 : ∀ j < 0, csum (m + 1) (fun i => complex.mul (if i = 0 then complex.one else complex.zero) (a i j)) = complex.zero
+      intro j hj; omega
+    exact ⟨h1, h2, h3⟩
+  · rw [succ_eq_add_one.nat] at hm ha ⊢
+    by_cases hcol : ∀ i < m + 1, a i r = complex.zero
+    · obtain ⟨c, hcL, hnz, hker⟩ := ihr m a (by omega) (by intro i hi j hj; exact ha i hi j (by omega))
+      have h3 : ∀ j < r + 1, csum (m + 1) (fun i => complex.mul (c i) (a i j)) = complex.zero
+        intro j hj
+        by_cases hjr : j = r
+        · rw [hjr]; apply csum.zero_of_all_zero; intro i hi; rw [hcol i hi, complex.mul_zero]
+        · exact hker j (by omega)
+      exact ⟨c, hcL, hnz, h3⟩
+    · have hex : ∃ i0 : ℕ, i0 < m + 1 ∧ a i0 r ≠ complex.zero
+        by_contra hne
+        apply hcol; intro i hi
+        by_contra h0
+        apply hne; exact ⟨i, hi, h0⟩
+      obtain ⟨i0, hi0, hp0⟩ := hex
+      apply clkernel.swap L (m + 1) (r + 1) a i0 m hi0 (by omega)
+      have hbL : ∀ i < m + 1, ∀ j < r + 1, L (cmat_swap_rows a i0 m i j)
+        intro i hi j hj; unfold cmat_swap_rows
+        exact ha (nat_swap i0 m i) (nat_swap.lt i0 m (m + 1) i hi0 (by omega) hi) j hj
+      have hpiv : cmat_swap_rows a i0 m m r ≠ complex.zero
+        unfold cmat_swap_rows; rw [nat_swap.right]; exact hp0
+      have hm1 : m = (m - 1) + 1 := by omega
+      have hredL : ∀ i < (m - 1) + 1, ∀ j < r, L (cmat_reduce (cmat_swap_rows a i0 m) m r i j)
+        intro i hi j hj; unfold cmat_reduce
+        have hinv : L (complex.inv (cmat_swap_rows a i0 m m r)) := hL.2 (cmat_swap_rows a i0 m m r) (hbL m (by omega) r (by omega)) hpiv
+        exact csubring.sub_mem L hL.1 (cmat_swap_rows a i0 m i j) (complex.mul (complex.mul (cmat_swap_rows a i0 m i r) (complex.inv (cmat_swap_rows a i0 m m r))) (cmat_swap_rows a i0 m m j)) (hbL i (by omega) j (by omega)) (hL.1.2.2.2.2 (complex.mul (cmat_swap_rows a i0 m i r) (complex.inv (cmat_swap_rows a i0 m m r))) (cmat_swap_rows a i0 m m j) (hL.1.2.2.2.2 (cmat_swap_rows a i0 m i r) (complex.inv (cmat_swap_rows a i0 m m r)) (hbL i (by omega) r (by omega)) hinv) (hbL m (by omega) j (by omega)))
+      have hih := ihr (m - 1) (cmat_reduce (cmat_swap_rows a i0 m) m r) (by omega) hredL
+      rw [← hm1] at hih
+      exact clkernel.pivot_last L hL m r (cmat_swap_rows a i0 m) hbL hpiv hih
+
+-- ====================================================================================
+-- SECTION 3: LINEAR DEPENDENCE IN SPANS
+-- ====================================================================================
+
+-- Any `n + 1` elements `t i = ∑_j a i j * e j` of the `L`-span of `e 0, ..., e (n-1)` satisfy a
+-- nontrivial `L`-linear relation.
++ cspan.lin_dep (L : ℂ → Prop) (hL : csubfield L) (n : ℕ) (e t : ℕ → ℂ) (a : ℕ → ℕ → ℂ)
+    (ha : ∀ i < n + 1, ∀ j < n, L (a i j))
+    (ht : ∀ i < n + 1, t i = csum n (fun j => complex.mul (a i j) (e j))) :
+    ∃ c : ℕ → ℂ, (∀ i < n + 1, L (c i)) ∧ (∃ i < n + 1, c i ≠ complex.zero) ∧
+      csum (n + 1) (fun i => complex.mul (c i) (t i)) = complex.zero
+  obtain ⟨c, hcL, hnz, hker⟩ := clkernel.exists L hL n n a (by omega) ha
+  have h1 : csum (n + 1) (fun i => complex.mul (c i) (t i)) = csum (n + 1) (fun i => csum n (fun j => complex.mul (complex.mul (c i) (a i j)) (e j)))
+    apply csum.congr; intro i hi
+    rw [ht i hi, ← csum.scale_left n (c i) (fun j => complex.mul (a i j) (e j))]
+    apply csum.congr; intro j _; rw [complex.mul_assoc]
+  have h2 : csum n (fun j => csum (n + 1) (fun i => complex.mul (complex.mul (c i) (a i j)) (e j))) = complex.zero
+    apply csum.zero_of_all_zero; intro j hj
+    rw [csum.scale_right (n + 1) (e j) (fun i => complex.mul (c i) (a i j)), hker j hj, complex.zero_mul]
+  have h3 : csum (n + 1) (fun i => complex.mul (c i) (t i)) = complex.zero
+    rw [h1, csum.swap (n + 1) n (fun i j => complex.mul (complex.mul (c i) (a i j)) (e j)), h2]
+  exact ⟨c, hcL, hnz, h3⟩
+
+#axioms clkernel.exists
+#axioms cspan.lin_dep

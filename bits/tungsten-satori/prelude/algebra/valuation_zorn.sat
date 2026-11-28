@@ -1,0 +1,44 @@
+-- Zorn's Lemma (maximal elements of chain-complete partial orders), derived from the
+-- Bourbaki-Witt fixed-point theorem and Hilbert choice.
+--
+-- Proved on Satori's HOL kernel (0 custom axioms).
+
+import algebra.bourbaki_witt
+
+-- One step up: a strictly larger element of `P` when one exists, otherwise `x` itself.
+-> zorn.step (P : α → Prop) (le : α → α → Prop) (x : α) : α :=
+  if ∃ y : α, P y ∧ le x y ∧ y ≠ x then choice (fun y : α => P y ∧ le x y ∧ y ≠ x) else x
+
++ zorn.step_spec (P : α → Prop) (le : α → α → Prop) (x : α)
+    (hex : ∃ y : α, P y ∧ le x y ∧ y ≠ x) :
+    P (zorn.step P le x) ∧ le x (zorn.step P le x) ∧ zorn.step P le x ≠ x
+  unfold zorn.step; rw [if_pos hex]
+  exact choice.spec (fun y : α => P y ∧ le x y ∧ y ≠ x) hex
+
++ zorn.step_fixed (P : α → Prop) (le : α → α → Prop) (x : α)
+    (hne : ¬ (∃ y : α, P y ∧ le x y ∧ y ≠ x)) : zorn.step P le x = x
+  unfold zorn.step; rw [if_neg hne]
+
+-- Zorn's Lemma: a partial order on `P` with a least element in which every nonempty chain
+-- has a least upper bound in `P` has a maximal element.
++ zorn.exists_maximal (P : α → Prop) (le : α → α → Prop) (bot : α) (lub : (α → Prop) → α)
+    (hbot_P : P bot) (hbot_le : ∀ x : α, P x → le bot x) (hrefl : ∀ x : α, P x → le x x)
+    (htrans : ∀ x y z : α, P x → P y → P z → le x y → le y z → le x z)
+    (hanti : ∀ x y : α, P x → P y → le x y → le y x → x = y)
+    (hlub : ∀ C : α → Prop, (∃ x0 : α, C x0) → (∀ x : α, C x → P x) → sernau.bw_is_chain le C → P (lub C) ∧ (∀ x : α, C x → le x (lub C)) ∧ (∀ z : α, P z → (∀ x : α, C x → le x z) → le (lub C) z)) :
+    ∃ m : α, P m ∧ ∀ x : α, P x → le m x → x = m
+  have hf : ∀ x : α, P x → P (zorn.step P le x) ∧ le x (zorn.step P le x)
+    intro x hx
+    by_cases hex : ∃ y : α, P y ∧ le x y ∧ y ≠ x
+    · have hs := zorn.step_spec P le x hex
+      exact ⟨hs.1, hs.2.1⟩
+    · rw [zorn.step_fixed P le x hex]; exact ⟨hx, hrefl x hx⟩
+  obtain ⟨m, hm, hfix⟩ := sernau.bourbaki_witt P le bot (zorn.step P le) lub hbot_P hbot_le hrefl htrans hanti hf hlub
+  use m; constructor; exact hm
+  intro x hx hle
+  by_contra hne
+  have hex : ∃ y : α, P y ∧ le m y ∧ y ≠ m := ⟨x, hx, hle, hne⟩
+  have hs := zorn.step_spec P le m hex
+  exact hs.2.2 hfix
+
+#axioms zorn.exists_maximal

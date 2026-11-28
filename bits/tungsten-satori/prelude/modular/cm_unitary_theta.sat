@@ -472,16 +472,6 @@ import modular.gamma0_hecke
     linarith
   exact ⟨hfp_im, hmul⟩
 
-+ cpow_nat.mul_dist (a b : ℂ) (k : ℕ) :
-    cpow_nat (complex.mul a b) k = complex.mul (cpow_nat a k) (cpow_nat b k)
-  induction k with m ihm
-  · unfold cpow_nat; ring
-  · rw [succ_eq_add_one.nat]
-    have h1 : cpow_nat (complex.mul a b) (m + 1) = complex.mul (cpow_nat (complex.mul a b) m) (complex.mul a b) := by rfl
-    have h2 : cpow_nat a (m + 1) = complex.mul (cpow_nat a m) a := by rfl
-    have h3 : cpow_nat b (m + 1) = complex.mul (cpow_nat b m) b := by rfl
-    rw [h1, h2, h3, ihm]; ring
-
 + complex.inv_eq_of_mul_one (a b : ℂ) (ha : a ≠ complex.zero) (h : complex.mul a b = complex.one) :
     complex.inv a = b
   have h1 : complex.mul (complex.inv a) (complex.mul a b) = complex.mul (complex.inv a) complex.one := by rw [h]

@@ -1,0 +1,964 @@
+-- Milestone 3.81a (Part 0): Cyclotomic-Quadratic Root Discriminant (`New/Data/Different.lean`),
+--                           2-Torsion Cubic Discriminant (`Lib/CM/Sigma/CurveTheta.lean`),
+--                           and Reduced Binary Quadratic Forms & Epstein-Dedekind Zeta Identity
+--                           (`Lib/CM/Genus/QuadraticZeta.lean`)
+--
+-- Proved unconditionally on Satori's untouched HOL kernel (ZERO custom axioms).
+
+import determinant
+import number_theory.dirichlet_conductor
+import padic.kummer_artin_hasse
+import algebra.vandermonde_siegel
+import number_theory.quadratic_reciprocity
+
+-- ====================================================================================
+-- 1. Cyclotomic Derivative Norm Product & `rad_exp_prod` (`New/Data/Different.lean`)
+-- ====================================================================================
+
++ sernau.m81a_dvd_cases (p g : ℕ) (hp : is_prime_nat p) (hg : 0 < g) (hgd : g ∣ p) : g = 1 ∨ g = p
+  have hp2 : 2 ≤ p := hp.1
+  obtain ⟨k, hk⟩ := (dvd.iff_exists g p hg).mp hgd
+  obtain h1 | h2 := hp.2 g k ((dvd.iff_exists p (g * k) (by omega)).mpr ⟨1, by omega⟩)
+  · right; have hle1 := le_of_dvd.nat g p hg h1; have hle2 := le_of_dvd.nat p g (by omega) hgd; omega
+  · left; have hk_pos : 0 < k := by by_contra h0; have hz : k = 0 := by omega; rw [hz] at hk; omega
+    have hpk := le_of_dvd.nat k p hk_pos h2
+    by_contra hne1; have hm := mul_le_mul_of_nonneg_left.nat p k g hpk (by omega); nlinarith
+
++ sernau.m81a_prime_iff (p : ℕ) : prime p ↔ is_prime_nat p
+  constructor
+  · intro hp; exact ⟨hp.1, by intro a b hd; exact prime.dvd_mul_or p a b hp hd⟩
+  · intro hp; constructor; exact hp.1; (intro d hdp hd2 hmod; obtain h1 | h2 := sernau.m81a_dvd_cases p d hp (by omega) hmod; omega; omega)
+
++ sernau.m81a_prime_dvd_pow (p M : ℕ) (hp : prime p) : ∀ k : ℕ, 1 ≤ k → p ∣ (M ^ k) → p ∣ M
+  have hall : ∀ k : ℕ, True ∧ (1 ≤ k → p ∣ (M ^ k) → p ∣ M)
+    intro k; induction k with m ihm
+    · exact ⟨trivial, by intro hk1 _; omega⟩
+    · constructor; trivial; intro hk1 hd; rw [succ_eq_add_one.nat] at hk1 hd
+      by_cases hm0 : m = 0; (rw [hm0, pow_succ.nat, pow_zero.nat, one_mul.nat] at hd; exact hd)
+      rw [pow_succ.nat] at hd; obtain h1 | h2 := prime.dvd_mul_or p (M ^ m) M hp hd; exact ihm.2 (by omega) h1; exact h2
+  intro k; exact (hall k).2
+
++ sernau.m81a_exp_pow_eq (x : ℝ) (n : ℕ) : (exp x) ^ n = exp ((n : ℝ) * x)
+  induction n with k ihk; (rw [pow_zero.real, cast_zero.real, zero_mul.real, exp_zero])
+  rw [succ_eq_add_one.nat, pow_succ.real, ihk, cast_add.real, cast_one.real]
+  have hr : ((k : ℝ) + 1) * x = (k : ℝ) * x + x := by ring
+  rw [hr, exp_add]
+
+-> sernau.rad_exp_prod (N0 : ℕ) : ℝ :=
+  ∏ p < N0 + 1, if is_prime_nat p ∧ p ∣ N0 then rpow (p : ℝ) (1 / ((p - 1 : ℕ) : ℝ)) else 1
+
++ sernau.rad_exp_prod_eq_of_same_primes (M N : ℕ) (hM : 1 ≤ M) (hN : 1 ≤ N)
+    (hsame : ∀ p : ℕ, is_prime_nat p → (p ∣ M ↔ p ∣ N)) : sernau.rad_exp_prod M = sernau.rad_exp_prod N
+  have htrunc : ∀ (A K : ℕ), 1 ≤ A → A < K → (∏ p < K, if is_prime_nat p ∧ p ∣ A then rpow (p : ℝ) (1 / ((p - 1 : ℕ) : ℝ)) else 1) = sernau.rad_exp_prod A
+    intro A K hA1 hlt; induction K with _ k ihk hlt; omega; rw [succ_eq_add_one.nat] at hlt ⊢
+    by_cases hk : k = A; (rw [hk]; unfold sernau.rad_exp_prod; trivial)
+    rw [prod_below_succ, ihk (by omega), if_neg (by intro ⟨_, hd⟩; have hle := le_of_dvd.nat A k (by omega) hd; omega)]; ring
+  rw [← htrunc M (M + N + 1) hM (by omega), ← htrunc N (M + N + 1) hN (by omega)]
+  apply prod_below.congr_real (M + N + 1); intro p _
+  by_cases hp : is_prime_nat p
+  · by_cases hdM : p ∣ M; (rw [if_pos ⟨hp, hdM⟩, if_pos ⟨hp, (hsame p hp).mp hdM⟩])
+    rw [if_neg (by intro h; exact hdM h.2), if_neg (by intro h; exact hdM ((hsame p hp).mpr h.2))]
+  · rw [if_neg (by intro h; exact hp h.1), if_neg (by intro h; exact hp h.1)]
+
++ sernau.rad_exp_prod_bounds (N0 : ℕ) (hN0 : 1 ≤ N0) :
+    1 ≤ sernau.rad_exp_prod N0 ∧ sernau.rad_exp_prod N0 ≤ (N0 : ℝ)
+  set rad_nat : ℕ → ℕ := fun K => ∏ p < K, if is_prime_nat p ∧ p ∣ N0 then p else 1 with hrad_def
+  have hrad_prop : ∀ K : ℕ, 1 ≤ rad_nat K ∧ rad_nat K ∣ N0 ∧ (∀ q : ℕ, is_prime_nat q → q ∣ rad_nat K → q < K)
+    intro K; induction K with k ihk; (rw [hrad_def, prod_below_zero]; exact ⟨by omega, dvd.one_left N0, by intro q hq hd; exfalso; exact not_dvd_one_of_ge_two q hq.1 hd⟩)
+    obtain ⟨hr1, hrd, hrp⟩ := ihk; have hstep : rad_nat (k + 1) = rad_nat k * (if is_prime_nat k ∧ k ∣ N0 then k else 1) := by rw [hrad_def, prod_below_succ]
+    rw [succ_eq_add_one.nat, hstep]; by_cases hc : is_prime_nat k ∧ k ∣ N0
+    · rw [if_pos hc]; have hk2 : 2 ≤ k := hc.1.1; have hnd_rk : ¬ (k ∣ rad_nat k) := by intro hd; have hlt := hrp k hc.1 hd; omega
+      obtain ⟨qr, hqr⟩ := (dvd.iff_exists (rad_nat k) N0 (by omega)).mp hrd
+      have hk_qr : k ∣ qr := by obtain h1 | h2 := prime.dvd_mul_or k (rad_nat k) qr ((sernau.m81a_prime_iff k).mpr hc.1) (by rw [← hqr]; exact hc.2); (exfalso; exact hnd_rk h1); exact h2
+      obtain ⟨w, hw⟩ := (dvd.iff_exists k qr (by omega)).mp hk_qr; have hpos_rk : 0 < rad_nat k * k := mul_pos.nat (rad_nat k) k (by omega) (by omega)
+      exact ⟨by omega, (dvd.iff_exists (rad_nat k * k) N0 hpos_rk).mpr ⟨w, by rw [hqr, hw]; ring⟩, by intro q hq hqd; obtain h1 | h2 := prime.dvd_mul_or q (rad_nat k) k ((sernau.m81a_prime_iff q).mpr hq) hqd; (have hlt := hrp q hq h1; omega); (have hle := le_of_dvd.nat k q (by omega) h2; omega)⟩
+    · rw [if_neg hc, mul_one.nat]; exact ⟨hr1, hrd, by intro q hq hd; have hlt := hrp q hq hd; omega⟩
+  have hterm : ∀ p : ℕ, 1 ≤ (if is_prime_nat p ∧ p ∣ N0 then rpow (p : ℝ) (1 / ((p - 1 : ℕ) : ℝ)) else 1) ∧
+      (if is_prime_nat p ∧ p ∣ N0 then rpow (p : ℝ) (1 / ((p - 1 : ℕ) : ℝ)) else 1) ≤ ((if is_prime_nat p ∧ p ∣ N0 then p else 1 : ℕ) : ℝ)
+    intro p; by_cases hc : is_prime_nat p ∧ p ∣ N0
+    · rw [if_pos hc, if_pos hc]; have hp2 : 2 ≤ p := hc.1.1; have hp_pos : (0 : ℝ) < (p : ℝ) := (cast_pos.real p).mpr (by omega)
+      have hlog_nn : 0 ≤ log (p : ℝ) := by have h := (log_le_log 1 (p : ℝ) (by decide) hp_pos).mpr ((cast_le.real 1 p).mpr (by omega)); rw [log_one] at h; exact h
+      have hpm1_ge1 : (1 : ℝ) ≤ ((p - 1 : ℕ) : ℝ) := (cast_le.real 1 (p - 1)).mpr (by omega)
+      have hexp_0 : 0 ≤ 1 / ((p - 1 : ℕ) : ℝ) := div_nonneg.real 1 ((p - 1 : ℕ) : ℝ) (by decide) (by linarith)
+      have hexp_1 : 1 / ((p - 1 : ℕ) : ℝ) ≤ 1 := (div_le_iff.real 1 1 ((p - 1 : ℕ) : ℝ) (by linarith)).mpr (by linarith)
+      unfold rpow
+      have hlo : 1 ≤ exp ((1 / ((p - 1 : ℕ) : ℝ)) * log (p : ℝ)) := by linarith [exp_ge_one_add ((1 / ((p - 1 : ℕ) : ℝ)) * log (p : ℝ)), mul_nonneg.real _ (log (p : ℝ)) hexp_0 hlog_nn]
+      have hm := mul_le_mul_of_nonneg_right.real (1 / ((p - 1 : ℕ) : ℝ)) 1 (log (p : ℝ)) hexp_1 hlog_nn
+      have he := (exp_le_exp ((1 / ((p - 1 : ℕ) : ℝ)) * log (p : ℝ)) (log (p : ℝ))).mpr (by linarith)
+      rw [exp_log (p : ℝ) hp_pos] at he; exact ⟨hlo, he⟩
+    · rw [if_neg hc, if_neg hc, cast_one.real]; exact ⟨by linarith, by linarith⟩
+  have hprod_le : ∀ K : ℕ, 1 ≤ (∏ p < K, if is_prime_nat p ∧ p ∣ N0 then rpow (p : ℝ) (1 / ((p - 1 : ℕ) : ℝ)) else 1) ∧
+      (∏ p < K, if is_prime_nat p ∧ p ∣ N0 then rpow (p : ℝ) (1 / ((p - 1 : ℕ) : ℝ)) else 1) ≤ (rad_nat K : ℝ)
+    intro K; induction K with k ihk; (rw [prod_below_zero, hrad_def, prod_below_zero, cast_one.real]; exact ⟨by linarith, by linarith⟩)
+    rw [succ_eq_add_one.nat, prod_below_succ]; have hrad_s : rad_nat (k + 1) = rad_nat k * (if is_prime_nat k ∧ k ∣ N0 then k else 1) := by rw [hrad_def, prod_below_succ]
+    rw [hrad_s, cast_mul.real]; obtain ⟨h1, h2⟩ := ihk; obtain ⟨t1, t2⟩ := hterm k
+    set fk := (if is_prime_nat k ∧ k ∣ N0 then rpow (k : ℝ) (1 / ((k - 1 : ℕ) : ℝ)) else 1)
+    set pk := (∏ i < k, if is_prime_nat i ∧ i ∣ N0 then rpow (i : ℝ) (1 / ((i - 1 : ℕ) : ℝ)) else 1)
+    have hm_lo := mul_le_mul_of_nonneg_left.real 1 fk pk t1 (by linarith)
+    have hm_0 := mul_le_mul_of_nonneg_right.real 1 pk 1 h1 (by decide)
+    have hm_1 := mul_le_mul_of_nonneg_right.real pk (rad_nat k : ℝ) fk h2 (by linarith)
+    have hm_2 := mul_le_mul_of_nonneg_left.real fk ((if is_prime_nat k ∧ k ∣ N0 then k else 1 : ℕ) : ℝ) (rad_nat k : ℝ) t2 (cast_nonneg.real (rad_nat k))
+    exact ⟨by linarith, by linarith⟩
+  obtain ⟨hlo, hhi⟩ := hprod_le (N0 + 1)
+  have hrad_le : rad_nat (N0 + 1) ≤ N0 := le_of_dvd.nat N0 (rad_nat (N0 + 1)) (by omega) (hrad_prop (N0 + 1)).2.1
+  have hrad_le_r : (rad_nat (N0 + 1) : ℝ) ≤ (N0 : ℝ) := (cast_le.real (rad_nat (N0 + 1)) N0).mpr hrad_le
+  unfold sernau.rad_exp_prod; exact ⟨hlo, by linarith⟩
+
++ sernau.m81a_abs_one_eq : complex.abs complex.one = 1
+  exact eq_of_sq_eq_nonneg (complex.abs complex.one) 1 (complex.abs_nonneg complex.one) (by decide) (by rw [complex.abs_sq]; unfold complex.norm_sq; simp)
+
++ sernau.m81a_abs_of_real (x : ℝ) : complex.abs (complex.of_real x) = |x|
+  exact eq_of_sq_eq_nonneg (complex.abs (complex.of_real x)) (|x|) (complex.abs_nonneg (complex.of_real x)) (abs_nonneg.real x) (by rw [complex.abs_sq]; unfold complex.norm_sq complex.of_real; simp; by_cases hx : 0 ≤ x; (rw [abs_of_nonneg.real x hx]); (rw [abs_of_neg.real x (by linarith)]; ring))
+
++ sernau.m81a_cpow_mod_eq (q : ℕ) (z : ℂ) (n : ℕ) (hq : cpow_nat z q = complex.one) :
+    cpow_nat z n = cpow_nat z (n % q)
+  exact (cpow_nat.mod_eq_m39 z q n hq).symm
+
++ sernau.m81a_zeta_pow_eq_exp (M k : ℕ) :
+    cpow_nat (zeta_q M) k = complex.exp (complex.mk 0 (2 * pi * (k : ℝ) / (M : ℝ)))
+  have hrec : ∀ n : ℕ, cpow_nat (zeta_q M) n = complex.exp (complex.mk 0 (2 * pi * (n : ℝ) / (M : ℝ)))
+    intro n; induction n with m ihm
+    · simp [cpow_nat]; exact complex.exp_zero.symm
+    · rw [succ_eq_add_one.nat]
+      have hs : cpow_nat (zeta_q M) (m + 1) = complex.mul (cpow_nat (zeta_q M) m) (zeta_q M) := by rfl
+      rw [hs, ihm]; unfold zeta_q; rw [← complex.exp_add]
+      have harg : complex.add (complex.mk 0 (2 * pi * (m : ℝ) / (M : ℝ))) (complex.mk 0 (2 * pi / (M : ℝ))) = complex.mk 0 (2 * pi * ((m + 1 : ℕ) : ℝ) / (M : ℝ))
+        apply complex.ext; simp; (simp; rw [div_def.real (2 * pi * (m : ℝ)) (M : ℝ), div_def.real (2 * pi) (M : ℝ), div_def.real (2 * pi * ((m : ℝ) + 1)) (M : ℝ)]; ring)
+      rw [harg]
+  exact hrec k
+
+-> sernau.m81a_diag_real (lam : ℕ → ℝ) (i j : ℕ) : ℂ :=
+  if i = j then complex.of_real (lam i) else complex.zero
+
++ sernau.m81a_det_diag_real (n : ℕ) (lam : ℕ → ℝ) :
+    cmat.det n (sernau.m81a_diag_real lam) = complex.of_real (∏ k < n, lam k)
+  induction n with m ihm
+  · rw [cmat.det_zero_eq, prod_below_zero, complex.of_real_one]
+  · have hcol0 : ∀ i < m, sernau.m81a_diag_real lam i m = complex.zero
+      intro i hi; unfold sernau.m81a_diag_real; have hne : i ≠ m := by omega; rw [if_neg hne]
+    rw [succ_eq_add_one.nat, prod_below_succ, cmat.det_block_lower m (sernau.m81a_diag_real lam) hcol0]
+    have hm : sernau.m81a_diag_real lam m m = complex.of_real (lam m) := by rfl
+    rw [hm, ihm, complex.mul_of_real]
+    have hcomm : lam m * (∏ k < m, lam k) = (∏ k < m, lam k) * lam m := by ring
+    rw [hcomm]
+
++ sernau.prod_abs_one_sub_zeta_q (q : ℕ) (hq : 1 ≤ q) :
+    (∏ d < q - 1, complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) (d + 1)))) = (q : ℝ)
+  have hupr : is_unitary_prim_root q (zeta_q q) := by unfold zeta_q; exact uproot.cexp_is_unitary_prim q (by omega)
+  have hzq1 : cpow_nat (zeta_q q) q = complex.one := hupr.2.2.1; have hz_ns : complex.norm_sq (zeta_q q) = 1 := hupr.2.1
+  set V := vander_T (fun j => cpow_nat (zeta_q q) j) with hV
+  have hV_entry : ∀ i j : ℕ, V i j = cpow_nat (zeta_q q) (j * i) := by intro i j; rw [hV]; unfold vander_T; exact (cpow_nat.mul (zeta_q q) j i).symm
+  have hgram : ∀ a < q, ∀ b < q, cmat.mul q (cmat.adj V) V a b = sernau.m81a_diag_real (fun _ => (q : ℝ)) a b
+    intro a ha b hb; unfold cmat.mul cmat.adj sernau.m81a_diag_real; by_cases hab : a = b
+    · rw [hab, if_pos (by rfl)]
+      have hp_ns : ∀ m : ℕ, complex.norm_sq (cpow_nat (zeta_q q) m) = 1 := by intro m; induction m with t iht; (rw [cpow_nat.zero_eq]; unfold complex.norm_sq; simp); (rw [succ_eq_add_one.nat, cpow_nat.succ_eq, complex.norm_sq_mul, iht, hz_ns]; ring)
+      have h1 : ∀ i < q, complex.mul (complex.conj (V i b)) (V i b) = complex.one := by intro i _; rw [hV_entry i b]; exact complex.conj_mul_self_of_unit _ (hp_ns (b * i))
+      rw [csum.congr q _ _ h1]
+      have hsum1 : ∀ m : ℕ, csum m (fun _ => complex.one) = complex.of_real (m : ℝ) := by intro m; induction m with t iht; (rw [csum.zero]; unfold complex.of_real; apply complex.ext <;> simp); (rw [succ_eq_add_one.nat, csum.succ, iht, cast_add.real, cast_one.real]; unfold complex.of_real; apply complex.ext <;> simp)
+      exact hsum1 q
+    · rw [if_neg hab]; set d := (b + q - a) % q with hd_def
+      have hd_pos : 0 < d := by rw [hd_def]; by_cases hba : a < b; (have he : b + q - a = (b - a) + q * 1 := (by omega); rw [he, add_mul_mod.nat, (div_mod_of_lt.nat (b - a) q (by omega)).2]; omega); (rw [(div_mod_of_lt.nat (b + q - a) q (by omega)).2]; omega)
+      have hd_lt : d < q := by rw [hd_def]; exact mod_lt.nat (b + q - a) q (by omega)
+      set r := cpow_nat (zeta_q q) d with hr_def; have hr_ne1 : r ≠ complex.one := by rw [hr_def]; exact hupr.2.2.2 d hd_pos hd_lt
+      have hr_q : cpow_nat r q = complex.one := by rw [hr_def, ← cpow_nat.mul (zeta_q q) d q]; have hper : ∀ k : ℕ, cpow_nat (zeta_q q) (k * q) = complex.one := (by intro k; induction k with t iht; (rw [zero_mul.nat, cpow_nat.zero_eq]); (rw [succ_eq_add_one.nat]; have hm : (t + 1) * q = t * q + q := (by ring); rw [hm, cpow_nat.add, iht, hzq1, complex.mul_one])); exact hper d
+      have hterm : ∀ i < q, complex.mul (complex.conj (V i a)) (V i b) = cpow_nat r i
+        intro i _; rw [hV_entry i a, hV_entry i b, sernau.m81a_cpow_mod_eq q (zeta_q q) (a * i) hzq1, cpow_nat.conj_eq_pow_neg q (zeta_q q) ((a * i) % q) hz_ns hzq1 (by have h := mod_lt.nat (a * i) q (by omega); omega), ← cpow_nat.add, hr_def, ← cpow_nat.mul]
+        rw [sernau.m81a_cpow_mod_eq q (zeta_q q) _ hzq1, sernau.m81a_cpow_mod_eq q (zeta_q q) (d * i) hzq1]
+        have hdm := div_add_mod.nat (a * i) q; have hlt_ai := mod_lt.nat (a * i) q (by omega)
+        have h1 : (a * i + ((q - (a * i) % q) + b * i)) % q = (b * i) % q := by have he : a * i + ((q - (a * i) % q) + b * i) = b * i + q * ((a * i) / q + 1) := (by have hm : q * ((a * i) / q + 1) = q * ((a * i) / q) + q := (by ring); omega); rw [he, add_mul_mod.nat]
+        have h2 : (a * i + (d * i)) % q = (b * i) % q
+          set qd := (b + q - a) / q with hqd_def
+          have hd_dm := div_add_mod.nat (b + q - a) q; rw [← hd_def, ← hqd_def] at hd_dm
+          have he1 : a * i + (b + q - a) * i = (a * i + (d * i)) + q * (qd * i) := by rw [← hd_dm]; ring
+          have he2 : a * i + (b + q - a) * i = b * i + q * i := by have hs : a + (b + q - a) = b + q := (by omega); have hl : (a + (b + q - a)) * i = a * i + (b + q - a) * i := (by ring); rw [← hl, hs]; ring
+          have hm1 : (a * i + (b + q - a) * i) % q = (a * i + (d * i)) % q := by rw [he1, add_mul_mod.nat]
+          rw [← hm1, he2, add_mul_mod.nat]
+        set neg_ai := (q - (a * i) % q) % q with hneg_def
+        have hz0 : (neg_ai + a * i) % q = 0 := by by_cases hr0 : (a * i) % q = 0; (have hn0 : neg_ai = 0 := (by rw [hneg_def, hr0]; have hq1 : q - 0 = 0 + q * 1 := (by omega); rw [hq1, add_mul_mod.nat, (div_mod_of_lt.nat 0 q (by omega)).2]); rw [hn0]; simp [hr0]); (have hn : neg_ai = q - (a * i) % q := (by rw [hneg_def]; exact (div_mod_of_lt.nat _ q (by omega)).2); rw [hn]; have he : (q - (a * i) % q) + a * i = 0 + q * ((a * i) / q + 1) := (by have hm : q * ((a * i) / q + 1) = q * ((a * i) / q) + q := (by ring); omega); rw [he, add_mul_mod.nat, (div_mod_of_lt.nat 0 q (by omega)).2])
+        have hL : (neg_ai + (a * i + ((q - (a * i) % q) + b * i))) % q = ((q - (a * i) % q) + b * i) % q := by have ha1 : neg_ai + (a * i + ((q - (a * i) % q) + b * i)) = (neg_ai + a * i) + ((q - (a * i) % q) + b * i) := (by omega); rw [ha1, add_mod.nat (neg_ai + a * i) _ q, hz0]; simp [zmod.mod_mod]
+        have hR : (neg_ai + (a * i + (d * i))) % q = (d * i) % q := by have ha1 : neg_ai + (a * i + (d * i)) = (neg_ai + a * i) + (d * i) := (by omega); rw [ha1, add_mod.nat (neg_ai + a * i) _ q, hz0]; simp [zmod.mod_mod]
+        have hmod_eq : ((q - (a * i) % q) + b * i) % q = (d * i) % q := by rw [← hL, ← hR, add_mod.nat neg_ai (a * i + ((q - (a * i) % q) + b * i)) q, h1, ← h2, ← add_mod.nat neg_ai (a * i + (d * i)) q]
+        rw [hmod_eq]
+      rw [csum.congr q _ _ hterm]
+      have htel : ∀ m : ℕ, complex.mul (complex.sub r complex.one) (csum m (fun i => cpow_nat r i)) = complex.sub (cpow_nat r m) complex.one := by intro m; induction m with t iht; (rw [csum.zero, cpow_nat.zero_eq]; apply complex.ext <;> simp); (rw [succ_eq_add_one.nat, csum.succ, cpow_nat.succ_eq]; have hd : complex.mul (complex.sub r complex.one) (complex.add (csum t (fun i => cpow_nat r i)) (cpow_nat r t)) = complex.add (complex.mul (complex.sub r complex.one) (csum t (fun i => cpow_nat r i))) (complex.mul (complex.sub r complex.one) (cpow_nat r t)) := (by apply complex.ext <;> simp <;> ring); rw [hd, iht]; apply complex.ext <;> simp <;> ring)
+      have hq_tel := htel q; rw [hr_q] at hq_tel; have h0 : complex.sub complex.one complex.one = complex.zero := (by apply complex.ext <;> simp); rw [h0] at hq_tel
+      have hne_sub : complex.sub r complex.one ≠ complex.zero := by intro hz; apply hr_ne1; apply complex.ext; (have hr1 : complex.re (complex.sub r complex.one) = complex.re complex.zero := (by rw [hz]); simp at hr1 ⊢; linarith); (have hi1 : complex.im (complex.sub r complex.one) = complex.im complex.zero := (by rw [hz]); simp at hi1 ⊢; linarith)
+      by_contra hs_ne; exact complex.mul_ne_zero _ _ hne_sub hs_ne hq_tel
+  have hdet_eq : cmat.det q (cmat.mul q (cmat.adj V) V) = cmat.det q (sernau.m81a_diag_real (fun _ => (q : ℝ))) := by apply cmat.det_congr; intro i hi j hj; exact hgram i hi j hj
+  rw [cmat.det_mul, cmat.det_adj, sernau.m81a_det_diag_real] at hdet_eq
+  have hconj_self : complex.mul (complex.conj (cmat.det q V)) (cmat.det q V) = complex.of_real (complex.norm_sq (cmat.det q V)) := by unfold complex.conj complex.norm_sq complex.of_real; apply complex.ext <;> simp <;> ring
+  have hprod_qq : (∏ _ < q, (q : ℝ)) = (q : ℝ) ^ q := by have hrec : ∀ m : ℕ, (∏ _ < m, (q : ℝ)) = (q : ℝ) ^ m := (by intro m; induction m with t iht; (rw [prod_below_zero, pow_zero.real]); (rw [succ_eq_add_one.nat, prod_below_succ, pow_succ.real, iht])); exact hrec q
+  rw [hconj_self, hprod_qq] at hdet_eq
+  have hns_det : (complex.abs (cmat.det q V)) * (complex.abs (cmat.det q V)) = (q : ℝ) ^ q := by rw [complex.abs_sq]; have hr : complex.re (complex.of_real (complex.norm_sq (cmat.det q V))) = complex.re (complex.of_real ((q : ℝ) ^ q)) := (by rw [hdet_eq]); unfold complex.of_real at hr; simp at hr; exact hr
+  set P1 := ∏ d < q - 1, complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) (d + 1))) with hP1
+  have habs_cprod : ∀ (m : ℕ) (f : ℕ → ℂ), complex.abs (cprod_c m f) = ∏ k < m, complex.abs (f k) := by intro m f; induction m with t iht; (rw [cprod_c.zero_eq, prod_below_zero]; exact sernau.m81a_abs_one_eq); (rw [succ_eq_add_one.nat, cprod_c.succ_eq, prod_below_succ, complex.abs_mul, iht])
+  have hv_abs : complex.abs (cmat.det q V) = ∏ i < q, ∏ j < i, complex.abs (complex.sub (cpow_nat (zeta_q q) i) (cpow_nat (zeta_q q) j)) := by rw [hV, cmat.det_vandermonde, habs_cprod]; apply prod_below.congr_real; intro i _; exact habs_cprod i _
+  set D_fn : ℕ → ℕ → ℝ := fun i j => if j = i then 1 else complex.abs (complex.sub (cpow_nat (zeta_q q) i) (cpow_nat (zeta_q q) j)) with hD_def
+  have hD_symm : ∀ i j : ℕ, D_fn i j = D_fn j i := by intro i j; rw [hD_def]; by_cases hij : j = i; (rw [hij, if_pos (by rfl)]); rw [if_neg hij, if_neg (by omega)]; have hneg : complex.sub (cpow_nat (zeta_q q) i) (cpow_nat (zeta_q q) j) = complex.neg (complex.sub (cpow_nat (zeta_q q) j) (cpow_nat (zeta_q q) i)) := (by apply complex.ext <;> simp <;> ring); rw [hneg, complex.abs_neg]
+  have hsq_eq_box : ∀ n : ℕ, (∏ i < n, ∏ j < n, D_fn i j) = (∏ i < n, ∏ j < i, complex.abs (complex.sub (cpow_nat (zeta_q q) i) (cpow_nat (zeta_q q) j))) * (∏ i < n, ∏ j < i, complex.abs (complex.sub (cpow_nat (zeta_q q) i) (cpow_nat (zeta_q q) j)))
+    intro n; induction n with k ihk; (rw [prod_below_zero, prod_below_zero]; ring)
+    rw [succ_eq_add_one.nat, prod_below_succ k (fun i => ∏ j < k + 1, D_fn i j), prod_below_succ k (fun i => ∏ j < i, complex.abs (complex.sub (cpow_nat (zeta_q q) i) (cpow_nat (zeta_q q) j)))]
+    have hcol : (∏ i < k, ∏ j < k + 1, D_fn i j) = (∏ i < k, ∏ j < k, D_fn i j) * (∏ i < k, D_fn i k) := by have hc : ∀ m ≤ k, (∏ i < m, ∏ j < k + 1, D_fn i j) = (∏ i < m, ∏ j < k, D_fn i j) * (∏ i < m, D_fn i k) := (by intro m; induction m with _ t iht hle; (rw [prod_below_zero, prod_below_zero, prod_below_zero]; ring); (rw [succ_eq_add_one.nat] at hle ⊢; rw [prod_below_succ t, prod_below_succ t, prod_below_succ t, prod_below_succ k (D_fn t), iht (by omega)]; ring)); exact hc k (by omega)
+    have hrow_k : (∏ j < k + 1, D_fn k j) = ∏ j < k, complex.abs (complex.sub (cpow_nat (zeta_q q) k) (cpow_nat (zeta_q q) j)) := by rw [prod_below_succ]; have hkk : D_fn k k = 1 := (by rw [hD_def, if_pos (by rfl)]); rw [hkk, mul_one.real]; apply prod_below.congr_real; intro j hj; rw [hD_def, if_neg (by omega)]
+    have hcol_k : (∏ i < k, D_fn i k) = ∏ j < k, complex.abs (complex.sub (cpow_nat (zeta_q q) k) (cpow_nat (zeta_q q) j)) := by apply prod_below.congr_real; intro j hj; rw [hD_symm j k, hD_def, if_neg (by omega)]
+    rw [hcol, ihk, hrow_k, hcol_k]; ring
+  have hrow_eq_P1 : ∀ i < q, (∏ j < q, D_fn i j) = P1
+    intro i hi
+    have hunit_abs : ∀ m : ℕ, complex.abs (cpow_nat (zeta_q q) m) = 1 := by intro m; induction m with t iht; (rw [cpow_nat.zero_eq]; exact sernau.m81a_abs_one_eq); (rw [succ_eq_add_one.nat, cpow_nat.succ_eq, complex.abs_mul, iht, one_mul.real]; exact eq_of_sq_eq_nonneg (complex.abs (zeta_q q)) 1 (complex.abs_nonneg (zeta_q q)) (by decide) (by rw [complex.abs_sq, hz_ns]; ring))
+    have hfac : ∀ j < q, D_fn i j = (if j = i then 1 else complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) ((j + q - i) % q))))
+      intro j hj; rw [hD_def]; by_cases hij : j = i; (rw [if_pos hij, if_pos hij]); rw [if_neg hij, if_neg hij]
+      have hd : complex.mul (cpow_nat (zeta_q q) i) (complex.sub complex.one (cpow_nat (zeta_q q) ((j + q - i) % q))) = complex.sub (cpow_nat (zeta_q q) i) (complex.mul (cpow_nat (zeta_q q) i) (cpow_nat (zeta_q q) ((j + q - i) % q))) := by apply complex.ext <;> simp <;> ring
+      have hm : (i + (j + q - i) % q) % q = j := by set r_ji := (j + q - i) % q with hrji_def; set q_ji := (j + q - i) / q with hqji_def; have hdm := div_add_mod.nat (j + q - i) q; rw [← hqji_def, ← hrji_def] at hdm; have he : (i + r_ji) + q * q_ji = j + q * 1 := (by omega); have hm1 := add_mul_mod.nat (i + r_ji) q_ji q; rw [he, add_mul_mod.nat, (div_mod_of_lt.nat j q hj).2] at hm1; exact hm1.symm
+      have heq_sub : complex.sub (cpow_nat (zeta_q q) i) (cpow_nat (zeta_q q) j) = complex.mul (cpow_nat (zeta_q q) i) (complex.sub complex.one (cpow_nat (zeta_q q) ((j + q - i) % q))) := by rw [hd, ← cpow_nat.add, sernau.m81a_cpow_mod_eq q (zeta_q q) (i + (j + q - i) % q) hzq1, hm]
+      rw [heq_sub, complex.abs_mul, hunit_abs i, one_mul.real]
+    rw [prod_below.congr_real q _ _ hfac]
+    have hsplit_p : ∀ (a b : ℕ) (g : ℕ → ℝ), (∏ x < a + b, g x) = (∏ x < a, g x) * (∏ y < b, g (a + y)) := by intro a b g; induction b with t iht; (have hz : a + 0 = a := (by omega); rw [hz, prod_below_zero]; ring); (rw [succ_eq_add_one.nat]; have hs : a + (t + 1) = (a + t) + 1 := (by omega); rw [hs, prod_below_succ, iht, prod_below_succ]; ring)
+    have hqi : i + (1 + (q - 1 - i)) = q := (by omega)
+    have hsp1 := hsplit_p i (1 + (q - 1 - i)) (fun j => if j = i then 1 else complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) ((j + q - i) % q))))
+    rw [hqi] at hsp1; rw [hsp1, hsplit_p 1 (q - 1 - i)]
+    have hmid : (∏ y < 1, if i + y = i then (1 : ℝ) else complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) (((i + y) + q - i) % q)))) = 1 := by have h1 : (1 : ℕ) = 0 + 1 := (by rfl); rw [h1, prod_below_succ, prod_below_zero, if_pos (by omega)]; ring
+    rw [hmid, one_mul.real]
+    have hL : (∏ x < i, if x = i then (1 : ℝ) else complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) ((x + q - i) % q)))) = ∏ x < i, complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) ((q - 1 - i) + x + 1))) := by apply prod_below.congr_real; intro x hx; rw [if_neg (by omega), (div_mod_of_lt.nat (x + q - i) q (by omega)).2]; have he : x + q - i = (q - 1 - i) + x + 1 := (by omega); rw [he]
+    have hR : (∏ y < q - 1 - i, if i + (1 + y) = i then (1 : ℝ) else complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) (((i + (1 + y)) + q - i) % q)))) = ∏ y < q - 1 - i, complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) (y + 1))) := by apply prod_below.congr_real; intro y hy; rw [if_neg (by omega)]; have he : (i + (1 + y)) + q - i = (y + 1) + q * 1 := (by omega); rw [he, add_mul_mod.nat, (div_mod_of_lt.nat (y + 1) q (by omega)).2]
+    rw [hL, hR]; have hq1_split : (q - 1 - i) + i = q - 1 := by omega
+    have hP1_sp := hsplit_p (q - 1 - i) i (fun d => complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) (d + 1))))
+    rw [hq1_split, ← hP1] at hP1_sp; rw [hP1_sp]; ring
+  have hbox_P1 : (∏ i < q, ∏ j < q, D_fn i j) = P1 ^ q := by have hrec : ∀ m ≤ q, (∏ i < m, ∏ j < q, D_fn i j) = P1 ^ m := (by intro m; induction m with _ t iht hle; (rw [prod_below_zero, pow_zero.real]); (rw [succ_eq_add_one.nat] at hle ⊢; rw [prod_below_succ, pow_succ.real, iht (by omega), hrow_eq_P1 t (by omega)])); exact hrec q (by omega)
+  have hP1_pow_eq : P1 ^ q = (q : ℝ) ^ q := by rw [← hbox_P1, hsq_eq_box q, ← hv_abs, hns_det]
+  have hP1_nn : 0 ≤ P1 := by rw [hP1]; have hrec : ∀ m : ℕ, 0 ≤ ∏ d < m, complex.abs (complex.sub complex.one (cpow_nat (zeta_q q) (d + 1))) := (by intro m; induction m with t iht; (rw [prod_below_zero]; decide); (rw [succ_eq_add_one.nat, prod_below_succ]; exact mul_nonneg.real _ _ iht (complex.abs_nonneg (complex.sub complex.one (cpow_nat (zeta_q q) (t + 1)))))); exact hrec (q - 1)
+  have hstrict_pow : ∀ (a b : ℝ), 0 ≤ a → a < b → ∀ m : ℕ, 1 ≤ m → a ^ m < b ^ m
+    intro a b ha hab m hm1; induction m with _ t iht hm1; omega; rw [succ_eq_add_one.nat] at hm1 ⊢
+    by_cases ht0 : t = 0; (rw [ht0, pow_succ.real, pow_zero.real, pow_succ.real, pow_zero.real]; linarith)
+    rw [pow_succ.real, pow_succ.real]; have hip := iht (by omega)
+    linarith [mul_le_mul_of_nonneg_right.real (a ^ t) (b ^ t) a (by linarith) ha, mul_lt_mul_of_pos_left.real a b (b ^ t) hab (pow_pos.real b t (by linarith))]
+  by_contra hne; by_cases hlt : P1 < (q : ℝ); linarith [hstrict_pow P1 (q : ℝ) hP1_nn hlt q hq]; linarith [hstrict_pow (q : ℝ) P1 (cast_nonneg.real q) (by linarith) q hq]
+
+-> sernau.cyclo_ppow (p k : ℕ) (z : ℂ) : ℂ := csum p (fun j => cpow_nat z (j * (p ^ (k - 1))))
+-> sernau.cyclo_ppow_deriv (p k : ℕ) (z : ℂ) : ℂ := csum p (fun j => if j = 0 then complex.zero else complex.mul (complex.of_real ((j * (p ^ (k - 1)) : ℕ) : ℝ)) (cpow_nat z (j * (p ^ (k - 1)) - 1)))
+
++ sernau.cyclotomic_deriv_norm_prod (p k : ℕ) (hp : is_prime_nat p) (hk : 1 ≤ k) :
+    (∀ z : ℂ, complex.mul (complex.sub (cpow_nat z (p ^ (k - 1))) complex.one) (sernau.cyclo_ppow p k z) = complex.sub (cpow_nat z (p ^ k)) complex.one) ∧
+    (∏ sig < p ^ k, if zmod.is_unit (p ^ k) sig then complex.abs (sernau.cyclo_ppow_deriv p k (cpow_nat (zeta_q (p ^ k)) sig)) else 1) =
+    (((p ^ k : ℕ) : ℝ) / rpow (p : ℝ) (1 / ((p - 1 : ℕ) : ℝ))) ^ ((p - 1) * (p ^ (k - 1)))
+  have hp2 : 2 ≤ p := hp.1; set pk1 := p ^ (k - 1) with hpk1
+  have hpk1_pos : 0 < pk1 := by rw [hpk1]; exact pow_pos.nat p (k - 1) (by omega)
+  have hpk_eq : p ^ k = pk1 * p := by have hk1 : k = (k - 1) + 1 := (by omega); rw [hk1, pow_succ.nat, ← hpk1]
+  have hpk_pos : 0 < p ^ k := by rw [hpk_eq]; exact mul_pos.nat pk1 p hpk1_pos (by omega)
+  have hid1 : ∀ z : ℂ, complex.mul (complex.sub (cpow_nat z pk1) complex.one) (sernau.cyclo_ppow p k z) = complex.sub (cpow_nat z (p ^ k)) complex.one
+    intro z; unfold sernau.cyclo_ppow; rw [← hpk1, hpk_eq, cpow_nat.mul z pk1 p]; set w := cpow_nat z pk1 with hw_def
+    have hcongr : csum p (fun j => cpow_nat z (j * pk1)) = csum p (fun j => cpow_nat w j) := by apply csum.congr; intro j _; have hc : j * pk1 = pk1 * j := (by ring); rw [hc, cpow_nat.mul z pk1 j, ← hw_def]
+    rw [hcongr]
+    have htel : ∀ m : ℕ, complex.mul (complex.sub w complex.one) (csum m (fun j => cpow_nat w j)) = complex.sub (cpow_nat w m) complex.one := by intro m; induction m with t iht; (rw [csum.zero, cpow_nat.zero_eq]; apply complex.ext <;> simp); (rw [succ_eq_add_one.nat, csum.succ, cpow_nat.succ_eq]; have hd : complex.mul (complex.sub w complex.one) (complex.add (csum t (fun j => cpow_nat w j)) (cpow_nat w t)) = complex.add (complex.mul (complex.sub w complex.one) (csum t (fun j => cpow_nat w j))) (complex.mul (complex.sub w complex.one) (cpow_nat w t)) := (by apply complex.ext <;> simp <;> ring); rw [hd, iht]; apply complex.ext <;> simp <;> ring)
+    exact htel p
+  constructor; exact hid1
+  have hupr_pk : is_unitary_prim_root (p ^ k) (zeta_q (p ^ k)) := by unfold zeta_q; exact uproot.cexp_is_unitary_prim (p ^ k) hpk_pos
+  have hupr_p : is_unitary_prim_root p (zeta_q p) := by unfold zeta_q; exact uproot.cexp_is_unitary_prim p (by omega)
+  have hderiv_id : ∀ sig < p ^ k, zmod.is_unit (p ^ k) sig → complex.abs (sernau.cyclo_ppow_deriv p k (cpow_nat (zeta_q (p ^ k)) sig)) = ((p ^ k : ℕ) : ℝ) / complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (sig % p)))
+    intro sig hsig hu; set ζ := cpow_nat (zeta_q (p ^ k)) sig with hζ_def
+    have hnd_p : ¬ (p ∣ sig) := by intro hd; exact (zmod.is_unit_iff_no_common_prime (p ^ k) sig hpk_pos).mp hu p ((sernau.m81a_prime_iff p).mpr hp) ((dvd.iff_exists p (p ^ k) (by omega)).mpr ⟨pk1, by rw [hpk_eq]; ring⟩) hd
+    have hζ_pk1 : cpow_nat ζ pk1 = cpow_nat (zeta_q p) (sig % p)
+      rw [hζ_def, ← cpow_nat.mul (zeta_q (p ^ k)) sig pk1, sernau.m81a_zeta_pow_eq_exp (p ^ k) (sig * pk1)]
+      have harg : 2 * pi * ((sig * pk1 : ℕ) : ℝ) / ((p ^ k : ℕ) : ℝ) = 2 * pi * (sig : ℝ) / (p : ℝ) := by rw [hpk_eq, cast_mul.real sig pk1, cast_mul.real pk1 p]; have hpk1_r : (0 : ℝ) < (pk1 : ℝ) := (cast_pos.real pk1).mpr hpk1_pos; have hp_r : (0 : ℝ) < (p : ℝ) := (cast_pos.real p).mpr (by omega); field_simp
+      rw [harg, ← sernau.m81a_zeta_pow_eq_exp p sig, sernau.m81a_cpow_mod_eq p (zeta_q p) sig hupr_p.2.2.1]
+    have hrm_pos : 0 < sig % p := by by_contra h0; have hz : sig % p = 0 := (by omega); exact hnd_p hz
+    have hden_ne : complex.sub (cpow_nat (zeta_q p) (sig % p)) complex.one ≠ complex.zero := by intro hz; apply hupr_p.2.2.2 (sig % p) hrm_pos (mod_lt.nat sig p (by omega)); apply complex.ext; (have hr : complex.re (complex.sub (cpow_nat (zeta_q p) (sig % p)) complex.one) = complex.re complex.zero := (by rw [hz]); simp at hr ⊢; linarith); (have hi : complex.im (complex.sub (cpow_nat (zeta_q p) (sig % p)) complex.one) = complex.im complex.zero := (by rw [hz]); simp at hi ⊢; linarith)
+    have halg_deriv : complex.mul ζ (complex.mul (complex.sub (cpow_nat ζ pk1) complex.one) (sernau.cyclo_ppow_deriv p k ζ)) =
+        complex.sub (complex.mul (complex.of_real ((p ^ k : ℕ) : ℝ)) (cpow_nat ζ (p ^ k))) (complex.mul (complex.of_real (pk1 : ℝ)) (complex.mul (cpow_nat ζ pk1) (sernau.cyclo_ppow p k ζ)))
+      unfold sernau.cyclo_ppow_deriv sernau.cyclo_ppow; rw [← hpk1]
+      have hmul_in : ∀ m : ℕ, complex.mul ζ (csum m (fun j => if j = 0 then complex.zero else complex.mul (complex.of_real ((j * pk1 : ℕ) : ℝ)) (cpow_nat ζ (j * pk1 - 1)))) = csum m (fun j => complex.mul (complex.of_real ((j * pk1 : ℕ) : ℝ)) (cpow_nat ζ (j * pk1)))
+        intro m; induction m with t iht; (rw [csum.zero, csum.zero, complex.mul_zero]); rw [succ_eq_add_one.nat, csum.succ, csum.succ]
+        have hd : complex.mul ζ (complex.add (csum t (fun j => if j = 0 then complex.zero else complex.mul (complex.of_real ((j * pk1 : ℕ) : ℝ)) (cpow_nat ζ (j * pk1 - 1)))) (if t = 0 then complex.zero else complex.mul (complex.of_real ((t * pk1 : ℕ) : ℝ)) (cpow_nat ζ (t * pk1 - 1)))) = complex.add (complex.mul ζ (csum t (fun j => if j = 0 then complex.zero else complex.mul (complex.of_real ((j * pk1 : ℕ) : ℝ)) (cpow_nat ζ (j * pk1 - 1))))) (complex.mul ζ (if t = 0 then complex.zero else complex.mul (complex.of_real ((t * pk1 : ℕ) : ℝ)) (cpow_nat ζ (t * pk1 - 1)))) := by apply complex.ext <;> simp <;> ring
+        rw [hd, iht]; by_cases ht0 : t = 0; (rw [ht0, if_pos (by rfl), zero_mul.nat, complex.mul_zero]; have hc0 : complex.of_real ((0 : ℕ) : ℝ) = complex.zero := (by unfold complex.of_real; apply complex.ext <;> simp); rw [hc0, complex.zero_mul])
+        rw [if_neg ht0]; have hpos_tp : 0 < t * pk1 := mul_pos.nat t pk1 (by omega) hpk1_pos; have hsub1 : (t * pk1 - 1) + 1 = t * pk1 := by omega
+        have hp_step : cpow_nat ζ ((t * pk1 - 1) + 1) = complex.mul ζ (cpow_nat ζ (t * pk1 - 1)) := by rw [cpow_nat.succ_eq]; apply complex.ext <;> simp <;> ring
+        rw [hsub1] at hp_step
+        have hassoc : complex.mul ζ (complex.mul (complex.of_real ((t * pk1 : ℕ) : ℝ)) (cpow_nat ζ (t * pk1 - 1))) = complex.mul (complex.of_real ((t * pk1 : ℕ) : ℝ)) (complex.mul ζ (cpow_nat ζ (t * pk1 - 1))) := by apply complex.ext <;> simp <;> ring
+        rw [hassoc, ← hp_step]
+      have hcomm1 : complex.mul ζ (complex.mul (complex.sub (cpow_nat ζ pk1) complex.one) (csum p (fun j => if j = 0 then complex.zero else complex.mul (complex.of_real ((j * pk1 : ℕ) : ℝ)) (cpow_nat ζ (j * pk1 - 1))))) = complex.mul (complex.sub (cpow_nat ζ pk1) complex.one) (complex.mul ζ (csum p (fun j => if j = 0 then complex.zero else complex.mul (complex.of_real ((j * pk1 : ℕ) : ℝ)) (cpow_nat ζ (j * pk1 - 1))))) := by apply complex.ext <;> simp <;> ring
+      rw [hcomm1, hmul_in p, hpk_eq]; set w := cpow_nat ζ pk1 with hw_def
+      have htel2 : ∀ m : ℕ, complex.mul (complex.sub w complex.one) (csum m (fun j => complex.mul (complex.of_real ((j * pk1 : ℕ) : ℝ)) (cpow_nat ζ (j * pk1)))) = complex.sub (complex.mul (complex.of_real ((m * pk1 : ℕ) : ℝ)) (cpow_nat w m)) (complex.mul (complex.of_real (pk1 : ℝ)) (complex.mul w (csum m (fun j => cpow_nat ζ (j * pk1)))))
+        intro m; induction m with t iht; (rw [csum.zero, csum.zero, zero_mul.nat, cpow_nat.zero_eq]; have hc0 : complex.of_real ((0 : ℕ) : ℝ) = complex.zero := (by unfold complex.of_real; apply complex.ext <;> simp); rw [hc0]; apply complex.ext <;> simp)
+        rw [succ_eq_add_one.nat, csum.succ, csum.succ, cpow_nat.succ_eq]
+        have hwt : cpow_nat w t = cpow_nat ζ (t * pk1) := by have hc : t * pk1 = pk1 * t := (by ring); rw [hc, cpow_nat.mul ζ pk1 t, ← hw_def]
+        have hd : complex.mul (complex.sub w complex.one) (complex.add (csum t (fun j => complex.mul (complex.of_real ((j * pk1 : ℕ) : ℝ)) (cpow_nat ζ (j * pk1)))) (complex.mul (complex.of_real ((t * pk1 : ℕ) : ℝ)) (cpow_nat ζ (t * pk1)))) = complex.add (complex.mul (complex.sub w complex.one) (csum t (fun j => complex.mul (complex.of_real ((j * pk1 : ℕ) : ℝ)) (cpow_nat ζ (j * pk1))))) (complex.mul (complex.sub w complex.one) (complex.mul (complex.of_real ((t * pk1 : ℕ) : ℝ)) (cpow_nat w t))) := by rw [← hwt]; apply complex.ext <;> simp <;> ring
+        rw [hd, iht, ← hwt]
+        have hcast_t1 : complex.of_real (((t + 1) * pk1 : ℕ) : ℝ) = complex.add (complex.of_real ((t * pk1 : ℕ) : ℝ)) (complex.of_real (pk1 : ℝ)) := by have hm_add : (t + 1) * pk1 = t * pk1 + pk1 := (by ring); rw [hm_add, cast_add.real]; unfold complex.of_real; apply complex.ext <;> simp
+        rw [hcast_t1]; apply complex.ext <;> simp <;> ring
+      have hres := htel2 p; have hc_pm : p * pk1 = pk1 * p := (by ring); rw [hc_pm, hw_def, ← cpow_nat.mul ζ pk1 p, ← hw_def] at hres; exact hres
+    have hζ_pk : cpow_nat ζ (p ^ k) = complex.one := by rw [hζ_def, ← cpow_nat.mul (zeta_q (p ^ k)) sig (p ^ k), sernau.m81a_cpow_mod_eq (p ^ k) (zeta_q (p ^ k)) _ hupr_pk.2.2.1]; have hm0 : (sig * (p ^ k)) % (p ^ k) = 0 := (by have he : sig * (p ^ k) = 0 + (p ^ k) * sig := (by ring); rw [he, add_mul_mod.nat, (div_mod_of_lt.nat 0 (p ^ k) hpk_pos).2]); rw [hm0, cpow_nat.zero_eq]
+    have hphi_zero : sernau.cyclo_ppow p k ζ = complex.zero := by have h1 := hid1 ζ; rw [hζ_pk, hζ_pk1] at h1; have hr0 : complex.sub complex.one complex.one = complex.zero := (by apply complex.ext <;> simp); rw [hr0] at h1; by_contra hne; exact complex.mul_ne_zero _ _ hden_ne hne h1
+    rw [hζ_pk, hphi_zero, hζ_pk1, complex.mul_zero, complex.mul_zero, complex.mul_one] at halg_deriv
+    have hsub0 : ∀ u : ℂ, complex.sub u complex.zero = u := by intro u; apply complex.ext <;> simp <;> ring
+    rw [hsub0] at halg_deriv
+    have habs_ζ : complex.abs ζ = 1 := by have hp_ns : ∀ m : ℕ, complex.norm_sq (cpow_nat (zeta_q (p ^ k)) m) = 1 := (by intro m; induction m with t iht; (rw [cpow_nat.zero_eq]; unfold complex.norm_sq; simp); (rw [succ_eq_add_one.nat, cpow_nat.succ_eq, complex.norm_sq_mul, iht, hupr_pk.2.1]; ring)); exact eq_of_sq_eq_nonneg (complex.abs ζ) 1 (complex.abs_nonneg ζ) (by decide) (by rw [complex.abs_sq, hζ_def, hp_ns sig]; ring)
+    have habs_eq : complex.abs (complex.mul ζ (complex.mul (complex.sub (cpow_nat (zeta_q p) (sig % p)) complex.one) (sernau.cyclo_ppow_deriv p k ζ))) = complex.abs (complex.of_real ((p ^ k : ℕ) : ℝ)) := by rw [halg_deriv]
+    rw [complex.abs_mul, complex.abs_mul, habs_ζ, sernau.m81a_abs_of_real, abs_of_pos.real ((p ^ k : ℕ) : ℝ) ((cast_pos.real (p ^ k)).mpr hpk_pos)] at habs_eq
+    have hneg_d : complex.sub (cpow_nat (zeta_q p) (sig % p)) complex.one = complex.neg (complex.sub complex.one (cpow_nat (zeta_q p) (sig % p))) := by apply complex.ext <;> simp <;> ring
+    rw [hneg_d, complex.abs_neg] at habs_eq
+    have hd_pos : 0 < complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (sig % p))) := by by_contra hle; have habs0 : complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (sig % p))) = 0 := (by linarith [complex.abs_nonneg (complex.sub complex.one (cpow_nat (zeta_q p) (sig % p)))]); have hz := (complex.abs_eq_zero (complex.sub complex.one (cpow_nat (zeta_q p) (sig % p)))).mp habs0; rw [hneg_d, hz] at hden_ne; exact hden_ne (by apply complex.ext <;> simp)
+    have hd_ne : complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (sig % p))) ≠ 0 := by linarith
+    field_simp; linarith
+  have hprod_blocks : ∀ (M K : ℕ) (g : ℕ → ℝ), (∏ x < M * K, g x) = ∏ q < K, ∏ r < M, g (r + M * q) := by intro M K g; induction K with q ihq; (have hz : M * 0 = 0 := (by ring); rw [hz, prod_below_zero, prod_below_zero]); rw [succ_eq_add_one.nat]; have hmk : M * (q + 1) = M * q + M := (by ring); have hadd : ∀ n : ℕ, (∏ x < M * q + n, g x) = (∏ x < M * q, g x) * ∏ r < n, g (r + M * q) := (by intro n; induction n with j ihj; (have hz : M * q + 0 = M * q := (by omega); rw [hz, prod_below_zero]; ring); (rw [succ_eq_add_one.nat]; have hs : M * q + (j + 1) = (M * q + j) + 1 := (by omega); have hr : j + M * q = M * q + j := (by omega); rw [hs, prod_below_succ, ihj, prod_below_succ, hr]; ring)); rw [hmk, hadd M, prod_below_succ, ihq]
+  have hblk_val : ∀ q < pk1, (∏ r < p, if zmod.is_unit (p ^ k) (r + p * q) then complex.abs (sernau.cyclo_ppow_deriv p k (cpow_nat (zeta_q (p ^ k)) (r + p * q))) else 1) = (((p ^ k : ℕ) : ℝ) ^ (p - 1)) / (p : ℝ)
+    intro q hq
+    have hterm_r : ∀ r < p, (if zmod.is_unit (p ^ k) (r + p * q) then complex.abs (sernau.cyclo_ppow_deriv p k (cpow_nat (zeta_q (p ^ k)) (r + p * q))) else 1) = (if r = 0 then 1 else ((p ^ k : ℕ) : ℝ) / complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) r)))
+      intro r hr; have hlt_pk : r + p * q < p ^ k := by rw [hpk_eq]; have hm := mul_le_mul_of_nonneg_left.nat (q + 1) pk1 p (by omega) (by omega); have hd : p * (q + 1) = p * q + p := (by ring); have hc : pk1 * p = p * pk1 := (by ring); omega
+      have hmod_r : (r + p * q) % p = r := by rw [add_mul_mod.nat, (div_mod_of_lt.nat r p hr).2]
+      by_cases hr0 : r = 0; (rw [if_neg (by intro hu; exact (zmod.is_unit_iff_no_common_prime (p ^ k) (r + p * q) hpk_pos).mp hu p ((sernau.m81a_prime_iff p).mpr hp) ((dvd.iff_exists p (p ^ k) (by omega)).mpr ⟨pk1, by rw [hpk_eq]; ring⟩) ((dvd.iff_exists p (r + p * q) (by omega)).mpr ⟨q, by rw [hr0]; ring⟩)), if_pos hr0])
+      have hu : zmod.is_unit (p ^ k) (r + p * q) := by apply (zmod.is_unit_iff_no_common_prime (p ^ k) (r + p * q) hpk_pos).mpr; intro l hl hl_pk hl_x; have hlp := sernau.m81a_prime_dvd_pow l p hl k (by omega) hl_pk; have hl2 := hl.1; obtain h1 | h2 := sernau.m81a_dvd_cases p l hp (by omega) hlp; omega; rw [h2] at hl_x; obtain ⟨u, hu_eq⟩ := (dvd.iff_exists p (r + p * q) (by omega)).mp hl_x; have hle_qu : q ≤ u := (by by_contra hgt; have hm := mul_le_mul_of_nonneg_left.nat (u + 1) q p (by omega) (by omega); have hd : p * (u + 1) = p * u + p := (by ring); omega); have hdiv_r : p ∣ r := (dvd.iff_exists p r (by omega)).mpr ⟨u - q, by have hs : (u - q) + q = u := (by omega); have hm : p * ((u - q) + q) = p * (u - q) + p * q := (by ring); rw [hs] at hm; omega⟩; have hle_pr := le_of_dvd.nat r p (by omega) hdiv_r; omega
+      rw [if_pos hu, if_neg hr0, hderiv_id (r + p * q) hlt_pk hu, hmod_r]
+    rw [prod_below.congr_real p _ _ hterm_r]
+    have hsh : ∀ m : ℕ, (∏ r < m + 1, if r = 0 then (1 : ℝ) else ((p ^ k : ℕ) : ℝ) / complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) r))) = ∏ j < m, (((p ^ k : ℕ) : ℝ) / complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1)))) := by intro m; induction m with t iht; (rw [prod_below_succ, prod_below_zero, prod_below_zero, if_pos (by rfl)]; ring); (rw [succ_eq_add_one.nat, prod_below_succ (t + 1), iht, prod_below_succ t, if_neg (by omega)])
+    have hp_m1 : (p - 1) + 1 = p := (by omega); have hsh_p := hsh (p - 1); rw [hp_m1] at hsh_p; rw [hsh_p]
+    have hall_pos : ∀ j < p - 1, 0 < complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1))) := by intro j hj; by_contra hle; have habs0 : complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1))) = 0 := (by linarith [complex.abs_nonneg (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1)))]); have hz := (complex.abs_eq_zero (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1)))).mp habs0; apply hupr_p.2.2.2 (j + 1) (by omega) (by omega); apply complex.ext; (have hr : complex.re (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1))) = complex.re complex.zero := (by rw [hz]); simp at hr ⊢; linarith); (have hi : complex.im (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1))) = complex.im complex.zero := (by rw [hz]); simp at hi ⊢; linarith)
+    have hdiv_prod : ∀ m : ℕ, (∀ j < m, 0 < complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1)))) → (∏ j < m, (((p ^ k : ℕ) : ℝ) / complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1))))) = (((p ^ k : ℕ) : ℝ) ^ m) / (∏ j < m, complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1))))
+      intro m hpos_all; induction m with _ t iht hpos_all; (rw [prod_below_zero, prod_below_zero, pow_zero.real]; field_simp); rw [succ_eq_add_one.nat] at hpos_all ⊢; rw [prod_below_succ, prod_below_succ, pow_succ.real, iht (by intro j hj; exact hpos_all j (by omega))]
+      have hp_den : ∀ s ≤ t, 0 < ∏ j < s, complex.abs (complex.sub complex.one (cpow_nat (zeta_q p) (j + 1))) := by intro s; induction s with _ u ihu hle; (rw [prod_below_zero]; decide); (rw [succ_eq_add_one.nat] at hle ⊢; rw [prod_below_succ]; exact mul_pos.real _ _ (ihu (by omega)) (hpos_all u (by omega)))
+      have hd1 := hp_den t (by omega); have hd2 := hpos_all t (by omega); field_simp
+    rw [hdiv_prod (p - 1) hall_pos, sernau.prod_abs_one_sub_zeta_q p (by omega)]
+  have hp_comm : p ^ k = p * pk1 := (by rw [hpk_eq]; ring); rw [hp_comm, hprod_blocks p pk1, ← hp_comm]
+  have hconst_prod : ∀ Q ≤ pk1, (∏ q < Q, ∏ r < p, if zmod.is_unit (p ^ k) (r + p * q) then complex.abs (sernau.cyclo_ppow_deriv p k (cpow_nat (zeta_q (p ^ k)) (r + p * q))) else 1) = ((((p ^ k : ℕ) : ℝ) ^ (p - 1)) / (p : ℝ)) ^ Q := by intro Q; induction Q with _ t iht hle; (rw [prod_below_zero, pow_zero.real]); (rw [succ_eq_add_one.nat] at hle ⊢; rw [prod_below_succ, pow_succ.real, iht (by omega), hblk_val t (by omega)])
+  rw [hconst_prod pk1 (by omega)]
+  have hp_pos : (0 : ℝ) < (p : ℝ) := (cast_pos.real p).mpr (by omega); have hpm1_pos : (0 : ℝ) < ((p - 1 : ℕ) : ℝ) := (cast_pos.real (p - 1)).mpr (by omega)
+  have hrpow_p : (rpow (p : ℝ) (1 / ((p - 1 : ℕ) : ℝ))) ^ (p - 1) = (p : ℝ) := by unfold rpow; rw [sernau.m81a_exp_pow_eq ((1 / ((p - 1 : ℕ) : ℝ)) * log (p : ℝ)) (p - 1)]; have hc : ((p - 1 : ℕ) : ℝ) * ((1 / ((p - 1 : ℕ) : ℝ)) * log (p : ℝ)) = log (p : ℝ) := (by field_simp); rw [hc, exp_log (p : ℝ) hp_pos]
+  have hbase_eq : (((p ^ k : ℕ) : ℝ) ^ (p - 1)) / (p : ℝ) = (((p ^ k : ℕ) : ℝ) / rpow (p : ℝ) (1 / ((p - 1 : ℕ) : ℝ))) ^ (p - 1) := by have hdiv_pow : ∀ (a b : ℝ) (m : ℕ), b ≠ 0 → (a ^ m) / (b ^ m) = (a / b) ^ m := (by intro a b m hb; induction m with t iht; (rw [pow_zero.real, pow_zero.real, pow_zero.real]; field_simp); (rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, pow_succ.real, ← iht]; field_simp)); have hdp := hdiv_pow ((p ^ k : ℕ) : ℝ) (rpow (p : ℝ) (1 / ((p - 1 : ℕ) : ℝ))) (p - 1) (by unfold rpow; linarith [exp_pos ((1 / ((p - 1 : ℕ) : ℝ)) * log (p : ℝ))]); rw [hrpow_p] at hdp; exact hdp
+  rw [hbase_eq]
+  have hpow_mul_r : ∀ (x : ℝ) (a b : ℕ), (x ^ a) ^ b = x ^ (a * b) := by intro x a b; induction b with t iht; (rw [pow_zero.real, mul_zero.nat, pow_zero.real]); rw [succ_eq_add_one.nat, pow_succ.real, iht]; have hadd_r : ∀ c d : ℕ, x ^ (c + d) = (x ^ c) * (x ^ d) := (by intro c d; induction d with u ihu; (rw [pow_zero.real]; simp); (rw [succ_eq_add_one.nat]; have hc : c + (u + 1) = (c + u) + 1 := (by omega); rw [hc, pow_succ.real, pow_succ.real, ihu]; ring)); have hm_eq : a * (t + 1) = a * t + a := (by ring); rw [hm_eq, hadd_r (a * t) a]
+  rw [hpow_mul_r]
+
+-- ====================================================================================
+-- 2. 2-Torsion Weierstrass Cubic Discriminant (`Lib/CM/Sigma/CurveTheta.lean` L80-156)
+-- ====================================================================================
+
+-> sernau.cm_g2 (e1 : ℂ) : ℂ := complex.sub (complex.smul 12 (complex.mul e1 e1)) (complex.of_real 4)
+-> sernau.cm_g3 (e1 : ℂ) : ℂ := complex.add (complex.smul (-8) (cpow_nat e1 3)) (complex.smul 4 e1)
+-> sernau.cm_cubic_disc (g2 g3 : ℂ) : ℂ := complex.sub (cpow_nat g2 3) (complex.smul 27 (complex.mul g3 g3))
+
++ sernau.cm_two_torsion_disc_eq (e1 a1 : ℂ) :
+    complex.sub (complex.sub (complex.smul 4 (cpow_nat e1 3)) (complex.mul (sernau.cm_g2 e1) e1)) (sernau.cm_g3 e1) = complex.zero ∧
+    sernau.cm_cubic_disc (sernau.cm_g2 e1) (sernau.cm_g3 e1) = complex.sub (cpow_nat (complex.smul 12 e1) 2) (complex.of_real 64) ∧
+    (complex.mul a1 a1 = complex.smul 12 e1 → sernau.cm_cubic_disc (sernau.cm_g2 e1) (sernau.cm_g3 e1) = complex.sub (cpow_nat a1 4) (complex.of_real 64))
+  have hc3 : ∀ w : ℂ, cpow_nat w 3 = complex.mul (complex.mul w w) w := by intro w; have h3 : (3 : ℕ) = ((0 + 1) + 1) + 1 := (by rfl); rw [h3, cpow_nat.succ_eq, cpow_nat.succ_eq, cpow_nat.succ_eq, cpow_nat.zero_eq, complex.one_mul]
+  have hc2 : ∀ w : ℂ, cpow_nat w 2 = complex.mul w w := by intro w; have h2 : (2 : ℕ) = (0 + 1) + 1 := (by rfl); rw [h2, cpow_nat.succ_eq, cpow_nat.succ_eq, cpow_nat.zero_eq, complex.one_mul]
+  have hc4 : ∀ w : ℂ, cpow_nat w 4 = complex.mul (complex.mul w w) (complex.mul w w) := by intro w; have h4 : (4 : ℕ) = (((0 + 1) + 1) + 1) + 1 := (by rfl); rw [h4, cpow_nat.succ_eq, cpow_nat.succ_eq, cpow_nat.succ_eq, cpow_nat.succ_eq, cpow_nat.zero_eq, complex.one_mul]; apply complex.ext <;> simp <;> ring
+  constructor
+  · unfold sernau.cm_g2 sernau.cm_g3; rw [hc3 e1]; unfold complex.of_real; apply complex.ext <;> simp <;> ring
+  · have hdisc : sernau.cm_cubic_disc (sernau.cm_g2 e1) (sernau.cm_g3 e1) = complex.sub (cpow_nat (complex.smul 12 e1) 2) (complex.of_real 64) := by unfold sernau.cm_cubic_disc sernau.cm_g2 sernau.cm_g3; rw [hc3 _, hc3 e1, hc2 (complex.smul 12 e1)]; unfold complex.of_real; apply complex.ext <;> simp <;> ring
+    exact ⟨hdisc, by intro ha1; rw [hdisc, hc2 (complex.smul 12 e1), ← ha1, hc4 a1]⟩
+
+-- ====================================================================================
+-- 3. Reduced Binary Quadratic Forms of Discriminant `-d` & Epstein-Dedekind Identity
+-- ====================================================================================
+
+structure QuadForm :=
+  (A B C : ℤ)
+
++ sernau.qf_ext (Q1 Q2 : QuadForm) (hA : Q1.A = Q2.A) (hB : Q1.B = Q2.B) (hC : Q1.C = Q2.C) : Q1 = Q2
+  induction Q1 with A1 B1 C1 hA hB hC; induction Q2 with A2 B2 C2 hA hB hC; simp at hA hB hC; rw [hA, hB, hC]
+
+-> sernau.qf_eval (Q : QuadForm) (m n : ℤ) : ℤ := Q.A * m * m + Q.B * m * n + Q.C * n * n
+-> sernau.qf_disc (Q : QuadForm) : ℤ := Q.B * Q.B - 4 * Q.A * Q.C
+-> sernau.qf_is_reduced (d : ℕ) (Q : QuadForm) : Prop :=
+  sernau.qf_disc Q = -(d : ℤ) ∧ 1 ≤ Q.A ∧ -Q.A < Q.B ∧ Q.B ≤ Q.A ∧ Q.A ≤ Q.C ∧ (Q.A = Q.C → 0 ≤ Q.B)
+-> sernau.qf_act (Q : QuadForm) (p q r s : ℤ) : QuadForm :=
+  QuadForm.mk (sernau.qf_eval Q p r) (2 * Q.A * p * q + Q.B * (p * s + q * r) + 2 * Q.C * r * s) (sernau.qf_eval Q q s)
+
++ sernau.qf_act_props (Q : QuadForm) (p q r s x y : ℤ) :
+    sernau.qf_eval (sernau.qf_act Q p q r s) x y = sernau.qf_eval Q (p * x + q * y) (r * x + s * y) ∧
+    sernau.qf_disc (sernau.qf_act Q p q r s) = (p * s - q * r) * (p * s - q * r) * sernau.qf_disc Q ∧
+    (p * s - q * r = 1 → sernau.qf_act (sernau.qf_act Q p q r s) s (-q) (-r) p = Q)
+  constructor; (unfold sernau.qf_eval sernau.qf_act; simp; ring)
+  constructor; (unfold sernau.qf_disc sernau.qf_eval sernau.qf_act; simp; ring)
+  intro hdet; apply sernau.qf_ext <;> (unfold sernau.qf_act sernau.qf_eval; simp)
+  · linear_combination Q.A * (p * s - q * r + 1) * hdet
+  · linear_combination Q.B * (p * s - q * r + 1) * hdet
+  · linear_combination Q.C * (p * s - q * r + 1) * hdet
+
++ sernau.qf_reduced_props (d : ℕ) (hd_pr : is_prime_nat d) (hd8 : d % 8 = 7) :
+    7 ≤ d ∧ sernau.qf_is_reduced d (QuadForm.mk 1 1 (((d + 1) / 4 : ℕ) : ℤ)) ∧
+    ∀ Q : QuadForm, sernau.qf_is_reduced d Q →
+      Q.A + 1 ≤ Q.C ∧ 1 ≤ Q.A ∧ Q.A ≤ (d : ℤ) ∧ -(d : ℤ) ≤ Q.B ∧ Q.B ≤ (d : ℤ) ∧ 1 ≤ Q.C ∧ Q.C ≤ (d : ℤ) ∧
+      (∀ x y : ℤ, 3 * x * x ≤ 4 * sernau.qf_eval Q x y ∧ 3 * y * y ≤ 4 * sernau.qf_eval Q x y) ∧
+      (∀ x y : ℤ, ¬ (x = 0 ∧ y = 0) → ¬ (x = 1 ∧ y = 0) → ¬ (x = -1 ∧ y = 0) → Q.A + 1 ≤ sernau.qf_eval Q x y)
+  have hd7 : 7 ≤ d := by have h := div_add_mod.nat d 8; omega
+  have h4c : 4 * ((d + 1) / 4) = d + 1 := by have h := div_add_mod.nat (d + 1) 4; have h8 := div_add_mod.nat d 8; omega
+  have hprinc : sernau.qf_is_reduced d (QuadForm.mk 1 1 (((d + 1) / 4 : ℕ) : ℤ))
+    have hc4 : 4 * (((d + 1) / 4 : ℕ) : ℤ) = (d : ℤ) + 1 := by have hc : ((4 * ((d + 1) / 4) : ℕ) : ℤ) = ((d + 1 : ℕ) : ℤ) := (by rw [h4c]); rw [cast_mul.int, cast_add.int, cast_one.int] at hc; simp at hc; exact hc
+    have hc_ge2 : (2 : ℤ) ≤ (((d + 1) / 4 : ℕ) : ℤ) := (cast_le.int 2 ((d + 1) / 4)).mpr (by omega)
+    unfold sernau.qf_is_reduced sernau.qf_disc
+    constructor; (simp; linarith)
+    constructor; decide
+    constructor; decide
+    constructor; decide
+    constructor; (simp; omega)
+    intro _; decide
+  constructor; exact hd7
+  constructor; exact hprinc
+  intro Q hred; obtain ⟨hdisc, hA1, hB_lo, hB_hi, hAC, hAC_eq⟩ := hred; unfold sernau.qf_disc at hdisc
+  have hA_lt_C : Q.A + 1 ≤ Q.C
+    by_contra hge; have heq_AC : Q.A = Q.C := (by omega); have hB0 : 0 ≤ Q.B := hAC_eq heq_AC
+    have hfac : (2 * Q.A - Q.B) * (2 * Q.A + Q.B) = (d : ℤ) := by rw [← heq_AC] at hdisc; linarith
+    set u := nat_of_int (2 * Q.A - Q.B) with hu_def; set v := nat_of_int (2 * Q.A + Q.B) with hv_def
+    have hu_eq : (u : ℤ) = 2 * Q.A - Q.B := by rw [hu_def]; exact int_of_nat_of_int _ (by omega)
+    have hv_eq : (v : ℤ) = 2 * Q.A + Q.B := by rw [hv_def]; exact int_of_nat_of_int _ (by omega)
+    have huv_d : u * v = d := (cast_inj.int (u * v) d).mp (by rw [cast_mul.int, hu_eq, hv_eq]; exact hfac)
+    have hu_pos : 0 < u := by by_contra h0; have hz : u = 0 := (by omega); rw [hz] at hu_eq; simp at hu_eq; omega
+    obtain hu1 | hud := sernau.m81a_dvd_cases d u hd_pr hu_pos ((dvd.iff_exists u d hu_pos).mpr ⟨v, huv_d.symm⟩)
+    · rw [hu1] at huv_d hu_eq; simp at huv_d hu_eq; rw [huv_d] at hv_eq; omega
+    · rw [hud] at huv_d; have hv1 : v = 1 := (by by_contra hne; by_cases hv0 : v = 0; (rw [hv0] at huv_d; omega); (have hm := mul_le_mul_of_nonneg_left.nat 2 v d (by omega) (by omega); omega)); rw [hud] at hu_eq; rw [hv1] at hv_eq; simp at hv_eq; omega
+  have hB2_le : Q.B * Q.B ≤ Q.A * Q.C
+    have hB2_A2 : Q.B * Q.B ≤ Q.A * Q.A := by by_cases hb0 : 0 ≤ Q.B; (have hm1 := mul_le_mul_of_nonneg_left.int Q.B Q.A Q.B hB_hi hb0; have hm2 := mul_le_mul_of_nonneg_right.int Q.B Q.A Q.A hB_hi (by omega); omega); (have hm1 := mul_le_mul_of_nonneg_left.int (-Q.B) Q.A (-Q.B) (by omega) (by omega); have hm2 := mul_le_mul_of_nonneg_right.int (-Q.B) Q.A Q.A (by omega) (by omega); have hs : (-Q.B) * (-Q.B) = Q.B * Q.B := (by ring); omega)
+    have hm_AC := mul_le_mul_of_nonneg_left.int Q.A Q.C Q.A hAC (by omega); omega
+  have hC_le_d : Q.C ≤ (d : ℤ) := by have hm := mul_le_mul_of_nonneg_right.int 1 Q.A Q.C hA1 (by omega); linarith
+  have hbase_lo : ∀ x y : ℤ, ∃ ax ay : ℤ, 0 ≤ ax ∧ 0 ≤ ay ∧ ax * ax = x * x ∧ ay * ay = y * y ∧
+      Q.A * (ax * ax - ax * ay + ay * ay) + (Q.C - Q.A) * (y * y) ≤ sernau.qf_eval Q x y
+    intro x y; set ax : ℤ := if 0 ≤ x then x else -x with hax_def; set ay : ℤ := if 0 ≤ y then y else -y with hay_def
+    have hax_nn : 0 ≤ ax := by rw [hax_def]; by_cases h : 0 ≤ x; (rw [if_pos h]; exact h); (rw [if_neg h]; omega)
+    have hay_nn : 0 ≤ ay := by rw [hay_def]; by_cases h : 0 ≤ y; (rw [if_pos h]; exact h); (rw [if_neg h]; omega)
+    have hax_sq : ax * ax = x * x := by rw [hax_def]; by_cases h : 0 ≤ x; rw [if_pos h]; (rw [if_neg h]; ring)
+    have hay_sq : ay * ay = y * y := by rw [hay_def]; by_cases h : 0 ≤ y; rw [if_pos h]; (rw [if_neg h]; ring)
+    have hBxy : -Q.A * ax * ay ≤ Q.B * x * y
+      by_cases hx0 : 0 ≤ x
+      · by_cases hy0 : 0 ≤ y
+        · have hx_e : ax = x := (by rw [hax_def, if_pos hx0]); have hy_e : ay = y := (by rw [hay_def, if_pos hy0]); rw [hx_e, hy_e]; have hm := mul_le_mul_of_nonneg_right.int (-Q.A) Q.B (x * y) (by omega) (mul_nonneg.int x y hx0 hy0); have hr1 : (-Q.A) * (x * y) = -Q.A * x * y := (by ring); have hr2 : Q.B * (x * y) = Q.B * x * y := (by ring); rw [hr1, hr2] at hm; exact hm
+        · have hx_e : ax = x := (by rw [hax_def, if_pos hx0]); have hy_e : ay = -y := (by rw [hay_def, if_neg hy0]); rw [hx_e, hy_e]; have hm := mul_le_mul_of_nonneg_right.int (-Q.A) (-Q.B) (x * (-y)) (by omega) (mul_nonneg.int x (-y) hx0 (by omega)); have hr1 : (-Q.A) * (x * (-y)) = -Q.A * x * (-y) := (by ring); have hr2 : (-Q.B) * (x * (-y)) = Q.B * x * y := (by ring); rw [hr1, hr2] at hm; exact hm
+      · by_cases hy0 : 0 ≤ y
+        · have hx_e : ax = -x := (by rw [hax_def, if_neg hx0]); have hy_e : ay = y := (by rw [hay_def, if_pos hy0]); rw [hx_e, hy_e]; have hm := mul_le_mul_of_nonneg_right.int (-Q.A) (-Q.B) ((-x) * y) (by omega) (mul_nonneg.int (-x) y (by omega) hy0); have hr1 : (-Q.A) * ((-x) * y) = -Q.A * (-x) * y := (by ring); have hr2 : (-Q.B) * ((-x) * y) = Q.B * x * y := (by ring); rw [hr1, hr2] at hm; exact hm
+        · have hx_e : ax = -x := (by rw [hax_def, if_neg hx0]); have hy_e : ay = -y := (by rw [hay_def, if_neg hy0]); rw [hx_e, hy_e]; have hm := mul_le_mul_of_nonneg_right.int (-Q.A) Q.B ((-x) * (-y)) (by omega) (mul_nonneg.int (-x) (-y) (by omega) (by omega)); have hr1 : (-Q.A) * ((-x) * (-y)) = -Q.A * (-x) * (-y) := (by ring); have hr2 : Q.B * ((-x) * (-y)) = Q.B * x * y := (by ring); rw [hr1, hr2] at hm; exact hm
+    unfold sernau.qf_eval; exact ⟨ax, ay, hax_nn, hay_nn, hax_sq, hay_sq, by rw [hax_sq, hay_sq]; linarith⟩
+  have hsq_nn : ∀ z : ℤ, 0 ≤ z * z := by intro z; by_cases h : 0 ≤ z; exact mul_nonneg.int z z h h; (have hm := mul_nonneg.int (-z) (-z) (by omega) (by omega); linarith)
+  have hquad_lo : ∀ x y : ℤ, 3 * x * x ≤ 4 * sernau.qf_eval Q x y ∧ 3 * y * y ≤ 4 * sernau.qf_eval Q x y
+    intro x y; obtain ⟨ax, ay, _, _, hax2, hay2, hlo⟩ := hbase_lo x y
+    have hid1 : 4 * (ax * ax - ax * ay + ay * ay) = (2 * ax - ay) * (2 * ax - ay) + 3 * (y * y) := by rw [← hay2]; ring
+    have hid2 : 4 * (ax * ax - ax * ay + ay * ay) = (ax - 2 * ay) * (ax - 2 * ay) + 3 * (x * x) := by rw [← hax2]; ring
+    have hs1 := hsq_nn (2 * ax - ay); have hs2 := hsq_nn (ax - 2 * ay); have hy2 := hsq_nn y; have hx2 := hsq_nn x
+    have hf_nn : 0 ≤ ax * ax - ax * ay + ay * ay := by omega
+    have hAf := mul_le_mul_of_nonneg_right.int 1 Q.A (ax * ax - ax * ay + ay * ay) hA1 hf_nn
+    have hCy := mul_nonneg.int (Q.C - Q.A) (y * y) (by omega) hy2; omega
+  have hstrict : ∀ x y : ℤ, ¬ (x = 0 ∧ y = 0) → ¬ (x = 1 ∧ y = 0) → ¬ (x = -1 ∧ y = 0) → Q.A + 1 ≤ sernau.qf_eval Q x y
+    intro x y h00 h10 hm10; by_cases hy0 : y = 0
+    · unfold sernau.qf_eval; rw [hy0]
+      have hx0 : x ≠ 0 := (by intro hx; exact h00 ⟨hx, hy0⟩); have hx1 : x ≠ 1 := (by intro hx; exact h10 ⟨hx, hy0⟩); have hxm1 : x ≠ -1 := (by intro hx; exact hm10 ⟨hx, hy0⟩)
+      have hx2 : 4 ≤ x * x := by by_cases hp : 2 ≤ x; (have hm := mul_le_mul_of_nonneg_left.int 2 x x hp (by omega); omega); (have hm := mul_le_mul_of_nonneg_left.int 2 (-x) (-x) (by omega) (by omega); have hs : (-x) * (-x) = x * x := (by ring); omega)
+      have hmA := mul_le_mul_of_nonneg_left.int 4 (x * x) Q.A hx2 (by omega)
+      have hrA : Q.A * (x * x) = Q.A * x * x + Q.B * x * 0 + Q.C * 0 * 0 := (by ring); omega
+    · obtain ⟨ax, ay, _, _, _, hay2, hlo⟩ := hbase_lo x y
+      have hy2_ge1 : 1 ≤ y * y := by by_cases hp : 1 ≤ y; (have hm := mul_le_mul_of_nonneg_left.int 1 y y hp (by omega); omega); (have hm := mul_le_mul_of_nonneg_left.int 1 (-y) (-y) (by omega) (by omega); have hs : (-y) * (-y) = y * y := (by ring); omega)
+      have hid1 : 4 * (ax * ax - ax * ay + ay * ay) = (2 * ax - ay) * (2 * ax - ay) + 3 * (y * y) := by rw [← hay2]; ring
+      have hs1 := hsq_nn (2 * ax - ay); have hf_ge1 : 1 ≤ ax * ax - ax * ay + ay * ay := by omega
+      have hAf := mul_le_mul_of_nonneg_left.int 1 (ax * ax - ax * ay + ay * ay) Q.A hf_ge1 (by omega)
+      have hCy := mul_le_mul_of_nonneg_left.int 1 (y * y) (Q.C - Q.A) hy2_ge1 (by omega); omega
+  exact ⟨hA_lt_C, hA1, by omega, by omega, by omega, by omega, hC_le_d, hquad_lo, hstrict⟩
+
+-> sernau.qf_grid_len (d : ℕ) : ℕ := d * ((2 * d + 1) * d)
+-> sernau.qf_of_idx (d idx : ℕ) : QuadForm :=
+  QuadForm.mk (((idx / ((2 * d + 1) * d)) + 1 : ℕ) : ℤ) ((((idx / d) % (2 * d + 1)) : ℤ) - (d : ℤ)) (((idx % d) + 1 : ℕ) : ℤ)
+-> sernau.class_num_neg_d (d : ℕ) : ℕ :=
+  ∑ idx < sernau.qf_grid_len d, if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then 1 else 0
+
++ sernau.qf_of_idx_bij_and_pos (d : ℕ) (hd_pr : is_prime_nat d) (hd8 : d % 8 = 7) :
+    1 ≤ sernau.class_num_neg_d d ∧
+    (∀ i1 < sernau.qf_grid_len d, ∀ i2 < sernau.qf_grid_len d, sernau.qf_of_idx d i1 = sernau.qf_of_idx d i2 → i1 = i2) ∧
+    (∀ Q : QuadForm, sernau.qf_is_reduced d Q → ∃ idx < sernau.qf_grid_len d, sernau.qf_of_idx d idx = Q)
+  obtain ⟨hd7, hprinc, hprops⟩ := sernau.qf_reduced_props d hd_pr hd8; set W := (2 * d + 1) * d with hW
+  have hinj : ∀ i1 < sernau.qf_grid_len d, ∀ i2 < sernau.qf_grid_len d, sernau.qf_of_idx d i1 = sernau.qf_of_idx d i2 → i1 = i2
+    intro i1 hi1 i2 hi2 heq
+    have hA : (sernau.qf_of_idx d i1).A = (sernau.qf_of_idx d i2).A := (by rw [heq]); have hB : (sernau.qf_of_idx d i1).B = (sernau.qf_of_idx d i2).B := (by rw [heq]); have hC : (sernau.qf_of_idx d i1).C = (sernau.qf_of_idx d i2).C := (by rw [heq])
+    unfold sernau.qf_of_idx at hA hB hC; simp [← hW] at hA hB hC
+    have hqA : i1 / W = i2 / W := (cast_inj.int (i1 / W) (i2 / W)).mp (by omega)
+    have hqB : (i1 / d) % (2 * d + 1) = (i2 / d) % (2 * d + 1) := (cast_inj.int _ _).mp (by omega)
+    have hqC : i1 % d = i2 % d := (cast_inj.int (i1 % d) (i2 % d)).mp (by omega)
+    have hdd1 : (i1 / d) / (2 * d + 1) = i1 / W := by rw [div_div.nat i1 d (2 * d + 1) (by omega) (by omega), hW]; have hc : d * (2 * d + 1) = (2 * d + 1) * d := (by ring); rw [hc]
+    have hdd2 : (i2 / d) / (2 * d + 1) = i2 / W := by rw [div_div.nat i2 d (2 * d + 1) (by omega) (by omega), hW]; have hc : d * (2 * d + 1) = (2 * d + 1) * d := (by ring); rw [hc]
+    have hm1 := div_add_mod.nat (i1 / d) (2 * d + 1); have hm2 := div_add_mod.nat (i2 / d) (2 * d + 1); rw [hdd1, hqA, hqB, ← hdd2] at hm1
+    have hqi : i1 / d = i2 / d := (by omega)
+    have hd1 := div_add_mod.nat i1 d; have hd2 := div_add_mod.nat i2 d; rw [hqi, hqC] at hd1; omega
+  have hsurj : ∀ Q : QuadForm, sernau.qf_is_reduced d Q → ∃ idx < sernau.qf_grid_len d, sernau.qf_of_idx d idx = Q
+    intro Q hred; have hp := hprops Q hred
+    set a := nat_of_int (Q.A - 1) with ha_def; set b := nat_of_int (Q.B + (d : ℤ)) with hb_def; set c := nat_of_int (Q.C - 1) with hc_def
+    have ha_eq : (a : ℤ) = Q.A - 1 := by rw [ha_def]; exact int_of_nat_of_int _ (by omega)
+    have hb_eq : (b : ℤ) = Q.B + (d : ℤ) := by rw [hb_def]; exact int_of_nat_of_int _ (by omega)
+    have hc_eq : (c : ℤ) = Q.C - 1 := by rw [hc_def]; exact int_of_nat_of_int _ (by omega)
+    have ha_lt : a < d := (cast_lt.int a d).mp (by omega); have hb_lt : b < 2 * d + 1 := (cast_lt.int b (2 * d + 1)).mp (by rw [cast_add.int, cast_mul.int, cast_one.int]; simp; omega); have hc_lt : c < d := (cast_lt.int c d).mp (by omega)
+    set idx := a * W + (b * d + c) with hidx
+    have hbc_lt : b * d + c < W := by rw [hW]; have hm := mul_le_mul_of_nonneg_right.nat (b + 1) (2 * d + 1) d (by omega) (by omega); have hd : (b + 1) * d = b * d + d := (by ring); omega
+    have hidx_lt : idx < sernau.qf_grid_len d := by unfold sernau.qf_grid_len; rw [← hW, hidx]; have hm := mul_le_mul_of_nonneg_right.nat (a + 1) d W (by omega) (by omega); have hd : (a + 1) * W = a * W + W := (by ring); omega
+    use idx; constructor; exact hidx_lt
+    have hdm_W := div_mod_unique.nat idx W a (b * d + c) (by rw [hidx]; ring) hbc_lt
+    have hdm_d := div_mod_unique.nat idx d (a * (2 * d + 1) + b) c (by rw [hidx, hW]; ring) hc_lt
+    have hb_mod : (idx / d) % (2 * d + 1) = b := by rw [← hdm_d.1]; have he : a * (2 * d + 1) + b = b + (2 * d + 1) * a := (by ring); rw [he, add_mul_mod.nat, (div_mod_of_lt.nat b (2 * d + 1) hb_lt).2]
+    apply sernau.qf_ext <;> (unfold sernau.qf_of_idx; simp [← hW, ← hdm_W.1, hb_mod, ← hdm_d.2])
+    · rw [ha_eq]; ring
+    · rw [hb_eq]; ring
+    · rw [hc_eq]; ring
+  obtain ⟨idx0, hidx0_lt, hidx0_eq⟩ := hsurj (QuadForm.mk 1 1 (((d + 1) / 4 : ℕ) : ℤ)) hprinc
+  have hpos : 1 ≤ sernau.class_num_neg_d d := by unfold sernau.class_num_neg_d; have hrec : ∀ K : ℕ, idx0 < K → 1 ≤ ∑ idx < K, if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then 1 else 0 := (by intro K hlt; induction K with _ k ihk hlt; omega; rw [succ_eq_add_one.nat] at hlt ⊢; rw [sum_below_succ]; by_cases hk : idx0 < k; (have hip := ihk hk; omega); (have he : k = idx0 := (by omega); rw [he, hidx0_eq, if_pos hprinc]; omega)); exact hrec (sernau.qf_grid_len d) hidx0_lt
+  exact ⟨hpos, hinj, hsurj⟩
+
++ sernau.qf_reduced_unique_and_aut (d : ℕ) (Q1 Q2 : QuadForm) (p q r s : ℤ)
+    (hd_pr : is_prime_nat d) (hd8 : d % 8 = 7)
+    (h1 : sernau.qf_is_reduced d Q1) (h2 : sernau.qf_is_reduced d Q2)
+    (hdet : p * s - q * r = 1) (hact : sernau.qf_act Q1 p q r s = Q2) :
+    Q1 = Q2 ∧ ((p = 1 ∧ q = 0 ∧ r = 0 ∧ s = 1) ∨ (p = -1 ∧ q = 0 ∧ r = 0 ∧ s = -1))
+  obtain ⟨_, _, hprops⟩ := sernau.qf_reduced_props d hd_pr hd8
+  have hle_case : ∀ (Qa Qb : QuadForm) (u v w z : ℤ),
+      sernau.qf_is_reduced d Qa → sernau.qf_is_reduced d Qb → Qb.A ≤ Qa.A → u * z - v * w = 1 → sernau.qf_act Qa u v w z = Qb →
+      Qa = Qb ∧ ((u = 1 ∧ v = 0 ∧ w = 0 ∧ z = 1) ∨ (u = -1 ∧ v = 0 ∧ w = 0 ∧ z = -1))
+    intro Qa Qb u v w z hra hrb hBA hdt hac; have hpa := hprops Qa hra
+    have hev_uw : sernau.qf_eval Qa u w = Qb.A := by have hA : (sernau.qf_act Qa u v w z).A = Qb.A := (by rw [hac]); unfold sernau.qf_act at hA; simp at hA; exact hA
+    have huw_ne0 : ¬ (u = 0 ∧ w = 0) := by intro ⟨hu0, hw0⟩; rw [hu0, hw0] at hdt; omega
+    have huw_cases : (u = 1 ∧ w = 0) ∨ (u = -1 ∧ w = 0) := by by_contra hnot; have hgt := hpa.2.2.2.2.2.2.2.2 u w huw_ne0 (by intro h; apply hnot; left; exact h) (by intro h; apply hnot; right; exact h); omega
+    have hw0 : w = 0 := by obtain h | h := huw_cases; exact h.2; exact h.2
+    have hu_sq : u * u = 1 := by obtain h | h := huw_cases; (rw [h.1]; ring); (rw [h.1]; ring)
+    have hz_eq : z = u := by rw [hw0] at hdt; have hm : u * (u * z) = u * 1 := (by linear_combination u * hdt); have hl : u * (u * z) = (u * u) * z := (by ring); rw [hl, hu_sq] at hm; linarith
+    have hA_eq : Qa.A = Qb.A := by unfold sernau.qf_eval at hev_uw; rw [hw0] at hev_uw; linear_combination hev_uw - Qa.A * hu_sq
+    have hB_rel : Qb.B = Qa.B + 2 * Qa.A * (u * v) := by have hB : (sernau.qf_act Qa u v w z).B = Qb.B := (by rw [hac]); unfold sernau.qf_act at hB; simp at hB; rw [hw0, hz_eq] at hB; linear_combination -hB + Qa.B * hu_sq
+    have hv0 : v = 0 := by have hba := hra.2.2; have hbb := hrb.2.2; rw [← hA_eq] at hbb; by_contra hvn; have huv_ne0 : u * v ≠ 0 := (by obtain h | h := huw_cases; (rw [h.1]; omega); (rw [h.1]; omega)); by_cases hp_uv : 1 ≤ u * v; (have hm := mul_le_mul_of_nonneg_left.int 1 (u * v) (2 * Qa.A) hp_uv (by linarith [hra.2.1]); omega); (have hm := mul_le_mul_of_nonneg_left.int (u * v) (-1) (2 * Qa.A) (by omega) (by linarith [hra.2.1]); omega)
+    have hC_eq : Qa.C = Qb.C := by have hC : (sernau.qf_act Qa u v w z).C = Qb.C := (by rw [hac]); unfold sernau.qf_act sernau.qf_eval at hC; simp at hC; rw [hv0, hz_eq] at hC; linear_combination hC - Qa.C * hu_sq
+    constructor
+    · exact sernau.qf_ext Qa Qb hA_eq (by rw [hv0] at hB_rel; linarith) hC_eq
+    · obtain h | h := huw_cases; (left; exact ⟨h.1, hv0, hw0, by rw [hz_eq, h.1]⟩); (right; exact ⟨h.1, hv0, hw0, by rw [hz_eq, h.1]⟩)
+  by_cases hle : Q2.A ≤ Q1.A; exact hle_case Q1 Q2 p q r s h1 h2 hle hdet hact
+  have hinv := (sernau.qf_act_props Q1 p q r s 0 0).2.2 hdet; rw [hact] at hinv
+  obtain ⟨heq21, haut⟩ := hle_case Q2 Q1 s (-q) (-r) p h2 h1 (by omega) (by linarith) hinv
+  constructor; exact heq21.symm
+  obtain h | h := haut; (left; exact ⟨h.2.2.2, by omega, by omega, h.1⟩); (right; exact ⟨h.2.2.2, by omega, by omega, h.1⟩)
+
++ sernau.qf_act_comp (Q : QuadForm) (p1 q1 r1 s1 p2 q2 r2 s2 : ℤ) :
+    sernau.qf_act (sernau.qf_act Q p1 q1 r1 s1) p2 q2 r2 s2 =
+    sernau.qf_act Q (p1 * p2 + q1 * r2) (p1 * q2 + q1 * s2) (r1 * p2 + s1 * r2) (r1 * q2 + s1 * s2)
+  apply sernau.qf_ext <;> (unfold sernau.qf_act sernau.qf_eval; simp; ring)
+
++ sernau.qf_exists_reduced (d : ℕ) (Q : QuadForm) (hd_pr : is_prime_nat d) (hd8 : d % 8 = 7)
+    (hA1 : 1 ≤ Q.A) (hdisc : sernau.qf_disc Q = -(d : ℤ)) :
+    ∃ (Qr : QuadForm) (p q r s : ℤ), sernau.qf_is_reduced d Qr ∧ p * s - q * r = 1 ∧ sernau.qf_act Q p q r s = Qr
+  have hd7 : 7 ≤ d := (sernau.qf_reduced_props d hd_pr hd8).1
+  have hrec : ∀ (M : ℕ) (F : QuadForm), 1 ≤ F.A → F.A ≤ (M : ℤ) → sernau.qf_disc F = -(d : ℤ) →
+      ∃ (Qr : QuadForm) (p q r s : ℤ), sernau.qf_is_reduced d Qr ∧ p * s - q * r = 1 ∧ sernau.qf_act F p q r s = Qr
+    intro M; induction M with _ _ _ _ k ihk F hFA hle hdF; (simp at *; omega)
+    rw [succ_eq_add_one.nat] at hle
+    by_cases hlt_k : F.A ≤ (k : ℤ); exact ihk F hFA hlt_k hdF
+    set A_n := nat_of_int F.A with hAn_def; have hAn_eq : (A_n : ℤ) = F.A := by rw [hAn_def]; exact int_of_nat_of_int F.A (by omega)
+    have hAn_pos : 0 < 2 * A_n := by have hp : 1 ≤ A_n := (cast_le.int 1 A_n).mp (by rw [hAn_eq]; exact hFA); omega
+    set absB := nat_of_int (if 0 ≤ F.B then F.B else -F.B) with habsB_def
+    have habsB_ge : -(absB : ℤ) ≤ F.B ∧ F.B ≤ (absB : ℤ) := by by_cases hb0 : 0 ≤ F.B; (have he : (absB : ℤ) = F.B := (by rw [habsB_def, if_pos hb0]; exact int_of_nat_of_int _ hb0); omega); (have he : (absB : ℤ) = -F.B := (by rw [habsB_def, if_neg hb0]; exact int_of_nat_of_int _ (by omega)); omega)
+    set sh_n := nat_of_int ((F.A - F.B) + ((2 * A_n : ℕ) : ℤ) * ((absB + 1 : ℕ) : ℤ)) with hshn_def
+    have hsh_nn : 0 ≤ (F.A - F.B) + ((2 * A_n : ℕ) : ℤ) * ((absB + 1 : ℕ) : ℤ) := by rw [cast_mul.int, cast_add.int, cast_one.int, hAn_eq]; simp; have hm := mul_le_mul_of_nonneg_left.int 1 F.A ((absB : ℤ) + 1) hFA (by linarith [cast_nonneg.int absB]); linarith [habsB_ge.2]
+    have hsh_eq : (sh_n : ℤ) = (F.A - F.B) + ((2 * A_n : ℕ) : ℤ) * ((absB + 1 : ℕ) : ℤ) := by rw [hshn_def]; exact int_of_nat_of_int _ hsh_nn
+    set q_n := sh_n / (2 * A_n) with hqn_def; set q_sh : ℤ := (q_n : ℤ) - ((absB + 1 : ℕ) : ℤ) with hqsh_def; set rem_n := sh_n % (2 * A_n) with hremn_def
+    have hdm := div_add_mod.nat sh_n (2 * A_n); rw [← hqn_def, ← hremn_def] at hdm; have hrem_lt := mod_lt.nat sh_n (2 * A_n) hAn_pos
+    have hsh_z : (sh_n : ℤ) = ((2 * A_n : ℕ) : ℤ) * (q_n : ℤ) + (rem_n : ℤ) := by have hc : ((sh_n : ℕ) : ℤ) = (((2 * A_n) * q_n + rem_n : ℕ) : ℤ) := (by rw [hdm]); rw [cast_add.int, cast_mul.int] at hc; exact hc
+    set F1 := sernau.qf_act F 1 q_sh 0 1 with hF1_def
+    have hF1_A : F1.A = F.A := by rw [hF1_def]; unfold sernau.qf_act sernau.qf_eval; simp
+    have hF1_B : F1.B = F.A - (rem_n : ℤ) := by rw [hF1_def]; unfold sernau.qf_act; simp; have h2A : ((2 * A_n : ℕ) : ℤ) = 2 * F.A := (by rw [cast_mul.int, hAn_eq]; simp); rw [h2A] at hsh_eq hsh_z; rw [hqsh_def]; omega
+    have hrem_z : 0 ≤ (rem_n : ℤ) ∧ (rem_n : ℤ) < 2 * F.A := by have hlt_z : (rem_n : ℤ) < ((2 * A_n : ℕ) : ℤ) := (cast_lt.int rem_n (2 * A_n)).mpr (by rw [hremn_def]; exact hrem_lt); rw [cast_mul.int, hAn_eq] at hlt_z; simp at hlt_z; exact ⟨cast_nonneg.int rem_n, hlt_z⟩
+    have hF1_disc : sernau.qf_disc F1 = -(d : ℤ) := by rw [hF1_def]; have hp := (sernau.qf_act_props F 1 q_sh 0 1 0 0).2.1; have hd1 : (1 : ℤ) * 1 - q_sh * 0 = 1 := (by ring); rw [hp, hd1, hdF]; ring
+    by_cases hAC1 : F1.A ≤ F1.C
+    · by_cases heq_AC1 : F1.A = F1.C ∧ F1.B < 0
+      · set F2 := sernau.qf_act F1 0 (-1) 1 0 with hF2_def; use F2, q_sh, (-1), 1, 0
+        have hcomp : sernau.qf_act F q_sh (-1) 1 0 = F2 := by rw [hF2_def, hF1_def, sernau.qf_act_comp]; apply sernau.qf_ext <;> simp <;> ring
+        have hF2_red : sernau.qf_is_reduced d F2
+          have hp2 := (sernau.qf_act_props F1 0 (-1) 1 0 0 0).2.1; have hd2 : (0 : ℤ) * 0 - (-1) * 1 = 1 := (by ring); unfold sernau.qf_is_reduced; rw [hF2_def, hp2, hd2, hF1_disc, ← hF2_def]
+          have hA2 : F2.A = F1.C := (by rw [hF2_def]; unfold sernau.qf_act sernau.qf_eval; simp); have hB2 : F2.B = -F1.B := (by rw [hF2_def]; unfold sernau.qf_act; simp; ring); have hC2 : F2.C = F1.A := (by rw [hF2_def]; unfold sernau.qf_act sernau.qf_eval; simp; ring)
+          rw [hA2, hB2, hC2, ← heq_AC1.1]; exact ⟨by ring, by omega, by omega, by omega, by omega, by intro _; omega⟩
+        exact ⟨hF2_red, by ring, hcomp⟩
+      · use F1, 1, q_sh, 0, 1
+        exact ⟨⟨hF1_disc, by omega, by omega, by omega, hAC1, by intro heq; by_contra hlt0; exact heq_AC1 ⟨heq, by omega⟩⟩, by ring, hF1_def.symm⟩
+    · set F2 := sernau.qf_act F1 0 (-1) 1 0 with hF2_def
+      have hF2_A : F2.A = F1.C := by rw [hF2_def]; unfold sernau.qf_act sernau.qf_eval; simp
+      have hF2_disc : sernau.qf_disc F2 = -(d : ℤ) := by rw [hF2_def]; have hp2 := (sernau.qf_act_props F1 0 (-1) 1 0 0 0).2.1; have hd2 : (0 : ℤ) * 0 - (-1) * 1 = 1 := (by ring); rw [hp2, hd2, hF1_disc]; ring
+      have hC1_pos : 1 ≤ F1.C := by unfold sernau.qf_disc at hF1_disc; have hB2_nn : 0 ≤ F1.B * F1.B := (by by_cases hb : 0 ≤ F1.B; exact mul_nonneg.int _ _ hb hb; (have hm := mul_nonneg.int (-F1.B) (-F1.B) (by omega) (by omega); have hs : (-F1.B) * (-F1.B) = F1.B * F1.B := (by ring); omega)); by_contra hc0; have hm := mul_le_mul_of_nonneg_left.int F1.C 0 (4 * F1.A) (by omega) (by omega); have hd_nn := cast_nonneg.int d; omega
+      obtain ⟨Qr, p2, q2, r2, s2, hQr_red, hdet2, hact2⟩ := ihk F2 (by omega) (by omega) hF2_disc
+      use Qr, (q_sh * p2 - r2), (q_sh * q2 - s2), p2, q2
+      exact ⟨hQr_red, by linear_combination hdet2, by rw [← hact2, hF2_def, hF1_def, sernau.qf_act_comp, sernau.qf_act_comp]; apply sernau.qf_ext <;> simp <;> ring⟩
+  set M0 := nat_of_int Q.A with hM0_def; have hM0 : (M0 : ℤ) = Q.A := by rw [hM0_def]; exact int_of_nat_of_int Q.A (by omega)
+  exact hrec M0 Q hA1 (by omega) hdisc
+
+-> sernau.int_coprime (x y : ℤ) : Prop := ∃ u v : ℤ, x * u - y * v = 1
+-> sernau.ok_poly (d t : ℕ) : ℕ := t * t + t + (d + 1) / 4
+-> sernau.ok_roots (d m : ℕ) : ℕ := ∑ t < m, if sernau.ok_poly d t % m = 0 then 1 else 0
+-> sernau.ok_form (d m t : ℕ) : QuadForm := QuadForm.mk (m : ℤ) ((2 * t + 1 : ℕ) : ℤ) ((sernau.ok_poly d t / m : ℕ) : ℤ)
+-> sernau.rel_rep_root (d m : ℕ) (Q : QuadForm) (x y : ℤ) (t : ℕ) : Prop :=
+  sernau.ok_poly d t % m = 0 ∧ ∃ u v : ℤ, x * u - y * v = 1 ∧ sernau.qf_act Q x v y u = sernau.ok_form d m t
+
+-> sernau.qf_prim_rep_count (d m : ℕ) : ℕ :=
+  ∑ idx < sernau.qf_grid_len d, if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then
+    (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1,
+      if sernau.qf_eval (sernau.qf_of_idx d idx) ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) = (m : ℤ) ∧
+         sernau.int_coprime ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) then 1 else 0)
+  else 0
+
+-> sernau.qf_rep_count (d n : ℕ) : ℕ :=
+  ∑ idx < sernau.qf_grid_len d, if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then
+    (∑ ix < 2 * n + 1, ∑ iy < 2 * n + 1,
+      if sernau.qf_eval (sernau.qf_of_idx d idx) ((ix : ℤ) - (n : ℤ)) ((iy : ℤ) - (n : ℤ)) = (n : ℤ) then 1 else 0)
+  else 0
+
++ sernau.qf_eval_box_bound (d m : ℕ) (Q : QuadForm) (x y : ℤ)
+    (hd_pr : is_prime_nat d) (hd8 : d % 8 = 7) (hred : sernau.qf_is_reduced d Q)
+    (hev : sernau.qf_eval Q x y = (m : ℤ)) :
+    -(m : ℤ) ≤ x ∧ x ≤ (m : ℤ) ∧ -(m : ℤ) ≤ y ∧ y ≤ (m : ℤ)
+  obtain ⟨_, _, hprops⟩ := sernau.qf_reduced_props d hd_pr hd8
+  have hq := (hprops Q hred).2.2.2.2.2.2.2.1 x y; rw [hev] at hq
+  have hbd : ∀ z : ℤ, 3 * z * z ≤ 4 * (m : ℤ) → -(m : ℤ) ≤ z ∧ z ≤ (m : ℤ)
+    intro z hz; constructor
+    · by_contra hlt; have hm1 := mul_le_mul_of_nonneg_left.int ((m : ℤ) + 1) (-z) ((m : ℤ) + 1) (by omega) (by linarith [cast_nonneg.int m])
+      have hm2 := mul_le_mul_of_nonneg_right.int ((m : ℤ) + 1) (-z) (-z) (by omega) (by linarith [cast_nonneg.int m])
+      have hs : (-z) * (-z) = z * z := (by ring)
+      have hexp : 3 * (((m : ℤ) + 1) * ((m : ℤ) + 1)) = 3 * ((m : ℤ) * (m : ℤ)) + 6 * (m : ℤ) + 3 := (by ring)
+      have hsq_m : 0 ≤ (m : ℤ) * (m : ℤ) := mul_nonneg.int (m : ℤ) (m : ℤ) (cast_nonneg.int m) (cast_nonneg.int m)
+      linarith [cast_nonneg.int m]
+    · by_contra hgt; have hm1 := mul_le_mul_of_nonneg_left.int ((m : ℤ) + 1) z ((m : ℤ) + 1) (by omega) (by linarith [cast_nonneg.int m])
+      have hm2 := mul_le_mul_of_nonneg_right.int ((m : ℤ) + 1) z z (by omega) (by omega)
+      have hexp : 3 * (((m : ℤ) + 1) * ((m : ℤ) + 1)) = 3 * ((m : ℤ) * (m : ℤ)) + 6 * (m : ℤ) + 3 := (by ring)
+      have hsq_m : 0 ≤ (m : ℤ) * (m : ℤ) := mul_nonneg.int (m : ℤ) (m : ℤ) (cast_nonneg.int m) (cast_nonneg.int m)
+      linarith [cast_nonneg.int m]
+  exact ⟨(hbd x hq.1).1, (hbd x hq.1).2, (hbd y hq.2).1, (hbd y hq.2).2⟩
+
++ sernau.qf_prim_rep_eq_two_ok_roots (d m : ℕ) (hd_pr : is_prime_nat d) (hd8 : d % 8 = 7) (hm : 1 ≤ m) :
+    sernau.qf_prim_rep_count d m = 2 * sernau.ok_roots d m
+  obtain ⟨hpos_cl, hinj, hsurj⟩ := sernau.qf_of_idx_bij_and_pos d hd_pr hd8
+  have h4cd : 4 * ((d + 1) / 4) = d + 1 := by have h := div_add_mod.nat (d + 1) 4; have h8 := div_add_mod.nat d 8; omega
+  have hok_id : ∀ t : ℕ, 4 * ((sernau.ok_poly d t : ℕ) : ℤ) = ((2 * t + 1 : ℕ) : ℤ) * ((2 * t + 1 : ℕ) : ℤ) + (d : ℤ)
+    intro t; unfold sernau.ok_poly; have hn : 4 * (t * t + t + (d + 1) / 4) = (2 * t + 1) * (2 * t + 1) + d := (by have hd4 : 4 * (t * t + t + (d + 1) / 4) = 4 * (t * t) + 4 * t + 4 * ((d + 1) / 4) := (by ring); rw [hd4, h4cd]; ring)
+    have hc : ((4 * (t * t + t + (d + 1) / 4) : ℕ) : ℤ) = (((2 * t + 1) * (2 * t + 1) + d : ℕ) : ℤ) := (by rw [hn])
+    rw [cast_mul.int 4 (t * t + t + (d + 1) / 4), cast_add.int ((2 * t + 1) * (2 * t + 1)) d, cast_mul.int (2 * t + 1) (2 * t + 1)] at hc; simp at hc ⊢
+  have hrow : ∀ (Q : QuadForm) (x y : ℤ), sernau.qf_is_reduced d Q →
+      (sernau.qf_eval Q x y = (m : ℤ) ∧ sernau.int_coprime x y) →
+      (∑ t < m, if sernau.rel_rep_root d m Q x y t then 1 else 0) = 1
+    intro Q x y hred ⟨hev, u0, v0, hdet0⟩
+    set F0 := sernau.qf_act Q x v0 y u0 with hF0_def
+    have hF0_A : F0.A = (m : ℤ) := by rw [hF0_def]; unfold sernau.qf_act; simp [hev]
+    have hF0_disc : sernau.qf_disc F0 = -(d : ℤ) := by rw [hF0_def, (sernau.qf_act_props Q x v0 y u0 0 0).2.1]; have hd1 : x * u0 - v0 * y = 1 := (by linarith); rw [hd1, hred.1]; ring
+    set absB := nat_of_int (if 0 ≤ F0.B then F0.B else -F0.B) with habsB_def
+    have habsB_ge : -(absB : ℤ) ≤ F0.B := by by_cases hb0 : 0 ≤ F0.B; (have he : (absB : ℤ) = F0.B := (by rw [habsB_def, if_pos hb0]; exact int_of_nat_of_int _ hb0); omega); (have he : (absB : ℤ) = -F0.B := (by rw [habsB_def, if_neg hb0]; exact int_of_nat_of_int _ (by omega)); omega)
+    set sh := nat_of_int (F0.B + ((2 * m : ℕ) : ℤ) * ((absB + 1 : ℕ) : ℤ)) with hsh_def
+    have hsh_nn : 0 ≤ F0.B + ((2 * m : ℕ) : ℤ) * ((absB + 1 : ℕ) : ℤ) := by rw [cast_mul.int, cast_add.int, cast_one.int]; simp; have hm1 := mul_le_mul_of_nonneg_left.int 1 (m : ℤ) ((absB : ℤ) + 1) ((cast_le.int 1 m).mpr hm) (by linarith [cast_nonneg.int absB]); linarith
+    have hsh_eq : (sh : ℤ) = F0.B + ((2 * m : ℕ) : ℤ) * ((absB + 1 : ℕ) : ℤ) := by rw [hsh_def]; exact int_of_nat_of_int _ hsh_nn
+    set q_shn := sh / (2 * m) with hqshn_def; set k_sh : ℤ := ((absB + 1 : ℕ) : ℤ) - (q_shn : ℤ) with hksh_def
+    set b_n := sh % (2 * m) with hbn_def
+    have hdm := div_add_mod.nat sh (2 * m); rw [← hqshn_def, ← hbn_def] at hdm; have hbn_lt := mod_lt.nat sh (2 * m) (by omega)
+    have hsh_z : (sh : ℤ) = ((2 * m : ℕ) : ℤ) * (q_shn : ℤ) + (b_n : ℤ) := by have hc : ((sh : ℕ) : ℤ) = (((2 * m) * q_shn + b_n : ℕ) : ℤ) := (by rw [hdm]); rw [cast_add.int, cast_mul.int] at hc; exact hc
+    set u1 := u0 + y * k_sh with hu1_def; set v1 := v0 + x * k_sh with hv1_def
+    set F1 := sernau.qf_act Q x v1 y u1 with hF1_def
+    have hF1_step : F1 = sernau.qf_act F0 1 k_sh 0 1 := by rw [hF1_def, hF0_def, sernau.qf_act_comp, hu1_def, hv1_def]; unfold sernau.qf_act sernau.qf_eval; have e1 : Q.A * x * x + Q.B * x * y + Q.C * y * y = Q.A * (x * 1 + v0 * 0) * (x * 1 + v0 * 0) + Q.B * (x * 1 + v0 * 0) * (y * 1 + u0 * 0) + Q.C * (y * 1 + u0 * 0) * (y * 1 + u0 * 0) := (by ring); have e2 : 2 * Q.A * x * (v0 + x * k_sh) + Q.B * (x * (u0 + y * k_sh) + (v0 + x * k_sh) * y) + 2 * Q.C * y * (u0 + y * k_sh) = 2 * Q.A * (x * 1 + v0 * 0) * (x * k_sh + v0 * 1) + Q.B * ((x * 1 + v0 * 0) * (y * k_sh + u0 * 1) + (x * k_sh + v0 * 1) * (y * 1 + u0 * 0)) + 2 * Q.C * (y * 1 + u0 * 0) * (y * k_sh + u0 * 1) := (by ring); have e3 : Q.A * (v0 + x * k_sh) * (v0 + x * k_sh) + Q.B * (v0 + x * k_sh) * (u0 + y * k_sh) + Q.C * (u0 + y * k_sh) * (u0 + y * k_sh) = Q.A * (x * k_sh + v0 * 1) * (x * k_sh + v0 * 1) + Q.B * (x * k_sh + v0 * 1) * (y * k_sh + u0 * 1) + Q.C * (y * k_sh + u0 * 1) * (y * k_sh + u0 * 1) := (by ring); rw [e1, e2, e3]
+    have hF1_A : F1.A = (m : ℤ) := by rw [hF1_step]; unfold sernau.qf_act sernau.qf_eval; simp [hF0_A]
+    have hF1_B : F1.B = (b_n : ℤ) := by rw [hF1_step]; unfold sernau.qf_act; simp; rw [hF0_A]; have h2m : ((2 * m : ℕ) : ℤ) = 2 * (m : ℤ) := (by rw [cast_mul.int]; simp); rw [h2m] at hsh_eq hsh_z; rw [hksh_def]; omega
+    have hF1_disc : sernau.qf_disc F1 = -(d : ℤ) := by rw [hF1_step, (sernau.qf_act_props F0 1 k_sh 0 1 0 0).2.1]; have hd1 : (1 : ℤ) * 1 - k_sh * 0 = 1 := (by ring); rw [hd1, hF0_disc]; ring
+    have hbn_odd : b_n % 2 = 1
+      by_contra hev_b; obtain h0 | h1 := mod_two_cases.nat b_n
+      · have hbn2 : b_n = 2 * (b_n / 2) := (by have h := div_add_mod.nat b_n 2; omega)
+        unfold sernau.qf_disc at hF1_disc; rw [hF1_A, hF1_B, hbn2, cast_mul.int] at hF1_disc; simp at hF1_disc
+        have hd_ev : (d : ℤ) = 2 * (2 * (m : ℤ) * F1.C - 2 * ((b_n / 2 : ℕ) : ℤ) * ((b_n / 2 : ℕ) : ℤ)) := (by omega)
+        set qd := nat_of_int (2 * (m : ℤ) * F1.C - 2 * ((b_n / 2 : ℕ) : ℤ) * ((b_n / 2 : ℕ) : ℤ)) with hqd_def
+        have hqd_nn : 0 ≤ 2 * (m : ℤ) * F1.C - 2 * ((b_n / 2 : ℕ) : ℤ) * ((b_n / 2 : ℕ) : ℤ) := (by have hd_nn := cast_nonneg.int d; omega)
+        have hqd_eq : (qd : ℤ) = 2 * (m : ℤ) * F1.C - 2 * ((b_n / 2 : ℕ) : ℤ) * ((b_n / 2 : ℕ) : ℤ) := (by rw [hqd_def]; exact int_of_nat_of_int _ hqd_nn)
+        have hd_nat : d = 2 * qd := (cast_inj.int d (2 * qd)).mp (by rw [cast_mul.int, hqd_eq]; simp [hd_ev])
+        have hd_m2 : d % 2 = 0 := (div_mod_unique.nat d 2 qd 0 hd_nat (by decide)).2.symm; have hd8_div := div_add_mod.nat d 8; omega
+      · exact hev_b h1
+    set t0 := b_n / 2 with ht0_def
+    have hbn_eq : b_n = 2 * t0 + 1 := by have h := div_add_mod.nat b_n 2; omega
+    have ht0_lt : t0 < m := by omega
+    have h4ok_eq : 4 * ((sernau.ok_poly d t0 : ℕ) : ℤ) = 4 * (m : ℤ) * F1.C := by rw [hok_id t0, ← hbn_eq]; have hc_bn : ((2 * t0 + 1 : ℕ) : ℤ) = (b_n : ℤ) := (by rw [hbn_eq]); unfold sernau.qf_disc at hF1_disc; rw [hF1_A, hF1_B] at hF1_disc; omega
+    have hok_eq : ((sernau.ok_poly d t0 : ℕ) : ℤ) = (m : ℤ) * F1.C := by omega
+    have hC_nn : 0 ≤ F1.C := by by_contra hn; have hm_neg := mul_le_mul_of_nonneg_left.int F1.C (-1) (m : ℤ) (by omega) (cast_nonneg.int m); have hm1 : (1 : ℤ) ≤ (m : ℤ) := (cast_le.int 1 m).mpr hm; have hok_nn := cast_nonneg.int (sernau.ok_poly d t0); omega
+    set c_n := nat_of_int F1.C with hcn_def; have hcn_eq : (c_n : ℤ) = F1.C := by rw [hcn_def]; exact int_of_nat_of_int _ hC_nn
+    have hok_nat : sernau.ok_poly d t0 = m * c_n + 0 := (cast_inj.int (sernau.ok_poly d t0) (m * c_n + 0)).mp (by rw [cast_add.int, cast_mul.int, hcn_eq]; simp [hok_eq])
+    have hdm_ok := div_mod_unique.nat (sernau.ok_poly d t0) m c_n 0 hok_nat (by omega)
+    have hF1_ok : F1 = sernau.ok_form d m t0
+      apply sernau.qf_ext
+      · unfold sernau.ok_form; simp [hF1_A]
+      · rw [hF1_B, hbn_eq]; unfold sernau.ok_form; simp
+      · unfold sernau.ok_form; simp [← hdm_ok.1, hcn_eq]
+    have hrel0 : sernau.rel_rep_root d m Q x y t0 :=
+      ⟨hdm_ok.2.symm, u1, v1, by rw [hu1_def, hv1_def]; linear_combination hdet0, by rw [← hF1_def, hF1_ok]⟩
+    have huniq : ∀ t < m, sernau.rel_rep_root d m Q x y t → t = t0
+      intro t ht ⟨_, ut, vt, hdett, hactt⟩
+      have hd1 : x * u1 - y * v1 = 1 := by rw [hu1_def, hv1_def]; linear_combination hdet0
+      have hv_eq : x * 1 * (u1 * vt - v1 * ut) + v1 * 1 = vt := by linear_combination vt * hd1 - v1 * hdett
+      have hu_eq : y * 1 * (u1 * vt - v1 * ut) + u1 * 1 = ut := by linear_combination ut * hd1 - u1 * hdett
+      have hstep : sernau.qf_act F1 1 (u1 * vt - v1 * ut) 0 1 = sernau.qf_act Q x vt y ut
+        rw [hF1_def, sernau.qf_act_comp]
+        have p1 : x * 1 + v1 * 0 = x := (by ring); have q1 : x * (u1 * vt - v1 * ut) + v1 * 1 = vt := (by linear_combination hv_eq)
+        have r1 : y * 1 + u1 * 0 = y := (by ring); have s1 : y * (u1 * vt - v1 * ut) + u1 * 1 = ut := (by linear_combination hu_eq)
+        rw [p1, q1, r1, s1]
+      rw [hactt] at hstep
+      have hB_eq : (sernau.qf_act F1 1 (u1 * vt - v1 * ut) 0 1).B = (sernau.ok_form d m t).B := by rw [hstep]
+      unfold sernau.qf_act sernau.ok_form at hB_eq; simp [hF1_A, hF1_B, hbn_eq] at hB_eq
+      set ks := u1 * vt - v1 * ut
+      have ht_lo : (0 : ℤ) ≤ (t : ℤ) := cast_nonneg.int t; have ht_hi : (t : ℤ) < (m : ℤ) := (cast_lt.int t m).mpr ht
+      have ht0_lo : (0 : ℤ) ≤ (t0 : ℤ) := cast_nonneg.int t0; have ht0_hi : (t0 : ℤ) < (m : ℤ) := (cast_lt.int t0 m).mpr ht0_lt
+      have hks0 : ks = 0 := by by_contra hkn; by_cases hp : 1 ≤ ks; (have hm_k := mul_le_mul_of_nonneg_left.int 1 ks (2 * (m : ℤ)) hp (by omega); omega); (have hm_k := mul_le_mul_of_nonneg_left.int ks (-1) (2 * (m : ℤ)) (by omega) (by omega); omega)
+      rw [hks0] at hB_eq; exact (cast_inj.int t t0).mp (by omega)
+    have hsum1 : ∀ K : ℕ, t0 < K → K ≤ m → (∑ t < K, if sernau.rel_rep_root d m Q x y t then 1 else 0) = 1
+      intro K; induction K with _ _ k ihk hlt hle; omega; rw [succ_eq_add_one.nat] at hlt hle ⊢; rw [sum_below_succ]
+      by_cases hk : t0 < k; (rw [ihk hk (by omega), if_neg (by intro hr; have he := huniq k (by omega) hr; omega)]; omega)
+      have he : k = t0 := (by omega); rw [he, if_pos hrel0]
+      have hz0 : ∀ u ≤ t0, (∑ t < u, if sernau.rel_rep_root d m Q x y t then 1 else 0) = 0 := by intro u; induction u with _ j ihj hu; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat] at hu ⊢; rw [sum_below_succ, ihj (by omega), if_neg (by intro hr; have he2 := huniq j (by omega) hr; omega)]; omega)
+      rw [hz0 t0 (by omega)]; omega
+    exact hsum1 m ht0_lt (by omega)
+  have hcol : ∀ t < m, (∑ idx < sernau.qf_grid_len d, (if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if sernau.rel_rep_root d m (sernau.qf_of_idx d idx) ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t then 1 else 0) else 0)) = 2 * (if sernau.ok_poly d t % m = 0 then 1 else 0)
+    intro t ht; by_cases hmod : sernau.ok_poly d t % m = 0
+    · rw [if_pos hmod]; set Ft := sernau.ok_form d m t with hFt_def
+      have hdm_ok := div_add_mod.nat (sernau.ok_poly d t) m; rw [hmod] at hdm_ok
+      have hFt_disc : sernau.qf_disc Ft = -(d : ℤ)
+        rw [hFt_def]; unfold sernau.qf_disc sernau.ok_form; simp
+        set q_ok := sernau.ok_poly d t / m with hqok_def; rw [add_zero.nat] at hdm_ok
+        have hmc : 4 * (m : ℤ) * (q_ok : ℤ) = 4 * ((sernau.ok_poly d t : ℕ) : ℤ) := by have hc : ((m * q_ok : ℕ) : ℤ) = ((sernau.ok_poly d t : ℕ) : ℤ) := (by rw [hdm_ok]); rw [cast_mul.int] at hc; linear_combination 4 * hc
+        have hok_t := hok_id t; simp at hok_t; rw [hmc, hok_t]; ring
+      obtain ⟨Q0, p, q, r, s, hQ0_red, hdet, hact⟩ := sernau.qf_exists_reduced d Ft hd_pr hd8 (by rw [hFt_def]; unfold sernau.ok_form; simp; exact (cast_le.int 1 m).mpr hm) hFt_disc
+      obtain ⟨idx0, hidx0_lt, hidx0_eq⟩ := hsurj Q0 hQ0_red
+      have hinv := (sernau.qf_act_props Ft p q r s 0 0).2.2 hdet; rw [hact] at hinv
+      set x0 := s with hx0_def; set y0 := -r with hy0_def
+      rw [hx0_def] at hdet hact hinv; rw [hy0_def] at hinv
+      have hrel_pos : sernau.rel_rep_root d m Q0 x0 y0 t := ⟨hmod, p, -q, by rw [hx0_def, hy0_def]; linear_combination hdet, by rw [hx0_def, hy0_def, ← hFt_def]; exact hinv⟩
+      have hrel_neg : sernau.rel_rep_root d m Q0 (-x0) (-y0) t := ⟨hmod, -p, q, by rw [hx0_def, hy0_def]; linear_combination hdet, by rw [← hFt_def, ← hinv, hx0_def, hy0_def]; unfold sernau.qf_act sernau.qf_eval; have e1 : Q0.A * (-s) * (-s) + Q0.B * (-s) * (-(-r)) + Q0.C * (-(-r)) * (-(-r)) = Q0.A * s * s + Q0.B * s * (-r) + Q0.C * (-r) * (-r) := (by ring); have e2 : 2 * Q0.A * (-s) * q + Q0.B * ((-s) * (-p) + q * (-(-r))) + 2 * Q0.C * (-(-r)) * (-p) = 2 * Q0.A * s * (-q) + Q0.B * (s * p + (-q) * (-r)) + 2 * Q0.C * (-r) * p := (by ring); have e3 : Q0.A * q * q + Q0.B * q * (-p) + Q0.C * (-p) * (-p) = Q0.A * (-q) * (-q) + Q0.B * (-q) * p + Q0.C * p * p := (by ring); rw [e1, e2, e3]⟩
+      have hev0 : sernau.qf_eval Q0 x0 y0 = (m : ℤ) := by have hA : (sernau.qf_act Q0 x0 (-q) y0 p).A = Ft.A := (by rw [hx0_def, hy0_def, hinv]); unfold sernau.qf_act at hA; rw [hFt_def] at hA; unfold sernau.ok_form at hA; simp at hA; exact hA
+      have hev1 : sernau.qf_eval Q0 (-x0) (-y0) = (m : ℤ) := by unfold sernau.qf_eval at hev0 ⊢; have hneg_ev : Q0.A * (-x0) * (-x0) + Q0.B * (-x0) * (-y0) + Q0.C * (-y0) * (-y0) = Q0.A * x0 * x0 + Q0.B * x0 * y0 + Q0.C * y0 * y0 := (by ring); rw [hneg_ev]; exact hev0
+      have hbd0 := sernau.qf_eval_box_bound d m Q0 x0 y0 hd_pr hd8 hQ0_red hev0
+      have hbd1 := sernau.qf_eval_box_bound d m Q0 (-x0) (-y0) hd_pr hd8 hQ0_red hev1
+      have hne_pair : ¬ (x0 = -x0 ∧ y0 = -y0) := by intro ⟨hx, hy⟩; have hx00 : x0 = 0 := (by omega); have hy00 : y0 = 0 := (by omega); rw [hx0_def] at hx00; rw [hy0_def] at hy00; rw [hx00] at hdet; have hr0 : r = 0 := (by omega); rw [hr0] at hdet; omega
+      have honly : ∀ (Q : QuadForm) (x y : ℤ), sernau.qf_is_reduced d Q → sernau.rel_rep_root d m Q x y t →
+          Q = Q0 ∧ ((x = x0 ∧ y = y0) ∨ (x = -x0 ∧ y = -y0))
+        intro Q x y hQ_red ⟨_, u, v, hduv, hact_uv⟩
+        have hcomp : sernau.qf_act Q (x * p + v * r) (x * q + v * s) (y * p + u * r) (y * q + u * s) = Q0 := by rw [← sernau.qf_act_comp, hact_uv, ← hFt_def, hact]
+        have hdet_c : (x * p + v * r) * (y * q + u * s) - (x * q + v * s) * (y * p + u * r) = 1 := by linear_combination (x * u - y * v) * hdet + hduv
+        obtain ⟨hQQ0, haut⟩ := sernau.qf_reduced_unique_and_aut d Q Q0 _ _ _ _ hd_pr hd8 hQ_red hQ0_red hdet_c hcomp
+        constructor; exact hQQ0
+        obtain ⟨e1, e2, e3, e4⟩ | ⟨e1, e2, e3, e4⟩ := haut
+        · left; exact ⟨by rw [hx0_def]; linear_combination s * e1 - r * e2 - x * hdet, by rw [hy0_def]; linear_combination s * e3 - r * e4 - y * hdet⟩
+        · right; exact ⟨by rw [hx0_def]; linear_combination s * e1 - r * e2 - x * hdet, by rw [hy0_def]; linear_combination s * e3 - r * e4 - y * hdet⟩
+      set ix0 := nat_of_int (x0 + (m : ℤ)) with hix0_def; set iy0 := nat_of_int (y0 + (m : ℤ)) with hiy0_def
+      set ix1 := nat_of_int (-x0 + (m : ℤ)) with hix1_def; set iy1 := nat_of_int (-y0 + (m : ℤ)) with hiy1_def
+      have hix0_eq : (ix0 : ℤ) - (m : ℤ) = x0 := by have h := int_of_nat_of_int (x0 + (m : ℤ)) (by omega); rw [← hix0_def] at h; omega
+      have hiy0_eq : (iy0 : ℤ) - (m : ℤ) = y0 := by have h := int_of_nat_of_int (y0 + (m : ℤ)) (by omega); rw [← hiy0_def] at h; omega
+      have hix1_eq : (ix1 : ℤ) - (m : ℤ) = -x0 := by have h := int_of_nat_of_int (-x0 + (m : ℤ)) (by omega); rw [← hix1_def] at h; omega
+      have hiy1_eq : (iy1 : ℤ) - (m : ℤ) = -y0 := by have h := int_of_nat_of_int (-y0 + (m : ℤ)) (by omega); rw [← hiy1_def] at h; omega
+      have hix0_lt : ix0 < 2 * m + 1 := (cast_lt.int ix0 (2 * m + 1)).mp (by rw [cast_add.int, cast_mul.int, cast_one.int]; simp; omega)
+      have hiy0_lt : iy0 < 2 * m + 1 := (cast_lt.int iy0 (2 * m + 1)).mp (by rw [cast_add.int, cast_mul.int, cast_one.int]; simp; omega)
+      have hix1_lt : ix1 < 2 * m + 1 := (cast_lt.int ix1 (2 * m + 1)).mp (by rw [cast_add.int, cast_mul.int, cast_one.int]; simp; omega)
+      have hiy1_lt : iy1 < 2 * m + 1 := (cast_lt.int iy1 (2 * m + 1)).mp (by rw [cast_add.int, cast_mul.int, cast_one.int]; simp; omega)
+      have hne_idx_pair : ¬ (ix0 = ix1 ∧ iy0 = iy1) := by intro ⟨ex, ey⟩; apply hne_pair; rw [ex] at hix0_eq; rw [ey] at hiy0_eq; exact ⟨by omega, by omega⟩
+      have hsingle : ∀ (N a : ℕ) (P : ℕ → Prop), a < N → P a → (∀ k < N, P k → k = a) → (∑ k < N, if P k then 1 else 0) = 1
+        intro N a P; induction N with _ _ _ u ihu ha hPa hun; omega; rw [succ_eq_add_one.nat] at ha ⊢; rw [sum_below_succ]
+        by_cases hlt : a < u; (rw [ihu hlt hPa (by intro j hj hPj; exact hun j (by omega) hPj), if_neg (by intro hPu; have he := hun u (by omega) hPu; omega)]; omega)
+        have he : u = a := (by omega); rw [he, if_pos hPa]
+        have hz : ∀ w ≤ a, (∑ j < w, if P j then 1 else 0) = 0 := by intro w; induction w with _ j ihj hw; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat] at hw ⊢; rw [sum_below_succ, ihj (by omega), if_neg (by intro hPj; have he2 := hun j (by omega) hPj; omega)]; omega)
+        rw [hz a (by omega)]; omega
+      have hzero_sum : ∀ (N : ℕ) (P : ℕ → Prop), (∀ k < N, ¬ P k) → (∑ k < N, if P k then 1 else 0) = 0
+        intro N P; induction N with _ u ihu hall; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat, sum_below_succ, ihu (by intro j hj; exact hall j (by omega)), if_neg (hall u (by omega))]; omega)
+      have hbox_Q0 : (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if sernau.rel_rep_root d m Q0 ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t then 1 else 0) = 2
+        have hiff : ∀ ix < 2 * m + 1, ∀ iy < 2 * m + 1, sernau.rel_rep_root d m Q0 ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t ↔ (ix = ix0 ∧ iy = iy0) ∨ (ix = ix1 ∧ iy = iy1)
+          intro ix _ iy _; constructor
+          · intro hr; obtain ⟨_, hxy⟩ := honly Q0 _ _ hQ0_red hr
+            obtain ⟨hx, hy⟩ | ⟨hx, hy⟩ := hxy
+            · left; exact ⟨(cast_inj.int ix ix0).mp (by omega), (cast_inj.int iy iy0).mp (by omega)⟩
+            · right; exact ⟨(cast_inj.int ix ix1).mp (by omega), (cast_inj.int iy iy1).mp (by omega)⟩
+          · intro hc; obtain ⟨ex, ey⟩ | ⟨ex, ey⟩ := hc
+            · rw [ex, ey, hix0_eq, hiy0_eq]; exact hrel_pos
+            · rw [ex, ey, hix1_eq, hiy1_eq]; exact hrel_neg
+        have hcon : (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if sernau.rel_rep_root d m Q0 ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t then 1 else 0) =
+            (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if ix = ix0 ∧ iy = iy0 then 1 else 0) + (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if ix = ix1 ∧ iy = iy1 then 1 else 0)
+          rw [← sum_add.nat]; apply sum_congr.nat; intro ix hix; rw [← sum_add.nat]; apply sum_congr.nat; intro iy hiy
+          by_cases h0 : ix = ix0 ∧ iy = iy0
+          · rw [if_pos ((hiff ix hix iy hiy).mpr (by left; exact h0)), if_pos h0, if_neg (by intro h1; exact hne_idx_pair ⟨by omega, by omega⟩)]; omega
+          · by_cases h1 : ix = ix1 ∧ iy = iy1
+            · rw [if_pos ((hiff ix hix iy hiy).mpr (by right; exact h1)), if_neg h0, if_pos h1]; omega
+            · have hnr : ¬ sernau.rel_rep_root d m Q0 ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t
+                intro hr; obtain c0 | c1 := (hiff ix hix iy hiy).mp hr
+                · exact h0 c0
+                · exact h1 c1
+              rw [if_neg hnr, if_neg h0, if_neg h1]; omega
+        have hp0 : (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if ix = ix0 ∧ iy = iy0 then 1 else 0) = 1
+          have hc0 : (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if ix = ix0 ∧ iy = iy0 then 1 else 0) = ∑ ix < 2 * m + 1, if ix = ix0 then 1 else 0
+            apply sum_congr.nat; intro ix _; by_cases ex : ix = ix0
+            · rw [if_pos ex]; exact hsingle (2 * m + 1) iy0 (fun iy => ix = ix0 ∧ iy = iy0) hiy0_lt ⟨ex, by rfl⟩ (by intro iy _ h; exact h.2)
+            · rw [if_neg ex]; exact hzero_sum (2 * m + 1) _ (by intro iy _ h; exact ex h.1)
+          rw [hc0]; exact hsingle (2 * m + 1) ix0 (fun ix => ix = ix0) hix0_lt (by rfl) (by intro ix _ h; exact h)
+        have hp1 : (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if ix = ix1 ∧ iy = iy1 then 1 else 0) = 1
+          have hc1 : (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if ix = ix1 ∧ iy = iy1 then 1 else 0) = ∑ ix < 2 * m + 1, if ix = ix1 then 1 else 0
+            apply sum_congr.nat; intro ix _; by_cases ex : ix = ix1
+            · rw [if_pos ex]; exact hsingle (2 * m + 1) iy1 (fun iy => ix = ix1 ∧ iy = iy1) hiy1_lt ⟨ex, by rfl⟩ (by intro iy _ h; exact h.2)
+            · rw [if_neg ex]; exact hzero_sum (2 * m + 1) _ (by intro iy _ h; exact ex h.1)
+          rw [hc1]; exact hsingle (2 * m + 1) ix1 (fun ix => ix = ix1) hix1_lt (by rfl) (by intro ix _ h; exact h)
+        rw [hcon, hp0, hp1]; omega
+      have hzero_fn : ∀ (N : ℕ) (f : ℕ → ℕ), (∀ k < N, f k = 0) → (∑ k < N, f k) = 0 := by intro N f; induction N with _ u ihu hall; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat, sum_below_succ, ihu (by intro j hj; exact hall j (by omega)), hall u (by omega)]; omega)
+      have hidx_con : (∑ idx < sernau.qf_grid_len d, (if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if sernau.rel_rep_root d m (sernau.qf_of_idx d idx) ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t then 1 else 0) else 0)) = 2 * (∑ idx < sernau.qf_grid_len d, if idx = idx0 then 1 else 0)
+        have hmul2 : ∀ (N : ℕ) (f : ℕ → ℕ), 2 * (∑ k < N, f k) = ∑ k < N, 2 * f k := by intro N f; induction N with u ihu; simp [sum_below_zero]; (rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ← ihu]; ring)
+        rw [hmul2]; apply sum_congr.nat; intro idx hidx; by_cases he_idx : idx = idx0
+        · rw [he_idx, hidx0_eq, if_pos hQ0_red, if_pos (by rfl), hbox_Q0]; omega
+        · rw [if_neg he_idx]; by_cases hred_i : sernau.qf_is_reduced d (sernau.qf_of_idx d idx)
+          · rw [if_pos hred_i]; have h20 : 2 * 0 = 0 := (by omega); rw [h20]
+            apply hzero_fn (2 * m + 1); intro ix _; apply hzero_sum (2 * m + 1); intro iy _ hr
+            have hQeq := (honly (sernau.qf_of_idx d idx) _ _ hred_i hr).1; rw [← hidx0_eq] at hQeq
+            exact he_idx (hinj idx hidx idx0 hidx0_lt hQeq)
+          · rw [if_neg hred_i]; omega
+      rw [hidx_con, hsingle (sernau.qf_grid_len d) idx0 (fun idx => idx = idx0) hidx0_lt (by rfl) (by intro idx _ h; exact h)]
+    · rw [if_neg hmod]; have h20 : 2 * 0 = 0 := (by omega); rw [h20]
+      have hzero_fn : ∀ (N : ℕ) (f : ℕ → ℕ), (∀ k < N, f k = 0) → (∑ k < N, f k) = 0 := by intro N f; induction N with _ u ihu hall; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat, sum_below_succ, ihu (by intro j hj; exact hall j (by omega)), hall u (by omega)]; omega)
+      apply hzero_fn (sernau.qf_grid_len d); intro idx _
+      by_cases hred_i : sernau.qf_is_reduced d (sernau.qf_of_idx d idx)
+      · rw [if_pos hred_i]; apply hzero_fn (2 * m + 1); intro ix _; apply hzero_fn (2 * m + 1); intro iy _
+        rw [if_neg (by intro hr; exact hmod hr.1)]
+      · rw [if_neg hred_i]
+  have hrel_implies_rep : ∀ (Q : QuadForm) (x y : ℤ) (t : ℕ), sernau.rel_rep_root d m Q x y t →
+      sernau.qf_eval Q x y = (m : ℤ) ∧ sernau.int_coprime x y
+    intro Q x y t ⟨_, u, v, hduv, hact_uv⟩
+    have hA : (sernau.qf_act Q x v y u).A = (sernau.ok_form d m t).A := by rw [hact_uv]
+    unfold sernau.qf_act sernau.ok_form at hA; simp at hA; exact ⟨hA, u, v, hduv⟩
+  have hmul2_sum : ∀ (N : ℕ) (f : ℕ → ℕ), (∑ k < N, 2 * f k) = 2 * (∑ k < N, f k) := by intro N f; induction N with u ihu; simp [sum_below_zero]; (rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ihu]; ring)
+  unfold sernau.qf_prim_rep_count sernau.ok_roots
+  have hL : (∑ idx < sernau.qf_grid_len d, (if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if sernau.qf_eval (sernau.qf_of_idx d idx) ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) = (m : ℤ) ∧ sernau.int_coprime ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) then 1 else 0) else 0)) = ∑ t < m, ∑ idx < sernau.qf_grid_len d, (if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if sernau.rel_rep_root d m (sernau.qf_of_idx d idx) ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t then 1 else 0) else 0)
+    rw [sum_swap.nat]; apply sum_congr.nat; intro idx _
+    by_cases hred_i : sernau.qf_is_reduced d (sernau.qf_of_idx d idx)
+    · have hif : (∑ t < m, (if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if sernau.rel_rep_root d m (sernau.qf_of_idx d idx) ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t then 1 else 0) else 0)) = ∑ t < m, ∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if sernau.rel_rep_root d m (sernau.qf_of_idx d idx) ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t then 1 else 0 :=
+        sum_congr.nat _ _ m (by intro t _; rw [if_pos hred_i])
+      rw [if_pos hred_i, hif]; symm; rw [sum_swap.nat]; apply sum_congr.nat; intro ix _
+      rw [sum_swap.nat]; apply sum_congr.nat; intro iy _; symm
+      by_cases hrep : sernau.qf_eval (sernau.qf_of_idx d idx) ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) = (m : ℤ) ∧
+          sernau.int_coprime ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ))
+      · rw [if_pos hrep, hrow (sernau.qf_of_idx d idx) _ _ hred_i hrep]
+      · rw [if_neg hrep]; symm
+        have hz : ∀ u ≤ m, (∑ t < u, if sernau.rel_rep_root d m (sernau.qf_of_idx d idx) ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t then 1 else 0) = 0 := by intro u; induction u with _ j ihj hu; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat] at hu ⊢; rw [sum_below_succ, ihj (by omega), if_neg (by intro hr; exact hrep (hrel_implies_rep _ _ _ j hr))]; omega)
+        exact hz m (by omega)
+    · rw [if_neg hred_i]; symm
+      have hz : ∀ u : ℕ, (∑ t < u, (if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then (∑ ix < 2 * m + 1, ∑ iy < 2 * m + 1, if sernau.rel_rep_root d m (sernau.qf_of_idx d idx) ((ix : ℤ) - (m : ℤ)) ((iy : ℤ) - (m : ℤ)) t then 1 else 0) else 0)) = 0 := by intro u; induction u with j ihj; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat, sum_below_succ, ihj, if_neg hred_i]; omega)
+      exact hz m
+  rw [hL, sum_congr.nat _ _ m hcol, hmul2_sum]
+
++ sernau.qf_rep_eq_sum_prim (d n : ℕ) (hd_pr : is_prime_nat d) (hd8 : d % 8 = 7) (hn : 1 ≤ n) :
+    sernau.qf_rep_count d n =
+    ∑ g < n + 1, if 1 ≤ g ∧ (g * g) ∣ n then sernau.qf_prim_rep_count d (n / (g * g)) else 0
+  have hzero_fn : ∀ (N : ℕ) (f : ℕ → ℕ), (∀ k < N, f k = 0) → (∑ k < N, f k) = 0 := by intro N f; induction N with _ k ihk hall; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat, sum_below_succ, ihk (by intro j hj; exact hall j (by omega)), hall k (by omega)]; omega)
+  have hsingle : ∀ (N a : ℕ) (f : ℕ → ℕ), a < N → (∀ k < N, k ≠ a → f k = 0) → (∑ k < N, f k) = f a
+    intro N a f; induction N with _ _ k ihk ha hall; omega; rw [succ_eq_add_one.nat] at ha hall ⊢; rw [sum_below_succ]
+    by_cases hlt : a < k; (rw [ihk hlt (by intro j hj hne; exact hall j (by omega) hne), hall k (by omega) (by omega)]; omega)
+    have he : k = a := (by omega); rw [he, hzero_fn a f (by intro j hj; exact hall j (by omega) (by omega))]; omega
+  have hbox_decomp : ∀ Q : QuadForm, sernau.qf_is_reduced d Q →
+      (∑ ix < 2 * n + 1, ∑ iy < 2 * n + 1, if sernau.qf_eval Q ((ix : ℤ) - (n : ℤ)) ((iy : ℤ) - (n : ℤ)) = (n : ℤ) then 1 else 0) =
+      ∑ g < n + 1, if 1 ≤ g ∧ (g * g) ∣ n then
+        (∑ jx < 2 * (n / (g * g)) + 1, ∑ jy < 2 * (n / (g * g)) + 1,
+          if sernau.qf_eval Q ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) = ((n / (g * g) : ℕ) : ℤ) ∧
+             sernau.int_coprime ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) then 1 else 0) else 0
+    intro Q hred
+    set R_rel : ℕ → ℕ → ℕ → ℕ → ℕ → Prop := fun ix iy g jx jy =>
+      1 ≤ g ∧ (g * g) ∣ n ∧ jx < 2 * (n / (g * g)) + 1 ∧ jy < 2 * (n / (g * g)) + 1 ∧
+      sernau.qf_eval Q ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) = ((n / (g * g) : ℕ) : ℤ) ∧
+      sernau.int_coprime ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ∧
+      ((ix : ℤ) - (n : ℤ)) = (g : ℤ) * ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ∧
+      ((iy : ℤ) - (n : ℤ)) = (g : ℤ) * ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) with hR_def
+    have hscale : ∀ (g : ℕ) (x0 y0 : ℤ), sernau.qf_eval Q ((g : ℤ) * x0) ((g : ℤ) * y0) = ((g * g : ℕ) : ℤ) * sernau.qf_eval Q x0 y0
+      intro g x0 y0; rw [cast_mul.int]; unfold sernau.qf_eval; ring
+    have hrow_xy : ∀ ix < 2 * n + 1, ∀ iy < 2 * n + 1,
+        (if sernau.qf_eval Q ((ix : ℤ) - (n : ℤ)) ((iy : ℤ) - (n : ℤ)) = (n : ℤ) then 1 else 0) =
+        ∑ g < n + 1, ∑ jx < 2 * (n / (g * g)) + 1, ∑ jy < 2 * (n / (g * g)) + 1, if R_rel ix iy g jx jy then 1 else 0
+      intro ix hix iy hiy; set x := (ix : ℤ) - (n : ℤ) with hx_def; set y := (iy : ℤ) - (n : ℤ) with hy_def
+      by_cases hev : sernau.qf_eval Q x y = (n : ℤ)
+      · rw [if_pos hev]; obtain ⟨gz, uz, vz, hgz_nn, ⟨x0, hx0⟩, ⟨y0, hy0⟩, hbez⟩ := int.bezout_gcd x y
+        have hgz_pos : 1 ≤ gz := by by_contra h0; have hz : gz = 0 := (by omega); rw [hz] at hx0 hy0; unfold sernau.qf_eval at hev; rw [hx0, hy0] at hev; have hn1 : (1 : ℤ) ≤ (n : ℤ) := (cast_le.int 1 n).mpr hn; omega
+        set g0 := nat_of_int gz with hg0_def; have hg0_eq : (g0 : ℤ) = gz := by rw [hg0_def]; exact int_of_nat_of_int gz hgz_nn
+        have hg0_ge1 : 1 ≤ g0 := (cast_le.int 1 g0).mp (by omega)
+        have hcop0 : sernau.int_coprime x0 y0 := ⟨uz, -vz, by have hm : gz * (x0 * uz - y0 * (-vz)) = gz * 1 := (by linear_combination -hx0 * uz - hy0 * vz + hbez); by_contra hne; by_cases hlt : x0 * uz - y0 * (-vz) < 1; (have hi := mul_le_mul_of_nonneg_left.int (x0 * uz - y0 * (-vz)) 0 gz (by omega) (by omega); omega); (have hi := mul_le_mul_of_nonneg_left.int 2 (x0 * uz - y0 * (-vz)) gz (by omega) (by omega); omega)⟩
+        have hsc0 : ((g0 * g0 : ℕ) : ℤ) * sernau.qf_eval Q x0 y0 = (n : ℤ) := by rw [← hscale g0 x0 y0, hg0_eq, ← hx0, ← hy0]; exact hev
+        have hev0_nn : 0 ≤ sernau.qf_eval Q x0 y0 := by by_contra hn0; have hm := mul_le_mul_of_nonneg_left.int (sernau.qf_eval Q x0 y0) (-1) ((g0 * g0 : ℕ) : ℤ) (by omega) (cast_nonneg.int _); have hg2_pos : (1 : ℤ) ≤ ((g0 * g0 : ℕ) : ℤ) := (cast_le.int 1 (g0 * g0)).mpr (by have hp := mul_pos.nat g0 g0 (by omega) (by omega); omega); have hn_nn := cast_nonneg.int n; omega
+        set m0 := nat_of_int (sernau.qf_eval Q x0 y0) with hm0_def
+        have hm0_eq : (m0 : ℤ) = sernau.qf_eval Q x0 y0 := by rw [hm0_def]; exact int_of_nat_of_int _ hev0_nn
+        have hn_fac : n = (g0 * g0) * m0 := (cast_inj.int n ((g0 * g0) * m0)).mp (by rw [cast_mul.int, hm0_eq]; exact hsc0.symm)
+        have hg2_dvd : (g0 * g0) ∣ n := (dvd.iff_exists (g0 * g0) n (mul_pos.nat g0 g0 (by omega) (by omega))).mpr ⟨m0, hn_fac⟩
+        have hm0_div : n / (g0 * g0) = m0 := (div_mod_unique.nat n (g0 * g0) m0 0 (by omega) (mul_pos.nat g0 g0 (by omega) (by omega))).1.symm
+        have hg0_le_n : g0 < n + 1 := by have hle1 := le_of_dvd.nat n (g0 * g0) (by omega) hg2_dvd; have hm_g := mul_le_mul_of_nonneg_left.nat 1 g0 g0 hg0_ge1 (by omega); omega
+        have hbd0 := sernau.qf_eval_box_bound d m0 Q x0 y0 hd_pr hd8 hred hm0_eq.symm
+        set jx0 := nat_of_int (x0 + (m0 : ℤ)) with hjx0_def; set jy0 := nat_of_int (y0 + (m0 : ℤ)) with hjy0_def
+        have hjx0_eq : (jx0 : ℤ) - (m0 : ℤ) = x0 := by have h := int_of_nat_of_int (x0 + (m0 : ℤ)) (by omega); rw [← hjx0_def] at h; omega
+        have hjy0_eq : (jy0 : ℤ) - (m0 : ℤ) = y0 := by have h := int_of_nat_of_int (y0 + (m0 : ℤ)) (by omega); rw [← hjy0_def] at h; omega
+        have hjx0_lt : jx0 < 2 * m0 + 1 := (cast_lt.int jx0 (2 * m0 + 1)).mp (by rw [cast_add.int, cast_mul.int, cast_one.int]; simp; omega)
+        have hjy0_lt : jy0 < 2 * m0 + 1 := (cast_lt.int jy0 (2 * m0 + 1)).mp (by rw [cast_add.int, cast_mul.int, cast_one.int]; simp; omega)
+        have hR0 : R_rel ix iy g0 jx0 jy0 := by rw [hR_def]; rw [hm0_div, hjx0_eq, hjy0_eq, ← hx_def, ← hy_def, hg0_eq]; exact ⟨hg0_ge1, hg2_dvd, hjx0_lt, hjy0_lt, hm0_eq.symm, hcop0, hx0, hy0⟩
+        have hun_R : ∀ g < n + 1, ∀ jx < 2 * (n / (g * g)) + 1, ∀ jy < 2 * (n / (g * g)) + 1, R_rel ix iy g jx jy → g = g0 ∧ jx = jx0 ∧ jy = jy0
+          intro g _ jx _ jy _ hRg; rw [hR_def] at hRg; obtain ⟨hg1, hgd, _, _, _, ⟨ug, vg, hdetg⟩, hxg, hyg⟩ := hRg
+          set x1 := (jx : ℤ) - ((n / (g * g) : ℕ) : ℤ) with hx1_def; set y1 := (jy : ℤ) - ((n / (g * g) : ℕ) : ℤ) with hy1_def
+          rw [← hx_def] at hxg; rw [← hy_def] at hyg; obtain ⟨u0, v0, hdet0⟩ := hcop0
+          have hd_g0_g : g0 ∣ g
+            have hz1 : (g : ℤ) = (g0 : ℤ) * (x0 * ug - y0 * vg) := by rw [hg0_eq]; linear_combination hx0 * ug - hy0 * vg - hxg * ug + hyg * vg - (g : ℤ) * hdetg
+            have hq_nn : 0 ≤ x0 * ug - y0 * vg := by by_contra hn1; have hm := mul_le_mul_of_nonneg_left.int (x0 * ug - y0 * vg) (-1) (g0 : ℤ) (by omega) (cast_nonneg.int g0); have hg0_z : (1 : ℤ) ≤ (g0 : ℤ) := (cast_le.int 1 g0).mpr hg0_ge1; have hg_nn := cast_nonneg.int g; omega
+            set q1 := nat_of_int (x0 * ug - y0 * vg) with hq1_def; have hq1_eq : (q1 : ℤ) = x0 * ug - y0 * vg := by rw [hq1_def]; exact int_of_nat_of_int _ hq_nn
+            exact (dvd.iff_exists g0 g (by omega)).mpr ⟨q1, (cast_inj.int g (g0 * q1)).mp (by rw [cast_mul.int, hq1_eq]; exact hz1)⟩
+          have hd_g_g0 : g ∣ g0
+            have hz2 : (g0 : ℤ) = (g : ℤ) * (x1 * u0 - y1 * v0) := by rw [hg0_eq]; linear_combination -hx0 * u0 + hy0 * v0 + hxg * u0 - hyg * v0 - gz * hdet0
+            have hq_nn : 0 ≤ x1 * u0 - y1 * v0 := by by_contra hn1; have hm := mul_le_mul_of_nonneg_left.int (x1 * u0 - y1 * v0) (-1) (g : ℤ) (by omega) (cast_nonneg.int g); have hg_z : (1 : ℤ) ≤ (g : ℤ) := (cast_le.int 1 g).mpr hg1; have hg0_nn := cast_nonneg.int g0; omega
+            set q2 := nat_of_int (x1 * u0 - y1 * v0) with hq2_def; have hq2_eq : (q2 : ℤ) = x1 * u0 - y1 * v0 := by rw [hq2_def]; exact int_of_nat_of_int _ hq_nn
+            exact (dvd.iff_exists g g0 (by omega)).mpr ⟨q2, (cast_inj.int g0 (g * q2)).mp (by rw [cast_mul.int, hq2_eq]; exact hz2)⟩
+          have hgeq : g = g0 := by have l1 := le_of_dvd.nat g g0 (by omega) hd_g0_g; have l2 := le_of_dvd.nat g0 g (by omega) hd_g_g0; omega
+          have hx1_eq : x1 = x0 := by rw [hgeq, hg0_eq] at hxg; have hd_x : gz * (x1 - x0) = 0 := (by linear_combination hx0 - hxg); by_contra hne; by_cases hp : 1 ≤ x1 - x0; (have hm := mul_le_mul_of_nonneg_left.int 1 (x1 - x0) gz hp (by omega); omega); (have hm := mul_le_mul_of_nonneg_left.int (x1 - x0) (-1) gz (by omega) (by omega); omega)
+          have hy1_eq : y1 = y0 := by rw [hgeq, hg0_eq] at hyg; have hd_y : gz * (y1 - y0) = 0 := (by linear_combination hy0 - hyg); by_contra hne; by_cases hp : 1 ≤ y1 - y0; (have hm := mul_le_mul_of_nonneg_left.int 1 (y1 - y0) gz hp (by omega); omega); (have hm := mul_le_mul_of_nonneg_left.int (y1 - y0) (-1) gz (by omega) (by omega); omega)
+          have hdiv_eq : ((n / (g * g) : ℕ) : ℤ) = (m0 : ℤ) := by rw [hgeq, hm0_div]
+          exact ⟨hgeq, (cast_inj.int jx jx0).mp (by rw [hx1_def] at hx1_eq; omega), (cast_inj.int jy jy0).mp (by rw [hy1_def] at hy1_eq; omega)⟩
+        symm; rw [hsingle (n + 1) g0 _ hg0_le_n (by intro g hg hne; apply hzero_fn; intro jx hjx; apply hzero_fn; intro jy hjy; rw [if_neg (by intro hr; exact hne (hun_R g hg jx hjx jy hjy hr).1)])]
+        have hjx0_lt' : jx0 < 2 * (n / (g0 * g0)) + 1 := by rw [hm0_div]; exact hjx0_lt
+        have hjy0_lt' : jy0 < 2 * (n / (g0 * g0)) + 1 := by rw [hm0_div]; exact hjy0_lt
+        rw [hsingle (2 * (n / (g0 * g0)) + 1) jx0 _ hjx0_lt' (by intro jx hjx hne; apply hzero_fn; intro jy hjy; rw [if_neg (by intro hr; exact hne (hun_R g0 hg0_le_n jx hjx jy hjy hr).2.1)])]
+        rw [hsingle (2 * (n / (g0 * g0)) + 1) jy0 _ hjy0_lt' (by intro jy hjy hne; rw [if_neg (by intro hr; exact hne (hun_R g0 hg0_le_n jx0 hjx0_lt' jy hjy hr).2.2)]), if_pos hR0]
+      · rw [if_neg hev]; symm
+        apply hzero_fn (n + 1); intro g _; apply hzero_fn; intro jx _; apply hzero_fn; intro jy _
+        rw [if_neg (by intro hr; rw [hR_def] at hr; obtain ⟨hg1, hgd, _, _, hev0, _, hxg, hyg⟩ := hr; apply hev; rw [hx_def, hy_def, hxg, hyg, hscale, hev0]; have hdm := div_add_mod.nat n (g * g); unfold dvd at hgd; rw [hgd] at hdm; have hc : (((g * g) * (n / (g * g)) : ℕ) : ℤ) = (n : ℤ) := (by omega); rw [cast_mul.int] at hc; exact hc)]
+    have hcol_g : ∀ g < n + 1, ∀ jx < 2 * (n / (g * g)) + 1, ∀ jy < 2 * (n / (g * g)) + 1,
+        (∑ ix < 2 * n + 1, ∑ iy < 2 * n + 1, if R_rel ix iy g jx jy then 1 else 0) =
+        if 1 ≤ g ∧ (g * g) ∣ n ∧
+           sernau.qf_eval Q ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) = ((n / (g * g) : ℕ) : ℤ) ∧
+           sernau.int_coprime ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) then 1 else 0
+      intro g hg jx hjx jy hjy
+      by_cases hcond : 1 ≤ g ∧ (g * g) ∣ n ∧
+          sernau.qf_eval Q ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) = ((n / (g * g) : ℕ) : ℤ) ∧
+          sernau.int_coprime ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ))
+      · rw [if_pos hcond]; obtain ⟨hg1, hgd, hev0, hcop0⟩ := hcond
+        set x := (g : ℤ) * ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) with hx_def
+        set y := (g : ℤ) * ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) with hy_def
+        have hev_xy : sernau.qf_eval Q x y = (n : ℤ)
+          rw [hx_def, hy_def, hscale, hev0]
+          have hdm := div_add_mod.nat n (g * g); unfold dvd at hgd; rw [hgd] at hdm
+          have hc : (((g * g) * (n / (g * g)) : ℕ) : ℤ) = (n : ℤ) := by omega
+          rw [cast_mul.int] at hc; exact hc
+        have hbd := sernau.qf_eval_box_bound d n Q x y hd_pr hd8 hred hev_xy
+        set ix0 := nat_of_int (x + (n : ℤ)) with hix0_def; set iy0 := nat_of_int (y + (n : ℤ)) with hiy0_def
+        have hix0_eq : (ix0 : ℤ) - (n : ℤ) = x := by have h := int_of_nat_of_int (x + (n : ℤ)) (by omega); rw [← hix0_def] at h; omega
+        have hiy0_eq : (iy0 : ℤ) - (n : ℤ) = y := by have h := int_of_nat_of_int (y + (n : ℤ)) (by omega); rw [← hiy0_def] at h; omega
+        have hix0_lt : ix0 < 2 * n + 1 := (cast_lt.int ix0 (2 * n + 1)).mp (by rw [cast_add.int, cast_mul.int, cast_one.int]; simp; omega)
+        have hiy0_lt : iy0 < 2 * n + 1 := (cast_lt.int iy0 (2 * n + 1)).mp (by rw [cast_add.int, cast_mul.int, cast_one.int]; simp; omega)
+        have hR0 : R_rel ix0 iy0 g jx jy := by rw [hR_def, hix0_eq, hiy0_eq, ← hx_def, ← hy_def]; exact ⟨hg1, hgd, hjx, hjy, hev0, hcop0, by rfl, by rfl⟩
+        rw [hsingle (2 * n + 1) ix0 _ hix0_lt (by intro ix _ hne; apply hzero_fn; intro iy _; rw [if_neg (by intro hr; rw [hR_def] at hr; exact hne ((cast_inj.int ix ix0).mp (by omega)))])]
+        rw [hsingle (2 * n + 1) iy0 _ hiy0_lt (by intro iy _ hne; rw [if_neg (by intro hr; rw [hR_def] at hr; exact hne ((cast_inj.int iy iy0).mp (by omega)))]), if_pos hR0]
+      · rw [if_neg hcond]; apply hzero_fn; intro ix _; apply hzero_fn; intro iy _; rw [if_neg (by intro hr; rw [hR_def] at hr; exact hcond ⟨hr.1, hr.2.1, hr.2.2.2.2.1, hr.2.2.2.2.2.1⟩)]
+    have hsw1 : ∀ (M G : ℕ) (H : ℕ → ℕ → ℕ → ℕ), (∑ a < M, ∑ b < M, ∑ c < G, H a b c) = ∑ c < G, ∑ a < M, ∑ b < M, H a b c
+      intro M G H; have hc : (∑ a < M, ∑ b < M, ∑ c < G, H a b c) = ∑ a < M, ∑ c < G, ∑ b < M, H a b c := sum_congr.nat _ _ M (by intro a _; exact sum_swap.nat (H a) M G)
+      rw [hc, sum_swap.nat]
+    have hL1 : (∑ ix < 2 * n + 1, ∑ iy < 2 * n + 1, if sernau.qf_eval Q ((ix : ℤ) - (n : ℤ)) ((iy : ℤ) - (n : ℤ)) = (n : ℤ) then 1 else 0) =
+        ∑ g < n + 1, ∑ jx < 2 * (n / (g * g)) + 1, ∑ jy < 2 * (n / (g * g)) + 1, ∑ ix < 2 * n + 1, ∑ iy < 2 * n + 1, if R_rel ix iy g jx jy then 1 else 0
+      have hc1 : (∑ ix < 2 * n + 1, ∑ iy < 2 * n + 1, if sernau.qf_eval Q ((ix : ℤ) - (n : ℤ)) ((iy : ℤ) - (n : ℤ)) = (n : ℤ) then 1 else 0) =
+          ∑ ix < 2 * n + 1, ∑ iy < 2 * n + 1, ∑ g < n + 1, (∑ jx < 2 * (n / (g * g)) + 1, ∑ jy < 2 * (n / (g * g)) + 1, if R_rel ix iy g jx jy then 1 else 0)
+        apply sum_congr.nat; intro ix hix; apply sum_congr.nat; intro iy hiy; exact hrow_xy ix hix iy hiy
+      rw [hc1, hsw1 (2 * n + 1) (n + 1) (fun ix iy g => ∑ jx < 2 * (n / (g * g)) + 1, ∑ jy < 2 * (n / (g * g)) + 1, if R_rel ix iy g jx jy then 1 else 0)]
+      apply sum_congr.nat; intro g _
+      rw [hsw1 (2 * n + 1) (2 * (n / (g * g)) + 1) (fun ix iy jx => ∑ jy < 2 * (n / (g * g)) + 1, if R_rel ix iy g jx jy then 1 else 0)]
+      apply sum_congr.nat; intro jx _
+      exact hsw1 (2 * n + 1) (2 * (n / (g * g)) + 1) (fun ix iy jy => if R_rel ix iy g jx jy then 1 else 0)
+    rw [hL1]; apply sum_congr.nat; intro g hg
+    by_cases hgd : 1 ≤ g ∧ (g * g) ∣ n
+    · rw [if_pos hgd]; apply sum_congr.nat; intro jx hjx; apply sum_congr.nat; intro jy hjy
+      rw [hcol_g g hg jx hjx jy hjy]
+      by_cases hrep : sernau.qf_eval Q ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) = ((n / (g * g) : ℕ) : ℤ) ∧
+          sernau.int_coprime ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ))
+      · rw [if_pos ⟨hgd.1, hgd.2, hrep.1, hrep.2⟩, if_pos hrep]
+      · rw [if_neg (by intro h; exact hrep ⟨h.2.2.1, h.2.2.2⟩), if_neg hrep]
+    · rw [if_neg hgd]; apply hzero_fn; intro jx hjx; apply hzero_fn; intro jy hjy
+      rw [hcol_g g hg jx hjx jy hjy, if_neg (by intro h; exact hgd ⟨h.1, h.2.1⟩)]
+  unfold sernau.qf_rep_count sernau.qf_prim_rep_count
+  have hcon_idx : (∑ idx < sernau.qf_grid_len d, (if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then (∑ ix < 2 * n + 1, ∑ iy < 2 * n + 1, if sernau.qf_eval (sernau.qf_of_idx d idx) ((ix : ℤ) - (n : ℤ)) ((iy : ℤ) - (n : ℤ)) = (n : ℤ) then 1 else 0) else 0)) = ∑ idx < sernau.qf_grid_len d, ∑ g < n + 1, (if 1 ≤ g ∧ (g * g) ∣ n then (if sernau.qf_is_reduced d (sernau.qf_of_idx d idx) then (∑ jx < 2 * (n / (g * g)) + 1, ∑ jy < 2 * (n / (g * g)) + 1, if sernau.qf_eval (sernau.qf_of_idx d idx) ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) = ((n / (g * g) : ℕ) : ℤ) ∧ sernau.int_coprime ((jx : ℤ) - ((n / (g * g) : ℕ) : ℤ)) ((jy : ℤ) - ((n / (g * g) : ℕ) : ℤ)) then 1 else 0) else 0) else 0)
+    apply sum_congr.nat; intro idx _; by_cases hred : sernau.qf_is_reduced d (sernau.qf_of_idx d idx)
+    · rw [if_pos hred, hbox_decomp (sernau.qf_of_idx d idx) hred]
+      apply sum_congr.nat; intro g _; by_cases hg : 1 ≤ g ∧ (g * g) ∣ n; rw [if_pos hg, if_pos hg, if_pos hred]; rw [if_neg hg, if_neg hg]
+    · rw [if_neg hred]; symm; apply hzero_fn; intro g _
+      by_cases hg : 1 ≤ g ∧ (g * g) ∣ n; rw [if_pos hg, if_neg hred]; rw [if_neg hg]
+  rw [hcon_idx, sum_swap.nat]
+  apply sum_congr.nat; intro g _; by_cases hg : 1 ≤ g ∧ (g * g) ∣ n
+  · rw [if_pos hg]; apply sum_congr.nat; intro idx _; rw [if_pos hg]
+  · rw [if_neg hg]; apply hzero_fn; intro idx _; rw [if_neg hg]

@@ -1,0 +1,423 @@
+-- Milestone 3.81a (Part 4c): Shifted Row Integral Limit & Exact Dedekind Eta Evaluation
+--                            `sernau.row_defect_total tau 1 = -(2 * pi / Im(tau)) * log |eta_prod tau|`
+--
+-- Proved unconditionally on Satori's untouched HOL kernel (ZERO custom axioms).
+
+import modular.epstein_row_defect
+
+-- ====================================================================================
+-- 1. Shifted Row Integral Convergence for All `alpha`, `beta > 0`, `s >= 1`
+-- ====================================================================================
+
++ sernau.row_int_shift_lim (alpha beta s : ℝ) (hbeta : 0 < beta) (hs : 1 ≤ s) :
+    tends_to (fun M : ℕ => rint (fun u => rpow ((u + alpha) ^ 2 + beta ^ 2) (-s)) (-(M : ℝ)) ((M : ℝ) + 1)) (rpow beta (1 - 2 * s) * sernau.row_int_val s)
+  have hcont_v : ∀ a b : ℝ, ∀ t, a ≤ t → t ≤ b → continuous_at (fun v => rpow (v * v + beta * beta) (-s)) t
+    intro a b t _ _; have hp : 0 < t * t + beta * beta := (by nlinarith)
+    have hcl := continuous_at.comp log (fun v => v * v + beta * beta) t (sernau.log_cont_and_deriv _ hp).1 (by continuity)
+    unfold rpow; continuity
+  have hsh_eq : ∀ M : ℕ, rint (fun u => rpow ((u + alpha) ^ 2 + beta ^ 2) (-s)) (-(M : ℝ)) ((M : ℝ) + 1) =
+      rint (fun v => rpow (v * v + beta * beta) (-s)) (-(M : ℝ) + alpha) ((M : ℝ) + 1 + alpha)
+    intro M
+    have hle : -(M : ℝ) + alpha ≤ (M : ℝ) + 1 + alpha := by linarith [cast_nonneg.real M]
+    obtain ⟨I, hI⟩ := darboux.continuous (fun v => rpow (v * v + beta * beta) (-s)) (-(M : ℝ) + alpha) ((M : ℝ) + 1 + alpha) hle (hcont_v _ _)
+    have hs1 := darboux.subst_shift (fun v => rpow (v * v + beta * beta) (-s)) alpha (-(M : ℝ)) ((M : ℝ) + 1) I hI
+    have hcg := darboux.congr _ (fun u => rpow ((u + alpha) ^ 2 + beta ^ 2) (-s)) (-(M : ℝ)) ((M : ℝ) + 1) I hs1 (by intro u _ _; have h1 : (u + alpha) * (u + alpha) + beta * beta = (u + alpha) ^ 2 + beta ^ 2 := (by ring); rw [h1])
+    rw [rint.eq_of_has_integral _ _ _ I hcg, rint.eq_of_has_integral _ _ _ I hI]
+  have hmono_int : ∀ a1 a2 b2 b1 : ℝ, a1 ≤ a2 → a2 ≤ b2 → b2 ≤ b1 →
+      rint (fun v => rpow (v * v + beta * beta) (-s)) a2 b2 ≤ rint (fun v => rpow (v * v + beta * beta) (-s)) a1 b1
+    intro a1 a2 b2 b1 h1 h2 h3
+    obtain ⟨IL, hIL⟩ := darboux.continuous (fun v => rpow (v * v + beta * beta) (-s)) a1 a2 h1 (hcont_v a1 a2)
+    obtain ⟨IM, hIM⟩ := darboux.continuous (fun v => rpow (v * v + beta * beta) (-s)) a2 b2 h2 (hcont_v a2 b2)
+    obtain ⟨IR, hIR⟩ := darboux.continuous (fun v => rpow (v * v + beta * beta) (-s)) b2 b1 h3 (hcont_v b2 b1)
+    have hLM := darboux.adjacent _ a1 a2 b2 IL IM hIL hIM
+    have hLMR := darboux.adjacent _ a1 b2 b1 (IL + IM) IR hLM hIR
+    rw [rint.eq_of_has_integral _ a2 b2 IM hIM, rint.eq_of_has_integral _ a1 b1 (IL + IM + IR) hLMR]
+    have hnnL := darboux.nonneg _ a1 a2 IL hIL (by intro v _ _; unfold rpow; exact exp_nonneg _)
+    have hnnR := darboux.nonneg _ b2 b1 IR hIR (by intro v _ _; unfold rpow; exact exp_nonneg _)
+    linarith
+  obtain ⟨A0, hA0⟩ := exists_nat_gt.real (|alpha| + 1)
+  have hbase := sernau.row_int_at_one_and_slope.2.1 s beta hs hbeta
+  unfold tends_to at hbase ⊢; intro e he
+  obtain ⟨N0, hN0⟩ := hbase e he
+  use N0 + A0; intro M hM
+  rw [hsh_eq M]
+  have hA0_pos : |alpha| + 1 < (A0 : ℝ) := hA0
+  have hM_sub : ((M - A0 : ℕ) : ℝ) + (A0 : ℝ) = (M : ℝ)
+    have hn : (M - A0) + A0 = M := (by omega)
+    have hc : (((M - A0) + A0 : ℕ) : ℝ) = (M : ℝ) := (by rw [hn])
+    rw [cast_add.real (M - A0) A0] at hc; exact hc
+  have hM_add : ((M + A0 : ℕ) : ℝ) = (M : ℝ) + (A0 : ℝ) := cast_add.real M A0
+  have hlo := hmono_int (-(M : ℝ) + alpha) (-((M - A0 : ℕ) : ℝ)) ((M - A0 : ℕ) : ℝ) ((M : ℝ) + 1 + alpha) (by linarith [le_abs_self.real alpha, neg_le_abs.real alpha]) (by linarith [cast_nonneg.real (M - A0)]) (by linarith [le_abs_self.real alpha, neg_le_abs.real alpha])
+  have hhi := hmono_int (-((M + A0 : ℕ) : ℝ)) (-(M : ℝ) + alpha) ((M : ℝ) + 1 + alpha) ((M + A0 : ℕ) : ℝ) (by linarith [le_abs_self.real alpha, neg_le_abs.real alpha]) (by linarith [cast_nonneg.real M]) (by linarith [le_abs_self.real alpha, neg_le_abs.real alpha])
+  have h1 := hN0 (M - A0) (by omega)
+  have h2 := hN0 (M + A0) (by omega)
+  exact abs_lt_of.real _ e (by linarith [neg_le_abs.real (rint (fun u => rpow (u * u + beta * beta) (-s)) (-((M - A0 : ℕ) : ℝ)) ((M - A0 : ℕ) : ℝ) - rpow beta (1 - 2 * s) * sernau.row_int_val s)]) (by linarith [le_abs_self.real (rint (fun u => rpow (u * u + beta * beta) (-s)) (-((M + A0 : ℕ) : ℝ)) ((M + A0 : ℕ) : ℝ) - rpow beta (1 - 2 * s) * sernau.row_int_val s)])
+
+-- ====================================================================================
+-- 2. Exact Evaluation `sernau.row_defect_total tau 1 = -(2 * pi / Im(tau)) * log |eta_prod tau|`
+-- ====================================================================================
+
++ sernau.row_defect_total_at_one (tau : ℂ) (htau : 0 < complex.im tau) :
+    sernau.row_defect_total tau 1 = -(2 * pi / complex.im tau) * log (complex.abs (sernau.eta_prod tau))
+  have hmd := sernau.modular_disc_ne_zero_and_log tau htau
+  have hbc := sernau.row_defect_bound_and_cont tau htau
+  set x := complex.re tau with hx_def
+  set y := complex.im tau with hy_def
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  set q := sernau.q_param tau with hq_def
+  set rho := exp (-2 * pi * y) with hrho_def
+  have hq_abs : complex.abs q = rho := hmd.1
+  have hrho_pos : 0 < rho := by rw [hrho_def]; exact exp_pos (-2 * pi * y)
+  have hrho_lt1 : rho < 1 := by rw [← hq_abs]; exact hmd.2.1
+  -- Step 1: `complex.re (cpow_nat q k) = exp (-2 * pi * k * y) * cos (2 * pi * k * x)`!
+  have hcpow_exp : ∀ (z : ℂ) (k : ℕ), cpow_nat (complex.exp z) k = complex.exp (complex.smul (k : ℝ) z)
+    intro z k; induction k with u ihu
+    · rw [cpow_nat.zero_eq, cast_zero.real]
+      have hz0 : complex.smul (0 : ℝ) z = complex.zero := (by apply complex.ext <;> simp)
+      rw [hz0, complex.exp_zero]
+    · rw [succ_eq_add_one.nat, cpow_nat.succ_eq, ihu, ← complex.exp_add, cast_add.real, cast_one.real]
+      have hs : complex.add (complex.smul (u : ℝ) z) z = complex.smul ((u : ℝ) + 1) z := (by apply complex.ext <;> simp <;> ring)
+      rw [hs]
+  have hre_qk : ∀ k : ℕ, complex.re (cpow_nat q k) = exp (-2 * pi * (k : ℝ) * y) * cos (2 * pi * (k : ℝ) * x)
+    intro k; rw [hq_def]; unfold sernau.q_param; rw [hcpow_exp, complex.exp_re]
+    have hre_z : complex.re (complex.smul (k : ℝ) (complex.mul (complex.mk 0 (2 * pi)) tau)) = -2 * pi * (k : ℝ) * y := by rw [hy_def]; simp; ring
+    have him_z : complex.im (complex.smul (k : ℝ) (complex.mul (complex.mk 0 (2 * pi)) tau)) = 2 * pi * (k : ℝ) * x := by rw [hx_def]; simp; ring
+    rw [hre_z, him_z]; rfl
+  have habs_cpow_q : ∀ k : ℕ, complex.abs (cpow_nat q k) = rho ^ k
+    intro k; induction k with u ihu
+    · rw [cpow_nat.zero_eq, pow_zero.real]; apply eq_of_sq_eq_nonneg (complex.abs complex.one) 1 (complex.abs_nonneg complex.one) (by decide); rw [complex.abs_sq]; unfold complex.norm_sq; simp
+    · rw [succ_eq_add_one.nat, cpow_nat.succ_eq, pow_succ.real, complex.abs_mul, ihu, hq_abs]
+  -- Step 2: Evaluate `sernau.row_defect_row tau n 1` for every `n >= 1`!
+  have hrow1_eq : ∀ n : ℕ, 1 ≤ n →
+      sernau.row_defect_row tau n 1 =
+      (2 * pi / y) * rlim (fun R => ∑ r < R, complex.re (cpow_nat q ((r + 1) * n)) / (n : ℝ))
+    intro n hn
+    have hn_r : (1 : ℝ) ≤ (n : ℝ) := (cast_le.real 1 n).mpr hn
+    have hny_pos : 0 < (n : ℝ) * y := by nlinarith
+    have hcont_f : ∀ a b : ℝ, ∀ t, a ≤ t → t ≤ b → continuous_at (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) t
+      intro a b t _ _
+      have hp : 0 < (t + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2 := by have hs1 : (t + (n : ℝ) * x) ^ 2 = (t + (n : ℝ) * x) * (t + (n : ℝ) * x) := (by ring); have hs2 : ((n : ℝ) * y) ^ 2 = ((n : ℝ) * y) * ((n : ℝ) * y) := (by ring); nlinarith
+      have hcl := continuous_at.comp log (fun u => (u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) t (sernau.log_cont_and_deriv _ hp).1 (by continuity)
+      unfold rpow; continuity
+    have hterm1 : ∀ m : ℤ, sernau.row_defect_term tau n m 1 =
+        1 / (((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) -
+        rint (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) (m : ℝ) ((m : ℝ) + 1)
+      intro m
+      have hAp : 0 < ((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2 := by have hs1 : ((m : ℝ) + (n : ℝ) * x) ^ 2 = ((m : ℝ) + (n : ℝ) * x) * ((m : ℝ) + (n : ℝ) * x) := (by ring); have hs2 : ((n : ℝ) * y) ^ 2 = ((n : ℝ) * y) * ((n : ℝ) * y) := (by ring); nlinarith
+      obtain ⟨I2, hI2⟩ := darboux.continuous (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) (m : ℝ) ((m : ℝ) + 1) (by linarith) (hcont_f _ _)
+      have hsh := darboux.subst_shift (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) (m : ℝ) 0 1 I2 (by have h0 : (0 : ℝ) + (m : ℝ) = (m : ℝ) := (by ring); have h1 : (1 : ℝ) + (m : ℝ) = (m : ℝ) + 1 := (by ring); rw [h0, h1]; exact hI2)
+      have hc1 := darboux.const 0 1 (1 / (((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2)) (by decide)
+      have hsub := darboux.sub _ _ 0 1 _ I2 hc1 hsh
+      rw [rint.eq_of_has_integral _ (m : ℝ) ((m : ℝ) + 1) I2 hI2]
+      have hval_c : 1 / (((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) * (1 - 0) - I2 = 1 / (((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) - I2 := by ring
+      rw [hval_c] at hsub; unfold sernau.row_defect_term; rw [← hx_def, ← hy_def]
+      apply rint.eq_of_has_integral
+      apply darboux.congr _ _ 0 1 _ hsub
+      intro t _ _
+      have hr1 := sernau.rpow_neg_one_eq (((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) hAp
+      have hord : t + (m : ℝ) + (n : ℝ) * x = (m : ℝ) + t + (n : ℝ) * x := by ring
+      rw [← hr1, hord]; unfold rpow; trivial
+    have hbox_eq : ∀ M : ℕ, (∑ ix < 2 * M + 1, sernau.row_defect_term tau n ((ix : ℤ) - (M : ℤ)) 1) =
+        (∑ ix < 2 * M + 1, 1 / (((((ix : ℤ) - (M : ℤ) : ℤ) : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2)) -
+        rint (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) (-(M : ℝ)) ((M : ℝ) + 1)
+      intro M
+      have htel_int : ∀ K : ℕ, (∑ ix < K, rint (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) ((((ix : ℤ) - (M : ℤ) : ℤ) : ℝ)) (((((ix : ℤ) - (M : ℤ) : ℤ) : ℝ)) + 1)) =
+          rint (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) (-(M : ℝ)) (-(M : ℝ) + (K : ℝ))
+        intro K; induction K with u ihu
+        · rw [sum_below_zero, cast_zero.real]; have h0 : -(M : ℝ) + 0 = -(M : ℝ) := (by ring); rw [h0]
+          exact (rint.eq_of_has_integral (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) (-(M : ℝ)) (-(M : ℝ)) 0 (darboux.point (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) (-(M : ℝ)))).symm
+        · rw [succ_eq_add_one.nat, sum_below_succ u, ihu, cast_add.real, cast_one.real]
+          have ha_eq : (((u : ℤ) - (M : ℤ) : ℤ) : ℝ) = -(M : ℝ) + (u : ℝ) := by ring
+          have hb_eq : -(M : ℝ) + ((u : ℝ) + 1) = (-(M : ℝ) + (u : ℝ)) + 1 := by ring
+          rw [ha_eq, hb_eq]
+          obtain ⟨I1, hI1⟩ := darboux.continuous (fun u0 => rpow ((u0 + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) (-(M : ℝ)) (-(M : ℝ) + (u : ℝ)) (by linarith [cast_nonneg.real u]) (hcont_f _ _)
+          obtain ⟨I2, hI2⟩ := darboux.continuous (fun u0 => rpow ((u0 + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) (-(M : ℝ) + (u : ℝ)) ((-(M : ℝ) + (u : ℝ)) + 1) (by linarith) (hcont_f _ _)
+          have hI12 := darboux.adjacent _ (-(M : ℝ)) (-(M : ℝ) + (u : ℝ)) ((-(M : ℝ) + (u : ℝ)) + 1) I1 I2 hI1 hI2
+          rw [rint.eq_of_has_integral _ _ _ I1 hI1, rint.eq_of_has_integral _ _ _ I2 hI2, rint.eq_of_has_integral _ _ _ (I1 + I2) hI12]
+      have hsplit_sum : ∀ K : ℕ, (∑ ix < K, sernau.row_defect_term tau n ((ix : ℤ) - (M : ℤ)) 1) =
+          (∑ ix < K, 1 / (((((ix : ℤ) - (M : ℤ) : ℤ) : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2)) -
+          (∑ ix < K, rint (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) ((((ix : ℤ) - (M : ℤ) : ℤ) : ℝ)) (((((ix : ℤ) - (M : ℤ) : ℤ) : ℝ)) + 1))
+        intro K; induction K with u ihu; (rw [sum_below_zero, sum_below_zero, sum_below_zero]; ring)
+        rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, sum_below_succ u, ihu, hterm1 ((u : ℤ) - (M : ℤ))]; ring
+      rw [hsplit_sum (2 * M + 1), htel_int (2 * M + 1)]
+      have htop : -(M : ℝ) + ((2 * M + 1 : ℕ) : ℝ) = (M : ℝ) + 1 := by rw [cast_add.real, cast_mul.real, cast_one.real]; simp; ring
+      rw [htop]
+    have hlim_lhs := (hbc.2.1 1 (by decide) (by decide)).1 n hn
+    have hlim_sum := sernau.basel_and_poisson_row.2 ((n : ℝ) * x) ((n : ℝ) * y) hny_pos
+    have hlim_int := sernau.row_int_shift_lim ((n : ℝ) * x) ((n : ℝ) * y) 1 hny_pos (by decide)
+    have hval_int : rpow ((n : ℝ) * y) (1 - 2 * 1) * sernau.row_int_val 1 = pi / ((n : ℝ) * y)
+      rw [sernau.row_int_at_one_and_slope.1]
+      have hneg1 : (1 : ℝ) - 2 * 1 = -1 := by ring
+      rw [hneg1, sernau.rpow_neg_one_eq ((n : ℝ) * y) hny_pos]; field_simp
+    rw [hval_int] at hlim_int
+    have hfu_inv : (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-1)) = (fun u => 1 / ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2))
+      funext u; exact sernau.rpow_neg_one_eq _ (by have hs1 : (u + (n : ℝ) * x) ^ 2 = (u + (n : ℝ) * x) * (u + (n : ℝ) * x) := (by ring); have hs2 : ((n : ℝ) * y) ^ 2 = ((n : ℝ) * y) * ((n : ℝ) * y) := (by ring); nlinarith)
+    have hlim_int_inv : tends_to (fun M : ℕ => rint (fun u => 1 / ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2)) (-(M : ℝ)) ((M : ℝ) + 1)) (pi / ((n : ℝ) * y))
+      rw [hfu_inv] at hlim_int; exact hlim_int
+    have hlim_lhs2 : tends_to (fun M => ∑ ix < 2 * M + 1, sernau.row_defect_term tau n ((ix : ℤ) - (M : ℤ)) 1) (2 * pi / ((n : ℝ) * y) * rlim (fun R => ∑ r < R, exp (-2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * y)) * cos (2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * x))))
+      unfold tends_to at hlim_sum hlim_int_inv ⊢; intro e he
+      obtain ⟨M1, hM1⟩ := hlim_sum (e / 2) (by linarith)
+      obtain ⟨M2, hM2⟩ := hlim_int_inv (e / 2) (by linarith)
+      use M1 + M2; intro M hM
+      have h1 := hM1 M (by omega)
+      have h2 := hM2 M (by omega)
+      rw [hbox_eq M, hfu_inv]
+      have h1_lo := neg_le_abs.real ((∑ ix < 2 * M + 1, 1 / (((((ix : ℤ) - (M : ℤ) : ℤ) : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2)) - (pi / ((n : ℝ) * y) + 2 * pi / ((n : ℝ) * y) * rlim (fun R => ∑ r < R, exp (-2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * y)) * cos (2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * x)))))
+      have h1_hi := le_abs_self.real ((∑ ix < 2 * M + 1, 1 / (((((ix : ℤ) - (M : ℤ) : ℤ) : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2)) - (pi / ((n : ℝ) * y) + 2 * pi / ((n : ℝ) * y) * rlim (fun R => ∑ r < R, exp (-2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * y)) * cos (2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * x)))))
+      have h2_lo := neg_le_abs.real (rint (fun u => 1 / ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2)) (-(M : ℝ)) ((M : ℝ) + 1) - pi / ((n : ℝ) * y))
+      have h2_hi := le_abs_self.real (rint (fun u => 1 / ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2)) (-(M : ℝ)) ((M : ℝ) + 1) - pi / ((n : ℝ) * y))
+      exact abs_lt_of.real _ e (by linarith) (by linarith)
+    have hrow_v : sernau.row_defect_row tau n 1 = 2 * pi / ((n : ℝ) * y) * rlim (fun R => ∑ r < R, exp (-2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * y)) * cos (2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * x)))
+      have hu1 := rlim.eq_of_tends_to _ _ hlim_lhs; have hu2 := rlim.eq_of_tends_to _ _ hlim_lhs2; linarith
+    -- Rewrite the inner sum terms as `re(q^((r+1)*n)) / n`!
+    have hterm_re : ∀ r : ℕ, exp (-2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * y)) * cos (2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * x)) = complex.re (cpow_nat q ((r + 1) * n))
+      intro r; rw [hre_qk ((r + 1) * n), cast_mul.real (r + 1) n]
+      have h1 : -2 * pi * (((r + 1 : ℕ) : ℝ) * (n : ℝ)) * y = -2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * y) := by ring
+      have h2 : 2 * pi * (((r + 1 : ℕ) : ℝ) * (n : ℝ)) * x = 2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * x) := by ring
+      rw [h1, h2]
+    have hab_r : ∀ r : ℕ, |complex.re (cpow_nat q ((r + 1) * n))| ≤ rho ^ (r + 1)
+      intro r
+      have hle1 : |complex.re (cpow_nat q ((r + 1) * n))| ≤ complex.abs (cpow_nat q ((r + 1) * n)) := complex.re_abs_le (cpow_nat q ((r + 1) * n))
+      rw [habs_cpow_q ((r + 1) * n)] at hle1
+      have hpow_le : rho ^ ((r + 1) * n) ≤ rho ^ (r + 1)
+        have hge : r + 1 ≤ (r + 1) * n := by have hm := mul_le_mul_of_nonneg_left.nat 1 n (r + 1) hn (by omega); omega
+        have hrec : ∀ k : ℕ, rho ^ ((r + 1) + k) ≤ rho ^ (r + 1)
+          intro k; induction k with u ihu
+          · have h0 : (r + 1) + 0 = r + 1 := (by omega); rw [h0]; linarith
+          · rw [succ_eq_add_one.nat]; have h1 : (r + 1) + (u + 1) = ((r + 1) + u) + 1 := (by omega); rw [h1, pow_succ.real]
+            nlinarith [pow_nonneg.real rho (by linarith) ((r + 1) + u)]
+        have hsp : (r + 1) + ((r + 1) * n - (r + 1)) = (r + 1) * n := (by omega)
+        have hres := hrec ((r + 1) * n - (r + 1)); rw [hsp] at hres; exact hres
+      linarith
+    have hS_r : ∀ K : ℕ, (∑ r < K, rho ^ (r + 1)) ≤ 1 / (1 - rho)
+      intro K
+      have htel : (1 - rho) * (∑ r < K, rho ^ (r + 1)) = rho - rho ^ (K + 1) := by induction K with u ihu; (rw [sum_below_zero, pow_succ.real, pow_zero.real]; ring); (rw [succ_eq_add_one.nat, sum_below_succ u, pow_succ.real rho (u + 1)]; linarith)
+      exact (le_div_iff.real (∑ r < K, rho ^ (r + 1)) 1 (1 - rho) (by linarith)).mpr (by linarith [pow_nonneg.real rho (by linarith) (K + 1)])
+    have hR_conv : converges (fun R => ∑ r < R, complex.re (cpow_nat q ((r + 1) * n))) :=
+      (sernau.abs_bounded_sum_converges (fun r => complex.re (cpow_nat q ((r + 1) * n))) (fun r => rho ^ (r + 1)) (1 / (1 - rho)) hab_r hS_r).1
+    obtain ⟨L_R, hL_R⟩ := hR_conv
+    have hL_R_eq1 : rlim (fun R => ∑ r < R, exp (-2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * y)) * cos (2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * x))) = L_R
+      apply rlim.eq_of_tends_to
+      have hfe : (fun R => ∑ r < R, exp (-2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * y)) * cos (2 * pi * ((r + 1 : ℕ) : ℝ) * ((n : ℝ) * x))) = (fun R => ∑ r < R, complex.re (cpow_nat q ((r + 1) * n)))
+        funext R; exact sum_congr.real _ _ R (by intro r _; exact hterm_re r)
+      rw [hfe]; exact hL_R
+    have hL_R_eq2 : rlim (fun R => ∑ r < R, complex.re (cpow_nat q ((r + 1) * n)) / (n : ℝ)) = (1 / (n : ℝ)) * L_R
+      apply rlim.eq_of_tends_to
+      have hsc := tends_to.mul (fun _ => 1 / (n : ℝ)) _ (1 / (n : ℝ)) L_R (tends_to.const (1 / (n : ℝ))) hL_R
+      have hfe : (fun R => (1 / (n : ℝ)) * (∑ r < R, complex.re (cpow_nat q ((r + 1) * n)))) = (fun R => ∑ r < R, complex.re (cpow_nat q ((r + 1) * n)) / (n : ℝ))
+        funext R; induction R with u ihu; (rw [sum_below_zero, sum_below_zero]; ring)
+        rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, ← ihu]; field_simp
+      rw [hfe] at hsc; exact hsc
+    rw [hrow_v, hL_R_eq1, hL_R_eq2]; field_simp
+  -- Step 3: Double-sum swap for `a(n, r) = re(q^((r+1)*(n+1))) / (n+1)`!
+  set a : ℕ → ℕ → ℝ := fun n r => complex.re (cpow_nat q ((r + 1) * (n + 1))) / ((n + 1 : ℕ) : ℝ) with ha_def
+  have ha_bd : ∀ n r : ℕ, |a n r| ≤ rho ^ (r + n + 1)
+    intro n r; rw [ha_def]
+    have hn_ge1 : (1 : ℝ) ≤ ((n + 1 : ℕ) : ℝ) := (cast_le.real 1 (n + 1)).mpr (by omega)
+    have h1 : |complex.re (cpow_nat q ((r + 1) * (n + 1))) / ((n + 1 : ℕ) : ℝ)| ≤ |complex.re (cpow_nat q ((r + 1) * (n + 1)))|
+      rw [div_def.real (complex.re (cpow_nat q ((r + 1) * (n + 1)))) ((n + 1 : ℕ) : ℝ), abs_mul.real, abs_of_pos.real (1 / ((n + 1 : ℕ) : ℝ)) (one_div_pos.real ((n + 1 : ℕ) : ℝ) (by linarith))]
+      have hinv1 : 1 / ((n + 1 : ℕ) : ℝ) ≤ 1 := (div_le_iff.real 1 1 ((n + 1 : ℕ) : ℝ) (by linarith)).mpr (by linarith)
+      have hm := mul_le_mul_of_nonneg_left.real (1 / ((n + 1 : ℕ) : ℝ)) 1 (|complex.re (cpow_nat q ((r + 1) * (n + 1)))|) hinv1 (abs_nonneg.real (complex.re (cpow_nat q ((r + 1) * (n + 1)))))
+      linarith
+    have h2 : |complex.re (cpow_nat q ((r + 1) * (n + 1)))| ≤ rho ^ ((r + 1) * (n + 1)) := by rw [← habs_cpow_q ((r + 1) * (n + 1))]; exact complex.re_abs_le _
+    have hge : r + n + 1 ≤ (r + 1) * (n + 1) := by have he : (r + 1) * (n + 1) = r * n + r + n + 1 := (by ring); omega
+    have hpow_le : rho ^ ((r + 1) * (n + 1)) ≤ rho ^ (r + n + 1)
+      have hrec : ∀ k : ℕ, rho ^ ((r + n + 1) + k) ≤ rho ^ (r + n + 1) := by intro k; induction k with u ihu; (have h0 : (r + n + 1) + 0 = r + n + 1 := (by omega); rw [h0]; linarith); (rw [succ_eq_add_one.nat]; have h1' : (r + n + 1) + (u + 1) = ((r + n + 1) + u) + 1 := (by omega); rw [h1', pow_succ.real]; have hm := mul_le_mul_of_nonneg_left.real rho 1 (rho ^ ((r + n + 1) + u)) (by linarith) (pow_nonneg.real rho (by linarith) _); linarith)
+      have hsp : (r + n + 1) + ((r + 1) * (n + 1) - (r + n + 1)) = (r + 1) * (n + 1) := (by omega)
+      have hres := hrec ((r + 1) * (n + 1) - (r + n + 1)); rw [hsp] at hres; exact hres
+    linarith
+  -- Geometric series exact value `rlim (fun K => ∑ k < K, rho ^ (k + 1)) = rho / (1 - rho)`!
+  have hgeom_lim : ∀ c : ℕ, tends_to (fun K => ∑ k < K, rho ^ (c + k)) (rho ^ c / (1 - rho))
+    intro c
+    have htel : ∀ K : ℕ, (1 - rho) * (∑ k < K, rho ^ (c + k)) = rho ^ c - rho ^ (c + K)
+      intro K; induction K with u ihu; (have h0 : c + 0 = c := (by omega); rw [sum_below_zero, h0]; ring)
+      rw [succ_eq_add_one.nat]; have h1 : c + (u + 1) = (c + u) + 1 := (by omega); rw [sum_below_succ u, h1, pow_succ.real rho (c + u)]; linarith
+    have hpow_z : tends_to (fun K => rho ^ K) 0
+      set d_r := 1 / rho - 1 with hdr_def
+      have hdr_pos : 0 < d_r := by rw [hdr_def]; linarith [(lt_div_iff.real 1 1 rho hrho_pos).mpr (by linarith)]
+      have hbern : ∀ m : ℕ, 1 + (m : ℝ) * d_r ≤ (1 + d_r) ^ m
+        intro m; induction m with u ihu; (rw [pow_zero.real, cast_zero.real]; linarith)
+        rw [succ_eq_add_one.nat, pow_succ.real, cast_add.real, cast_one.real]
+        have hm := mul_le_mul_of_nonneg_right.real (1 + (u : ℝ) * d_r) ((1 + d_r) ^ u) (1 + d_r) ihu (by linarith)
+        linarith [mul_nonneg.real ((u : ℝ) * d_r) d_r (mul_nonneg.real (u : ℝ) d_r (cast_nonneg.real u) (by linarith)) (by linarith)]
+      unfold tends_to; intro e he; obtain ⟨K0, hK0⟩ := exists_nat_gt.real ((1 / e) / d_r); use K0 + 1; intro K hK
+      have hK_pos : 0 < (K : ℝ) := (cast_pos.real K).mpr (by omega)
+      have h1d : (1 + d_r) * rho = 1 := by rw [hdr_def]; field_simp
+      have hpow_inv_all : ∀ m : ℕ, ((1 + d_r) ^ m) * (rho ^ m) = 1
+        intro m; induction m with u ihu
+        · rw [pow_zero.real, pow_zero.real]; ring
+        · rw [succ_eq_add_one.nat, pow_succ.real (1 + d_r) u, pow_succ.real rho u]; linear_combination (rho ^ u * (1 + d_r) ^ u) * h1d + ihu
+      have hpow_inv := hpow_inv_all K
+      have hgt : 1 / e < (K : ℝ) * d_r := (div_lt_iff.real (1 / e) (K : ℝ) d_r hdr_pos).mp (by have hc := (cast_lt.real K0 K).mpr (by omega); linarith)
+      have hgt2 : 1 / e < (1 + d_r) ^ K := by linarith [hbern K]
+      have hm := mul_lt_mul_of_pos_right.real (1 / e) ((1 + d_r) ^ K) (rho ^ K) hgt2 (pow_pos.real rho hrho_pos K)
+      rw [hpow_inv] at hm
+      have hlt_e : rho ^ K < e
+        have hm2 := mul_lt_mul_of_pos_left.real ((1 / e) * rho ^ K) 1 e hm he
+        have hc : e * ((1 / e) * rho ^ K) = rho ^ K := by field_simp
+        linarith
+      have hr : rho ^ K - 0 = rho ^ K := by ring
+      rw [hr, abs_of_pos.real (rho ^ K) (pow_pos.real rho hrho_pos K)]; exact hlt_e
+    unfold tends_to at hpow_z ⊢; intro e he
+    obtain ⟨K0, hK0⟩ := hpow_z (e * (1 - rho) / rho ^ c) (div_pos.real (e * (1 - rho)) (rho ^ c) (mul_pos.real e (1 - rho) he (by linarith)) (pow_pos.real rho hrho_pos c))
+    use K0; intro K hK
+    have hdiff : (∑ k < K, rho ^ (c + k)) - rho ^ c / (1 - rho) = -(rho ^ c * rho ^ K / (1 - rho))
+      have hpow_a_all : ∀ m : ℕ, rho ^ (c + m) = rho ^ c * rho ^ m
+        intro m; induction m with u ihu
+        · have h0 : c + 0 = c := (by omega); rw [h0, pow_zero.real]; ring
+        · rw [succ_eq_add_one.nat]; have h1 : c + (u + 1) = (c + u) + 1 := (by omega); rw [h1, pow_succ.real, pow_succ.real, ihu]; ring
+      have ht := htel K; rw [hpow_a_all K] at ht
+      have h1r : 1 - rho ≠ 0 := by linarith
+      have hi := mul_inv_cancel.real (1 - rho) h1r
+      rw [div_def.real (rho ^ c) (1 - rho), div_def.real (rho ^ c * rho ^ K) (1 - rho)]
+      linear_combination (1 / (1 - rho)) * ht - (∑ k < K, rho ^ (c + k)) * hi
+    rw [hdiff, abs_neg_eq, abs_of_pos.real (rho ^ c * rho ^ K / (1 - rho)) (div_pos.real (rho ^ c * rho ^ K) (1 - rho) (mul_pos.real (rho ^ c) (rho ^ K) (pow_pos.real rho hrho_pos c) (pow_pos.real rho hrho_pos K)) (by linarith))]
+    have h1 := hK0 K hK; have hr0 : rho ^ K - 0 = rho ^ K := (by ring); rw [hr0, abs_of_pos.real (rho ^ K) (pow_pos.real rho hrho_pos K)] at h1
+    have hm := mul_lt_mul_of_pos_left.real (rho ^ K) (e * (1 - rho) / rho ^ c) (rho ^ c / (1 - rho)) h1 (div_pos.real (rho ^ c) (1 - rho) (pow_pos.real rho hrho_pos c) (by linarith))
+    have hc1 : (rho ^ c / (1 - rho)) * rho ^ K = rho ^ c * rho ^ K / (1 - rho) := by field_simp
+    have hc2 : (rho ^ c / (1 - rho)) * (e * (1 - rho) / rho ^ c) = e := by field_simp
+    linarith
+  -- Tail of each inner row and column, then conclude `rlim (∑ n, rlim_r a(n, r)) = -log |eta_prod tau|`!
+  have hrow_tail : ∀ n N : ℕ, |rlim (fun R => ∑ r < R, a n r) - ∑ r < N, a n r| ≤ rho ^ (n + 1 + N) / (1 - rho)
+    intro n N
+    have hM_bd : ∀ K : ℕ, (∑ r < K, rho ^ (r + n + 1)) ≤ rho ^ (n + 1) / (1 - rho)
+      intro K
+      have htel : (1 - rho) * (∑ r < K, rho ^ (r + n + 1)) = rho ^ (n + 1) - rho ^ (K + n + 1)
+        induction K with u ihu; (rw [sum_below_zero]; have h0 : 0 + n + 1 = n + 1 := (by omega); rw [h0]; ring)
+        rw [succ_eq_add_one.nat, sum_below_succ u]; have h1 : u + 1 + n + 1 = (u + n + 1) + 1 := (by omega); rw [h1, pow_succ.real rho (u + n + 1)]; linear_combination ihu
+      exact (le_div_iff.real _ _ (1 - rho) (by linarith)).mpr (by have hc : (∑ r < K, rho ^ (r + n + 1)) * (1 - rho) = (1 - rho) * (∑ r < K, rho ^ (r + n + 1)) := (by ring); linarith [pow_nonneg.real rho (by linarith) (K + n + 1)])
+    have htail := (sernau.abs_bounded_sum_converges (fun r => a n r) (fun r => rho ^ (r + n + 1)) (rho ^ (n + 1) / (1 - rho)) (by intro r; exact ha_bd n r) hM_bd).2 N
+    have hfe : (fun K => ∑ r < K, rho ^ (r + n + 1)) = (fun K => ∑ r < K, rho ^ ((n + 1) + r))
+      funext K; exact sum_congr.real _ _ K (by intro r _; have he : r + n + 1 = (n + 1) + r := (by omega); rw [he])
+    rw [hfe, rlim.eq_of_tends_to _ (rho ^ (n + 1) / (1 - rho)) (hgeom_lim (n + 1))] at htail
+    have htelN_all : ∀ K : ℕ, (1 - rho) * (∑ r < K, rho ^ ((n + 1) + r)) = rho ^ (n + 1) - rho ^ ((n + 1) + K)
+      intro K; induction K with u ihu
+      · have h0 : (n + 1) + 0 = n + 1 := (by omega); rw [sum_below_zero, h0]; ring
+      · rw [succ_eq_add_one.nat]; have h1 : (n + 1) + (u + 1) = ((n + 1) + u) + 1 := (by omega); rw [sum_below_succ u, h1, pow_succ.real rho ((n + 1) + u)]; linear_combination ihu
+    have htelN := htelN_all N
+    have hdiff : rho ^ (n + 1) / (1 - rho) - ∑ r < N, rho ^ ((n + 1) + r) = rho ^ (n + 1 + N) / (1 - rho)
+      have h1r : 1 - rho ≠ 0 := by linarith
+      have hi := mul_inv_cancel.real (1 - rho) h1r
+      rw [div_def.real (rho ^ (n + 1)) (1 - rho), div_def.real (rho ^ (n + 1 + N)) (1 - rho)]
+      linear_combination -(1 / (1 - rho)) * htelN + (∑ r < N, rho ^ ((n + 1) + r)) * hi
+    have hN_eq : (∑ r < N, rho ^ (r + n + 1)) = ∑ r < N, rho ^ ((n + 1) + r) := sum_congr.real _ _ N (by intro r _; have he : r + n + 1 = (n + 1) + r := (by omega); rw [he])
+    rw [hN_eq] at htail; linarith
+  have hcol_lim : ∀ r : ℕ, tends_to (fun N => ∑ n < N, a n r) (-log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1)))))
+    intro r
+    have hlt1 : complex.abs (cpow_nat q (r + 1)) < 1
+      rw [habs_cpow_q (r + 1)]
+      have hrec : ∀ k : ℕ, rho ^ (k + 1) ≤ rho := by intro k; induction k with u ihu; (rw [pow_succ.real, pow_zero.real]; linarith); (rw [succ_eq_add_one.nat, pow_succ.real rho (u + 1)]; linarith [mul_le_mul_of_nonneg_left.real rho 1 (rho ^ (u + 1)) (by linarith) (pow_nonneg.real rho (by linarith) _)])
+      linarith [hrec r]
+    have hl := hmd.2.2.2.2.2.2.2.2.2.2.2 (cpow_nat q (r + 1)) hlt1
+    have hfe : (fun N => ∑ n < N, complex.re (cpow_nat (cpow_nat q (r + 1)) (n + 1)) / ((n + 1 : ℕ) : ℝ)) = (fun N => ∑ n < N, a n r)
+      funext N; exact sum_congr.real _ _ N (by intro n _; rw [ha_def, ← cpow_nat.mul q (r + 1) (n + 1)])
+    rw [hfe] at hl; exact hl
+  have hcol_tail : ∀ r N : ℕ, |-log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1)))) - ∑ n < N, a n r| ≤ rho ^ (r + 1 + N) / (1 - rho)
+    intro r N
+    have hM_bd : ∀ K : ℕ, (∑ n < K, rho ^ (r + n + 1)) ≤ rho ^ (r + 1) / (1 - rho)
+      intro K
+      have htel : (1 - rho) * (∑ n < K, rho ^ (r + n + 1)) = rho ^ (r + 1) - rho ^ (r + K + 1)
+        induction K with u ihu; (rw [sum_below_zero]; have h0 : r + 0 + 1 = r + 1 := (by omega); rw [h0]; ring)
+        rw [succ_eq_add_one.nat, sum_below_succ u]; have h1 : r + (u + 1) + 1 = (r + u + 1) + 1 := (by omega); rw [h1, pow_succ.real rho (r + u + 1)]; linear_combination ihu
+      exact (le_div_iff.real _ _ (1 - rho) (by linarith)).mpr (by have hc : (∑ n < K, rho ^ (r + n + 1)) * (1 - rho) = (1 - rho) * (∑ n < K, rho ^ (r + n + 1)) := (by ring); linarith [pow_nonneg.real rho (by linarith) (r + K + 1)])
+    have htail := (sernau.abs_bounded_sum_converges (fun n => a n r) (fun n => rho ^ (r + n + 1)) (rho ^ (r + 1) / (1 - rho)) (by intro n; exact ha_bd n r) hM_bd).2 N
+    have hfe : (fun K => ∑ n < K, rho ^ (r + n + 1)) = (fun K => ∑ n < K, rho ^ ((r + 1) + n))
+      funext K; exact sum_congr.real _ _ K (by intro n _; have he : r + n + 1 = (r + 1) + n := (by omega); rw [he])
+    rw [rlim.eq_of_tends_to _ (-log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) (hcol_lim r), hfe, rlim.eq_of_tends_to _ (rho ^ (r + 1) / (1 - rho)) (hgeom_lim (r + 1))] at htail
+    have htelN_all : ∀ K : ℕ, (1 - rho) * (∑ n < K, rho ^ ((r + 1) + n)) = rho ^ (r + 1) - rho ^ ((r + 1) + K)
+      intro K; induction K with u ihu
+      · have h0 : (r + 1) + 0 = r + 1 := (by omega); rw [sum_below_zero, h0]; ring
+      · rw [succ_eq_add_one.nat]; have h1 : (r + 1) + (u + 1) = ((r + 1) + u) + 1 := (by omega); rw [sum_below_succ u, h1, pow_succ.real rho ((r + 1) + u)]; linear_combination ihu
+    have htelN := htelN_all N
+    have hdiff : rho ^ (r + 1) / (1 - rho) - ∑ n < N, rho ^ ((r + 1) + n) = rho ^ (r + 1 + N) / (1 - rho)
+      have h1r : 1 - rho ≠ 0 := by linarith
+      have hi := mul_inv_cancel.real (1 - rho) h1r
+      rw [div_def.real (rho ^ (r + 1)) (1 - rho), div_def.real (rho ^ (r + 1 + N)) (1 - rho)]
+      linear_combination -(1 / (1 - rho)) * htelN + (∑ n < N, rho ^ ((r + 1) + n)) * hi
+    have hN_eq : (∑ n < N, rho ^ (r + n + 1)) = ∑ n < N, rho ^ ((r + 1) + n) := sum_congr.real _ _ N (by intro n _; have he : r + n + 1 = (r + 1) + n := (by omega); rw [he])
+    rw [hN_eq] at htail; linarith
+  -- Compare finite sums of row limits vs column limits at cutoff N!
+  have hswap_fin : ∀ M K : ℕ, (∑ n < M, ∑ r < K, a n r) = ∑ r < K, ∑ n < M, a n r
+    intro M K; induction M with u ihu
+    · rw [sum_below_zero]; induction K with j ihj; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat, sum_below_succ j, sum_below_zero, ← ihj]; ring)
+    · rw [succ_eq_add_one.nat, sum_below_succ u, ihu]
+      have hadd : ∀ J : ℕ, (∑ r < J, ∑ n < u, a n r) + (∑ r < J, a u r) = ∑ r < J, ∑ n < u + 1, a n r
+        intro J; induction J with j ihj; (rw [sum_below_zero, sum_below_zero, sum_below_zero]; ring)
+        rw [succ_eq_add_one.nat, sum_below_succ j, sum_below_succ j, sum_below_succ j, sum_below_succ u]; linarith
+      exact hadd K
+  have hsq_diff : ∀ N : ℕ, |(∑ n < N, rlim (fun R => ∑ r < R, a n r)) - (∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1)))))| ≤ 2 * (rho ^ (N + 1) / ((1 - rho) * (1 - rho)))
+    intro N
+    have hsum_rho : (∑ k < N, rho ^ (k + 1 + N) / (1 - rho)) ≤ rho ^ (N + 1) / ((1 - rho) * (1 - rho))
+      have htel : ∀ K : ℕ, (1 - rho) * (∑ k < K, rho ^ (k + 1 + N)) = rho ^ (N + 1) - rho ^ (K + 1 + N)
+        intro K; induction K with u ihu; (rw [sum_below_zero]; have h0 : 0 + 1 + N = N + 1 := (by omega); rw [h0]; ring)
+        rw [succ_eq_add_one.nat, sum_below_succ u]; have h1 : (u + 1) + 1 + N = (u + 1 + N) + 1 := (by omega); rw [h1, pow_succ.real rho (u + 1 + N)]; linear_combination ihu
+      have hdiv_out : ∀ K : ℕ, (∑ k < K, rho ^ (k + 1 + N) / (1 - rho)) = (∑ k < K, rho ^ (k + 1 + N)) / (1 - rho)
+        intro K; induction K with u ihu; (rw [sum_below_zero, sum_below_zero]; field_simp)
+        rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, ihu]; field_simp
+      rw [hdiv_out N]
+      have h1 : (∑ k < N, rho ^ (k + 1 + N)) ≤ rho ^ (N + 1) / (1 - rho) := (le_div_iff.real _ _ (1 - rho) (by linarith)).mpr (by have hc : (∑ k < N, rho ^ (k + 1 + N)) * (1 - rho) = (1 - rho) * (∑ k < N, rho ^ (k + 1 + N)) := (by ring); linarith [htel N, pow_nonneg.real rho (by linarith) (N + 1 + N)])
+      have h2 := mul_le_mul_of_nonneg_right.real _ (rho ^ (N + 1) / (1 - rho)) (1 / (1 - rho)) h1 (div_nonneg.real 1 (1 - rho) (by decide) (by linarith))
+      have hq1 : (∑ k < N, rho ^ (k + 1 + N)) * (1 / (1 - rho)) = (∑ k < N, rho ^ (k + 1 + N)) / (1 - rho) := by field_simp
+      have hq2 : (rho ^ (N + 1) / (1 - rho)) * (1 / (1 - rho)) = rho ^ (N + 1) / ((1 - rho) * (1 - rho)) := by field_simp
+      linarith
+    have hdiff1 : |(∑ n < N, rlim (fun R => ∑ r < R, a n r)) - (∑ n < N, ∑ r < N, a n r)| ≤ ∑ k < N, rho ^ (k + 1 + N) / (1 - rho)
+      have hrec : ∀ K : ℕ, |(∑ n < K, rlim (fun R => ∑ r < R, a n r)) - (∑ n < K, ∑ r < N, a n r)| ≤ ∑ k < K, rho ^ (k + 1 + N) / (1 - rho)
+        intro K; induction K with u ihu
+        · rw [sum_below_zero, sum_below_zero, sum_below_zero]; have h0 : (0 : ℝ) - 0 = 0 := (by ring); rw [h0, abs_of_nonneg.real 0 (by decide)]; linarith
+        · rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, sum_below_succ u]
+          have hre : ((∑ n < u, rlim (fun R => ∑ r < R, a n r)) + rlim (fun R => ∑ r < R, a u r)) - ((∑ n < u, ∑ r < N, a n r) + (∑ r < N, a u r)) = ((∑ n < u, rlim (fun R => ∑ r < R, a n r)) - (∑ n < u, ∑ r < N, a n r)) + (rlim (fun R => ∑ r < R, a u r) - ∑ r < N, a u r) := by ring
+          rw [hre]; linarith [abs_add_le ((∑ n < u, rlim (fun R => ∑ r < R, a n r)) - (∑ n < u, ∑ r < N, a n r)) (rlim (fun R => ∑ r < R, a u r) - ∑ r < N, a u r), hrow_tail u N]
+      exact hrec N
+    have hdiff2 : |(∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) - (∑ r < N, ∑ n < N, a n r)| ≤ ∑ k < N, rho ^ (k + 1 + N) / (1 - rho)
+      have hrec : ∀ K : ℕ, |(∑ r < K, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) - (∑ r < K, ∑ n < N, a n r)| ≤ ∑ k < K, rho ^ (k + 1 + N) / (1 - rho)
+        intro K; induction K with u ihu
+        · rw [sum_below_zero, sum_below_zero, sum_below_zero]; have h0 : (0 : ℝ) - 0 = 0 := (by ring); rw [h0, abs_of_nonneg.real 0 (by decide)]; linarith
+        · rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, sum_below_succ u]
+          have hre : ((∑ r < u, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) + -log (complex.abs (complex.sub complex.one (cpow_nat q (u + 1))))) - ((∑ r < u, ∑ n < N, a n r) + (∑ n < N, a n u)) = ((∑ r < u, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) - (∑ r < u, ∑ n < N, a n r)) + (-log (complex.abs (complex.sub complex.one (cpow_nat q (u + 1)))) - ∑ n < N, a n u) := by ring
+          rw [hre]; linarith [abs_add_le ((∑ r < u, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) - (∑ r < u, ∑ n < N, a n r)) (-log (complex.abs (complex.sub complex.one (cpow_nat q (u + 1)))) - ∑ n < N, a n u), hcol_tail u N]
+      exact hrec N
+    rw [← hswap_fin N N] at hdiff2
+    have hre : (∑ n < N, rlim (fun R => ∑ r < R, a n r)) - (∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) = ((∑ n < N, rlim (fun R => ∑ r < R, a n r)) - (∑ n < N, ∑ r < N, a n r)) + -((∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) - (∑ n < N, ∑ r < N, a n r)) := by ring
+    rw [hre]; linarith [abs_add_le ((∑ n < N, rlim (fun R => ∑ r < R, a n r)) - (∑ n < N, ∑ r < N, a n r)) (-((∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) - (∑ n < N, ∑ r < N, a n r))), abs_neg_eq ((∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) - (∑ n < N, ∑ r < N, a n r))]
+  -- Pass `N -> infty` to get `tends_to (fun N => ∑ n < N, rlim_r a(n, r)) (-log |eta_prod tau|)`!
+  have heta_neg_lim : tends_to (fun N => ∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) (-log (complex.abs (sernau.eta_prod tau)))
+    have h8 := hmd.2.2.2.2.2.2.2.1
+    have hneg := tends_to.mul (fun _ => (-1 : ℝ)) _ (-1) (log (complex.abs (sernau.eta_prod tau))) (tends_to.const (-1)) h8
+    have hfe : (fun N => (-1 : ℝ) * (∑ k < N, log (complex.abs (complex.sub complex.one (cpow_nat q (k + 1)))))) = (fun N => ∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1)))))
+      funext N; induction N with u ihu; (rw [sum_below_zero, sum_below_zero]; ring)
+      rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, ← ihu]; ring
+    have hv : (-1 : ℝ) * log (complex.abs (sernau.eta_prod tau)) = -log (complex.abs (sernau.eta_prod tau)) := by ring
+    rw [hfe, hv] at hneg; exact hneg
+  have hrow_sum_lim : tends_to (fun N => ∑ n < N, rlim (fun R => ∑ r < R, a n r)) (-log (complex.abs (sernau.eta_prod tau)))
+    have hpow_z : tends_to (fun N => rho ^ (N + 1)) 0
+      have hg1 := hgeom_lim 1
+      have htel : ∀ N : ℕ, rho ^ (N + 1) = rho - (1 - rho) * (∑ k < N, rho ^ (1 + k))
+        intro N; induction N with u ihu; (rw [sum_below_zero, pow_succ.real, pow_zero.real]; ring)
+        rw [succ_eq_add_one.nat, sum_below_succ u, pow_succ.real rho (u + 1)]; have h1 : 1 + u = u + 1 := (by omega); rw [h1]; linear_combination ihu
+      have hsub := tends_to.sub (fun _ => rho) (fun N => (1 - rho) * (∑ k < N, rho ^ (1 + k))) rho ((1 - rho) * (rho ^ 1 / (1 - rho))) (tends_to.const rho) (tends_to.mul (fun _ => 1 - rho) _ (1 - rho) (rho ^ 1 / (1 - rho)) (tends_to.const (1 - rho)) hg1)
+      have hv : rho - (1 - rho) * (rho ^ 1 / (1 - rho)) = 0 := by have e1 : (1 : ℕ) = 0 + 1 := (by rfl); have h1 : rho ^ 1 = rho := (by rw [e1, pow_succ.real, pow_zero.real]; ring); rw [h1]; field_simp
+      rw [hv] at hsub
+      unfold tends_to at hsub ⊢; intro e he; obtain ⟨N0, hN0⟩ := hsub e he; use N0; intro N hN; rw [htel N]; exact hN0 N hN
+    unfold tends_to at heta_neg_lim hpow_z ⊢; intro e he
+    obtain ⟨N1, hN1⟩ := heta_neg_lim (e / 2) (by linarith)
+    have hden_pos : 0 < (1 - rho) * (1 - rho) := by nlinarith
+    obtain ⟨N2, hN2⟩ := hpow_z ((e / 4) * ((1 - rho) * (1 - rho))) (mul_pos.real (e / 4) ((1 - rho) * (1 - rho)) (by linarith) hden_pos)
+    use N1 + N2; intro N hN
+    have h1 := hN1 N (by omega)
+    have h2 := hN2 N (by omega); have hr0 : rho ^ (N + 1) - 0 = rho ^ (N + 1) := (by ring); rw [hr0, abs_of_pos.real (rho ^ (N + 1)) (pow_pos.real rho hrho_pos (N + 1))] at h2
+    have h3 : 2 * (rho ^ (N + 1) / ((1 - rho) * (1 - rho))) < e / 2
+      have hd := (div_lt_iff.real (rho ^ (N + 1)) (e / 4) ((1 - rho) * (1 - rho)) hden_pos).mpr h2
+      linarith
+    have h4 := hsq_diff N
+    have hre : (∑ n < N, rlim (fun R => ∑ r < R, a n r)) - -log (complex.abs (sernau.eta_prod tau)) = ((∑ n < N, rlim (fun R => ∑ r < R, a n r)) - (∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1)))))) + ((∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) - -log (complex.abs (sernau.eta_prod tau))) := by ring
+    rw [hre]; linarith [abs_add_le ((∑ n < N, rlim (fun R => ∑ r < R, a n r)) - (∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1)))))) ((∑ r < N, -log (complex.abs (complex.sub complex.one (cpow_nat q (r + 1))))) - -log (complex.abs (sernau.eta_prod tau)))]
+  -- Finally, scale by `2 * pi / y` and match `sernau.row_defect_total tau 1`!
+  have htot1 := (hbc.2.1 1 (by decide) (by decide)).2.1
+  have hsc := tends_to.mul (fun _ => 2 * pi / y) _ (2 * pi / y) (-log (complex.abs (sernau.eta_prod tau))) (tends_to.const (2 * pi / y)) hrow_sum_lim
+  have hfe_tot : (fun N => (2 * pi / y) * (∑ n < N, rlim (fun R => ∑ r < R, a n r))) = (fun N => ∑ n < N, sernau.row_defect_row tau (n + 1) 1)
+    funext N; induction N with u ihu; (rw [sum_below_zero, sum_below_zero]; ring)
+    rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, ← ihu, hrow1_eq (u + 1) (by omega)]; rw [ha_def]; ring
+  rw [hfe_tot] at hsc
+  have hu1 := rlim.eq_of_tends_to _ _ htot1
+  have hu2 := rlim.eq_of_tends_to _ _ hsc
+  rw [← hu1, hu2]; ring

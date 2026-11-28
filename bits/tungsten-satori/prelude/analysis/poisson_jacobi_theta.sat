@@ -1,0 +1,2220 @@
+-- Milestone 3.30: Unconditional C^2 Fourier Convergence (Dirichlet Kernel + IBP),
+--                 Unconditional Gaussian Integral int_{-inf}^{inf} e^(-pi*x^2) dx = 1,
+--                 and Unconditional Jacobi Theta Modular Inversion
+--                 1 + 2*psi(t) = (1/sqrt(t)) * (1 + 2*psi(1/t)) (0 CUSTOM AXIOMS!)
+--
+-- Retires the remaining analytic bottleneck of Frontier #1 (`classical_L_laws`):
+--   1. `sin_pi_ge_self`: sin(pi*x) >= x for ALL x in [0, 1/2] (from `one_sub_cos_le` + IBP).
+--   2. `dirichlet_kernel.telescope`: sin(pi*x) * D_N(x) = sin((2N+1)*pi*x) and int_0^{1/2} D_N = 1/2.
+--   3. `fourier.riemann_lebesgue_sin_c1`: |int_delta^{1/2} g(x) sin((2N+1)*pi*x) dx| <= (2*B + M)/((2N+1)*pi).
+--   4. `fourier.even_c1_quad_converges_at_zero`: for ANY F on [0, 1/2] with |F(x) - F(0)| <= L*x^2
+--      and C^1 on every [delta, 1/2], the Fourier cosine series 2*c_0 + 4*sum_{k>=1} c_k -> F(0)!
+--   5. `series.c1_of_c2_bound`: quadratic-remainder termwise differentiation for sum u_n(x).
+--   6. `gaussian.integral_eq_one` & `jacobi_theta.modular_inversion_unconditional`:
+--      UNCONDITIONAL int_{-inf}^{inf} e^(-pi*x^2) dx = 1 and
+--      1 + 2*psi(t) = (1/sqrt(t)) * (1 + 2*psi(1/t)) for ALL t > 0 (0 CUSTOM AXIOMS!).
+
+import number_theory.dirichlet_sieve_gamma
+
+-- ====================================================================================
+-- 1. TRIGONOMETRIC BOUNDS, DIRICHLET KERNEL, & UNCONDITIONAL C^2 FOURIER CONVERGENCE
+-- ====================================================================================
+
+-- Elementary sine lower bound on [0, 1/2]: x <= sin(pi * x)!
++ sin_pi_ge_self (x : ℝ) (hx0 : 0 ≤ x) (hx1 : x ≤ 1 / 2) : x ≤ sin (pi * x)
+  have hpi_lo : 3.1415926 < pi := pi_bounds.1
+  have hpi_hi : pi < 3.1415927 := pi_bounds.2
+  -- First prove u - u^3 / 6 <= sin u for all u >= 0!
+  have hsin_cub : ∀ u : ℝ, 0 ≤ u → u - u * u * u / 6 ≤ sin u
+    intro u hu
+    set g := (fun t => sin t - (t - t * t * t / 6)) with hg
+    set dg := (fun t => cos t - (1 - t * t / 2)) with hdg
+    have hderiv : ∀ t, 0 ≤ t → t ≤ u → has_deriv_within g (fun z => 0 ≤ z ∧ z ≤ u) t (dg t)
+      intro t _ _
+      set S := (fun (z : ℝ) => 0 ≤ z ∧ z ≤ u)
+      have hs := has_deriv_within.sin S t
+      have hid := has_deriv_within.id S t
+      have hsq : has_deriv_within (fun z => z * z) S t (t + t)
+        have h := has_deriv_within.mul (fun z => z) (fun z => z) S t 1 1 hid hid
+        have hv : 1 * t + t * 1 = t + t := by ring
+        rw [hv] at h; exact h
+      have hcub : has_deriv_within (fun z => z * z * z) S t (3 * t * t)
+        have h := has_deriv_within.mul (fun z => z * z) (fun z => z) S t (t + t) 1 hsq hid
+        have hv : (t + t) * t + t * t * 1 = 3 * t * t := by ring
+        rw [hv] at h; exact h
+      have hsc := has_deriv_within.scale (1 / 6) (fun z => z * z * z) S t (3 * t * t) hcub
+      have hneg_id := has_deriv_within.scale (-1) (fun z => z) S t 1 hid
+      have h1 := has_deriv_within.add sin (fun z => (-1) * z) S t (cos t) ((-1) * 1) hs hneg_id
+      have h2 := has_deriv_within.add (fun z => sin z + (-1) * z) (fun z => (1 / 6) * (z * z * z)) S t (cos t + (-1) * 1) ((1 / 6) * (3 * t * t)) h1 hsc
+      have hf : (fun z => (sin z + (-1) * z) + (1 / 6) * (z * z * z)) = g := by rw [hg]; funext z; ring
+      have hv : (cos t + (-1) * 1) + (1 / 6) * (3 * t * t) = dg t := by rw [hdg]; ring
+      rw [hf, hv] at h2; exact h2
+    have hdg_nn : ∀ t, 0 ≤ t → t ≤ u → 0 ≤ dg t
+      intro t _ _
+      rw [hdg]; linarith [(one_sub_cos_le t).2]
+    have hinc := interval.increment_ge_of_deriv_ge g dg 0 u 0 hu hderiv hdg_nn
+    have hg0 : g 0 = 0 := by rw [hg]; simp [sin_zero]
+    have hgu : g u = sin u - (u - u * u * u / 6) := by rw [hg]
+    rw [hg0, hgu] at hinc; linarith
+  have hu := hsin_cub (pi * x) (by nlinarith)
+  -- Since 0 <= pi * x <= pi / 2 < 1.6, (pi * x)^2 / 6 < 0.43, so pi * x * (1 - (pi * x)^2 / 6) >= (pi / 2) * x >= x!
+  have hpx_nn : 0 ≤ pi * x := by nlinarith
+  have hpx_le : pi * x ≤ 1.6 := by nlinarith
+  nlinarith
+
++ abs_neg_eq (z : ℝ) : |-z| = |z|
+  have h : -z = 0 - z := by ring
+  rw [h, abs_neg.real]
+
++ abs_add_le (a b : ℝ) : |a + b| ≤ |a| + |b|
+  exact abs_le_of.real (a + b) (|a| + |b|) (by linarith [neg_le_abs.real a, neg_le_abs.real b]) (by linarith [le_abs_self.real a, le_abs_self.real b])
+
+-- Exact periodicity helpers for integer multiples of pi and 2*pi:
++ sin_nat_mul_pi (k : ℕ) : sin ((k : ℝ) * pi) = 0
+  induction k with j ihj
+  · simp [sin_zero]
+  · rw [succ_eq_add_one.nat, cast_add.real j 1]; simp
+    have ha : ((j : ℝ) + 1) * pi = (j : ℝ) * pi + pi := by ring
+    rw [ha, sin_add, ihj, sin_pi]; ring
+
++ cos_add_two_pi_nat (n : ℕ) (x : ℝ) : cos (x + 2 * pi * (n : ℝ)) = cos x
+  induction n with j ihj
+  · simp
+  · rw [succ_eq_add_one.nat, cast_add.real j 1]; simp
+    have ha : x + 2 * pi * ((j : ℝ) + 1) = (x + 2 * pi * (j : ℝ)) + 2 * pi := by ring
+    rw [ha, cos_add, cos_two_pi, sin_two_pi, ihj]; ring
+
++ cos_sub_two_pi_nat (n : ℕ) (x : ℝ) : cos (x - 2 * pi * (n : ℝ)) = cos x
+  have h := cos_add_two_pi_nat n (x - 2 * pi * (n : ℝ))
+  have he : (x - 2 * pi * (n : ℝ)) + 2 * pi * (n : ℝ) = x := by ring
+  rw [he] at h; exact h.symm
+
+-- Dirichlet kernel D_N(x) = 1 + 2 * sum_{k=0}^{N-1} cos(2 * pi * (k + 1) * x):
+-> dirichlet_kernel (N : ℕ) (x : ℝ) : ℝ :=
+  1 + 2 * (∑ k < N, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x))
+
+-- Exact Dirichlet kernel trig telescope: sin(pi * x) * D_N(x) = sin((2*N + 1) * pi * x)!
++ dirichlet_kernel.telescope (N : ℕ) (x : ℝ) :
+    sin (pi * x) * dirichlet_kernel N x = sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)
+  unfold dirichlet_kernel
+  induction N with j ihj
+  · rw [sum_below_zero]
+    have h1 : ((2 * 0 + 1 : ℕ) : ℝ) * pi * x = pi * x := by simp
+    rw [h1]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ]
+    have hstep : sin (pi * x) * (1 + 2 * ((∑ k < j, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) + cos (2 * pi * ((j + 1 : ℕ) : ℝ) * x))) = sin (pi * x) * (1 + 2 * (∑ k < j, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x))) + 2 * sin (pi * x) * cos (2 * pi * ((j + 1 : ℕ) : ℝ) * x) := by ring
+    rw [hstep, ihj]
+    -- Product-to-sum: sin((2j+1)pi x) + 2 sin(pi x) cos(2(j+1)pi x) = sin((2j+3)pi x)!
+    set A := (2 * (j : ℝ) + 2) * pi * x with hA
+    set B := pi * x with hB
+    have hcast1 : ((2 * j + 1 : ℕ) : ℝ) * pi * x = A - B := by rw [hA, hB]; ring
+    have hcast2 : ((2 * (j + 1) + 1 : ℕ) : ℝ) * pi * x = A + B := by rw [hA, hB]; ring
+    have hcast3 : 2 * pi * ((j + 1 : ℕ) : ℝ) * x = A := by rw [hA]; ring
+    rw [hcast1, hcast2, hcast3]
+    have hs1 := sin_add A B
+    have hs2 := sin_add A (-B)
+    have hsub : A + -B = A - B := by ring
+    rw [hsub, sin_neg, cos_neg] at hs2
+    linarith
+
+-- Exact integral of Dirichlet kernel on [0, 1/2]: int_0^{1/2} D_N(x) dx = 1/2!
++ dirichlet_kernel.integral_half (N : ℕ) :
+    darboux.has_integral (dirichlet_kernel N) 0 (1 / 2) (1 / 2)
+  have hcos0 : ∀ k : ℕ, darboux.has_integral (fun x => cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) 0 (1 / 2) 0
+    intro k
+    have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+    set w := 2 * pi * ((k + 1 : ℕ) : ℝ) with hw
+    have hw_pos : 0 < w := by rw [hw]; exact mul_pos.real (2 * pi) ((k + 1 : ℕ) : ℝ) (by linarith) ((cast_pos.real (k + 1)).mpr (by omega))
+    have hcont : ∀ t, 0 ≤ t → t ≤ 1 / 2 → continuous_at (fun x => cos (w * x)) t := by intro t _ _; continuity
+    have hderiv : ∀ t, 0 ≤ t → t ≤ 1 / 2 → has_deriv_within (fun x => (1 / w) * sin (w * x)) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t (cos (w * t))
+      intro t _ _
+      set S := (fun (z : ℝ) => 0 ≤ z ∧ z ≤ 1 / 2)
+      have h1 := has_deriv_within.comp sin (fun x => w * x) S (fun _ => True) t (cos (w * t)) w (has_deriv_within.sin (fun _ => True) (w * t)) (has_deriv_within.scale_id w S t) (by intro z _; trivial)
+      have h2 := has_deriv_within.scale (1 / w) (fun x => sin (w * x)) S t (cos (w * t) * w) h1
+      have hcw := mul_inv_cancel.real w (by linarith)
+      have hv : (1 / w) * (cos (w * t) * w) = cos (w * t) := by linear_combination (cos (w * t)) * hcw
+      rw [hv] at h2; exact h2
+    have hraw := darboux.fundamental (fun x => (1 / w) * sin (w * x)) (fun x => cos (w * x)) 0 (1 / 2) (by decide) hcont hderiv
+    have hval : (1 / w) * sin (w * (1 / 2)) - (1 / w) * sin (w * 0) = 0
+      have h0 : w * 0 = 0 := by ring
+      have h1 : w * (1 / 2) = ((k + 1 : ℕ) : ℝ) * pi := by rw [hw]; ring
+      rw [h0, h1, sin_zero, sin_nat_mul_pi (k + 1)]; ring
+    rw [hval] at hraw; exact hraw
+  have hsum0 : ∀ M : ℕ, darboux.has_integral (fun x => ∑ k < M, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) 0 (1 / 2) 0
+    intro M; induction M with j ihj
+    · have hf : (fun (_ : ℝ) => ∑ k < 0, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * _)) = (fun _ => (0 : ℝ)) := by funext x; rw [sum_below_zero]
+      have h0 := darboux.const 0 (1 / 2) 0 (by decide)
+      have hv : (0 : ℝ) * (1 / 2 - 0) = 0 := by ring
+      rw [hv] at h0; rw [hf]; exact h0
+    · rw [succ_eq_add_one.nat]
+      have hadd := darboux.add (fun x => ∑ k < j, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) (fun x => cos (2 * pi * ((j + 1 : ℕ) : ℝ) * x)) 0 (1 / 2) 0 0 ihj (hcos0 j)
+      have hf : (fun x => (∑ k < j, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) + cos (2 * pi * ((j + 1 : ℕ) : ℝ) * x)) = (fun x => ∑ k < j + 1, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) := by funext x; rw [sum_below_succ]
+      have hv : (0 : ℝ) + 0 = 0 := by ring
+      rw [hf, hv] at hadd; exact hadd
+  have hconst1 := darboux.const 0 (1 / 2) 1 (by decide)
+  have h2sum := darboux.scale (fun x => ∑ k < N, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) 0 (1 / 2) 0 2 (hsum0 N)
+  have hall := darboux.add (fun _ => (1 : ℝ)) (fun x => 2 * (∑ k < N, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x))) 0 (1 / 2) (1 * (1 / 2 - 0)) (2 * 0) hconst1 h2sum
+  have hf : (fun x => 1 + 2 * (∑ k < N, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x))) = dirichlet_kernel N := by rfl
+  have hv : 1 * (1 / 2 - 0) + 2 * 0 = (1 / 2 : ℝ) := by ring
+  rw [hf, hv] at hall; exact hall
+
+-- THEOREM 1 (RIEMANN-LEBESGUE LEMMA FOR C^1 FUNCTIONS VIA 1 IBP — 0 AXIOMS!):
++ fourier.riemann_lebesgue_sin_c1 (g gp : ℝ → ℝ) (delta I J B M : ℝ) (N : ℕ)
+    (hd0 : 0 < delta) (hd1 : delta ≤ 1 / 2) (hB : 0 ≤ B) (hM : 0 ≤ M)
+    (hI : darboux.has_integral (fun x => g x * sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)) delta (1 / 2) I)
+    (hJ : darboux.has_integral (fun x => gp x * cos (((2 * N + 1 : ℕ) : ℝ) * pi * x)) delta (1 / 2) J)
+    (hg_bd : ∀ x, delta ≤ x → x ≤ 1 / 2 → |g x| ≤ B)
+    (hgp_bd : ∀ x, delta ≤ x → x ≤ 1 / 2 → |gp x| ≤ M)
+    (hderiv : ∀ t, delta ≤ t → t ≤ 1 / 2 → has_deriv_within g (fun z => delta ≤ z ∧ z ≤ 1 / 2) t (gp t)) :
+    |I| ≤ (2 * B + M) / (((2 * N + 1 : ℕ) : ℝ) * pi)
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  set w := ((2 * N + 1 : ℕ) : ℝ) * pi with hw
+  have hw_pos : 0 < w := by rw [hw]; exact mul_pos.real ((2 * N + 1 : ℕ) : ℝ) pi ((cast_pos.real (2 * N + 1)).mpr (by omega)) hpi_pos
+  have hcw := mul_inv_cancel.real w (by linarith)
+  set G := (fun x => -(1 / w) * cos (w * x)) with hG
+  have hG_deriv : ∀ t, delta ≤ t → t ≤ 1 / 2 → has_deriv_within G (fun z => delta ≤ z ∧ z ≤ 1 / 2) t (sin (w * t))
+    intro t _ _
+    set S := (fun (z : ℝ) => delta ≤ z ∧ z ≤ 1 / 2)
+    have h1 := has_deriv_within.comp cos (fun x => w * x) S (fun _ => True) t (-sin (w * t)) w (has_deriv_within.cos (fun _ => True) (w * t)) (has_deriv_within.scale_id w S t) (by intro z _; trivial)
+    have h2 := has_deriv_within.scale (-(1 / w)) (fun x => cos (w * x)) S t (-sin (w * t) * w) h1
+    have hf : (fun x => -(1 / w) * cos (w * x)) = G := by rw [hG]
+    have hv : -(1 / w) * (-sin (w * t) * w) = sin (w * t) := by linear_combination (sin (w * t)) * hcw
+    rw [hf, hv] at h2; exact h2
+  have hJ_sc := darboux.scale (fun x => gp x * cos (w * x)) delta (1 / 2) J (-(1 / w)) hJ
+  have hJ_eq : darboux.has_integral (fun x => gp x * G x) delta (1 / 2) (-(1 / w) * J)
+    have hf : (fun x => -(1 / w) * (gp x * cos (w * x))) = (fun x => gp x * G x) := by rw [hG]; funext x; ring
+    rw [hf] at hJ_sc; exact hJ_sc
+  have hbp := darboux.by_parts g G gp (fun x => sin (w * x)) delta (1 / 2) (-(1 / w) * J) I hJ_eq hI hderiv hG_deriv
+  -- Bound |J| <= M * (1/2 - delta) <= M!
+  have hJ_abs : |J| ≤ M
+    have hpt_J : ∀ x, delta ≤ x → x ≤ 1 / 2 → |gp x * cos (w * x)| ≤ M
+      intro x hx1 hx2
+      rw [abs_mul.real]
+      have h1 := hgp_bd x hx1 hx2
+      have h2 := cos_abs_le_one (w * x)
+      have hm1 := mul_le_mul_of_nonneg_right.real (|gp x|) M (|cos (w * x)|) h1 (abs_nonneg.real (cos (w * x)))
+      have hm2 := mul_le_mul_of_nonneg_left.real (|cos (w * x)|) 1 M h2 hM
+      linarith
+    have hle := darboux.abs_le_const (fun x => gp x * cos (w * x)) delta (1 / 2) J M hJ hpt_J
+    have hlen : 1 / 2 - delta ≤ 1 := by linarith
+    have hm := mul_le_mul_of_nonneg_left.real (1 / 2 - delta) 1 M hlen hM
+    linarith
+  -- Bound boundary terms: |g(1/2)*G(1/2)| <= B/w and |g(delta)*G(delta)| <= B/w!
+  have hG_bd : ∀ x, |G x| ≤ 1 / w
+    intro x; rw [hG, abs_mul.real]
+    have h1w : |-(1 / w)| = 1 / w := by rw [abs_neg_eq, abs_of_pos.real (1 / w) (one_div_pos.real w hw_pos)]
+    rw [h1w]
+    have hm := mul_le_mul_of_nonneg_left.real (|cos (w * x)|) 1 (1 / w) (cos_abs_le_one (w * x)) (by linarith [one_div_pos.real w hw_pos])
+    linarith
+  have hb1 : |g (1 / 2) * G (1 / 2)| ≤ B / w
+    rw [abs_mul.real]
+    have hm1 := mul_le_mul_of_nonneg_right.real (|g (1 / 2)|) B (|G (1 / 2)|) (hg_bd (1 / 2) hd1 (by linarith)) (abs_nonneg.real (G (1 / 2)))
+    have hm2 := mul_le_mul_of_nonneg_left.real (|G (1 / 2)|) (1 / w) B (hG_bd (1 / 2)) hB
+    rw [div_def.real B w]; linarith
+  have hb2 : |g delta * G delta| ≤ B / w
+    rw [abs_mul.real]
+    have hm1 := mul_le_mul_of_nonneg_right.real (|g delta|) B (|G delta|) (hg_bd delta (by linarith) hd1) (abs_nonneg.real (G delta))
+    have hm2 := mul_le_mul_of_nonneg_left.real (|G delta|) (1 / w) B (hG_bd delta) hB
+    rw [div_def.real B w]; linarith
+  have hb3 : |-(1 / w) * J| ≤ M / w
+    rw [abs_mul.real, abs_neg_eq, abs_of_pos.real (1 / w) (one_div_pos.real w hw_pos)]
+    have hm := mul_le_mul_of_nonneg_left.real (|J|) M (1 / w) hJ_abs (by linarith [one_div_pos.real w hw_pos])
+    rw [div_def.real M w]; linarith
+  have htri1 := abs_add_le (g (1 / 2) * G (1 / 2)) (-(g delta * G delta) + (1 / w) * J)
+  have htri2 := abs_add_le (-(g delta * G delta)) ((1 / w) * J)
+  rw [abs_neg_eq] at htri2
+  have hre : g (1 / 2) * G (1 / 2) + (-(g delta * G delta) + (1 / w) * J) = I := by linarith
+  have hneg3 : |-(1 / w) * J| = |(1 / w) * J|
+    have h1 : -(1 / w) * J = -((1 / w) * J) := by ring
+    rw [h1, abs_neg_eq]
+  rw [hre] at htri1; rw [hneg3] at hb3
+  have hsum_div : B / w + B / w + M / w = (2 * B + M) / w := by field_simp
+  linarith
+
+-- Reciprocal continuity & derivative for positive functions (0 axioms!):
++ continuous_at.inv_of_pos (f : ℝ → ℝ) (t : ℝ) (hf : continuous_at f t) (hpos : 0 < f t) :
+    continuous_at (fun x => 1 / f x) t
+  unfold continuous_at at hf ⊢
+  intro e he
+  set d0 := min (f t / 2) (e * (f t * f t) / 2) with hd0
+  have hd0_pos : 0 < d0 := by rw [hd0]; exact lt_min.real (f t / 2) (e * (f t * f t) / 2) 0 (by linarith) (by nlinarith)
+  obtain ⟨r, hr_pos, hr⟩ := hf d0 hd0_pos
+  use r; constructor
+  · exact hr_pos
+  · intro x hx
+    have hfx_near := hr x hx
+    have h1 : |f x - f t| < f t / 2 := by linarith [min_le_left.real (f t / 2) (e * (f t * f t) / 2)]
+    have h2 : |f x - f t| < e * (f t * f t) / 2 := by linarith [min_le_right.real (f t / 2) (e * (f t * f t) / 2)]
+    have hfx_ge : f t / 2 < f x := by linarith [neg_le_abs.real (f x - f t)]
+    have hdiff : 1 / f x - 1 / f t = -(f x - f t) / (f x * f t) := by field_simp
+    rw [hdiff, div_def.real (-(f x - f t)) (f x * f t), abs_mul.real, abs_neg_eq]
+    rw [abs_of_pos.real (1 / (f x * f t)) (one_div_pos.real (f x * f t) (by nlinarith))]
+    have hlt : |f x - f t| < e * (f x * f t) := by nlinarith
+    have hdiv := (div_lt_iff.real (|f x - f t|) e (f x * f t) (by nlinarith)).mpr hlt
+    rw [div_def.real (|f x - f t|) (f x * f t)] at hdiv; exact hdiv
+
++ has_deriv_within.inv_of_pos (f : ℝ → ℝ) (S : set ℝ) (t v : ℝ)
+    (hf : has_deriv_within f S t v) (hpos : 0 < f t) (hpos_all : ∀ y, y ∈ S → 0 < f y) :
+    has_deriv_within (fun x => 1 / f x) S t (-v / (f t * f t))
+  obtain ⟨k, hk_cont, hk_t, hk_eq⟩ := has_deriv_within.factor f S t v hf
+  have hpos_val : 0 < f t * (f t + (t - t) * k t) := by nlinarith
+  set K := (fun y => -k y * (1 / (f t * (f t + (y - t) * k y)))) with hK
+  apply has_deriv_within.of_factor (fun x => 1 / f x) K S t (-v / (f t * f t))
+  · rw [hK]; continuity [hk_cont, hpos_val]
+  · simp [hK, hk_t]; field_simp
+  · intro y hy
+    have hfy_pos : 0 < f y := hpos_all y hy
+    have hfy : f t + (y - t) * k y = f y := by linarith [hk_eq y hy]
+    simp [hK]; rw [hfy]
+    have h1 : 1 / f y - 1 / f t = -(f y - f t) * (1 / (f t * f y)) := by field_simp
+    rw [h1, hk_eq y hy]; ring
+
+-- THEOREM 2 (UNCONDITIONAL FOURIER COSINE CONVERGENCE AT 0 — 0 CUSTOM AXIOMS!):
+-- For ANY continuous F on [0, 1/2] with |F(x) - F(0)| <= L * x^2 and C^1 on every [delta, 1/2]:
+--   2 * c(0) + 4 * sum_{k=0}^{N-1} c(k + 1)  --->  F(0)   as N -> infty!
++ fourier.even_c1_quad_converges_at_zero (F Fp : ℝ → ℝ) (c : ℕ → ℝ) (L : ℝ)
+    (hL : 0 ≤ L)
+    (hcont_F : ∀ t, 0 ≤ t → t ≤ 1 / 2 → continuous_at F t)
+    (hquad : ∀ x, 0 ≤ x → x ≤ 1 / 2 → |F x - F 0| ≤ L * (x * x))
+    (hderiv_F : ∀ delta, 0 < delta → delta ≤ 1 / 2 →
+      (∀ t, delta ≤ t → t ≤ 1 / 2 → has_deriv_within F (fun z => delta ≤ z ∧ z ≤ 1 / 2) t (Fp t)) ∧
+      (∀ t, delta ≤ t → t ≤ 1 / 2 → continuous_at Fp t) ∧
+      (∃ M : ℝ, 0 ≤ M ∧ ∀ t, delta ≤ t → t ≤ 1 / 2 → |Fp t| ≤ M))
+    (hc : ∀ k : ℕ, darboux.has_integral (fun x => F x * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) (c k)) :
+    tends_to (fun (N : ℕ) => 2 * c 0 + 4 * (∑ k < N, c (k + 1))) (F 0)
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  -- Step 1: Identify partial sum S_N - F(0) = 2 * int_0^{1/2} (F(x) - F(0)) * D_N(x) dx!
+  have hS_int : ∀ N : ℕ, darboux.has_integral (fun x => (F x - F 0) * dirichlet_kernel N x) 0 (1 / 2) ((2 * c 0 + 4 * (∑ k < N, c (k + 1)) - F 0) / 2)
+    intro N
+    have hsum_int : ∀ M : ℕ, darboux.has_integral (fun x => F x * (∑ k < M, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x))) 0 (1 / 2) (∑ k < M, c (k + 1))
+      intro M; induction M with j ihj
+      · have hf : (fun x => F x * (∑ k < 0, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x))) = (fun _ => (0 : ℝ)) := by funext x; rw [sum_below_zero]; ring
+        have h0 := darboux.const 0 (1 / 2) 0 (by decide)
+        have hv : (0 : ℝ) * (1 / 2 - 0) = 0 := by ring
+        rw [hv] at h0; rw [hf, sum_below_zero]; exact h0
+      · rw [succ_eq_add_one.nat, sum_below_succ]
+        have hadd := darboux.add (fun x => F x * (∑ k < j, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x))) (fun x => F x * cos (2 * pi * ((j + 1 : ℕ) : ℝ) * x)) 0 (1 / 2) (∑ k < j, c (k + 1)) (c (j + 1)) ihj (hc (j + 1))
+        have hf : (fun x => F x * (∑ k < j, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) + F x * cos (2 * pi * ((j + 1 : ℕ) : ℝ) * x)) = (fun x => F x * (∑ k < j + 1, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x))) := by funext x; rw [sum_below_succ]; ring
+        rw [hf] at hadd; exact hadd
+    have hc0 : darboux.has_integral F 0 (1 / 2) (c 0)
+      have h := hc 0
+      have hf : (fun x => F x * cos (2 * pi * ((0 : ℕ) : ℝ) * x)) = F := by funext x; simp [cos_zero]
+      rw [hf] at h; exact h
+    have h2s := darboux.scale (fun x => F x * (∑ k < N, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x))) 0 (1 / 2) (∑ k < N, c (k + 1)) 2 (hsum_int N)
+    have hFD := darboux.add F (fun x => 2 * (F x * (∑ k < N, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)))) 0 (1 / 2) (c 0) (2 * (∑ k < N, c (k + 1))) hc0 h2s
+    have hFD_eq : darboux.has_integral (fun x => F x * dirichlet_kernel N x) 0 (1 / 2) (c 0 + 2 * (∑ k < N, c (k + 1)))
+      have hf : (fun x => F x + 2 * (F x * (∑ k < N, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)))) = (fun x => F x * dirichlet_kernel N x) := by funext x; unfold dirichlet_kernel; ring
+      rw [hf] at hFD; exact hFD
+    have hF0D := darboux.scale (dirichlet_kernel N) 0 (1 / 2) (1 / 2) (F 0) (dirichlet_kernel.integral_half N)
+    have hdiff := darboux.sub (fun x => F x * dirichlet_kernel N x) (fun x => F 0 * dirichlet_kernel N x) 0 (1 / 2) (c 0 + 2 * (∑ k < N, c (k + 1))) (F 0 * (1 / 2)) hFD_eq hF0D
+    have hf : (fun x => F x * dirichlet_kernel N x - F 0 * dirichlet_kernel N x) = (fun x => (F x - F 0) * dirichlet_kernel N x) := by funext x; ring
+    have hv : (c 0 + 2 * (∑ k < N, c (k + 1))) - F 0 * (1 / 2) = (2 * c 0 + 4 * (∑ k < N, c (k + 1)) - F 0) / 2 := by ring
+    rw [hf, hv] at hdiff; exact hdiff
+  -- Continuity of D_N(x) for every N:
+  have hcont_D : ∀ N : ℕ, ∀ t : ℝ, continuous_at (dirichlet_kernel N) t
+    intro N t; unfold dirichlet_kernel
+    have hsum_c : ∀ M : ℕ, continuous_at (fun x => ∑ k < M, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) t
+      intro M; induction M with j ihj
+      · have hf : (fun (_ : ℝ) => ∑ k < 0, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * _)) = (fun _ => (0 : ℝ)) := by funext x; rw [sum_below_zero]
+        rw [hf]; continuity
+      · rw [succ_eq_add_one.nat]
+        have hf : (fun x => ∑ k < j + 1, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) = (fun x => (∑ k < j, cos (2 * pi * ((k + 1 : ℕ) : ℝ) * x)) + cos (2 * pi * ((j + 1 : ℕ) : ℝ) * x)) := by funext x; rw [sum_below_succ]
+        rw [hf]; continuity [ihj]
+    have hsc := hsum_c N
+    continuity [hsc]
+  -- Step 2: For any e > 0, pick delta in (0, 1/4] with 2 * L * delta^2 < e / 2, then apply RL on [delta, 1/2]!
+  unfold tends_to; intro e he
+  set delta := min (1 / 4) (e / (8 * (L + 1))) with hdelta
+  have hd_pos : 0 < delta := by rw [hdelta]; exact lt_min.real (1 / 4) (e / (8 * (L + 1))) 0 (by decide) (div_pos.real e (8 * (L + 1)) he (by linarith))
+  have hd_le4 : delta ≤ 1 / 4 := by rw [hdelta]; exact min_le_left.real (1 / 4) (e / (8 * (L + 1)))
+  have hd_le_e : delta ≤ e / (8 * (L + 1)) := by rw [hdelta]; exact min_le_right.real (1 / 4) (e / (8 * (L + 1)))
+  have h2Ld_lt : 2 * L * (delta * delta) < e / 2
+    have h1 : delta * (8 * (L + 1)) ≤ e := (le_div_iff.real delta e (8 * (L + 1)) (by linarith)).mp hd_le_e
+    nlinarith
+  -- Get derivative & bound for F on [delta, 1/2]:
+  obtain ⟨hFd, hFp_cont, M_F, hMF_nn, hFp_bd⟩ := hderiv_F delta hd_pos (by linarith)
+  -- Define g(x) = (F(x) - F(0)) / sin(pi * x) on [delta, 1/2], where sin(pi * x) >= delta > 0!
+  set g := (fun x => (F x - F 0) / sin (pi * x)) with hg
+  set gp := (fun x => (Fp x * sin (pi * x) - (F x - F 0) * (pi * cos (pi * x))) / (sin (pi * x) * sin (pi * x))) with hgp
+  -- Uniform bounds on [delta, 1/2]: |F(x) - F(0)| <= L/4, sin(pi*x) >= delta!
+  set B_g := L / (4 * delta) with hBg
+  set M_g := (M_F + pi * (L / 4)) / (delta * delta) with hMg
+  have hBg_nn : 0 ≤ B_g := by rw [hBg]; exact div_nonneg.real L (4 * delta) hL (by linarith)
+  have hMg_nn : 0 ≤ M_g := by rw [hMg]; exact div_nonneg.real (M_F + pi * (L / 4)) (delta * delta) (by nlinarith) (by nlinarith)
+  have hsin_ge : ∀ x, delta ≤ x → x ≤ 1 / 2 → delta ≤ sin (pi * x) := by intro x hx1 hx2; linarith [sin_pi_ge_self x (by linarith) hx2]
+  have hsin_pos : ∀ x, delta ≤ x → x ≤ 1 / 2 → 0 < sin (pi * x) := by intro x hx1 hx2; linarith [hsin_ge x hx1 hx2]
+  have hg_bd : ∀ x, delta ≤ x → x ≤ 1 / 2 → |g x| ≤ B_g
+    intro x hx1 hx2
+    rw [hg, div_def.real (F x - F 0) (sin (pi * x)), abs_mul.real]
+    have hsp := hsin_pos x hx1 hx2
+    have hinv_pos : 0 < 1 / sin (pi * x) := one_div_pos.real (sin (pi * x)) hsp
+    rw [abs_of_pos.real (1 / sin (pi * x)) hinv_pos]
+    have hxx : x * x ≤ 1 / 4 := by nlinarith
+    have h1 : |F x - F 0| ≤ L / 4 := by have hq := hquad x (by linarith) hx2; nlinarith
+    have hinv_le : 1 / sin (pi * x) ≤ 1 / delta
+      have h1a : 1 ≤ sin (pi * x) * (1 / delta)
+        have h := mul_le_mul_of_nonneg_right.real delta (sin (pi * x)) (1 / delta) (hsin_ge x hx1 hx2) (by linarith [one_div_pos.real delta hd_pos])
+        have hc := mul_inv_cancel.real delta (by linarith)
+        linarith
+      exact (div_le_iff.real 1 (1 / delta) (sin (pi * x)) hsp).mpr (by linarith)
+    have hm1 := mul_le_mul_of_nonneg_right.real (|F x - F 0|) (L / 4) (1 / sin (pi * x)) h1 (by linarith)
+    have hm2 := mul_le_mul_of_nonneg_left.real (1 / sin (pi * x)) (1 / delta) (L / 4) hinv_le (by linarith)
+    have heq : (L / 4) * (1 / delta) = B_g := by rw [hBg]; field_simp
+    linarith
+  have hgp_bd : ∀ x, delta ≤ x → x ≤ 1 / 2 → |gp x| ≤ M_g
+    intro x hx1 hx2
+    have hsp := hsin_pos x hx1 hx2
+    have hsg := hsin_ge x hx1 hx2
+    rw [hgp, div_def.real (Fp x * sin (pi * x) - (F x - F 0) * (pi * cos (pi * x))) (sin (pi * x) * sin (pi * x)), abs_mul.real]
+    have hs2_pos : 0 < sin (pi * x) * sin (pi * x) := by nlinarith
+    have hinv_pos : 0 < 1 / (sin (pi * x) * sin (pi * x)) := one_div_pos.real (sin (pi * x) * sin (pi * x)) hs2_pos
+    rw [abs_of_pos.real (1 / (sin (pi * x) * sin (pi * x))) hinv_pos]
+    have hnum_bd : |Fp x * sin (pi * x) - (F x - F 0) * (pi * cos (pi * x))| ≤ M_F + pi * (L / 4)
+      have htri := abs_add_le (Fp x * sin (pi * x)) (-((F x - F 0) * (pi * cos (pi * x))))
+      have hsub : Fp x * sin (pi * x) + -((F x - F 0) * (pi * cos (pi * x))) = Fp x * sin (pi * x) - (F x - F 0) * (pi * cos (pi * x)) := by ring
+      rw [hsub, abs_neg_eq, abs_mul.real, abs_mul.real, abs_mul.real, abs_of_pos.real pi hpi_pos] at htri
+      have h1 : |Fp x| * |sin (pi * x)| ≤ M_F
+        have hm1 := mul_le_mul_of_nonneg_right.real (|Fp x|) M_F (|sin (pi * x)|) (hFp_bd x hx1 hx2) (abs_nonneg.real (sin (pi * x)))
+        have hm2 := mul_le_mul_of_nonneg_left.real (|sin (pi * x)|) 1 M_F (sin_abs_le_one (pi * x)) hMF_nn
+        linarith
+      have h2 : |F x - F 0| * (pi * |cos (pi * x)|) ≤ pi * (L / 4)
+        have hxx : x * x ≤ 1 / 4 := by nlinarith
+        have hF4 : |F x - F 0| ≤ L / 4 := by have hq := hquad x (by linarith) hx2; nlinarith
+        have hpc : pi * |cos (pi * x)| ≤ pi := by have hm := mul_le_mul_of_nonneg_left.real (|cos (pi * x)|) 1 pi (cos_abs_le_one (pi * x)) (by linarith); linarith
+        have hm1 := mul_le_mul_of_nonneg_right.real (|F x - F 0|) (L / 4) (pi * |cos (pi * x)|) hF4 (by nlinarith [abs_nonneg.real (cos (pi * x))])
+        have hm2 := mul_le_mul_of_nonneg_left.real (pi * |cos (pi * x)|) pi (L / 4) hpc (by linarith)
+        linarith
+      linarith
+    have hinv_le : 1 / (sin (pi * x) * sin (pi * x)) ≤ 1 / (delta * delta)
+      have hs2_ge : delta * delta ≤ sin (pi * x) * sin (pi * x) := by nlinarith
+      have h1 : 1 ≤ (sin (pi * x) * sin (pi * x)) * (1 / (delta * delta))
+        have h := mul_le_mul_of_nonneg_right.real (delta * delta) (sin (pi * x) * sin (pi * x)) (1 / (delta * delta)) hs2_ge (by linarith [one_div_pos.real (delta * delta) (by nlinarith)])
+        have hc := mul_inv_cancel.real (delta * delta) (by nlinarith)
+        linarith
+      exact (div_le_iff.real 1 (1 / (delta * delta)) (sin (pi * x) * sin (pi * x)) hs2_pos).mpr (by linarith)
+    have hm1 := mul_le_mul_of_nonneg_right.real (|Fp x * sin (pi * x) - (F x - F 0) * (pi * cos (pi * x))|) (M_F + pi * (L / 4)) (1 / (sin (pi * x) * sin (pi * x))) hnum_bd (by linarith)
+    have hm2 := mul_le_mul_of_nonneg_left.real (1 / (sin (pi * x) * sin (pi * x))) (1 / (delta * delta)) (M_F + pi * (L / 4)) hinv_le (by nlinarith)
+    rw [hMg, div_def.real (M_F + pi * (L / 4)) (delta * delta)]; linarith
+  -- Derivative of g on [delta, 1/2] via quotient rule (`has_deriv_within.div` or `inv` + `mul`):
+  have hg_deriv : ∀ t, delta ≤ t → t ≤ 1 / 2 → has_deriv_within g (fun z => delta ≤ z ∧ z ≤ 1 / 2) t (gp t)
+    intro t ht1 ht2
+    set S := (fun (z : ℝ) => delta ≤ z ∧ z ≤ 1 / 2) with hS
+    have hnum_d : has_deriv_within (fun x => F x - F 0) S t (Fp t)
+      have h := has_deriv_within.add F (fun _ => -F 0) S t (Fp t) 0 (hFd t ht1 ht2) (has_deriv_within.const (-F 0) S t)
+      have hf : (fun x => F x + -F 0) = (fun x => F x - F 0) := by funext x; ring
+      have hv : Fp t + 0 = Fp t := by ring
+      rw [hf, hv] at h; exact h
+    have hden_d : has_deriv_within (fun x => sin (pi * x)) S t (pi * cos (pi * t))
+      have h := has_deriv_within.comp sin (fun x => pi * x) S (fun _ => True) t (cos (pi * t)) pi (has_deriv_within.sin (fun _ => True) (pi * t)) (has_deriv_within.scale_id pi S t) (by intro z _; trivial)
+      have hv : cos (pi * t) * pi = pi * cos (pi * t) := by ring
+      rw [hv] at h; exact h
+    have hsp := hsin_pos t ht1 ht2
+    have hinv_d := has_deriv_within.inv_of_pos (fun x => sin (pi * x)) S t (pi * cos (pi * t)) hden_d hsp (by intro y hy; rw [hS] at hy; exact hsin_pos y hy.1 hy.2)
+    have hq := has_deriv_within.mul (fun x => F x - F 0) (fun x => 1 / sin (pi * x)) S t (Fp t) (-(pi * cos (pi * t)) / (sin (pi * t) * sin (pi * t))) hnum_d hinv_d
+    have hf : (fun x => (F x - F 0) * (1 / sin (pi * x))) = g
+      rw [hg]; funext x; rw [div_def.real (F x - F 0) (sin (pi * x))]
+    have hv : Fp t * (1 / sin (pi * t)) + (F t - F 0) * (-(pi * cos (pi * t)) / (sin (pi * t) * sin (pi * t))) = gp t := by rw [hgp]; field_simp
+    rw [hf, hv] at hq; exact hq
+  -- Continuity of gp on [delta, 1/2]:
+  have hgp_cont : ∀ t, delta ≤ t → t ≤ 1 / 2 → continuous_at gp t
+    intro t ht1 ht2
+    have hsp := hsin_pos t ht1 ht2
+    have hcF := hcont_F t (by linarith) ht2
+    have hcFp := hFp_cont t ht1 ht2
+    rw [hgp]; continuity [hsp, hcF, hcFp]
+  -- Choose N0 so that 2 * (2 * B_g + M_g) / ((2 * N0 + 1) * pi) < e / 2!
+  obtain ⟨N0, hN0⟩ := exists_nat_gt.real (2 * (2 * B_g + M_g) / ((e / 2) * pi))
+  use N0; intro N hN
+  -- Split int_0^{1/2} = int_0^delta + int_delta^{1/2}:
+  have hcont_int : ∀ t, 0 ≤ t → t ≤ 1 / 2 → continuous_at (fun x => (F x - F 0) * dirichlet_kernel N x) t
+    intro t ht1 ht2
+    have hcF := hcont_F t ht1 ht2
+    have hcD := hcont_D N t
+    continuity [hcF, hcD]
+  obtain ⟨I1, hI1⟩ := darboux.continuous (fun x => (F x - F 0) * dirichlet_kernel N x) 0 delta (by linarith) (by intro t h1 h2; exact hcont_int t h1 (by linarith))
+  obtain ⟨I2, hI2⟩ := darboux.continuous (fun x => (F x - F 0) * dirichlet_kernel N x) delta (1 / 2) (by linarith) (by intro t h1 h2; exact hcont_int t (by linarith) h2)
+  have hadj := darboux.adjacent (fun x => (F x - F 0) * dirichlet_kernel N x) 0 delta (1 / 2) I1 I2 hI1 hI2
+  have hItot := darboux.unique (fun x => (F x - F 0) * dirichlet_kernel N x) 0 (1 / 2) ((2 * c 0 + 4 * (∑ k < N, c (k + 1)) - F 0) / 2) (I1 + I2) (hS_int N) hadj
+  -- Bound 1: |I1| <= L * delta^2!
+  have hI1_bd : |I1| ≤ L * (delta * delta)
+    have hpt : ∀ x, 0 ≤ x → x ≤ delta → |(F x - F 0) * dirichlet_kernel N x| ≤ L * delta
+      intro x hx1 hx2
+      by_cases hx0 : x = 0
+      · rw [hx0]
+        have h0 : (F 0 - F 0) * dirichlet_kernel N 0 = 0 := by ring
+        rw [h0, abs_of_nonneg.real 0 (by decide)]; nlinarith
+      · have hx_pos : 0 < x := by linarith
+        have hsin_ge_x : x ≤ sin (pi * x) := sin_pi_ge_self x hx1 (by linarith)
+        have hsin_pos_x : 0 < sin (pi * x) := by linarith
+        have htel := dirichlet_kernel.telescope N x
+        have hD_eq : dirichlet_kernel N x = sin (((2 * N + 1 : ℕ) : ℝ) * pi * x) / sin (pi * x)
+          exact (eq_div_iff.real (dirichlet_kernel N x) (sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)) (sin (pi * x)) (by linarith)).mpr (by linarith)
+        rw [hD_eq, abs_mul.real, div_def.real (sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)) (sin (pi * x)), abs_mul.real]
+        rw [abs_of_pos.real (1 / sin (pi * x)) (one_div_pos.real (sin (pi * x)) hsin_pos_x)]
+        have hq := hquad x hx1 (by linarith)
+        have hsin1 := sin_abs_le_one (((2 * N + 1 : ℕ) : ℝ) * pi * x)
+        have hinv_le : 1 / sin (pi * x) ≤ 1 / x
+          have h1 : 1 ≤ sin (pi * x) * (1 / x)
+            have h := mul_le_mul_of_nonneg_right.real x (sin (pi * x)) (1 / x) hsin_ge_x (by linarith [one_div_pos.real x hx_pos])
+            have hc := mul_inv_cancel.real x (by linarith)
+            linarith
+          exact (div_le_iff.real 1 (1 / x) (sin (pi * x)) hsin_pos_x).mpr (by linarith)
+        have hm1 : |sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)| * (1 / sin (pi * x)) ≤ 1 / x
+          have ha := mul_le_mul_of_nonneg_right.real (|sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)|) 1 (1 / sin (pi * x)) hsin1 (by linarith [one_div_pos.real (sin (pi * x)) hsin_pos_x])
+          linarith
+        have hm2 := mul_le_mul_of_nonneg_right.real (|F x - F 0|) (L * (x * x)) (|sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)| * (1 / sin (pi * x))) hq (mul_nonneg.real (|sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)|) (1 / sin (pi * x)) (abs_nonneg.real (sin (((2 * N + 1 : ℕ) : ℝ) * pi * x))) (by linarith [one_div_pos.real (sin (pi * x)) hsin_pos_x]))
+        have hm3 := mul_le_mul_of_nonneg_left.real (|sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)| * (1 / sin (pi * x))) (1 / x) (L * (x * x)) hm1 (by nlinarith)
+        have hcx := mul_inv_cancel.real x (by linarith)
+        have hsimp : L * (x * x) * (1 / x) = L * x := by linear_combination (L * x) * hcx
+        nlinarith
+    have hbd := darboux.abs_le_const (fun x => (F x - F 0) * dirichlet_kernel N x) 0 delta I1 (L * delta) hI1 hpt
+    nlinarith
+  -- Bound 2: On [delta, 1/2], (F(x) - F(0)) * D_N(x) = g(x) * sin((2N+1)*pi*x), apply RL!
+  have hI2_congr : darboux.has_integral (fun x => g x * sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)) delta (1 / 2) I2
+    apply darboux.congr (fun x => (F x - F 0) * dirichlet_kernel N x) (fun x => g x * sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)) delta (1 / 2) I2 hI2
+    intro x hx1 hx2
+    have hsp := hsin_pos x hx1 hx2
+    have htel := dirichlet_kernel.telescope N x
+    have hD_eq : dirichlet_kernel N x = sin (((2 * N + 1 : ℕ) : ℝ) * pi * x) / sin (pi * x)
+      exact (eq_div_iff.real (dirichlet_kernel N x) (sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)) (sin (pi * x)) (by linarith)).mpr (by linarith)
+    rw [hg, hD_eq, div_def.real (F x - F 0) (sin (pi * x)), div_def.real (sin (((2 * N + 1 : ℕ) : ℝ) * pi * x)) (sin (pi * x))]; ring
+  have hJ_cont : ∀ t, delta ≤ t → t ≤ 1 / 2 → continuous_at (fun x => gp x * cos (((2 * N + 1 : ℕ) : ℝ) * pi * x)) t
+    intro t ht1 ht2; have hcg := hgp_cont t ht1 ht2; continuity [hcg]
+  obtain ⟨J, hJ⟩ := darboux.continuous (fun x => gp x * cos (((2 * N + 1 : ℕ) : ℝ) * pi * x)) delta (1 / 2) (by linarith) hJ_cont
+  have hI2_bd := fourier.riemann_lebesgue_sin_c1 g gp delta I2 J B_g M_g N hd_pos (by linarith) hBg_nn hMg_nn hI2_congr hJ hg_bd hgp_bd hg_deriv
+  -- Combine: |S_N - F(0)| = 2 * |I1 + I2| <= 2 * L * delta^2 + 2 * (2*B_g + M_g)/((2N+1)*pi) < e!
+  have h2I2_lt : 2 * |I2| < e / 2
+    have h2N1_gt : (N0 : ℝ) < ((2 * N + 1 : ℕ) : ℝ) := (cast_lt.real N0 (2 * N + 1)).mpr (by omega)
+    have hw_pos : 0 < ((2 * N + 1 : ℕ) : ℝ) * pi := mul_pos.real ((2 * N + 1 : ℕ) : ℝ) pi ((cast_pos.real (2 * N + 1)).mpr (by omega)) hpi_pos
+    have h1 : 2 * (2 * B_g + M_g) < ((2 * N + 1 : ℕ) : ℝ) * ((e / 2) * pi)
+      have ha := (div_lt_iff.real (2 * (2 * B_g + M_g)) ((2 * N + 1 : ℕ) : ℝ) ((e / 2) * pi) (by nlinarith)).mp (by linarith)
+      linarith
+    have h2 : 2 * (2 * B_g + M_g) / (((2 * N + 1 : ℕ) : ℝ) * pi) < e / 2
+      exact (div_lt_iff.real (2 * (2 * B_g + M_g)) (e / 2) (((2 * N + 1 : ℕ) : ℝ) * pi) hw_pos).mpr (by linarith)
+    have h3 : 2 * ((2 * B_g + M_g) / (((2 * N + 1 : ℕ) : ℝ) * pi)) = 2 * (2 * B_g + M_g) / (((2 * N + 1 : ℕ) : ℝ) * pi)
+      rw [div_def.real (2 * B_g + M_g) (((2 * N + 1 : ℕ) : ℝ) * pi), div_def.real (2 * (2 * B_g + M_g)) (((2 * N + 1 : ℕ) : ℝ) * pi)]; ring
+    linarith
+  have hS_eq : 2 * c 0 + 4 * (∑ k < N, c (k + 1)) - F 0 = 2 * (I1 + I2) := by linarith
+  rw [hS_eq, abs_mul.real, abs_of_pos.real 2 (by decide)]
+  have htri := abs_add_le I1 I2
+  linarith
+
+-- ====================================================================================
+-- 2. QUADRATIC-REMAINDER C^1/C^2 SERIES DIFFERENTIATION HELPER (0 AXIOMS!)
+-- ====================================================================================
+
+-- If u has derivative u' and u' has derivative u'' with |u''| <= M on [a, b],
+-- then |u(y) - u(x) - (y - x) * u'(x)| <= M * (y - x)^2 for ALL x, y in [a, b]!
++ c2_quadratic_remainder (u up upp : ℝ → ℝ) (a b M : ℝ) (hM : 0 ≤ M)
+    (hdu : ∀ t, a ≤ t → t ≤ b → has_deriv_within u (fun z => a ≤ z ∧ z ≤ b) t (up t))
+    (hdup : ∀ t, a ≤ t → t ≤ b → has_deriv_within up (fun z => a ≤ z ∧ z ≤ b) t (upp t))
+    (hbd : ∀ t, a ≤ t → t ≤ b → |upp t| ≤ M)
+    (x y : ℝ) (hx1 : a ≤ x) (hx2 : x ≤ b) (hy1 : a ≤ y) (hy2 : y ≤ b) :
+    |u y - u x - (y - x) * up x| ≤ M * ((y - x) * (y - x))
+  set h := (fun z => u z - u x - (z - x) * up x) with hh
+  set hp := (fun z => up z - up x) with hhp
+  have hup_lip : ∀ z, a ≤ z → z ≤ b → |up z - up x| ≤ M * |z - x|
+    intro z hz1 hz2
+    by_cases hxz : x ≤ z
+    · have hd_sub : ∀ t, x ≤ t → t ≤ z → has_deriv_within up (fun w => x ≤ w ∧ w ≤ z) t (upp t)
+        intro t ht1 ht2
+        exact has_deriv_within.restrict up (fun w => a ≤ w ∧ w ≤ b) (fun w => x ≤ w ∧ w ≤ z) t (upp t) (hdup t (by linarith) (by linarith)) (by intro w hw; exact ⟨by linarith [hw.1], by linarith [hw.2]⟩)
+      have hhi := interval.increment_le_of_deriv_le up upp x z M hxz hd_sub (by intro t ht1 ht2; linarith [le_abs_self.real (upp t), hbd t (by linarith) (by linarith)])
+      have hlo := interval.increment_ge_of_deriv_ge up upp x z (-M) hxz hd_sub (by intro t ht1 ht2; linarith [neg_le_abs.real (upp t), hbd t (by linarith) (by linarith)])
+      rw [abs_of_nonneg.real (z - x) (by linarith)]
+      exact abs_le_of.real (up z - up x) (M * (z - x)) (by linarith) (by linarith)
+    · have hzx : z ≤ x := by linarith
+      have hd_sub : ∀ t, z ≤ t → t ≤ x → has_deriv_within up (fun w => z ≤ w ∧ w ≤ x) t (upp t)
+        intro t ht1 ht2
+        exact has_deriv_within.restrict up (fun w => a ≤ w ∧ w ≤ b) (fun w => z ≤ w ∧ w ≤ x) t (upp t) (hdup t (by linarith) (by linarith)) (by intro w hw; exact ⟨by linarith [hw.1], by linarith [hw.2]⟩)
+      have hhi := interval.increment_le_of_deriv_le up upp z x M hzx hd_sub (by intro t ht1 ht2; linarith [le_abs_self.real (upp t), hbd t (by linarith) (by linarith)])
+      have hlo := interval.increment_ge_of_deriv_ge up upp z x (-M) hzx hd_sub (by intro t ht1 ht2; linarith [neg_le_abs.real (upp t), hbd t (by linarith) (by linarith)])
+      rw [abs_of_nonpos.real (z - x) (by linarith)]
+      exact abs_le_of.real (up z - up x) (M * (0 - (z - x))) (by linarith) (by linarith)
+  have hh_deriv : ∀ (p q : ℝ), a ≤ p → q ≤ b → ∀ t, p ≤ t → t ≤ q → has_deriv_within h (fun w => p ≤ w ∧ w ≤ q) t (hp t)
+    intro p q hap hqb t ht1 ht2
+    set S := (fun (w : ℝ) => p ≤ w ∧ w ≤ q) with hS
+    have h1 := has_deriv_within.restrict u (fun w => a ≤ w ∧ w ≤ b) S t (up t) (hdu t (by linarith) (by linarith)) (by intro w hw; rw [hS] at hw; exact ⟨by linarith [hw.1], by linarith [hw.2]⟩)
+    have h2 := has_deriv_within.scale (-up x) (fun w => w) S t 1 (has_deriv_within.id S t)
+    have h3 := has_deriv_within.add u (fun w => (-up x) * w) S t (up t) ((-up x) * 1) h1 h2
+    have h4 := has_deriv_within.add (fun w => u w + (-up x) * w) (fun _ => -u x + x * up x) S t (up t + (-up x) * 1) 0 h3 (has_deriv_within.const (-u x + x * up x) S t)
+    have hf : (fun w => (u w + (-up x) * w) + (-u x + x * up x)) = h := by rw [hh]; funext w; ring
+    have hv : (up t + (-up x) * 1) + 0 = hp t := by rw [hhp]; ring
+    rw [hf, hv] at h4; exact h4
+  have hhx : h x = 0 := by rw [hh]; ring
+  have hhy : h y = u y - u x - (y - x) * up x := by rw [hh]
+  by_cases hxy : x ≤ y
+  · have hhp_hi : ∀ t, x ≤ t → t ≤ y → hp t ≤ M * (y - x)
+      intro t ht1 ht2
+      have h1 := hup_lip t (by linarith) (by linarith)
+      rw [abs_of_nonneg.real (t - x) (by linarith)] at h1
+      rw [hhp]; nlinarith [le_abs_self.real (up t - up x)]
+    have hhp_lo : ∀ t, x ≤ t → t ≤ y → -(M * (y - x)) ≤ hp t
+      intro t ht1 ht2
+      have h1 := hup_lip t (by linarith) (by linarith)
+      rw [abs_of_nonneg.real (t - x) (by linarith)] at h1
+      rw [hhp]; nlinarith [neg_le_abs.real (up t - up x)]
+    have hhi := interval.increment_le_of_deriv_le h hp x y (M * (y - x)) hxy (hh_deriv x y hx1 hy2) hhp_hi
+    have hlo := interval.increment_ge_of_deriv_ge h hp x y (-(M * (y - x))) hxy (hh_deriv x y hx1 hy2) hhp_lo
+    rw [hhx, hhy] at hhi hlo
+    exact abs_le_of.real (u y - u x - (y - x) * up x) (M * ((y - x) * (y - x))) (by nlinarith) (by nlinarith)
+  · have hyx : y ≤ x := by linarith
+    have hhp_hi : ∀ t, y ≤ t → t ≤ x → hp t ≤ M * (x - y)
+      intro t ht1 ht2
+      have h1 := hup_lip t (by linarith) (by linarith)
+      rw [abs_of_nonpos.real (t - x) (by linarith)] at h1
+      rw [hhp]; nlinarith [le_abs_self.real (up t - up x)]
+    have hhp_lo : ∀ t, y ≤ t → t ≤ x → -(M * (x - y)) ≤ hp t
+      intro t ht1 ht2
+      have h1 := hup_lip t (by linarith) (by linarith)
+      rw [abs_of_nonpos.real (t - x) (by linarith)] at h1
+      rw [hhp]; nlinarith [neg_le_abs.real (up t - up x)]
+    have hhi := interval.increment_le_of_deriv_le h hp y x (M * (x - y)) hyx (hh_deriv y x hy1 hx2) hhp_hi
+    have hlo := interval.increment_ge_of_deriv_ge h hp y x (-(M * (x - y))) hyx (hh_deriv y x hy1 hx2) hhp_lo
+    rw [hhx, hhy] at hhi hlo
+    exact abs_le_of.real (u y - u x - (y - x) * up x) (M * ((y - x) * (y - x))) (by nlinarith) (by nlinarith)
+
+-- ====================================================================================
+-- 3. REAL INTEGRAL `rint`, `darboux.subst_neg`, GAUSSIAN INTEGRAL C, & JACOBI PSI(t)
+-- ====================================================================================
+
++ darboux.lower_sum_subst_neg (f : ℝ → ℝ) (n : ℕ) : ∀ a b s,
+    darboux.lower_sum f n (-b) (-a) s → s ∈ darboux.lower_sums (fun x => f (-x)) a b
+  induction n with a b s h k ih a b s h
+  · unfold darboux.lower_sum at h
+    obtain ⟨heq, hs⟩ := h
+    have hab : a = b := by linarith
+    rw [hab, hs]; exact darboux.empty (fun x => f (-x)) b
+  · simp only [succ_eq_add_one.nat, darboux.lower_sum] at h
+    obtain ⟨t, m, r, h1, h2, hlow, htail, harea⟩ := h
+    have ht_eq : -(-t) = t := by ring
+    have htail' : darboux.lower_sum f k (-(-t)) (-a) r := by rw [ht_eq]; exact htail
+    have hL : r ∈ darboux.lower_sums (fun x => f (-x)) a (-t) := ih a (-t) r htail'
+    have hlow' : ∀ x, -t ≤ x → x ≤ b → m ≤ f (-x) := by intro x hx1 hx2; exact hlow (-x) (by linarith) (by linarith)
+    have hR : m * (b - -t) + 0 ∈ darboux.lower_sums (fun x => f (-x)) (-t) b :=
+      darboux.prepend (fun x => f (-x)) (-t) b b m 0 (by linarith) (by linarith) hlow' (darboux.empty (fun x => f (-x)) b)
+    unfold darboux.lower_sums at hL
+    obtain ⟨nL, hnL⟩ := hL
+    have happ := darboux.lower_sum_append (fun x => f (-x)) nL a (-t) b r (m * (b - -t) + 0) (by linarith) hnL hR
+    have heq : r + (m * (b - -t) + 0) = s := by linarith
+    rw [heq] at happ; exact happ
+
++ darboux.subst_neg (f : ℝ → ℝ) (a b I : ℝ)
+    (hI : darboux.has_integral f (-b) (-a) I) :
+    darboux.has_integral (fun x => f (-x)) a b I
+  have hsup_eq : ∀ (g : ℝ → ℝ) (V : ℝ), is_sup (darboux.lower_sums g (-b) (-a)) V → is_sup (darboux.lower_sums (fun x => g (-x)) a b) V
+    intro g V hV
+    unfold is_sup at hV ⊢
+    constructor
+    · unfold upper_bound; intro s hs
+      unfold darboux.lower_sums at hs
+      obtain ⟨n, hn⟩ := hs
+      have h1 := darboux.lower_sum_subst_neg (fun x => g (-x)) n (-b) (-a) s
+      have ha1 : -(-a) = a := by ring
+      have hb1 : -(-b) = b := by ring
+      rw [ha1, hb1] at h1
+      have h2 := h1 hn
+      have hfg : (fun x => g (-(-x))) = g := by funext x; have hx : -(-x) = x := by ring; rw [hx]
+      rw [hfg] at h2
+      exact is_sup.le_of_mem (darboux.lower_sums g (-b) (-a)) V s hV h2
+    · intro z hz
+      unfold upper_bound at hz
+      have hub : upper_bound (darboux.lower_sums g (-b) (-a)) z
+        unfold upper_bound; intro s hs
+        unfold darboux.lower_sums at hs
+        obtain ⟨n, hn⟩ := hs
+        exact hz s (darboux.lower_sum_subst_neg g n a b s hn)
+      exact hV.2 z hub
+  unfold darboux.has_integral at hI ⊢
+  exact ⟨by linarith [hI.1], hsup_eq f I hI.2.1, hsup_eq (fun y => -f y) (-I) hI.2.2⟩
+
+-- Concrete real Darboux integral:
+-> rint (f : ℝ → ℝ) (a b : ℝ) : ℝ :=
+  if ∃ I, darboux.has_integral f a b I then choice (fun I => darboux.has_integral f a b I) else 0
+
++ rint.eq_of_has_integral (f : ℝ → ℝ) (a b I : ℝ) (hI : darboux.has_integral f a b I) :
+    rint f a b = I
+  unfold rint
+  have hex : ∃ I0, darboux.has_integral f a b I0 := ⟨I, hI⟩
+  rw [if_pos hex]
+  have hsp := choice.spec (fun I0 => darboux.has_integral f a b I0) hex
+  exact darboux.unique f a b (choice (fun I0 => darboux.has_integral f a b I0)) I hsp hI
+
+-- Continuity of gauss_cos_t and gauss_sin_deriv_t:
++ gauss_cos_t.has_integral (t xi a b : ℝ) (hab : a ≤ b) :
+    darboux.has_integral (gauss_cos_t t xi) a b (rint (gauss_cos_t t xi) a b)
+  have hcont : ∀ u, a ≤ u → u ≤ b → continuous_at (gauss_cos_t t xi) u := by intro u _ _; unfold gauss_cos_t; continuity
+  obtain ⟨I, hI⟩ := darboux.continuous (gauss_cos_t t xi) a b hab hcont
+  rw [rint.eq_of_has_integral (gauss_cos_t t xi) a b I hI]; exact hI
+
++ gauss_sin_deriv_t.has_integral (t xi a b : ℝ) (hab : a ≤ b) :
+    ∃ V, darboux.has_integral (gauss_sin_deriv_t t xi) a b V
+  have hcont : ∀ u, a ≤ u → u ≤ b → continuous_at (gauss_sin_deriv_t t xi) u := by intro u _ _; unfold gauss_sin_deriv_t; continuity
+  exact darboux.continuous (gauss_sin_deriv_t t xi) a b hab hcont
+
+-- Exponential tail integral: int_A^B exp(-pi * x * x) dx <= (1/pi) * exp(-pi * A) for 1 <= A <= B!
++ gauss_tail_bound (A B : ℝ) (hA : 1 ≤ A) (hAB : A ≤ B) :
+    rint (gauss_cos_t 1 0) A B ≤ (1 / pi) * exp (-pi * A)
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  have hI := gauss_cos_t.has_integral 1 0 A B hAB
+  have hmaj : darboux.has_integral (fun x => exp (-pi * x)) A B ((1 / pi) * (exp (-pi * A) - exp (-pi * B)))
+    have hcont : ∀ t, A ≤ t → t ≤ B → continuous_at (fun x => exp (-pi * x)) t := by intro t _ _; continuity
+    have hderiv : ∀ t, A ≤ t → t ≤ B → has_deriv_within (fun x => -(1 / pi) * exp (-pi * x)) (fun z => A ≤ z ∧ z ≤ B) t (exp (-pi * t))
+      intro t _ _
+      set S := (fun (z : ℝ) => A ≤ z ∧ z ≤ B)
+      have h1 := has_deriv_within.exp_comp (fun x => -pi * x) S t (-pi) (has_deriv_within.scale_id (-pi) S t)
+      have h2 := has_deriv_within.scale (-(1 / pi)) (fun x => exp (-pi * x)) S t (exp (-pi * t) * -pi) h1
+      have hcp := mul_inv_cancel.real pi (by linarith)
+      have hv : -(1 / pi) * (exp (-pi * t) * -pi) = exp (-pi * t) := by linear_combination (exp (-pi * t)) * hcp
+      rw [hv] at h2; exact h2
+    have hraw := darboux.fundamental (fun x => -(1 / pi) * exp (-pi * x)) (fun x => exp (-pi * x)) A B hAB hcont hderiv
+    have hv : -(1 / pi) * exp (-pi * B) - -(1 / pi) * exp (-pi * A) = (1 / pi) * (exp (-pi * A) - exp (-pi * B)) := by ring
+    rw [hv] at hraw; exact hraw
+  have hle : ∀ x, A ≤ x → x ≤ B → gauss_cos_t 1 0 x ≤ exp (-pi * x)
+    intro x hx1 hx2
+    unfold gauss_cos_t
+    have h0 : 2 * pi * 0 * x = 0 := by ring
+    rw [h0, cos_zero]
+    have hexp_le : exp (-pi * 1 * x * x) ≤ exp (-pi * x) := (exp_le_exp (-pi * 1 * x * x) (-pi * x)).mpr (by nlinarith)
+    linarith
+  have hm := darboux.mono (gauss_cos_t 1 0) (fun x => exp (-pi * x)) A B (rint (gauss_cos_t 1 0) A B) ((1 / pi) * (exp (-pi * A) - exp (-pi * B))) hI hmaj hle
+  have hposB : 0 < (1 / pi) * exp (-pi * B) := mul_pos.real (1 / pi) (exp (-pi * B)) (one_div_pos.real pi hpi_pos) (exp_pos (-pi * B))
+  linarith
+
+-- Concrete Gaussian integral C = lim_{N -> infty} int_{-N}^N e^(-pi*x^2) dx:
+-> gauss_int_C : ℝ :=
+  rlim (fun (N : ℕ) => rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ))
+
++ gauss_int_C.spec_and_pos :
+    tends_to (fun (N : ℕ) => rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ)) gauss_int_C ∧
+    0 < gauss_int_C ∧
+    (∀ R : ℝ, 1 ≤ R → 0 ≤ gauss_int_C - rint (gauss_cos_t 1 0) (-R) R ∧ gauss_int_C - rint (gauss_cos_t 1 0) (-R) R ≤ (2 / pi) * exp (-pi * R))
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  have hnn : ∀ x : ℝ, 0 ≤ gauss_cos_t 1 0 x
+    intro x; unfold gauss_cos_t
+    have h0 : 2 * pi * 0 * x = 0 := by ring
+    rw [h0, cos_zero]; linarith [exp_pos (-pi * 1 * x * x)]
+  -- For any 0 <= R1 <= R2: rint(-R2, R2) - rint(-R1, R1) = 2 * rint(R1, R2) >= 0!
+  have hdiff_eq : ∀ R1 R2 : ℝ, 0 ≤ R1 → R1 ≤ R2 →
+      rint (gauss_cos_t 1 0) (-R2) R2 - rint (gauss_cos_t 1 0) (-R1) R1 = 2 * rint (gauss_cos_t 1 0) R1 R2
+    intro R1 R2 hR1 hR12
+    have hI1 := gauss_cos_t.has_integral 1 0 (-R2) (-R1) (by linarith)
+    have hI2 := gauss_cos_t.has_integral 1 0 (-R1) R1 (by linarith)
+    have hI3 := gauss_cos_t.has_integral 1 0 R1 R2 hR12
+    have hItot := gauss_cos_t.has_integral 1 0 (-R2) R2 (by linarith)
+    have hadj1 := darboux.adjacent (gauss_cos_t 1 0) (-R2) (-R1) R1 (rint (gauss_cos_t 1 0) (-R2) (-R1)) (rint (gauss_cos_t 1 0) (-R1) R1) hI1 hI2
+    have hadj2 := darboux.adjacent (gauss_cos_t 1 0) (-R2) R1 R2 (rint (gauss_cos_t 1 0) (-R2) (-R1) + rint (gauss_cos_t 1 0) (-R1) R1) (rint (gauss_cos_t 1 0) R1 R2) hadj1 hI3
+    have hsum := darboux.unique (gauss_cos_t 1 0) (-R2) R2 (rint (gauss_cos_t 1 0) (-R2) R2) (rint (gauss_cos_t 1 0) (-R2) (-R1) + rint (gauss_cos_t 1 0) (-R1) R1 + rint (gauss_cos_t 1 0) R1 R2) hItot hadj2
+    -- Evenness: rint(-R2, -R1) = rint(R1, R2) via darboux.subst_neg!
+    have hneg := darboux.subst_neg (gauss_cos_t 1 0) R1 R2 (rint (gauss_cos_t 1 0) (-R2) (-R1)) hI1
+    have heven : (fun x => gauss_cos_t 1 0 (-x)) = gauss_cos_t 1 0
+      funext x; unfold gauss_cos_t
+      have h1 : -pi * 1 * -x * -x = -pi * 1 * x * x := by ring
+      have h2 : 2 * pi * 0 * -x = 2 * pi * 0 * x := by ring
+      rw [h1, h2]
+    rw [heven] at hneg
+    have hlr := darboux.unique (gauss_cos_t 1 0) R1 R2 (rint (gauss_cos_t 1 0) (-R2) (-R1)) (rint (gauss_cos_t 1 0) R1 R2) hneg hI3
+    linarith
+  have hmono : ∀ n : ℕ, rint (gauss_cos_t 1 0) (-((n : ℝ))) (n : ℝ) ≤ rint (gauss_cos_t 1 0) (-(((n + 1 : ℕ) : ℝ))) ((n + 1 : ℕ) : ℝ)
+    intro n
+    have hn_nn : (0 : ℝ) ≤ (n : ℝ) := (cast_le.real 0 n).mpr (by omega)
+    have hn_le : (n : ℝ) ≤ ((n + 1 : ℕ) : ℝ) := (cast_le.real n (n + 1)).mpr (by omega)
+    have hd := hdiff_eq (n : ℝ) ((n + 1 : ℕ) : ℝ) hn_nn hn_le
+    have hI := gauss_cos_t.has_integral 1 0 (n : ℝ) ((n + 1 : ℕ) : ℝ) hn_le
+    have hpos := darboux.nonneg (gauss_cos_t 1 0) (n : ℝ) ((n + 1 : ℕ) : ℝ) (rint (gauss_cos_t 1 0) (n : ℝ) ((n + 1 : ℕ) : ℝ)) hI (by intro x _ _; exact hnn x)
+    linarith
+  -- Upper bound for all N: <= 2 + 2/pi!
+  have hbd_all : ∀ R : ℝ, 0 ≤ R → rint (gauss_cos_t 1 0) (-R) R ≤ 2 + 2 / pi
+    intro R hR
+    by_cases hR1 : R ≤ 1
+    · have hI := gauss_cos_t.has_integral 1 0 (-R) R (by linarith)
+      have hle1 : ∀ x, -R ≤ x → x ≤ R → gauss_cos_t 1 0 x ≤ 1
+        intro x _ _; unfold gauss_cos_t
+        have h0 : 2 * pi * 0 * x = 0 := by ring
+        rw [h0, cos_zero]
+        have hxx : 0 ≤ x * x := by nlinarith
+        have h1 : exp (-pi * 1 * x * x) ≤ 1 := by have h := (exp_le_exp (-pi * 1 * x * x) 0).mpr (by nlinarith); rw [exp_zero] at h; exact h
+        linarith
+      have h1 := darboux.le_const (gauss_cos_t 1 0) (-R) R (rint (gauss_cos_t 1 0) (-R) R) 1 hI hle1
+      have h2pi : 0 < 2 / pi := div_pos.real 2 pi (by decide) hpi_pos
+      linarith
+    · have h1R : 1 ≤ R := by linarith
+      have hd := hdiff_eq 1 R (by decide) h1R
+      have ht := gauss_tail_bound 1 R (by decide) h1R
+      have hI1 := gauss_cos_t.has_integral 1 0 (-1) 1 (by decide)
+      have hle1 : ∀ x, -1 ≤ x → x ≤ 1 → gauss_cos_t 1 0 x ≤ 1
+        intro x _ _; unfold gauss_cos_t
+        have h0 : 2 * pi * 0 * x = 0 := by ring
+        rw [h0, cos_zero]
+        have hxx : 0 ≤ x * x := by nlinarith
+        have h1 : exp (-pi * 1 * x * x) ≤ 1 := by have h := (exp_le_exp (-pi * 1 * x * x) 0).mpr (by nlinarith); rw [exp_zero] at h; exact h
+        linarith
+      have hb1 := darboux.le_const (gauss_cos_t 1 0) (-1) 1 (rint (gauss_cos_t 1 0) (-1) 1) 1 hI1 hle1
+      have he1 : exp (-pi * 1) ≤ 1 := by have h := (exp_le_exp (-pi * 1) 0).mpr (by linarith); rw [exp_zero] at h; exact h
+      have h1pi_pos : 0 < 1 / pi := one_div_pos.real pi hpi_pos
+      have hm := mul_le_mul_of_nonneg_left.real (exp (-pi * 1)) 1 (1 / pi) he1 (by linarith)
+      have h2p : 2 * (1 / pi) = 2 / pi := by rw [div_def.real 1 pi, div_def.real 2 pi]; ring
+      linarith
+  have hconv : ∃ L, tends_to (fun (N : ℕ) => rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ)) L
+    have hmon_s : monotone_seq (fun (N : ℕ) => rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ))
+      unfold monotone_seq; intro m n hmn
+      exact sequence.monotone.real (fun (N : ℕ) => rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ)) hmono m n hmn
+    have hbd_s : bounded_seq (fun (N : ℕ) => rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ))
+      unfold bounded_seq; use 2 + 2 / pi; intro N
+      have hnnN : 0 ≤ rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ)
+        have hI := gauss_cos_t.has_integral 1 0 (-((N : ℝ))) (N : ℝ) (by have h := (cast_le.real 0 N).mpr (by omega); linarith)
+        exact darboux.nonneg (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ) (rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ)) hI (by intro x _ _; exact hnn x)
+      have hhiN := hbd_all (N : ℝ) ((cast_le.real 0 N).mpr (by omega))
+      exact abs_le_of.real (rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ)) (2 + 2 / pi) (by linarith) hhiN
+    exact monotone_bounded_converges (fun (N : ℕ) => rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ)) hmon_s hbd_s
+  obtain ⟨L, hL⟩ := hconv
+  have hC_eq : gauss_int_C = L := rlim.eq_of_tends_to (fun (N : ℕ) => rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ)) L hL
+  rw [← hC_eq] at hL
+  -- Positivity: gauss_int_C >= rint(-1, 1) >= 2 * exp(-pi) > 0!
+  have hC_pos : 0 < gauss_int_C
+    have hI1 := gauss_cos_t.has_integral 1 0 (-1) 1 (by decide)
+    have hconst := darboux.const (-1) 1 (exp (-pi)) (by decide)
+    have hge_c : ∀ x, -1 ≤ x → x ≤ 1 → exp (-pi) ≤ gauss_cos_t 1 0 x
+      intro x hx1 hx2; unfold gauss_cos_t
+      have h0 : 2 * pi * 0 * x = 0 := by ring
+      rw [h0, cos_zero]
+      have h1 : exp (-pi) ≤ exp (-pi * 1 * x * x) := (exp_le_exp (-pi) (-pi * 1 * x * x)).mpr (by nlinarith)
+      linarith
+    have hlow1 := darboux.mono (fun _ => exp (-pi)) (gauss_cos_t 1 0) (-1) 1 (exp (-pi) * (1 - -1)) (rint (gauss_cos_t 1 0) (-1) 1) hconst hI1 hge_c
+    have hge_all : ∀ N : ℕ, 1 ≤ N → exp (-pi) * 2 ≤ rint (gauss_cos_t 1 0) (-((N : ℝ))) (N : ℝ)
+      intro N hN
+      have hd := hdiff_eq 1 (N : ℝ) (by decide) ((cast_le.real 1 N).mpr hN)
+      have hI := gauss_cos_t.has_integral 1 0 1 (N : ℝ) ((cast_le.real 1 N).mpr hN)
+      have hpos := darboux.nonneg (gauss_cos_t 1 0) 1 (N : ℝ) (rint (gauss_cos_t 1 0) 1 (N : ℝ)) hI (by intro x _ _; exact hnn x)
+      linarith
+    have hlim_shift : tends_to (fun (k : ℕ) => rint (gauss_cos_t 1 0) (-(((k + 1 : ℕ) : ℝ))) ((k + 1 : ℕ) : ℝ)) gauss_int_C
+      unfold tends_to at hL ⊢; intro e he
+      obtain ⟨N0, hN0⟩ := hL e he
+      use N0; intro k hk; exact hN0 (k + 1) (by omega)
+    have hgeC := tends_to.ge_of_ge (fun (k : ℕ) => rint (gauss_cos_t 1 0) (-(((k + 1 : ℕ) : ℝ))) ((k + 1 : ℕ) : ℝ)) gauss_int_C (exp (-pi) * 2) hlim_shift (by intro k; exact hge_all (k + 1) (by omega))
+    linarith [exp_pos (-pi)]
+  -- Tail bound for arbitrary R >= 1: 0 <= C - rint(-R, R) <= (2/pi) * exp(-pi * R)!
+  have htail_R : ∀ R : ℝ, 1 ≤ R → 0 ≤ gauss_int_C - rint (gauss_cos_t 1 0) (-R) R ∧ gauss_int_C - rint (gauss_cos_t 1 0) (-R) R ≤ (2 / pi) * exp (-pi * R)
+    intro R hR
+    obtain ⟨N0, hN0⟩ := exists_nat_gt.real R
+    have hseq_bd : ∀ k : ℕ, 0 ≤ rint (gauss_cos_t 1 0) (-(((N0 + k : ℕ) : ℝ))) ((N0 + k : ℕ) : ℝ) - rint (gauss_cos_t 1 0) (-R) R ∧ rint (gauss_cos_t 1 0) (-(((N0 + k : ℕ) : ℝ))) ((N0 + k : ℕ) : ℝ) - rint (gauss_cos_t 1 0) (-R) R ≤ (2 / pi) * exp (-pi * R)
+      intro k
+      have hRN : R ≤ ((N0 + k : ℕ) : ℝ) := by have h := (cast_le.real N0 (N0 + k)).mpr (by omega); linarith
+      have hd := hdiff_eq R ((N0 + k : ℕ) : ℝ) (by linarith) hRN
+      have hI := gauss_cos_t.has_integral 1 0 R ((N0 + k : ℕ) : ℝ) hRN
+      have hpos := darboux.nonneg (gauss_cos_t 1 0) R ((N0 + k : ℕ) : ℝ) (rint (gauss_cos_t 1 0) R ((N0 + k : ℕ) : ℝ)) hI (by intro x _ _; exact hnn x)
+      have ht := gauss_tail_bound R ((N0 + k : ℕ) : ℝ) hR hRN
+      have h2p : 2 * ((1 / pi) * exp (-pi * R)) = (2 / pi) * exp (-pi * R) := by rw [div_def.real 1 pi, div_def.real 2 pi]; ring
+      constructor <;> linarith
+    have hlim_diff : tends_to (fun k => rint (gauss_cos_t 1 0) (-(((N0 + k : ℕ) : ℝ))) ((N0 + k : ℕ) : ℝ) - rint (gauss_cos_t 1 0) (-R) R) (gauss_int_C - rint (gauss_cos_t 1 0) (-R) R)
+      unfold tends_to at hL ⊢; intro e he
+      obtain ⟨M0, hM0⟩ := hL e he
+      use M0; intro k hk
+      have h1 := hM0 (N0 + k) (by omega)
+      have hsub : (rint (gauss_cos_t 1 0) (-(((N0 + k : ℕ) : ℝ))) ((N0 + k : ℕ) : ℝ) - rint (gauss_cos_t 1 0) (-R) R) - (gauss_int_C - rint (gauss_cos_t 1 0) (-R) R) = rint (gauss_cos_t 1 0) (-(((N0 + k : ℕ) : ℝ))) ((N0 + k : ℕ) : ℝ) - gauss_int_C := by ring
+      rw [hsub]; exact h1
+    constructor
+    · exact tends_to.ge_of_ge (fun k => rint (gauss_cos_t 1 0) (-(((N0 + k : ℕ) : ℝ))) ((N0 + k : ℕ) : ℝ) - rint (gauss_cos_t 1 0) (-R) R) (gauss_int_C - rint (gauss_cos_t 1 0) (-R) R) 0 hlim_diff (by intro k; exact (hseq_bd k).1)
+    · have hneg_lim : tends_to (fun k => -(rint (gauss_cos_t 1 0) (-(((N0 + k : ℕ) : ℝ))) ((N0 + k : ℕ) : ℝ) - rint (gauss_cos_t 1 0) (-R) R)) (-(gauss_int_C - rint (gauss_cos_t 1 0) (-R) R))
+        unfold tends_to at hlim_diff ⊢; intro e he
+        obtain ⟨K0, hK0⟩ := hlim_diff e he
+        use K0; intro k hk
+        have h1 := hK0 k hk
+        have heq : -(rint (gauss_cos_t 1 0) (-(((N0 + k : ℕ) : ℝ))) ((N0 + k : ℕ) : ℝ) - rint (gauss_cos_t 1 0) (-R) R) - -(gauss_int_C - rint (gauss_cos_t 1 0) (-R) R) = -((rint (gauss_cos_t 1 0) (-(((N0 + k : ℕ) : ℝ))) ((N0 + k : ℕ) : ℝ) - rint (gauss_cos_t 1 0) (-R) R) - (gauss_int_C - rint (gauss_cos_t 1 0) (-R) R)) := by ring
+        rw [heq, abs_neg_eq]; exact h1
+      have hge := tends_to.ge_of_ge (fun k => -(rint (gauss_cos_t 1 0) (-(((N0 + k : ℕ) : ℝ))) ((N0 + k : ℕ) : ℝ) - rint (gauss_cos_t 1 0) (-R) R)) (-(gauss_int_C - rint (gauss_cos_t 1 0) (-R) R)) (-((2 / pi) * exp (-pi * R))) hneg_lim (by intro k; linarith [(hseq_bd k).2])
+      linarith
+  exact ⟨hL, hC_pos, htail_R⟩
+
+-- Scaled Gaussian Fourier limit: int_{-(M+1/2)}^{M+1/2} e^(-pi*t*x^2) cos(2*pi*xi*x) dx -> (C / sqrt t) * e^(-pi*xi^2 / t)!
++ gaussian.scaled_fourier_limit (t xi : ℝ) (ht : 0 < t) :
+    tends_to (fun (M : ℕ) => rint (gauss_cos_t t xi) (-(((M : ℝ) + 1 / 2))) ((M : ℝ) + 1 / 2)) ((gauss_int_C / sqrt t) * exp (-pi * xi * xi / t))
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  have hsq_sp := sqrt_spec t (by linarith)
+  have hsq_pos : 0 < sqrt t := by nlinarith [hsq_sp.1, hsq_sp.2]
+  have hsq_sq : sqrt t * sqrt t = t := hsq_sp.2
+  have hcsq := mul_inv_cancel.real (sqrt t) (by linarith)
+  -- First prove linear scaling: rint (gauss_cos_t t 0) (-R) R = (1 / sqrt t) * rint (gauss_cos_t 1 0) (-R * sqrt t) (R * sqrt t)!
+  have hscale0 : ∀ R : ℝ, 0 ≤ R → rint (gauss_cos_t t 0) (-R) R = (1 / sqrt t) * rint (gauss_cos_t 1 0) (-(R * sqrt t)) (R * sqrt t)
+    intro R hR
+    have hI1 := gauss_cos_t.has_integral 1 0 (sqrt t * (-R)) (sqrt t * R) (by nlinarith)
+    have hsub := darboux.subst_mul_pos (gauss_cos_t 1 0) (sqrt t) (-R) R (rint (gauss_cos_t 1 0) (sqrt t * (-R)) (sqrt t * R)) hsq_pos hI1
+    have hsc := darboux.scale (fun u => sqrt t * gauss_cos_t 1 0 (sqrt t * u)) (-R) R (rint (gauss_cos_t 1 0) (sqrt t * (-R)) (sqrt t * R)) (1 / sqrt t) hsub
+    have hfeq : (fun u => (1 / sqrt t) * (sqrt t * gauss_cos_t 1 0 (sqrt t * u))) = gauss_cos_t t 0
+      funext u; unfold gauss_cos_t
+      have h0a : 2 * pi * 0 * (sqrt t * u) = 0 := by ring
+      have h0b : 2 * pi * 0 * u = 0 := by ring
+      have hex : -pi * 1 * (sqrt t * u) * (sqrt t * u) = -pi * t * u * u := by linear_combination (-pi * u * u) * hsq_sq
+      rw [h0a, h0b, hex, cos_zero]
+      linear_combination (exp (-pi * t * u * u)) * hcsq
+    rw [hfeq] at hsc
+    have hres := rint.eq_of_has_integral (gauss_cos_t t 0) (-R) R ((1 / sqrt t) * rint (gauss_cos_t 1 0) (sqrt t * (-R)) (sqrt t * R)) hsc
+    have h1a : sqrt t * (-R) = -(R * sqrt t) := by ring
+    have h1b : sqrt t * R = R * sqrt t := by ring
+    rw [h1a, h1b] at hres; exact hres
+  -- Now apply Milestone 3.21 `gaussian.scaled_fourier_duality_bound` + `gauss_int_C.spec_and_pos`!
+  unfold tends_to; intro e he
+  have hC_tail := gauss_int_C.spec_and_pos.2.2
+  have hexp_le1 : exp (-pi * xi * xi / t) ≤ 1
+    have hle0 : -pi * xi * xi / t ≤ 0
+      have hxx : 0 ≤ xi * xi := by nlinarith
+      have hnn : 0 ≤ pi * xi * xi / t := div_nonneg.real (pi * xi * xi) t (by nlinarith) (by linarith)
+      rw [div_def.real (pi * xi * xi) t] at hnn
+      rw [div_def.real (-pi * xi * xi) t]; linarith
+    have h := (exp_le_exp (-pi * xi * xi / t) 0).mpr hle0
+    rw [exp_zero] at h; exact h
+  -- Pick M0 large enough that: (M0+1/2)*sqrt t >= 1, (2/(pi*sqrt t)) * exp(-pi*(M0+1/2)*sqrt t) < e/2, and (2*|xi|/t) * exp(-pi*t*(M0+1/2)^2) < e/2!
+  set K1 := 4 / (pi * sqrt t * e) + 2 with hK1
+  set K2 := 4 * (|xi| + 1) / (t * e) + 2 with hK2
+  obtain ⟨M1, hM1⟩ := exists_nat_gt.real ((log K1 + 1) / (pi * sqrt t) + 1 / sqrt t + 1)
+  obtain ⟨M2, hM2⟩ := exists_nat_gt.real ((log K2 + 1) / (pi * t) + 1)
+  use M1 + M2 + 1; intro M hM
+  set R := (M : ℝ) + 1 / 2 with hR
+  have hR_ge1 : 1 ≤ R := by rw [hR]; have h1 : (1 : ℝ) ≤ (M : ℝ) := (cast_le.real 1 M).mpr (by omega); linarith
+  have hR_sq_ge1 : 1 ≤ R * sqrt t
+    have hM1_lt : (M1 : ℝ) < R := by rw [hR]; have h1 : (M1 : ℝ) ≤ (M : ℝ) := (cast_le.real M1 M).mpr (by omega); linarith
+    have hlog1_nn : 0 ≤ log K1
+      have hK1_ge1 : 1 ≤ K1 := by rw [hK1]; have h := div_pos.real 4 (pi * sqrt t * e) (by decide) (by nlinarith); linarith
+      exact log_nonneg K1 hK1_ge1
+    have h1 : 1 / sqrt t < R
+      have ha : 0 < (log K1 + 1) / (pi * sqrt t) := div_pos.real (log K1 + 1) (pi * sqrt t) (by linarith) (by nlinarith)
+      linarith
+    have h2 := (div_lt_iff.real 1 R (sqrt t) hsq_pos).mp h1
+    linarith
+  have hdual := gaussian.scaled_fourier_duality_bound (fun s => rint (gauss_cos_t t s) (-R) R) t R xi ht (by linarith) (by intro s; exact gauss_cos_t.has_integral t s (-R) R (by linarith)) (by intro s; exact gauss_sin_deriv_t.has_integral t s (-R) R (by linarith))
+  have hsc_R := hscale0 R (by linarith)
+  have ht_bd := hC_tail (R * sqrt t) hR_sq_ge1
+  -- Term 1: |(2 * |xi| / t) * exp(-pi * t * R^2)| < e / 2!
+  have hb1 : (2 * |xi| / t) * exp (-pi * t * R * R) < e / 2
+    have hK2_pos : 0 < K2 := by rw [hK2]; have h := div_pos.real (4 * (|xi| + 1)) (t * e) (by linarith [abs_nonneg.real xi]) (by nlinarith); linarith
+    have hlog2_lt : log K2 < pi * t * R * R
+      have hM2_lt : (M2 : ℝ) < R := by rw [hR]; have h1 : (M2 : ℝ) ≤ (M : ℝ) := (cast_le.real M2 M).mpr (by omega); linarith
+      have h1 : (log K2 + 1) / (pi * t) < R := by linarith
+      have h2 := (div_lt_iff.real (log K2 + 1) R (pi * t) (by nlinarith)).mp h1
+      have hR2 : R ≤ R * R := by nlinarith
+      have hpt : 0 < pi * t := by nlinarith
+      have h3 : R * (pi * t) ≤ (R * R) * (pi * t) := by nlinarith
+      linarith
+    have hexp_gt : K2 < exp (pi * t * R * R)
+      have h := (exp_lt_exp (log K2) (pi * t * R * R)).mpr hlog2_lt
+      rw [exp_log K2 hK2_pos] at h; exact h
+    have hexp_inv : exp (-pi * t * R * R) * exp (pi * t * R * R) = 1
+      rw [← exp_add]; have h0 : -pi * t * R * R + pi * t * R * R = 0 := by ring
+      rw [h0, exp_zero]
+    have hlt1 : 4 * (|xi| + 1) / (t * e) < exp (pi * t * R * R) := by rw [hK2] at hexp_gt; linarith
+    have hm1 := mul_lt_mul_of_pos_left.real (4 * (|xi| + 1) / (t * e)) (exp (pi * t * R * R)) (exp (-pi * t * R * R)) hlt1 (exp_pos (-pi * t * R * R))
+    rw [hexp_inv] at hm1
+    have h2xi_le : 2 * |xi| / t ≤ (e / 2) * (4 * (|xi| + 1) / (t * e))
+      have hinv_split : (e / 2) * (4 * (|xi| + 1) / (t * e)) = 2 * (|xi| + 1) / t := by field_simp
+      rw [hinv_split]; field_simp; nlinarith
+    have hm2 := mul_le_mul_of_nonneg_right.real (2 * |xi| / t) ((e / 2) * (4 * (|xi| + 1) / (t * e))) (exp (-pi * t * R * R)) h2xi_le (by linarith [exp_pos (-pi * t * R * R)])
+    nlinarith
+  -- Term 2: |exp(-pi*xi^2/t) * rint(gauss_cos_t t 0) - (C/sqrt t) * exp(-pi*xi^2/t)| < e / 2!
+  have hb2 : |exp (-pi * xi * xi / t) * rint (gauss_cos_t t 0) (-R) R - (gauss_int_C / sqrt t) * exp (-pi * xi * xi / t)| < e / 2
+    have hK1_pos : 0 < K1 := by rw [hK1]; have h := div_pos.real 4 (pi * sqrt t * e) (by decide) (by nlinarith); linarith
+    have hlog1_lt : log K1 < pi * (R * sqrt t)
+      have hM1_lt : (M1 : ℝ) < R := by rw [hR]; have h1 : (M1 : ℝ) ≤ (M : ℝ) := (cast_le.real M1 M).mpr (by omega); linarith
+      have h1 : (log K1 + 1) / (pi * sqrt t) < R := by have hp : 0 < 1 / sqrt t := one_div_pos.real (sqrt t) hsq_pos; linarith
+      have h2 := (div_lt_iff.real (log K1 + 1) R (pi * sqrt t) (by nlinarith)).mp h1
+      linarith
+    have hexp_gt : K1 < exp (pi * (R * sqrt t))
+      have h := (exp_lt_exp (log K1) (pi * (R * sqrt t))).mpr hlog1_lt
+      rw [exp_log K1 hK1_pos] at h; exact h
+    have hexp_inv : exp (-pi * (R * sqrt t)) * exp (pi * (R * sqrt t)) = 1
+      rw [← exp_add]; have h0 : -pi * (R * sqrt t) + pi * (R * sqrt t) = 0 := by ring
+      rw [h0, exp_zero]
+    have hlt1 : 4 / (pi * sqrt t * e) < exp (pi * (R * sqrt t)) := by rw [hK1] at hexp_gt; linarith
+    have hm1 := mul_lt_mul_of_pos_left.real (4 / (pi * sqrt t * e)) (exp (pi * (R * sqrt t))) (exp (-pi * (R * sqrt t))) hlt1 (exp_pos (-pi * (R * sqrt t)))
+    rw [hexp_inv] at hm1
+    have hdiff_fac : exp (-pi * xi * xi / t) * rint (gauss_cos_t t 0) (-R) R - (gauss_int_C / sqrt t) * exp (-pi * xi * xi / t) = -(exp (-pi * xi * xi / t) * (1 / sqrt t) * (gauss_int_C - rint (gauss_cos_t 1 0) (-(R * sqrt t)) (R * sqrt t)))
+      rw [hsc_R, div_def.real gauss_int_C (sqrt t)]; ring
+    rw [hdiff_fac, abs_neg_eq, abs_mul.real, abs_mul.real]
+    rw [abs_of_pos.real (exp (-pi * xi * xi / t)) (exp_pos (-pi * xi * xi / t))]
+    rw [abs_of_pos.real (1 / sqrt t) (one_div_pos.real (sqrt t) hsq_pos)]
+    rw [abs_of_nonneg.real (gauss_int_C - rint (gauss_cos_t 1 0) (-(R * sqrt t)) (R * sqrt t)) ht_bd.1]
+    have hprod_le : exp (-pi * xi * xi / t) * (1 / sqrt t) * (gauss_int_C - rint (gauss_cos_t 1 0) (-(R * sqrt t)) (R * sqrt t)) ≤ (1 / sqrt t) * ((2 / pi) * exp (-pi * (R * sqrt t)))
+      have ha := mul_le_mul_of_nonneg_left.real (gauss_int_C - rint (gauss_cos_t 1 0) (-(R * sqrt t)) (R * sqrt t)) ((2 / pi) * exp (-pi * (R * sqrt t))) (exp (-pi * xi * xi / t) * (1 / sqrt t)) ht_bd.2 (by nlinarith [exp_pos (-pi * xi * xi / t), one_div_pos.real (sqrt t) hsq_pos])
+      have hb := mul_le_mul_of_nonneg_right.real (exp (-pi * xi * xi / t)) 1 ((1 / sqrt t) * ((2 / pi) * exp (-pi * (R * sqrt t)))) hexp_le1 (by nlinarith [one_div_pos.real (sqrt t) hsq_pos, div_pos.real 2 pi (by decide) hpi_pos, exp_pos (-pi * (R * sqrt t))])
+      linarith
+    have hcoeff_eq : (1 / sqrt t) * (2 / pi) = (e / 2) * (4 / (pi * sqrt t * e)) := by field_simp
+    have hlt2 : (1 / sqrt t) * ((2 / pi) * exp (-pi * (R * sqrt t))) < e / 2
+      have h1 : (1 / sqrt t) * ((2 / pi) * exp (-pi * (R * sqrt t))) = (e / 2) * (exp (-pi * (R * sqrt t)) * (4 / (pi * sqrt t * e)))
+        linear_combination (exp (-pi * (R * sqrt t))) * hcoeff_eq
+      rw [h1]; nlinarith
+    linarith
+  -- Triangle inequality!
+  have hres : |rint (gauss_cos_t t xi) (-R) R - (gauss_int_C / sqrt t) * exp (-pi * xi * xi / t)| < e
+    have hsplit : rint (gauss_cos_t t xi) (-R) R - (gauss_int_C / sqrt t) * exp (-pi * xi * xi / t) = (rint (gauss_cos_t t xi) (-R) R - exp (-pi * xi * xi / t) * rint (gauss_cos_t t 0) (-R) R) + (exp (-pi * xi * xi / t) * rint (gauss_cos_t t 0) (-R) R - (gauss_int_C / sqrt t) * exp (-pi * xi * xi / t)) := by ring
+    rw [hsplit]
+    have htri := abs_add_le (rint (gauss_cos_t t xi) (-R) R - exp (-pi * xi * xi / t) * rint (gauss_cos_t t 0) (-R) R) (exp (-pi * xi * xi / t) * rint (gauss_cos_t t 0) (-R) R - (gauss_int_C / sqrt t) * exp (-pi * xi * xi / t))
+    linarith
+  rw [hR] at hres; exact hres
+
+-- Concrete Jacobi theta series psi(t) = sum_{n>=1} exp(-pi * n^2 * t):
+-> jacobi_psi_term (t : ℝ) (n : ℕ) : ℝ :=
+  exp (-pi * ((n + 1 : ℕ) : ℝ) * ((n + 1 : ℕ) : ℝ) * t)
+
+-> jacobi_psi (t : ℝ) : ℝ :=
+  rlim (fun (N : ℕ) => ∑ n < N, jacobi_psi_term t n)
+
+-- Geometric series partial sum bound for 0 <= r < 1: sum_{k<N} r^(k+1) <= r / (1 - r)!
++ geom_sum_succ_le (r : ℝ) (hr0 : 0 ≤ r) (hr1 : r < 1) (N : ℕ) :
+    (∑ k < N, r ^ (k + 1)) ≤ r / (1 - r)
+  have htele : ∀ M : ℕ, (1 - r) * (∑ k < M, r ^ (k + 1)) = r - r ^ (M + 1)
+    intro M; induction M with j ihj
+    · rw [sum_below_zero, pow_succ.real, pow_zero.real]; ring
+    · rw [succ_eq_add_one.nat, sum_below_succ]
+      have h1 : (1 - r) * ((∑ k < j, r ^ (k + 1)) + r ^ (j + 1)) = (1 - r) * (∑ k < j, r ^ (k + 1)) + (1 - r) * r ^ (j + 1) := by ring
+      rw [h1, ihj, pow_succ.real r (j + 1)]; ring
+  have hrpow_nn : ∀ M : ℕ, 0 ≤ r ^ M
+    intro M; induction M with j ihj
+    · rw [pow_zero.real]; decide
+    · rw [succ_eq_add_one.nat, pow_succ.real]; nlinarith
+  have h1 := htele N
+  have h2 := hrpow_nn (N + 1)
+  exact (le_div_iff.real (∑ k < N, r ^ (k + 1)) r (1 - r) (by linarith)).mpr (by linarith)
+
++ jacobi_psi.spec_and_bounds (t : ℝ) (ht : 0 < t) :
+    tends_to (fun (N : ℕ) => ∑ n < N, jacobi_psi_term t n) (jacobi_psi t) ∧
+    0 ≤ jacobi_psi t ∧
+    jacobi_psi t ≤ exp (-pi * t) / (1 - exp (-pi * t))
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  set r := exp (-pi * t) with hr
+  have hr_pos : 0 < r := by rw [hr]; exact exp_pos (-pi * t)
+  have hr_lt1 : r < 1 := by rw [hr]; have h := (exp_lt_exp (-pi * t) 0).mpr (by nlinarith); rw [exp_zero] at h; exact h
+  have hterm_le : ∀ n : ℕ, jacobi_psi_term t n ≤ r ^ (n + 1)
+    intro n
+    have hr_pow : ∀ m : ℕ, r ^ m = exp (-pi * (m : ℝ) * t)
+      intro m; induction m with j ihj
+      · rw [pow_zero.real]; simp [exp_zero]
+      · rw [succ_eq_add_one.nat, pow_succ.real, ihj, hr, ← exp_add, cast_add.real j 1]; simp
+        have h1 : -pi * (j : ℝ) * t + -pi * t = -pi * ((j : ℝ) + 1) * t := by ring
+        rw [h1]
+    rw [hr_pow (n + 1)]; unfold jacobi_psi_term
+    have hn1 : (1 : ℝ) ≤ ((n + 1 : ℕ) : ℝ) := (cast_le.real 1 (n + 1)).mpr (by omega)
+    have hpt : 0 < pi * t := by nlinarith
+    have hsq : ((n + 1 : ℕ) : ℝ) ≤ ((n + 1 : ℕ) : ℝ) * ((n + 1 : ℕ) : ℝ) := by nlinarith
+    exact (exp_le_exp (-pi * ((n + 1 : ℕ) : ℝ) * ((n + 1 : ℕ) : ℝ) * t) (-pi * ((n + 1 : ℕ) : ℝ) * t)).mpr (by nlinarith)
+  have hmono : ∀ m n : ℕ, m ≤ n → (∑ k < m, jacobi_psi_term t k) ≤ (∑ k < n, jacobi_psi_term t k)
+    intro m n hmn
+    have hshift : ∀ d : ℕ, (∑ k < m, jacobi_psi_term t k) ≤ (∑ k < m + d, jacobi_psi_term t k)
+      intro d; induction d with j ihj
+      · have h0 : m + 0 = m := by omega
+        rw [h0]; linarith
+      · rw [succ_eq_add_one.nat]
+        have h1 : m + (j + 1) = (m + j) + 1 := by omega
+        rw [h1, sum_below_succ]
+        have hpos : 0 < jacobi_psi_term t (m + j) := by unfold jacobi_psi_term; exact exp_pos (-pi * ((m + j + 1 : ℕ) : ℝ) * ((m + j + 1 : ℕ) : ℝ) * t)
+        linarith
+    have h1 : n = m + (n - m) := by omega
+    rw [h1]; exact hshift (n - m)
+  have hbd : ∀ N : ℕ, (∑ k < N, jacobi_psi_term t k) ≤ r / (1 - r)
+    intro N
+    have h1 := sum_le.real (jacobi_psi_term t) (fun k => r ^ (k + 1)) N (by intro k _; exact hterm_le k)
+    linarith [geom_sum_succ_le r (by linarith) hr_lt1 N]
+  have hmon_s : monotone_seq (fun N => ∑ k < N, jacobi_psi_term t k) := by unfold monotone_seq; exact hmono
+  have hbd_s : bounded_seq (fun N => ∑ k < N, jacobi_psi_term t k)
+    unfold bounded_seq; use r / (1 - r); intro N
+    have hnnN : 0 ≤ ∑ k < N, jacobi_psi_term t k
+      induction N with j ihj
+      · rw [sum_below_zero]; linarith
+      · rw [succ_eq_add_one.nat, sum_below_succ]
+        have hpos : 0 < jacobi_psi_term t j := by unfold jacobi_psi_term; exact exp_pos (-pi * ((j + 1 : ℕ) : ℝ) * ((j + 1 : ℕ) : ℝ) * t)
+        linarith
+    exact abs_le_of.real (∑ k < N, jacobi_psi_term t k) (r / (1 - r)) (by linarith [div_pos.real r (1 - r) hr_pos (by linarith)]) (hbd N)
+  have hconv := monotone_bounded_converges (fun N => ∑ k < N, jacobi_psi_term t k) hmon_s hbd_s
+  unfold converges at hconv
+  obtain ⟨L, hL⟩ := hconv
+  have hpsi_eq : jacobi_psi t = L := rlim.eq_of_tends_to (fun N => ∑ k < N, jacobi_psi_term t k) L hL
+  rw [← hpsi_eq] at hL
+  have hnn : 0 ≤ jacobi_psi t
+    apply tends_to.ge_of_ge (fun N => ∑ k < N, jacobi_psi_term t k) (jacobi_psi t) 0 hL
+    intro N; induction N with j ihj
+    · rw [sum_below_zero]; linarith
+    · rw [succ_eq_add_one.nat, sum_below_succ]
+      have hpos : 0 < jacobi_psi_term t j := by unfold jacobi_psi_term; exact exp_pos (-pi * ((j + 1 : ℕ) : ℝ) * ((j + 1 : ℕ) : ℝ) * t)
+      linarith
+  have hup : jacobi_psi t ≤ r / (1 - r)
+    have hneg_lim : tends_to (fun N => -(∑ k < N, jacobi_psi_term t k)) (-(jacobi_psi t))
+      unfold tends_to at hL ⊢; intro e he
+      obtain ⟨N0, hN0⟩ := hL e he
+      use N0; intro N hN
+      have h1 := hN0 N hN
+      have heq : -(∑ k < N, jacobi_psi_term t k) - -(jacobi_psi t) = -((∑ k < N, jacobi_psi_term t k) - jacobi_psi t) := by ring
+      rw [heq, abs_neg_eq]; exact h1
+    have hge := tends_to.ge_of_ge (fun N => -(∑ k < N, jacobi_psi_term t k)) (-(jacobi_psi t)) (-(r / (1 - r))) hneg_lim (by intro N; linarith [hbd N])
+    linarith
+  exact ⟨hL, hnn, hup⟩
+
+-- ====================================================================================
+-- 4. UNIFIED SHIFTED C^2 POISSON SUMMATION, GAUSSIAN INTEGRAL C = 1, & JACOBI THETA INVERSION
+-- ====================================================================================
+
++ tends_to.unique (f : ℕ → ℝ) (L1 L2 : ℝ) (h1 : tends_to f L1) (h2 : tends_to f L2) : L1 = L2
+  have heq1 := rlim.eq_of_tends_to f L1 h1
+  have heq2 := rlim.eq_of_tends_to f L2 h2
+  rw [← heq1, heq2]
+
++ summable.scale_real (c : ℝ) (f : ℕ → ℝ) (hf : summable f) : summable (fun n => c * f n)
+  unfold summable converges at hf ⊢
+  obtain ⟨L, hL⟩ := hf
+  use c * L
+  have h1 := tends_to.const_mul (partial_sum f) L c hL
+  have hps : (fun N => c * partial_sum f N) = partial_sum (fun n => c * f n)
+    funext N; unfold partial_sum; induction N with k ihk
+    · rw [sum_below_zero, sum_below_zero]; ring
+    · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ← ihk]; ring
+  rw [hps] at h1; exact h1
+
++ summable.exp_neg_geom (c : ℝ) (hc : 0 < c) : summable (fun n => (exp (-c)) ^ n)
+  set r := exp (-c) with hr
+  have hr_lt1 : r < 1 := by rw [hr]; have h := (exp_lt_exp (-c) 0).mpr (by linarith); rw [exp_zero] at h; exact h
+  have hr_pow : ∀ k : ℕ, r ^ k = exp (-c * (k : ℝ))
+    intro k; induction k with l ihl
+    · rw [pow_zero.real]; simp [exp_zero]
+    · rw [succ_eq_add_one.nat, pow_succ.real, ihl, hr, ← exp_add, cast_add.real l 1]; simp
+      have h1 : -c * (l : ℝ) + -c = -c * ((l : ℝ) + 1) := by ring
+      rw [h1]
+  unfold summable converges; use 1 / (1 - r); unfold tends_to partial_sum; intro e he
+  obtain ⟨N0, hN0⟩ := exists_nat_gt.real (log ((1 / (1 - r) + 1) / e + 1) / c + 1)
+  use N0; intro N hN
+  have hg_id : ∀ k : ℕ, (1 - r) * (∑ j < k, r ^ j) = 1 - r ^ k
+    intro k; induction k with l ihl
+    · rw [sum_below_zero, pow_zero.real]; ring
+    · rw [succ_eq_add_one.nat, sum_below_succ]
+      have ha : (1 - r) * ((∑ j < l, r ^ j) + r ^ l) = (1 - r) * (∑ j < l, r ^ j) + (1 - r) * r ^ l := by ring
+      rw [ha, ihl, pow_succ.real]; ring
+  have hdiff : (∑ j < N, r ^ j) - 1 / (1 - r) = -(r ^ N / (1 - r))
+    have h1r := mul_inv_cancel.real (1 - r) (by linarith)
+    rw [div_def.real 1 (1 - r), div_def.real (r ^ N) (1 - r)]
+    linear_combination (1 / (1 - r)) * hg_id N - (∑ j < N, r ^ j) * h1r
+  rw [hdiff, abs_neg_eq, abs_of_pos.real (r ^ N / (1 - r)) (div_pos.real (r ^ N) (1 - r) (by rw [hr_pow N]; exact exp_pos (-c * (N : ℝ))) (by linarith)), hr_pow N]
+  have hB_pos : 0 < (1 / (1 - r) + 1) / e + 1 := by linarith [div_pos.real (1 / (1 - r) + 1) e (by linarith [one_div_pos.real (1 - r) (by linarith)]) he]
+  have hlog_lt : log ((1 / (1 - r) + 1) / e + 1) < c * (N : ℝ)
+    have hN_gt : log ((1 / (1 - r) + 1) / e + 1) / c < (N : ℝ) := by linarith [(cast_le.real N0 N).mpr hN]
+    linarith [(div_lt_iff.real (log ((1 / (1 - r) + 1) / e + 1)) (N : ℝ) c hc).mp hN_gt]
+  have hexp_gt : (1 / (1 - r) + 1) / e + 1 < exp (c * (N : ℝ))
+    have h := (exp_lt_exp (log ((1 / (1 - r) + 1) / e + 1)) (c * (N : ℝ))).mpr hlog_lt
+    rw [exp_log ((1 / (1 - r) + 1) / e + 1) hB_pos] at h; exact h
+  have hinv_e : exp (-c * (N : ℝ)) * exp (c * (N : ℝ)) = 1 := by rw [← exp_add]; have h0 : -c * (N : ℝ) + c * (N : ℝ) = 0 := by ring; rw [h0, exp_zero]
+  have hsub : (1 / (1 - r)) / e < (1 / (1 - r) + 1) / e + 1
+    rw [div_def.real (1 / (1 - r)) e, div_def.real (1 / (1 - r) + 1) e]
+    linarith [mul_lt_mul_of_pos_right.real (1 / (1 - r)) (1 / (1 - r) + 1) (1 / e) (by linarith) (one_div_pos.real e he)]
+  have hm := mul_lt_mul_of_pos_left.real ((1 / (1 - r)) / e) (exp (c * (N : ℝ))) (exp (-c * (N : ℝ))) (by linarith) (exp_pos (-c * (N : ℝ)))
+  rw [hinv_e] at hm
+  have hme := mul_lt_mul_of_pos_right.real (exp (-c * (N : ℝ)) * ((1 / (1 - r)) / e)) 1 e hm he
+  have hre : exp (-c * (N : ℝ)) * ((1 / (1 - r)) / e) * e = exp (-c * (N : ℝ)) / (1 - r) := by field_simp
+  linarith
+
+-- Symmetrized shifted periodization terms on [0, 1/2]:
+--   n = 0     => (1/2) * (g(a + x) + g(a - x))
+--   n = m + 1 => (1/2) * (g(a + x + m + 1) + g(a + x - (m + 1))
+--                       + g(a - x + m + 1) + g(a - x - (m + 1)))
+-> sp_term (g : ℝ → ℝ) (a : ℝ) : ℕ → ℝ → ℝ
+  | 0 => fun x => (1 / 2) * (g (a + x) + g (a - x))
+  | m + 1 => fun x => (1 / 2) * (g (a + x + ((m + 1 : ℕ) : ℝ)) + g (a + x - ((m + 1 : ℕ) : ℝ)) + g (a - x + ((m + 1 : ℕ) : ℝ)) + g (a - x - ((m + 1 : ℕ) : ℝ)))
+
+-> sp_d1_term (g1 : ℝ → ℝ) (a : ℝ) : ℕ → ℝ → ℝ
+  | 0 => fun x => (1 / 2) * (g1 (a + x) - g1 (a - x))
+  | m + 1 => fun x => (1 / 2) * (g1 (a + x + ((m + 1 : ℕ) : ℝ)) + g1 (a + x - ((m + 1 : ℕ) : ℝ)) - g1 (a - x + ((m + 1 : ℕ) : ℝ)) - g1 (a - x - ((m + 1 : ℕ) : ℝ)))
+
+-> sp_d2_term (g2 : ℝ → ℝ) (a : ℝ) : ℕ → ℝ → ℝ
+  | 0 => fun x => (1 / 2) * (g2 (a + x) + g2 (a - x))
+  | m + 1 => fun x => (1 / 2) * (g2 (a + x + ((m + 1 : ℕ) : ℝ)) + g2 (a + x - ((m + 1 : ℕ) : ℝ)) + g2 (a - x + ((m + 1 : ℕ) : ℝ)) + g2 (a - x - ((m + 1 : ℕ) : ℝ)))
+
+-- Value at x = 0:
+--   n = 0     => g(a)
+--   n = m + 1 => g(a + (m + 1)) + g(a - (m + 1))
+-> sp_zero_term (g : ℝ → ℝ) (a : ℝ) : ℕ → ℝ
+  | 0 => g a
+  | m + 1 => g (a + ((m + 1 : ℕ) : ℝ)) + g (a - ((m + 1 : ℕ) : ℝ))
+
++ sp_term.at_zero (g : ℝ → ℝ) (a : ℝ) (n : ℕ) :
+    sp_term g a n 0 = sp_zero_term g a n
+  induction n with m _
+  · unfold sp_term sp_zero_term
+    have h1 : a + 0 = a := by ring
+    have h2 : a - 0 = a := by ring
+    rw [h1, h2]; ring
+  · rw [succ_eq_add_one.nat]; unfold sp_term sp_zero_term
+    have h1 : a + 0 + ((m + 1 : ℕ) : ℝ) = a + ((m + 1 : ℕ) : ℝ) := by ring
+    have h2 : a + 0 - ((m + 1 : ℕ) : ℝ) = a - ((m + 1 : ℕ) : ℝ) := by ring
+    have h3 : a - 0 + ((m + 1 : ℕ) : ℝ) = a + ((m + 1 : ℕ) : ℝ) := by ring
+    have h4 : a - 0 - ((m + 1 : ℕ) : ℝ) = a - ((m + 1 : ℕ) : ℝ) := by ring
+    rw [h1, h2, h3, h4]; ring
+
++ sp_d1_term.at_zero (g1 : ℝ → ℝ) (a : ℝ) (n : ℕ) :
+    sp_d1_term g1 a n 0 = 0
+  induction n with m _
+  · unfold sp_d1_term
+    have h1 : a + 0 = a := by ring
+    have h2 : a - 0 = a := by ring
+    rw [h1, h2]; ring
+  · rw [succ_eq_add_one.nat]; unfold sp_d1_term
+    have h1 : a + 0 + ((m + 1 : ℕ) : ℝ) = a + ((m + 1 : ℕ) : ℝ) := by ring
+    have h2 : a + 0 - ((m + 1 : ℕ) : ℝ) = a - ((m + 1 : ℕ) : ℝ) := by ring
+    have h3 : a - 0 + ((m + 1 : ℕ) : ℝ) = a + ((m + 1 : ℕ) : ℝ) := by ring
+    have h4 : a - 0 - ((m + 1 : ℕ) : ℝ) = a - ((m + 1 : ℕ) : ℝ) := by ring
+    rw [h1, h2, h3, h4]; ring
+
+-- Helper: linear-shift derivative for x |-> f(x + d) and x |-> f(d - x)!
++ has_deriv_within.comp_add_const (f : ℝ → ℝ) (S : set ℝ) (d t v : ℝ)
+    (hd : has_deriv_within f (fun z => True) (t + d) v) :
+    has_deriv_within (fun x => f (x + d)) S t v
+  unfold has_deriv_within at hd ⊢
+  intro e he
+  obtain ⟨del, hdel, hbd⟩ := hd e he
+  use del; constructor
+  · exact hdel
+  · intro x _ hxd
+    have h1 : |(x + d) - (t + d)| < del
+      have heq : (x + d) - (t + d) = x - t := by ring
+      rw [heq]; exact hxd
+    have hres := hbd (x + d) h1
+    have heq2 : (x + d) - (t + d) = x - t := by ring
+    rw [heq2] at hres; exact hres
+
++ has_deriv_within.comp_const_sub (f : ℝ → ℝ) (S : set ℝ) (d t v : ℝ)
+    (hd : has_deriv_within f (fun z => True) (d - t) v) :
+    has_deriv_within (fun x => f (d - x)) S t (-v)
+  unfold has_deriv_within at hd ⊢
+  intro e he
+  obtain ⟨del, hdel, hbd⟩ := hd e he
+  use del; constructor
+  · exact hdel
+  · intro x _ hxd
+    have h1 : |(d - x) - (d - t)| < del
+      have heq : (d - x) - (d - t) = -(x - t) := by ring
+      rw [heq, abs_neg_eq]; exact hxd
+    have hres := hbd (d - x) h1
+    have heq1 : f (d - x) - f (d - t) - v * ((d - x) - (d - t)) = f (d - x) - f (d - t) - -v * (x - t) := by ring
+    have heq2 : |(d - x) - (d - t)| = |x - t|
+      have h : (d - x) - (d - t) = -(x - t) := by ring
+      rw [h, abs_neg_eq]
+    rw [heq1, heq2] at hres; exact hres
+
+-- Exact unfolding of the finite partial sum Fourier cosine integral on [0, 1/2]:
+--   int_0^{1/2} (sum_{n < M + 1} sp_term g a n x) * cos(2*pi*k*x) dx
+--     = (1 / 2) * rint (fun u => g u * cos(2*pi*k*(u - a))) (a - (M + 1/2)) (a + (M + 1/2)) !
++ sp_term.partial_fourier_unfold (g : ℝ → ℝ) (a : ℝ) (hcont : ∀ u : ℝ, continuous_at g u) (M k : ℕ) :
+    darboux.has_integral (fun x => (∑ n < M + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) ((1 / 2) * rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + 1 / 2)) (a + ((M : ℝ) + 1 / 2)))
+  set h := (fun (u : ℝ) => g u * cos (2 * pi * (k : ℝ) * (u - a))) with hh
+  have hh_cont : ∀ u : ℝ, continuous_at h u := by intro u; rw [hh]; continuity
+  have hh_int : ∀ p q : ℝ, p ≤ q → darboux.has_integral h p q (rint h p q)
+    intro p q hpq
+    obtain ⟨I, hI⟩ := darboux.continuous h p q hpq (by intro t _ _; exact hh_cont t)
+    rw [rint.eq_of_has_integral h p q I hI]; exact hI
+  -- Periodicity of cos(2*pi*k*(x + m)) = cos(2*pi*k*x):
+  have hcos_shift : ∀ (m : ℕ) (x : ℝ), cos (2 * pi * (k : ℝ) * (x + (m : ℝ))) = cos (2 * pi * (k : ℝ) * x)
+    intro m x
+    have h1 : 2 * pi * (k : ℝ) * (x + (m : ℝ)) = 2 * pi * (k : ℝ) * x + 2 * pi * ((k * m : ℕ) : ℝ) := by rw [cast_mul.real k m]; ring
+    rw [h1, cos_add_two_pi_nat (k * m) (2 * pi * (k : ℝ) * x)]
+  have hcos_shift_sub : ∀ (m : ℕ) (x : ℝ), cos (2 * pi * (k : ℝ) * (x - (m : ℝ))) = cos (2 * pi * (k : ℝ) * x)
+    intro m x
+    have h1 : 2 * pi * (k : ℝ) * (x - (m : ℝ)) = 2 * pi * (k : ℝ) * x - 2 * pi * ((k * m : ℕ) : ℝ) := by rw [cast_mul.real k m]; ring
+    rw [h1, cos_sub_two_pi_nat (k * m) (2 * pi * (k : ℝ) * x)]
+  -- Key shift lemma: for ANY real shift d with cos(2*pi*k*(x + d - a)) = cos(2*pi*k*x):
+  --   int_0^{1/2} (g(d + x) * cos(2*pi*k*x)) dx = rint h d (d + 1/2)
+  --   int_0^{1/2} (g(d - x) * cos(2*pi*k*x)) dx = rint h (d - 1/2) d
+  have hpos_half : ∀ (d : ℝ), (∀ x : ℝ, cos (2 * pi * (k : ℝ) * ((x + d) - a)) = cos (2 * pi * (k : ℝ) * x)) →
+      darboux.has_integral (fun x => g (d + x) * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) (rint h d (d + 1 / 2))
+    intro d hper
+    have hI := hh_int d (d + 1 / 2) (by linarith)
+    have hI_sh : darboux.has_integral h (0 + d) (1 / 2 + d) (rint h d (d + 1 / 2))
+      have h0 : (0 : ℝ) + d = d := by ring
+      have h1 : (1 / 2 : ℝ) + d = d + 1 / 2 := by ring
+      rw [h0, h1]; exact hI
+    have hsh := darboux.subst_shift h d 0 (1 / 2) (rint h d (d + 1 / 2)) hI_sh
+    have hfn : (fun u => h (u + d)) = (fun x => g (d + x) * cos (2 * pi * (k : ℝ) * x))
+      funext x; rw [hh]
+      have hcomm : x + d = d + x := by ring
+      rw [hper x, hcomm]
+    rw [hfn] at hsh; exact hsh
+  have hneg_half : ∀ (d : ℝ), (∀ x : ℝ, cos (2 * pi * (k : ℝ) * ((d - x) - a)) = cos (2 * pi * (k : ℝ) * x)) →
+      darboux.has_integral (fun x => g (d - x) * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) (rint h (d - 1 / 2) d)
+    intro d hper
+    have hI := hh_int (d - 1 / 2) d (by linarith)
+    have hI_sh : darboux.has_integral h (-(1 / 2) + d) (0 + d) (rint h (d - 1 / 2) d)
+      have h0 : -(1 / 2 : ℝ) + d = d - 1 / 2 := by ring
+      have h1 : (0 : ℝ) + d = d := by ring
+      rw [h0, h1]; exact hI
+    have hsh := darboux.subst_shift h d (-(1 / 2)) 0 (rint h (d - 1 / 2) d) hI_sh
+    have hsh0 : darboux.has_integral (fun u => h (u + d)) (-(1 / 2)) (-0) (rint h (d - 1 / 2) d)
+      have h0 : -(0 : ℝ) = 0 := by ring
+      rw [h0]; exact hsh
+    have hneg := darboux.subst_neg (fun u => h (u + d)) 0 (1 / 2) (rint h (d - 1 / 2) d) hsh0
+    have hfn : (fun x => h (-x + d)) = (fun x => g (d - x) * cos (2 * pi * (k : ℝ) * x))
+      funext x; rw [hh]
+      have hcomm : -x + d = d - x := by ring
+      rw [hcomm, hper x]
+    rw [hfn] at hneg; exact hneg
+  -- Helper: adjacent interval sum rint h p q + rint h q r = rint h p r!
+  have hadj_eq : ∀ p q r : ℝ, p ≤ q → q ≤ r → rint h p q + rint h q r = rint h p r
+    intro p q r hpq hqr
+    have h1 := hh_int p q hpq
+    have h2 := hh_int q r hqr
+    have h3 := hh_int p r (by linarith)
+    exact darboux.unique h p r (rint h p q + rint h q r) (rint h p r) (darboux.adjacent h p q r (rint h p q) (rint h q r) h1 h2) h3
+  induction M with j ihj
+  · -- Base M = 0: int_0^{1/2} (1/2) * (g(a+x) + g(a-x)) cos(2*pi*k*x) dx = (1/2) * rint h (a - 1/2) (a + 1/2)!
+    have hp0 := hpos_half a (by intro x; have h1 : (x + a) - a = x := by ring; rw [h1])
+    have hn0 := hneg_half a (by intro x; have h1 : 2 * pi * (k : ℝ) * ((a - x) - a) = -(2 * pi * (k : ℝ) * x) := by ring; rw [h1, cos_neg])
+    have hadd := darboux.add (fun x => g (a + x) * cos (2 * pi * (k : ℝ) * x)) (fun x => g (a - x) * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) (rint h a (a + 1 / 2)) (rint h (a - 1 / 2) a) hp0 hn0
+    have hsc := darboux.scale (fun x => g (a + x) * cos (2 * pi * (k : ℝ) * x) + g (a - x) * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) (rint h a (a + 1 / 2) + rint h (a - 1 / 2) a) (1 / 2) hadd
+    have hfn : (fun x => (1 / 2) * (g (a + x) * cos (2 * pi * (k : ℝ) * x) + g (a - x) * cos (2 * pi * (k : ℝ) * x))) = (fun x => (∑ n < 0 + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x)) := by funext x; rw [sum_below_succ, sum_below_zero]; unfold sp_term; ring
+    have hv := hadj_eq (a - 1 / 2) a (a + 1 / 2) (by linarith) (by linarith)
+    have hval : (1 / 2) * (rint h a (a + 1 / 2) + rint h (a - 1 / 2) a) = (1 / 2) * rint h (a - (((0 : ℕ) : ℝ) + 1 / 2)) (a + (((0 : ℕ) : ℝ) + 1 / 2))
+      have hz : ((0 : ℕ) : ℝ) = 0 := by simp
+      have hl : a - (0 + 1 / 2) = a - 1 / 2 := by ring
+      have hr : a + (0 + 1 / 2) = a + 1 / 2 := by ring
+      rw [hz, hl, hr]; linarith
+    rw [hfn, hval] at hsc; exact hsc
+  · -- Step j -> j + 1: add sp_term g a (j + 1)!
+    rw [succ_eq_add_one.nat]
+    set m := j + 1 with hm
+    -- 4 pieces for m = j + 1:
+    --   g(a + m + x) -> [a + m, a + m + 1/2]
+    --   g(a - m + x) -> [a - m, a - m + 1/2]
+    --   g(a + m - x) -> [a + m - 1/2, a + m]
+    --   g(a - m - x) -> [a - m - 1/2, a - m]
+    have hper1 : ∀ x : ℝ, cos (2 * pi * (k : ℝ) * ((x + (a + (m : ℝ))) - a)) = cos (2 * pi * (k : ℝ) * x)
+      intro x; have h1 : (x + (a + (m : ℝ))) - a = x + (m : ℝ) := by ring
+      rw [h1, hcos_shift m x]
+    have hper2 : ∀ x : ℝ, cos (2 * pi * (k : ℝ) * ((x + (a - (m : ℝ))) - a)) = cos (2 * pi * (k : ℝ) * x)
+      intro x; have h1 : (x + (a - (m : ℝ))) - a = x - (m : ℝ) := by ring
+      rw [h1, hcos_shift_sub m x]
+    have hper3 : ∀ x : ℝ, cos (2 * pi * (k : ℝ) * (((a + (m : ℝ)) - x) - a)) = cos (2 * pi * (k : ℝ) * x)
+      intro x; have h1 : 2 * pi * (k : ℝ) * (((a + (m : ℝ)) - x) - a) = -(2 * pi * (k : ℝ) * (x - (m : ℝ))) := by ring
+      rw [h1, cos_neg, hcos_shift_sub m x]
+    have hper4 : ∀ x : ℝ, cos (2 * pi * (k : ℝ) * (((a - (m : ℝ)) - x) - a)) = cos (2 * pi * (k : ℝ) * x)
+      intro x; have h1 : 2 * pi * (k : ℝ) * (((a - (m : ℝ)) - x) - a) = -(2 * pi * (k : ℝ) * (x + (m : ℝ))) := by ring
+      rw [h1, cos_neg, hcos_shift m x]
+    have hp_p := hpos_half (a + (m : ℝ)) hper1
+    have hp_m := hpos_half (a - (m : ℝ)) hper2
+    have hn_p := hneg_half (a + (m : ℝ)) hper3
+    have hn_m := hneg_half (a - (m : ℝ)) hper4
+    have ha1 := darboux.add (fun x => g (a + (m : ℝ) + x) * cos (2 * pi * (k : ℝ) * x)) (fun x => g (a - (m : ℝ) + x) * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) (rint h (a + (m : ℝ)) (a + (m : ℝ) + 1 / 2)) (rint h (a - (m : ℝ)) (a - (m : ℝ) + 1 / 2)) hp_p hp_m
+    have ha2 := darboux.add (fun x => g (a + (m : ℝ) - x) * cos (2 * pi * (k : ℝ) * x)) (fun x => g (a - (m : ℝ) - x) * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) (rint h (a + (m : ℝ) - 1 / 2) (a + (m : ℝ))) (rint h (a - (m : ℝ) - 1 / 2) (a - (m : ℝ))) hn_p hn_m
+    have ha12 := darboux.add (fun x => g (a + (m : ℝ) + x) * cos (2 * pi * (k : ℝ) * x) + g (a - (m : ℝ) + x) * cos (2 * pi * (k : ℝ) * x)) (fun x => g (a + (m : ℝ) - x) * cos (2 * pi * (k : ℝ) * x) + g (a - (m : ℝ) - x) * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) (rint h (a + (m : ℝ)) (a + (m : ℝ) + 1 / 2) + rint h (a - (m : ℝ)) (a - (m : ℝ) + 1 / 2)) (rint h (a + (m : ℝ) - 1 / 2) (a + (m : ℝ)) + rint h (a - (m : ℝ) - 1 / 2) (a - (m : ℝ))) ha1 ha2
+    have hsc := darboux.scale (fun x => (g (a + (m : ℝ) + x) * cos (2 * pi * (k : ℝ) * x) + g (a - (m : ℝ) + x) * cos (2 * pi * (k : ℝ) * x)) + (g (a + (m : ℝ) - x) * cos (2 * pi * (k : ℝ) * x) + g (a - (m : ℝ) - x) * cos (2 * pi * (k : ℝ) * x))) 0 (1 / 2) ((rint h (a + (m : ℝ)) (a + (m : ℝ) + 1 / 2) + rint h (a - (m : ℝ)) (a - (m : ℝ) + 1 / 2)) + (rint h (a + (m : ℝ) - 1 / 2) (a + (m : ℝ)) + rint h (a - (m : ℝ) - 1 / 2) (a - (m : ℝ)))) (1 / 2) ha12
+    have hfn_m : (fun x => (1 / 2) * ((g (a + (m : ℝ) + x) * cos (2 * pi * (k : ℝ) * x) + g (a - (m : ℝ) + x) * cos (2 * pi * (k : ℝ) * x)) + (g (a + (m : ℝ) - x) * cos (2 * pi * (k : ℝ) * x) + g (a - (m : ℝ) - x) * cos (2 * pi * (k : ℝ) * x)))) = (fun x => sp_term g a m x * cos (2 * pi * (k : ℝ) * x))
+      funext x; rw [hm]; unfold sp_term
+      have e1 : a + ((j + 1 : ℕ) : ℝ) + x = a + x + ((j + 1 : ℕ) : ℝ) := by ring
+      have e2 : a - ((j + 1 : ℕ) : ℝ) + x = a + x - ((j + 1 : ℕ) : ℝ) := by ring
+      have e3 : a + ((j + 1 : ℕ) : ℝ) - x = a - x + ((j + 1 : ℕ) : ℝ) := by ring
+      have e4 : a - ((j + 1 : ℕ) : ℝ) - x = a - x - ((j + 1 : ℕ) : ℝ) := by ring
+      rw [e1, e2, e3, e4]; ring
+    rw [hfn_m] at hsc
+    -- Adjacent gluing:
+    --   [a - m - 1/2, a - m] + [a - m, a - m + 1/2] = [a - (m + 1/2), a - (j + 1/2)]
+    --   [a + m - 1/2, a + m] + [a + m, a + m + 1/2] = [a + (j + 1/2), a + (m + 1/2)]
+    have hL1 := hadj_eq (a - (m : ℝ) - 1 / 2) (a - (m : ℝ)) (a - (m : ℝ) + 1 / 2) (by linarith) (by linarith)
+    have hR1 := hadj_eq (a + (m : ℝ) - 1 / 2) (a + (m : ℝ)) (a + (m : ℝ) + 1 / 2) (by linarith) (by linarith)
+    have hL_end1 : a - (m : ℝ) - 1 / 2 = a - ((m : ℝ) + 1 / 2) := by ring
+    have hL_end2 : a - (m : ℝ) + 1 / 2 = a - ((j : ℝ) + 1 / 2) := by linarith
+    have hR_end1 : a + (m : ℝ) - 1 / 2 = a + ((j : ℝ) + 1 / 2) := by linarith
+    have hR_end2 : a + (m : ℝ) + 1 / 2 = a + ((m : ℝ) + 1 / 2) := by ring
+    have hL_eq : rint h (a - (m : ℝ) - 1 / 2) (a - (m : ℝ)) + rint h (a - (m : ℝ)) (a - (m : ℝ) + 1 / 2) = rint h (a - ((m : ℝ) + 1 / 2)) (a - ((j : ℝ) + 1 / 2)) := by rw [← hL_end1, ← hL_end2]; exact hL1
+    have hR_eq : rint h (a + (m : ℝ) - 1 / 2) (a + (m : ℝ)) + rint h (a + (m : ℝ)) (a + (m : ℝ) + 1 / 2) = rint h (a + ((j : ℝ) + 1 / 2)) (a + ((m : ℝ) + 1 / 2)) := by rw [← hR_end1, ← hR_end2]; exact hR1
+    have hj_nn : (0 : ℝ) ≤ (j : ℝ) := cast_nonneg.real j
+    have hG1 := hadj_eq (a - ((m : ℝ) + 1 / 2)) (a - ((j : ℝ) + 1 / 2)) (a + ((j : ℝ) + 1 / 2)) (by linarith) (by linarith)
+    have hG2 := hadj_eq (a - ((m : ℝ) + 1 / 2)) (a + ((j : ℝ) + 1 / 2)) (a + ((m : ℝ) + 1 / 2)) (by linarith) (by linarith)
+    have hcomb := darboux.add (fun x => (∑ n < m, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x)) (fun x => sp_term g a m x * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) ((1 / 2) * rint h (a - ((j : ℝ) + 1 / 2)) (a + ((j : ℝ) + 1 / 2))) ((1 / 2) * ((rint h (a + (m : ℝ)) (a + (m : ℝ) + 1 / 2) + rint h (a - (m : ℝ)) (a - (m : ℝ) + 1 / 2)) + (rint h (a + (m : ℝ) - 1 / 2) (a + (m : ℝ)) + rint h (a - (m : ℝ) - 1 / 2) (a - (m : ℝ))))) ihj hsc
+    have hfn_all : (fun x => (∑ n < m, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x) + sp_term g a m x * cos (2 * pi * (k : ℝ) * x)) = (fun x => (∑ n < m + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x)) := by funext x; rw [sum_below_succ]; ring
+    have hval_all : (1 / 2) * rint h (a - ((j : ℝ) + 1 / 2)) (a + ((j : ℝ) + 1 / 2)) + (1 / 2) * ((rint h (a + (m : ℝ)) (a + (m : ℝ) + 1 / 2) + rint h (a - (m : ℝ)) (a - (m : ℝ) + 1 / 2)) + (rint h (a + (m : ℝ) - 1 / 2) (a + (m : ℝ)) + rint h (a - (m : ℝ) - 1 / 2) (a - (m : ℝ)))) = (1 / 2) * rint h (a - ((m : ℝ) + 1 / 2)) (a + ((m : ℝ) + 1 / 2)) := by linarith
+    rw [hfn_all, hval_all] at hcomb; exact hcomb
+
+-- MASTER THEOREM (UNIFIED SHIFTED C^2 POISSON SUMMATION — 0 CUSTOM AXIOMS!):
++ shifted_poisson.of_c2_exp_decay (g g1 g2 : ℝ → ℝ) (a c C : ℝ) (gh : ℕ → ℝ)
+    (ha0 : 0 ≤ a) (ha1 : a ≤ 1) (hc : 0 < c) (hC : 0 ≤ C)
+    (hd1 : ∀ u : ℝ, has_deriv_within g (fun z => True) u (g1 u))
+    (hd2 : ∀ u : ℝ, has_deriv_within g1 (fun z => True) u (g2 u))
+    (hc0 : ∀ u : ℝ, continuous_at g u)
+    (hc1 : ∀ u : ℝ, continuous_at g1 u)
+    (hc2 : ∀ u : ℝ, continuous_at g2 u)
+    (hb0 : ∀ u : ℝ, |g u| ≤ C * exp (-c * u * u))
+    (hb1 : ∀ u : ℝ, |g1 u| ≤ C * exp (-c * u * u))
+    (hb2 : ∀ u : ℝ, |g2 u| ≤ C * exp (-c * u * u))
+    (hgh : ∀ k : ℕ, tends_to (fun (M : ℕ) => rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + 1 / 2)) (a + ((M : ℝ) + 1 / 2))) (gh k)) :
+    tends_to (fun (N : ℕ) => gh 0 + 2 * (∑ k < N, gh (k + 1))) (rlim (fun (N : ℕ) => ∑ n < N, sp_zero_term g a n))
+  set r := exp (-c) with hr
+  have hr_lt1 : r < 1 := by rw [hr]; have h := (exp_lt_exp (-c) 0).mpr (by linarith); rw [exp_zero] at h; exact h
+  have hr_pow : ∀ m : ℕ, r ^ m = exp (-c * (m : ℝ))
+    intro m; induction m with j ihj
+    · rw [pow_zero.real]; simp [exp_zero]
+    · rw [succ_eq_add_one.nat, pow_succ.real, ihj, hr, ← exp_add, cast_add.real j 1]; simp
+      have h1 : -c * (j : ℝ) + -c = -c * ((j : ℝ) + 1) := by ring
+      rw [h1]
+  set K0 := 2 * (C + 1) * exp (2 * c) with hK0
+  have hK0_pos : 0 < K0 := by rw [hK0]; exact mul_pos.real (2 * (C + 1)) (exp (2 * c)) (by linarith) (exp_pos (2 * c))
+  -- Single unified geometric bound on [-1/4, 3/4] (covers [0, 1/2] and two-sided neighborhoods!):
+  have hterm_bd_wide : ∀ (f : ℝ → ℝ), (∀ u : ℝ, |f u| ≤ C * exp (-c * u * u)) →
+      ∀ (n : ℕ) (x : ℝ), -(1 / 4) ≤ x → x ≤ 3 / 4 →
+      |sp_term f a n x| ≤ K0 * r ^ n ∧ |sp_d1_term f a n x| ≤ K0 * r ^ n ∧ |sp_d2_term f a n x| ≤ K0 * r ^ n
+    intro f hf n x hx0 hx1
+    have hpt : ∀ (m : ℕ) (z : ℝ), (m : ℝ) - 2 ≤ |z| → |f z| ≤ (C + 1) * exp (2 * c) * r ^ m
+      intro m z hz
+      have h1 := hf z
+      have h2 : exp (-c * z * z) ≤ exp (2 * c) * r ^ m
+        rw [hr_pow m, ← exp_add]
+        have hz2 : (m : ℝ) - 2 ≤ z * z
+          by_cases hm3 : 3 ≤ m
+          · have hm_ge : (1 : ℝ) ≤ (m : ℝ) - 2 := by have h := (cast_le.real 3 m).mpr hm3; linarith
+            have hsq := sq_abs.real z
+            have h3 : (m : ℝ) - 2 ≤ |z| * |z| := by nlinarith
+            linarith
+          · have hm_le : (m : ℝ) ≤ 2 := (cast_le.real m 2).mpr (by omega)
+            nlinarith
+        have hmul := mul_le_mul_of_nonneg_left.real ((m : ℝ) - 2) (z * z) c hz2 (by linarith)
+        exact (exp_le_exp (-c * z * z) (2 * c + -c * (m : ℝ))).mpr (by linarith)
+      have h3 := mul_le_mul_of_nonneg_left.real (exp (-c * z * z)) (exp (2 * c) * r ^ m) C h2 hC
+      have h4 : C * (exp (2 * c) * r ^ m) ≤ (C + 1) * exp (2 * c) * r ^ m
+        have he_pos : 0 < exp (2 * c) * r ^ m := mul_pos.real (exp (2 * c)) (r ^ m) (exp_pos (2 * c)) (by rw [hr_pow m]; exact exp_pos (-c * (m : ℝ)))
+        linarith
+      linarith
+    induction n with m _
+    · have h1 := hpt 0 (a + x) (by simp; linarith [abs_nonneg.real (a + x)])
+      have h2 := hpt 0 (a - x) (by simp; linarith [abs_nonneg.real (a - x)])
+      have hsp0 : |sp_term f a 0 x| ≤ K0 * r ^ 0
+        unfold sp_term
+        have ht := abs_add_le (f (a + x)) (f (a - x))
+        have hlo := neg_le_abs.real (f (a + x) + f (a - x))
+        have hhi := le_abs_self.real (f (a + x) + f (a - x))
+        apply abs_le_of.real <;> (rw [hK0]; linarith)
+      have hd10 : |sp_d1_term f a 0 x| ≤ K0 * r ^ 0
+        unfold sp_d1_term
+        have heq : f (a + x) - f (a - x) = f (a + x) + -f (a - x) := by ring
+        rw [heq]; have ht := abs_add_le (f (a + x)) (-f (a - x)); rw [abs_neg_eq] at ht
+        have hlo := neg_le_abs.real (f (a + x) + -f (a - x))
+        have hhi := le_abs_self.real (f (a + x) + -f (a - x))
+        apply abs_le_of.real <;> (rw [hK0]; linarith)
+      have hd20 : |sp_d2_term f a 0 x| ≤ K0 * r ^ 0
+        unfold sp_d2_term
+        have ht := abs_add_le (f (a + x)) (f (a - x))
+        have hlo := neg_le_abs.real (f (a + x) + f (a - x))
+        have hhi := le_abs_self.real (f (a + x) + f (a - x))
+        apply abs_le_of.real <;> (rw [hK0]; linarith)
+      exact ⟨hsp0, hd10, hd20⟩
+    · rw [succ_eq_add_one.nat]
+      have h1 := hpt (m + 1) (a + x + ((m + 1 : ℕ) : ℝ)) (by linarith [le_abs_self.real (a + x + ((m + 1 : ℕ) : ℝ))])
+      have h2 := hpt (m + 1) (a + x - ((m + 1 : ℕ) : ℝ)) (by linarith [neg_le_abs.real (a + x - ((m + 1 : ℕ) : ℝ))])
+      have h3 := hpt (m + 1) (a - x + ((m + 1 : ℕ) : ℝ)) (by linarith [le_abs_self.real (a - x + ((m + 1 : ℕ) : ℝ))])
+      have h4 := hpt (m + 1) (a - x - ((m + 1 : ℕ) : ℝ)) (by linarith [neg_le_abs.real (a - x - ((m + 1 : ℕ) : ℝ))])
+      have hsp1 : |sp_term f a (m + 1) x| ≤ K0 * r ^ (m + 1)
+        unfold sp_term
+        have t1 := abs_add_le (f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ)) + f (a - x + ((m + 1 : ℕ) : ℝ))) (f (a - x - ((m + 1 : ℕ) : ℝ)))
+        have t2 := abs_add_le (f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ))) (f (a - x + ((m + 1 : ℕ) : ℝ)))
+        have t3 := abs_add_le (f (a + x + ((m + 1 : ℕ) : ℝ))) (f (a + x - ((m + 1 : ℕ) : ℝ)))
+        have hlo := neg_le_abs.real (f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ)) + f (a - x + ((m + 1 : ℕ) : ℝ)) + f (a - x - ((m + 1 : ℕ) : ℝ)))
+        have hhi := le_abs_self.real (f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ)) + f (a - x + ((m + 1 : ℕ) : ℝ)) + f (a - x - ((m + 1 : ℕ) : ℝ)))
+        apply abs_le_of.real <;> (rw [hK0]; linarith)
+      have hd11 : |sp_d1_term f a (m + 1) x| ≤ K0 * r ^ (m + 1)
+        unfold sp_d1_term
+        have heq : f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ)) - f (a - x + ((m + 1 : ℕ) : ℝ)) - f (a - x - ((m + 1 : ℕ) : ℝ)) = (f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ))) + (-f (a - x + ((m + 1 : ℕ) : ℝ)) + -f (a - x - ((m + 1 : ℕ) : ℝ))) := by ring
+        rw [heq]
+        have t1 := abs_add_le (f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ))) (-f (a - x + ((m + 1 : ℕ) : ℝ)) + -f (a - x - ((m + 1 : ℕ) : ℝ)))
+        have t2 := abs_add_le (f (a + x + ((m + 1 : ℕ) : ℝ))) (f (a + x - ((m + 1 : ℕ) : ℝ)))
+        have t3 := abs_add_le (-f (a - x + ((m + 1 : ℕ) : ℝ))) (-f (a - x - ((m + 1 : ℕ) : ℝ)))
+        rw [abs_neg_eq, abs_neg_eq] at t3
+        have hlo := neg_le_abs.real ((f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ))) + (-f (a - x + ((m + 1 : ℕ) : ℝ)) + -f (a - x - ((m + 1 : ℕ) : ℝ))))
+        have hhi := le_abs_self.real ((f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ))) + (-f (a - x + ((m + 1 : ℕ) : ℝ)) + -f (a - x - ((m + 1 : ℕ) : ℝ))))
+        apply abs_le_of.real <;> (rw [hK0]; linarith)
+      have hd21 : |sp_d2_term f a (m + 1) x| ≤ K0 * r ^ (m + 1)
+        unfold sp_d2_term
+        have t1 := abs_add_le (f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ)) + f (a - x + ((m + 1 : ℕ) : ℝ))) (f (a - x - ((m + 1 : ℕ) : ℝ)))
+        have t2 := abs_add_le (f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ))) (f (a - x + ((m + 1 : ℕ) : ℝ)))
+        have t3 := abs_add_le (f (a + x + ((m + 1 : ℕ) : ℝ))) (f (a + x - ((m + 1 : ℕ) : ℝ)))
+        have hlo := neg_le_abs.real (f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ)) + f (a - x + ((m + 1 : ℕ) : ℝ)) + f (a - x - ((m + 1 : ℕ) : ℝ)))
+        have hhi := le_abs_self.real (f (a + x + ((m + 1 : ℕ) : ℝ)) + f (a + x - ((m + 1 : ℕ) : ℝ)) + f (a - x + ((m + 1 : ℕ) : ℝ)) + f (a - x - ((m + 1 : ℕ) : ℝ)))
+        apply abs_le_of.real <;> (rw [hK0]; linarith)
+      exact ⟨hsp1, hd11, hd21⟩
+  have hterm_bd : ∀ (f : ℝ → ℝ), (∀ u : ℝ, |f u| ≤ C * exp (-c * u * u)) →
+      ∀ (n : ℕ) (x : ℝ), 0 ≤ x → x ≤ 1 / 2 →
+      |sp_term f a n x| ≤ K0 * r ^ n ∧ |sp_d1_term f a n x| ≤ K0 * r ^ n ∧ |sp_d2_term f a n x| ≤ K0 * r ^ n :=
+    by intro f hf n x hx0 hx1; exact hterm_bd_wide f hf n x (by linarith) (by linarith)
+  -- Define F and Fp as pointwise limits on [0, 1/2]:
+  set F := (fun (x : ℝ) => rlim (fun (N : ℕ) => ∑ n < N, sp_term g a n x)) with hF
+  set Fp := (fun (x : ℝ) => rlim (fun (N : ℕ) => ∑ n < N, sp_d1_term g1 a n x)) with hFp
+  -- Geometric series tail bound helper for any sequence bounded by K0 * r^n:
+  have hgeom_tail : ∀ (u : ℕ → ℝ), (∀ n : ℕ, |u n| ≤ K0 * r ^ n) →
+      tends_to (fun (N : ℕ) => ∑ n < N, u n) (rlim (fun (N : ℕ) => ∑ n < N, u n)) ∧
+      (∀ N : ℕ, |rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n| ≤ K0 * r ^ N / (1 - r))
+    intro u hu
+    have hsum_r : summable (fun n => K0 * r ^ n) := by rw [hr]; exact summable.scale_real K0 (fun n => (exp (-c)) ^ n) (summable.exp_neg_geom c hc)
+    have habs_s : summable (fun n => |u n|) := summable.of_nonneg_le (fun n => |u n|) (fun n => K0 * r ^ n) (by intro n; exact abs_nonneg.real (u n)) hu hsum_r
+    have hs := summable.of_abs_summable u habs_s
+    unfold summable converges partial_sum at hs
+    obtain ⟨L, hL⟩ := hs
+    have hlim : tends_to (fun (N : ℕ) => ∑ n < N, u n) (rlim (fun (N : ℕ) => ∑ n < N, u n)) := by rw [rlim.eq_of_tends_to (fun (N : ℕ) => ∑ n < N, u n) L hL]; exact hL
+    constructor
+    · exact hlim
+    · intro N
+      have hdiff_d : ∀ d : ℕ, |(∑ n < N + d, u n) - (∑ n < N, u n)| ≤ K0 * r ^ N / (1 - r)
+        intro d
+        have hsh : ∀ k : ℕ, (∑ n < N + k, u n) - (∑ n < N, u n) = ∑ j < k, u (N + j)
+          intro k; induction k with l ihl
+          · have h0 : N + 0 = N := by omega
+            rw [h0, sum_below_zero]; ring
+          · rw [succ_eq_add_one.nat]
+            have h1 : N + (l + 1) = (N + l) + 1 := by omega
+            have hs1 : (∑ n < (N + l) + 1, u n) = (∑ n < N + l, u n) + u (N + l) := by rw [sum_below_succ]
+            have hs2 : (∑ j < l + 1, u (N + j)) = (∑ j < l, u (N + j)) + u (N + l) := by rw [sum_below_succ]
+            rw [h1, hs1, hs2]; linarith
+        rw [hsh d]
+        have habs_sum : ∀ k : ℕ, |∑ j < k, u (N + j)| ≤ ∑ j < k, K0 * r ^ N * r ^ j
+          intro k; induction k with l ihl
+          · rw [sum_below_zero, sum_below_zero]; exact abs_le_of.real 0 0 (by linarith) (by linarith)
+          · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+            have ht := abs_add_le (∑ j < l, u (N + j)) (u (N + l))
+            have hb := hu (N + l)
+            have hp : r ^ (N + l) = r ^ N * r ^ l
+              rw [hr_pow (N + l), hr_pow N, hr_pow l, ← exp_add, cast_add.real N l]
+              have ha : -c * ((N : ℝ) + (l : ℝ)) = -c * (N : ℝ) + -c * (l : ℝ) := by ring
+              rw [ha]
+            rw [hp] at hb; linarith
+        have hsc : ∀ k : ℕ, (∑ j < k, K0 * r ^ N * r ^ j) = K0 * r ^ N * (∑ j < k, r ^ j)
+          intro k; induction k with l ihl
+          · rw [sum_below_zero, sum_below_zero]; ring
+          · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ihl]; ring
+        have hgeom : (∑ j < d, r ^ j) ≤ 1 / (1 - r)
+          have h1 : ∀ k : ℕ, (1 - r) * (∑ j < k, r ^ j) = 1 - r ^ k
+            intro k; induction k with l ihl
+            · rw [sum_below_zero, pow_zero.real]; ring
+            · rw [succ_eq_add_one.nat, sum_below_succ]
+              have ha : (1 - r) * ((∑ j < l, r ^ j) + r ^ l) = (1 - r) * (∑ j < l, r ^ j) + (1 - r) * r ^ l := by ring
+              rw [ha, ihl, pow_succ.real]; ring
+          have hr_nn : 0 ≤ r ^ d := by rw [hr_pow d]; linarith [exp_pos (-c * (d : ℝ))]
+          exact (le_div_iff.real (∑ j < d, r ^ j) 1 (1 - r) (by linarith)).mpr (by linarith [h1 d])
+        have hrN_nn : 0 ≤ K0 * r ^ N := mul_nonneg.real K0 (r ^ N) (by linarith) (by rw [hr_pow N]; linarith [exp_pos (-c * (N : ℝ))])
+        have hm := mul_le_mul_of_nonneg_left.real (∑ j < d, r ^ j) (1 / (1 - r)) (K0 * r ^ N) hgeom hrN_nn
+        have hdiv : K0 * r ^ N * (1 / (1 - r)) = K0 * r ^ N / (1 - r) := by rw [div_def.real (K0 * r ^ N) (1 - r)]
+        linarith [habs_sum d, hsc d]
+      have hsh_lim : tends_to (fun d => (∑ n < N + d, u n) - (∑ n < N, u n)) (rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n)
+        unfold tends_to at hlim ⊢; intro eps heps
+        obtain ⟨N1, hN1⟩ := hlim eps heps
+        use N1; intro d hd
+        have h1 := hN1 (N + d) (by omega)
+        have hre : ((∑ n < N + d, u n) - (∑ n < N, u n)) - (rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n) = (∑ n < N + d, u n) - rlim (fun (M : ℕ) => ∑ n < M, u n) := by ring
+        rw [hre]; exact h1
+      have hhi : rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n ≤ K0 * r ^ N / (1 - r)
+        have hneg_lim : tends_to (fun d => -((∑ n < N + d, u n) - (∑ n < N, u n))) (-(rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n))
+          unfold tends_to at hsh_lim ⊢; intro eps heps
+          obtain ⟨N1, hN1⟩ := hsh_lim eps heps
+          use N1; intro d hd
+          have hre : -((∑ n < N + d, u n) - (∑ n < N, u n)) - -(rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n) = -(((∑ n < N + d, u n) - (∑ n < N, u n)) - (rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n)) := by ring
+          rw [hre, abs_neg_eq]; exact hN1 d hd
+        have hge := tends_to.ge_of_ge (fun d => -((∑ n < N + d, u n) - (∑ n < N, u n))) (-(rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n)) (-(K0 * r ^ N / (1 - r))) hneg_lim (by intro d; linarith [le_abs_self.real ((∑ n < N + d, u n) - (∑ n < N, u n)), hdiff_d d])
+        linarith
+      have hlo : -(K0 * r ^ N / (1 - r)) ≤ rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n := by exact tends_to.ge_of_ge (fun d => (∑ n < N + d, u n) - (∑ n < N, u n)) (rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n) (-(K0 * r ^ N / (1 - r))) hsh_lim (by intro d; linarith [neg_le_abs.real ((∑ n < N + d, u n) - (∑ n < N, u n)), hdiff_d d])
+      exact abs_le_of.real (rlim (fun (M : ℕ) => ∑ n < M, u n) - ∑ n < N, u n) (K0 * r ^ N / (1 - r)) (by linarith) (by linarith)
+  -- Uniform convergence of F, Fp on [0, 1/2]:
+  have hF_unif : ∀ (x : ℝ) (N : ℕ), 0 ≤ x → x ≤ 1 / 2 → |F x - ∑ n < N, sp_term g a n x| ≤ K0 * r ^ N / (1 - r)
+    intro x N hx0 hx1
+    rw [hF]; exact (hgeom_tail (fun n => sp_term g a n x) (by intro n; exact (hterm_bd g hb0 n x hx0 hx1).1)).2 N
+  have hFp_unif : ∀ (x : ℝ) (N : ℕ), 0 ≤ x → x ≤ 1 / 2 → |Fp x - ∑ n < N, sp_d1_term g1 a n x| ≤ K0 * r ^ N / (1 - r)
+    intro x N hx0 hx1
+    rw [hFp]; exact (hgeom_tail (fun n => sp_d1_term g1 a n x) (by intro n; have hb := hterm_bd g1 hb1 n x hx0 hx1; exact hb.2.1)).2 N
+  -- Helper: r^N -> 0 (for uniform limit continuity & integration!):
+  have hrN_zero : ∀ eps : ℝ, 0 < eps → ∃ N : ℕ, K0 * r ^ N / (1 - r) < eps
+    intro eps heps
+    have hB_pos : 0 < K0 / ((1 - r) * eps) + 1 := by
+      have h1 := div_pos.real K0 ((1 - r) * eps) hK0_pos (mul_pos.real (1 - r) eps (by linarith) heps)
+      linarith
+    obtain ⟨N, hN⟩ := exists_nat_gt.real (log (K0 / ((1 - r) * eps) + 1) / c + 1)
+    use N; rw [hr_pow N]
+    have hlog_lt : log (K0 / ((1 - r) * eps) + 1) < c * (N : ℝ) := by
+      have h := (div_lt_iff.real (log (K0 / ((1 - r) * eps) + 1)) (N : ℝ) c hc).mp (by linarith); linarith
+    have hexp_gt : K0 / ((1 - r) * eps) + 1 < exp (c * (N : ℝ))
+      have h := (exp_lt_exp (log (K0 / ((1 - r) * eps) + 1)) (c * (N : ℝ))).mpr hlog_lt
+      rw [exp_log (K0 / ((1 - r) * eps) + 1) hB_pos] at h; exact h
+    have hinv_e : exp (-c * (N : ℝ)) * exp (c * (N : ℝ)) = 1
+      rw [← exp_add]; have h0 : -c * (N : ℝ) + c * (N : ℝ) = 0 := by ring
+      rw [h0, exp_zero]
+    have hm := mul_lt_mul_of_pos_left.real (K0 / ((1 - r) * eps)) (exp (c * (N : ℝ))) (exp (-c * (N : ℝ))) (by linarith) (exp_pos (-c * (N : ℝ)))
+    rw [hinv_e] at hm
+    have hden_pos : 0 < (1 - r) * eps := mul_pos.real (1 - r) eps (by linarith) heps
+    have hm2 := mul_lt_mul_of_pos_right.real (exp (-c * (N : ℝ)) * (K0 / ((1 - r) * eps))) 1 ((1 - r) * eps) hm hden_pos
+    have hcd := mul_inv_cancel.real ((1 - r) * eps) (by linarith)
+    have hre : exp (-c * (N : ℝ)) * (K0 / ((1 - r) * eps)) * ((1 - r) * eps) = K0 * exp (-c * (N : ℝ))
+      rw [div_def.real K0 ((1 - r) * eps)]; linear_combination (K0 * exp (-c * (N : ℝ))) * hcd
+    have hlt : K0 * exp (-c * (N : ℝ)) < (1 - r) * eps := by linarith
+    exact (div_lt_iff.real (K0 * exp (-c * (N : ℝ))) eps (1 - r) (by linarith)).mpr (by linarith)
+  -- Partial sums are C^2 on [0, 1/2] with uniform second-derivative bound L = K0 / (1 - r)!
+  set L := K0 / (1 - r) with hL
+  have hL_nn : 0 ≤ L := by rw [hL]; exact div_nonneg.real K0 (1 - r) (by linarith) (by linarith)
+  have hterm_c2 : ∀ (n : ℕ) (S : set ℝ) (t : ℝ),
+      has_deriv_within (sp_term g a n) S t (sp_d1_term g1 a n t) ∧
+      has_deriv_within (sp_d1_term g1 a n) S t (sp_d2_term g2 a n t) ∧
+      continuous_at (sp_term g a n) t ∧
+      continuous_at (sp_d1_term g1 a n) t
+    intro n S t
+    induction n with m _
+    · have hta : t + a = a + t := by ring
+      have hp0 := has_deriv_within.comp_add_const g S a t (g1 (a + t)) (by rw [hta]; exact hd1 (a + t))
+      have hm0 := has_deriv_within.comp_const_sub g S a t (g1 (a - t)) (hd1 (a - t))
+      have hd_g := has_deriv_within.scale (1 / 2) (fun x => g (x + a) + g (a - x)) S t (g1 (a + t) + -g1 (a - t)) (has_deriv_within.add (fun x => g (x + a)) (fun x => g (a - x)) S t (g1 (a + t)) (-g1 (a - t)) hp0 hm0)
+      have hf_g : (fun x => (1 / 2) * (g (x + a) + g (a - x))) = sp_term g a 0
+        funext x; unfold sp_term
+        have h1 : x + a = a + x := by ring
+        rw [h1]
+      have hv_g : (1 / 2) * (g1 (a + t) + -g1 (a - t)) = sp_d1_term g1 a 0 t := by unfold sp_d1_term; ring
+      rw [hf_g, hv_g] at hd_g
+      have hp1 := has_deriv_within.comp_add_const g1 S a t (g2 (a + t)) (by rw [hta]; exact hd2 (a + t))
+      have hm1 := has_deriv_within.comp_const_sub g1 S a t (g2 (a - t)) (hd2 (a - t))
+      have hd_g1 := has_deriv_within.scale (1 / 2) (fun x => g1 (x + a) - g1 (a - x)) S t (g2 (a + t) - -g2 (a - t)) (has_deriv_within.sub (fun x => g1 (x + a)) (fun x => g1 (a - x)) S t (g2 (a + t)) (-g2 (a - t)) hp1 hm1)
+      have hf_g1 : (fun x => (1 / 2) * (g1 (x + a) - g1 (a - x))) = sp_d1_term g1 a 0
+        funext x; unfold sp_d1_term
+        have h1 : x + a = a + x := by ring
+        rw [h1]
+      have hv_g1 : (1 / 2) * (g2 (a + t) - -g2 (a - t)) = sp_d2_term g2 a 0 t := by unfold sp_d2_term; ring
+      rw [hf_g1, hv_g1] at hd_g1
+      have hc_g : continuous_at (sp_term g a 0) t := by unfold sp_term; continuity
+      have hc_g1 : continuous_at (sp_d1_term g1 a 0) t := by unfold sp_d1_term; continuity
+      exact ⟨hd_g, hd_g1, hc_g, hc_g1⟩
+    · rw [succ_eq_add_one.nat]
+      set M1 := ((m + 1 : ℕ) : ℝ) with hM1
+      have ht1 : t + (a + M1) = a + t + M1 := by ring
+      have ht2 : t + (a - M1) = a + t - M1 := by ring
+      have ht3 : (a + M1) - t = a - t + M1 := by ring
+      have ht4 : (a - M1) - t = a - t - M1 := by ring
+      have hp1 := has_deriv_within.comp_add_const g S (a + M1) t (g1 (a + t + M1)) (by rw [ht1]; exact hd1 (a + t + M1))
+      have hp2 := has_deriv_within.comp_add_const g S (a - M1) t (g1 (a + t - M1)) (by rw [ht2]; exact hd1 (a + t - M1))
+      have hm1 := has_deriv_within.comp_const_sub g S (a + M1) t (g1 (a - t + M1)) (by rw [ht3]; exact hd1 (a - t + M1))
+      have hm2 := has_deriv_within.comp_const_sub g S (a - M1) t (g1 (a - t - M1)) (by rw [ht4]; exact hd1 (a - t - M1))
+      have ha1 := has_deriv_within.add (fun x => g (x + (a + M1))) (fun x => g (x + (a - M1))) S t (g1 (a + t + M1)) (g1 (a + t - M1)) hp1 hp2
+      have ha2 := has_deriv_within.add (fun x => g ((a + M1) - x)) (fun x => g ((a - M1) - x)) S t (-g1 (a - t + M1)) (-g1 (a - t - M1)) hm1 hm2
+      have ha12 := has_deriv_within.add (fun x => g (x + (a + M1)) + g (x + (a - M1))) (fun x => g ((a + M1) - x) + g ((a - M1) - x)) S t (g1 (a + t + M1) + g1 (a + t - M1)) (-g1 (a - t + M1) + -g1 (a - t - M1)) ha1 ha2
+      have hd_g := has_deriv_within.scale (1 / 2) (fun x => (g (x + (a + M1)) + g (x + (a - M1))) + (g ((a + M1) - x) + g ((a - M1) - x))) S t ((g1 (a + t + M1) + g1 (a + t - M1)) + (-g1 (a - t + M1) + -g1 (a - t - M1))) ha12
+      have hf_g : (fun x => (1 / 2) * ((g (x + (a + M1)) + g (x + (a - M1))) + (g ((a + M1) - x) + g ((a - M1) - x)))) = sp_term g a (m + 1)
+        funext x; unfold sp_term; rw [← hM1]
+        have e1 : x + (a + M1) = a + x + M1 := by ring
+        have e2 : x + (a - M1) = a + x - M1 := by ring
+        have e3 : (a + M1) - x = a - x + M1 := by ring
+        have e4 : (a - M1) - x = a - x - M1 := by ring
+        rw [e1, e2, e3, e4]; ring
+      have hv_g : (1 / 2) * ((g1 (a + t + M1) + g1 (a + t - M1)) + (-g1 (a - t + M1) + -g1 (a - t - M1))) = sp_d1_term g1 a (m + 1) t := by unfold sp_d1_term; rw [← hM1]; ring
+      rw [hf_g, hv_g] at hd_g
+      have qp1 := has_deriv_within.comp_add_const g1 S (a + M1) t (g2 (a + t + M1)) (by rw [ht1]; exact hd2 (a + t + M1))
+      have qp2 := has_deriv_within.comp_add_const g1 S (a - M1) t (g2 (a + t - M1)) (by rw [ht2]; exact hd2 (a + t - M1))
+      have qm1 := has_deriv_within.comp_const_sub g1 S (a + M1) t (g2 (a - t + M1)) (by rw [ht3]; exact hd2 (a - t + M1))
+      have qm2 := has_deriv_within.comp_const_sub g1 S (a - M1) t (g2 (a - t - M1)) (by rw [ht4]; exact hd2 (a - t - M1))
+      have qa1 := has_deriv_within.add (fun x => g1 (x + (a + M1))) (fun x => g1 (x + (a - M1))) S t (g2 (a + t + M1)) (g2 (a + t - M1)) qp1 qp2
+      have qa2 := has_deriv_within.add (fun x => g1 ((a + M1) - x)) (fun x => g1 ((a - M1) - x)) S t (-g2 (a - t + M1)) (-g2 (a - t - M1)) qm1 qm2
+      have qa12 := has_deriv_within.sub (fun x => g1 (x + (a + M1)) + g1 (x + (a - M1))) (fun x => g1 ((a + M1) - x) + g1 ((a - M1) - x)) S t (g2 (a + t + M1) + g2 (a + t - M1)) (-g2 (a - t + M1) + -g2 (a - t - M1)) qa1 qa2
+      have hd_g1 := has_deriv_within.scale (1 / 2) (fun x => (g1 (x + (a + M1)) + g1 (x + (a - M1))) - (g1 ((a + M1) - x) + g1 ((a - M1) - x))) S t ((g2 (a + t + M1) + g2 (a + t - M1)) - (-g2 (a - t + M1) + -g2 (a - t - M1))) qa12
+      have hf_g1 : (fun x => (1 / 2) * ((g1 (x + (a + M1)) + g1 (x + (a - M1))) - (g1 ((a + M1) - x) + g1 ((a - M1) - x)))) = sp_d1_term g1 a (m + 1)
+        funext x; unfold sp_d1_term; rw [← hM1]
+        have e1 : x + (a + M1) = a + x + M1 := by ring
+        have e2 : x + (a - M1) = a + x - M1 := by ring
+        have e3 : (a + M1) - x = a - x + M1 := by ring
+        have e4 : (a - M1) - x = a - x - M1 := by ring
+        rw [e1, e2, e3, e4]; ring
+      have hv_g1 : (1 / 2) * ((g2 (a + t + M1) + g2 (a + t - M1)) - (-g2 (a - t + M1) + -g2 (a - t - M1))) = sp_d2_term g2 a (m + 1) t := by unfold sp_d2_term; rw [← hM1]; ring
+      rw [hf_g1, hv_g1] at hd_g1
+      have hc_g : continuous_at (sp_term g a (m + 1)) t := by unfold sp_term; continuity
+      have hc_g1 : continuous_at (sp_d1_term g1 a (m + 1)) t := by unfold sp_d1_term; continuity
+      exact ⟨hd_g, hd_g1, hc_g, hc_g1⟩
+  -- Finite-sum C^2 and quadratic remainder for S_N on [0, 1/2]:
+  have hSN_quad : ∀ (N : ℕ) (x y : ℝ), 0 ≤ x → x ≤ 1 / 2 → 0 ≤ y → y ≤ 1 / 2 →
+      |(∑ n < N, sp_term g a n y) - (∑ n < N, sp_term g a n x) - (y - x) * (∑ n < N, sp_d1_term g1 a n x)| ≤ L * ((y - x) * (y - x))
+    intro N x y hx0 hx1 hy0 hy1
+    have hdu : ∀ t, 0 ≤ t → t ≤ 1 / 2 → has_deriv_within (fun z => ∑ n < N, sp_term g a n z) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t (∑ n < N, sp_d1_term g1 a n t)
+      intro t _ _; induction N with k ihk
+      · have hf : (fun z => ∑ n < 0, sp_term g a n z) = (fun _ => (0 : ℝ)) := by funext z; rw [sum_below_zero]
+        rw [hf, sum_below_zero]; exact has_deriv_within.const 0 (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t
+      · rw [succ_eq_add_one.nat]
+        have hf : (fun z => ∑ n < k + 1, sp_term g a n z) = (fun z => (∑ n < k, sp_term g a n z) + sp_term g a k z) := by funext z; rw [sum_below_succ]
+        rw [hf, sum_below_succ]
+        exact has_deriv_within.add (fun z => ∑ n < k, sp_term g a n z) (sp_term g a k) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t (∑ n < k, sp_d1_term g1 a n t) (sp_d1_term g1 a k t) ihk (hterm_c2 k (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t).1
+    have hdup : ∀ t, 0 ≤ t → t ≤ 1 / 2 → has_deriv_within (fun z => ∑ n < N, sp_d1_term g1 a n z) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t (∑ n < N, sp_d2_term g2 a n t)
+      intro t _ _
+      have hgen : ∀ M : ℕ, has_deriv_within (fun z => ∑ n < M, sp_d1_term g1 a n z) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t (∑ n < M, sp_d2_term g2 a n t)
+        intro M; induction M with k ihk
+        · have hf : (fun z => ∑ n < 0, sp_d1_term g1 a n z) = (fun _ => (0 : ℝ)) := by funext z; rw [sum_below_zero]
+          rw [hf, sum_below_zero]; exact has_deriv_within.const 0 (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t
+        · rw [succ_eq_add_one.nat]
+          have hf : (fun z => ∑ n < k + 1, sp_d1_term g1 a n z) = (fun z => (∑ n < k, sp_d1_term g1 a n z) + sp_d1_term g1 a k z) := by funext z; rw [sum_below_succ]
+          rw [hf, sum_below_succ]
+          have hc2_k := hterm_c2 k (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t
+          exact has_deriv_within.add (fun z => ∑ n < k, sp_d1_term g1 a n z) (sp_d1_term g1 a k) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t (∑ n < k, sp_d2_term g2 a n t) (sp_d2_term g2 a k t) ihk hc2_k.2.1
+      exact hgen N
+    have hbd2 : ∀ t, 0 ≤ t → t ≤ 1 / 2 → |∑ n < N, sp_d2_term g2 a n t| ≤ L
+      intro t ht0 ht1
+      have h1 : ∀ k : ℕ, |∑ n < k, sp_d2_term g2 a n t| ≤ ∑ n < k, K0 * r ^ n
+        intro k; induction k with l ihl
+        · rw [sum_below_zero, sum_below_zero]; exact abs_le_of.real 0 0 (by linarith) (by linarith)
+        · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+          have ht := abs_add_le (∑ n < l, sp_d2_term g2 a n t) (sp_d2_term g2 a l t)
+          have hbl := hterm_bd g2 hb2 l t ht0 ht1
+          have hb := hbl.2.2
+          linarith
+      have hsc : ∀ k : ℕ, (∑ n < k, K0 * r ^ n) = K0 * (∑ n < k, r ^ n)
+        intro k; induction k with l ihl
+        · rw [sum_below_zero, sum_below_zero]; ring
+        · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ihl]; ring
+      have hgeom : (∑ n < N, r ^ n) ≤ 1 / (1 - r)
+        have hg : ∀ k : ℕ, (1 - r) * (∑ n < k, r ^ n) = 1 - r ^ k
+          intro k; induction k with l ihl
+          · rw [sum_below_zero, pow_zero.real]; ring
+          · rw [succ_eq_add_one.nat, sum_below_succ]
+            have ha : (1 - r) * ((∑ n < l, r ^ n) + r ^ l) = (1 - r) * (∑ n < l, r ^ n) + (1 - r) * r ^ l := by ring
+            rw [ha, ihl, pow_succ.real]; ring
+        have hr_nn : 0 ≤ r ^ N := by rw [hr_pow N]; linarith [exp_pos (-c * (N : ℝ))]
+        exact (le_div_iff.real (∑ n < N, r ^ n) 1 (1 - r) (by linarith)).mpr (by linarith [hg N])
+      have hm := mul_le_mul_of_nonneg_left.real (∑ n < N, r ^ n) (1 / (1 - r)) K0 hgeom (by linarith)
+      have hdiv : K0 * (1 / (1 - r)) = L := by rw [hL, div_def.real K0 (1 - r)]
+      linarith [h1 N, hsc N]
+    exact c2_quadratic_remainder (fun z => ∑ n < N, sp_term g a n z) (fun z => ∑ n < N, sp_d1_term g1 a n z) (fun z => ∑ n < N, sp_d2_term g2 a n z) 0 (1 / 2) L hL_nn hdu hdup hbd2 x y hx0 hx1 hy0 hy1
+  -- Pass N -> infty in hSN_quad: |F y - F x - (y - x) * Fp x| <= L * (y - x)^2!
+  have hF_quad_all : ∀ x y : ℝ, 0 ≤ x → x ≤ 1 / 2 → 0 ≤ y → y ≤ 1 / 2 →
+      |F y - F x - (y - x) * Fp x| ≤ L * ((y - x) * (y - x))
+    intro x y hx0 hx1 hy0 hy1
+    by_contra hgt
+    set gap := |F y - F x - (y - x) * Fp x| - L * ((y - x) * (y - x)) with hgap
+    have hgap_pos : 0 < gap := by rw [hgap]; linarith
+    obtain ⟨N, hN⟩ := hrN_zero (gap / 4) (by linarith)
+    have h1 := hF_unif y N hy0 hy1
+    have h2 := hF_unif x N hx0 hx1
+    have h3 := hFp_unif x N hx0 hx1
+    have hq := hSN_quad N x y hx0 hx1 hy0 hy1
+    have hxy_le : |y - x| ≤ 1 := by
+      have ha : -(1 : ℝ) ≤ y - x := by linarith
+      have hb : y - x ≤ 1 := by linarith
+      exact abs_le_of.real (y - x) 1 ha hb
+    have hprod_bd : |(y - x) * (Fp x - ∑ n < N, sp_d1_term g1 a n x)| ≤ K0 * r ^ N / (1 - r)
+      rw [abs_mul.real]
+      have hnn : 0 ≤ K0 * r ^ N / (1 - r) := div_nonneg.real (K0 * r ^ N) (1 - r) (mul_nonneg.real K0 (r ^ N) (by linarith) (by rw [hr_pow N]; linarith [exp_pos (-c * (N : ℝ))])) (by linarith)
+      have m1 := mul_le_mul_of_nonneg_left.real (|Fp x - ∑ n < N, sp_d1_term g1 a n x|) (K0 * r ^ N / (1 - r)) (|y - x|) h3 (abs_nonneg.real (y - x))
+      have m2 := mul_le_mul_of_nonneg_right.real (|y - x|) 1 (K0 * r ^ N / (1 - r)) hxy_le hnn
+      linarith
+    have hsplit : F y - F x - (y - x) * Fp x = ((∑ n < N, sp_term g a n y) - (∑ n < N, sp_term g a n x) - (y - x) * (∑ n < N, sp_d1_term g1 a n x)) + ((F y - ∑ n < N, sp_term g a n y) + (-(F x - ∑ n < N, sp_term g a n x) + -((y - x) * (Fp x - ∑ n < N, sp_d1_term g1 a n x)))) := by ring
+    rw [hsplit] at hgap
+    have t1 := abs_add_le ((∑ n < N, sp_term g a n y) - (∑ n < N, sp_term g a n x) - (y - x) * (∑ n < N, sp_d1_term g1 a n x)) ((F y - ∑ n < N, sp_term g a n y) + (-(F x - ∑ n < N, sp_term g a n x) + -((y - x) * (Fp x - ∑ n < N, sp_d1_term g1 a n x))))
+    have t2 := abs_add_le (F y - ∑ n < N, sp_term g a n y) (-(F x - ∑ n < N, sp_term g a n x) + -((y - x) * (Fp x - ∑ n < N, sp_d1_term g1 a n x)))
+    have t3 := abs_add_le (-(F x - ∑ n < N, sp_term g a n x)) (-((y - x) * (Fp x - ∑ n < N, sp_d1_term g1 a n x)))
+    rw [abs_neg_eq, abs_neg_eq] at t3
+    linarith
+  -- Fp(0) = 0, so |F x - F 0| <= L * x^2 on [0, 1/2]!
+  have hFp0 : Fp 0 = 0
+    rw [hFp]
+    have h0seq : (fun (N : ℕ) => ∑ n < N, sp_d1_term g1 a n 0) = (fun _ => (0 : ℝ))
+      funext N; induction N with k ihk
+      · rw [sum_below_zero]
+      · rw [succ_eq_add_one.nat, sum_below_succ, ihk, sp_d1_term.at_zero]; ring
+    rw [h0seq]
+    have ht0 : tends_to (fun _ => (0 : ℝ)) 0
+      unfold tends_to; intro e he; use 0; intro n _
+      have h0 : |(0 : ℝ) - 0| ≤ 0 := abs_le_of.real ((0 : ℝ) - 0) 0 (by linarith) (by linarith)
+      linarith
+    exact rlim.eq_of_tends_to (fun _ => (0 : ℝ)) 0 ht0
+  have hquad_F : ∀ x, 0 ≤ x → x ≤ 1 / 2 → |F x - F 0| ≤ L * (x * x)
+    intro x hx0 hx1
+    have hq := hF_quad_all 0 x (by decide) (by decide) hx0 hx1
+    rw [hFp0] at hq
+    have h1 : F x - F 0 - (x - 0) * 0 = F x - F 0 := by ring
+    have h2 : (x - 0) * (x - 0) = x * x := by ring
+    rw [h1, h2] at hq; exact hq
+  -- Unified uniform-limit continuity helper on [0, 1/2]:
+  have hunif_cont : ∀ (tm : ℕ → ℝ → ℝ) (Lim : ℝ → ℝ),
+      (∀ (k : ℕ) (t : ℝ), continuous_at (tm k) t) →
+      (∀ (x : ℝ) (N : ℕ), -(1 / 4) ≤ x → x ≤ 3 / 4 → |Lim x - ∑ n < N, tm n x| ≤ K0 * r ^ N / (1 - r)) →
+      ∀ t, 0 ≤ t → t ≤ 1 / 2 → continuous_at Lim t
+    intro tm Lim htm htail t ht0 ht1; unfold continuous_at; intro e he
+    obtain ⟨N, hN⟩ := hrN_zero (e / 3) (by linarith)
+    have hc_sum : continuous_at (fun x => ∑ n < N, tm n x) t
+      have hgen : ∀ M : ℕ, continuous_at (fun x => ∑ n < M, tm n x) t
+        intro M; induction M with k ihk
+        · have hf : (fun x => ∑ n < 0, tm n x) = (fun _ => (0 : ℝ)) := by funext x; rw [sum_below_zero]
+          rw [hf]; exact continuous_at.const 0 t
+        · rw [succ_eq_add_one.nat]
+          have hf : (fun x => ∑ n < k + 1, tm n x) = (fun x => (∑ n < k, tm n x) + tm k x) := by funext x; rw [sum_below_succ]
+          rw [hf]; exact continuous_at.add (fun x => ∑ n < k, tm n x) (tm k) t ihk (htm k t)
+      exact hgen N
+    unfold continuous_at at hc_sum
+    obtain ⟨del, hdel, hbd⟩ := hc_sum (e / 3) (by linarith)
+    use min del (1 / 4); constructor
+    · exact lt_min.real del (1 / 4) 0 hdel (by decide)
+    · intro x hx
+      have hx_d : |x - t| < del := by linarith [min_le_left.real del (1 / 4)]
+      have hx_q : |x - t| < 1 / 4 := by linarith [min_le_right.real del (1 / 4)]
+      have hfx := htail x N (by linarith [neg_le_abs.real (x - t)]) (by linarith [le_abs_self.real (x - t)])
+      have hft := htail t N (by linarith) (by linarith)
+      have hsx := hbd x hx_d
+      have hsp : Lim x - Lim t = (Lim x - ∑ n < N, tm n x) + (((∑ n < N, tm n x) - (∑ n < N, tm n t)) + -(Lim t - ∑ n < N, tm n t)) := by ring
+      rw [hsp]
+      have t1 := abs_add_le (Lim x - ∑ n < N, tm n x) (((∑ n < N, tm n x) - (∑ n < N, tm n t)) + -(Lim t - ∑ n < N, tm n t))
+      have t2 := abs_add_le ((∑ n < N, tm n x) - (∑ n < N, tm n t)) (-(Lim t - ∑ n < N, tm n t))
+      rw [abs_neg_eq] at t2; linarith
+  have hcont_F : ∀ t, 0 ≤ t → t ≤ 1 / 2 → continuous_at F t :=
+    hunif_cont (sp_term g a) F (by intro k t; exact (hterm_c2 k (fun _ => True) t).2.2.1) (by intro x N h1 h2; rw [hF]; exact (hgeom_tail (fun n => sp_term g a n x) (by intro n; exact (hterm_bd_wide g hb0 n x h1 h2).1)).2 N)
+  have hcont_Fp : ∀ t, 0 ≤ t → t ≤ 1 / 2 → continuous_at Fp t :=
+    hunif_cont (sp_d1_term g1 a) Fp (by intro k t; exact (hterm_c2 k (fun _ => True) t).2.2.2) (by intro x N h1 h2; rw [hFp]; exact (hgeom_tail (fun n => sp_d1_term g1 a n x) (by intro n; exact (hterm_bd_wide g1 hb1 n x h1 h2).2.1)).2 N)
+  -- Differentiability & uniform bound of Fp on every [delta, 1/2]:
+  have hderiv_F : ∀ delta, 0 < delta → delta ≤ 1 / 2 →
+      (∀ t, delta ≤ t → t ≤ 1 / 2 → has_deriv_within F (fun z => delta ≤ z ∧ z ≤ 1 / 2) t (Fp t)) ∧
+      (∀ t, delta ≤ t → t ≤ 1 / 2 → continuous_at Fp t) ∧
+      (∃ M : ℝ, 0 ≤ M ∧ ∀ t, delta ≤ t → t ≤ 1 / 2 → |Fp t| ≤ M)
+    intro delta hdel0 hdel1
+    constructor
+    · intro t ht1 ht2; unfold has_deriv_within; intro e he
+      use e / (L + 1); constructor
+      · exact div_pos.real e (L + 1) he (by linarith)
+      · intro x hx hxd
+        have hq := hF_quad_all t x (by linarith) ht2 (by linarith [hx.1]) hx.2
+        have hsq := sq_abs.real (x - t)
+        have hsq2 : (x - t) * (x - t) = |x - t| * |x - t| := by nlinarith
+        have hlt := (lt_div_iff.real (|x - t|) e (L + 1) (by linarith)).mp hxd
+        have hL_le : L * |x - t| ≤ (L + 1) * |x - t| := mul_le_mul_of_nonneg_right.real L (L + 1) (|x - t|) (by linarith) (abs_nonneg.real (x - t))
+        have hm := mul_le_mul_of_nonneg_right.real (L * |x - t|) e (|x - t|) (by linarith) (abs_nonneg.real (x - t))
+        have hassoc : L * (|x - t| * |x - t|) = L * |x - t| * |x - t| := by ring
+        rw [hsq2, hassoc] at hq
+        have hre : F x - F t - Fp t * (x - t) = F x - F t - (x - t) * Fp t := by ring
+        rw [hre]; linarith
+    · constructor
+      · intro t ht1 ht2; exact hcont_Fp t (by linarith) ht2
+      · use L; constructor
+        · exact hL_nn
+        · intro t ht1 ht2
+          have h0 := hFp_unif t 0 (by linarith) ht2
+          rw [sum_below_zero, pow_zero.real] at h0
+          have heq : Fp t - 0 = Fp t := by ring
+          have h1 : K0 * 1 / (1 - r) = L := by rw [hL]; ring
+          rw [heq, h1] at h0; exact h0
+  -- Identify Fourier cosine integrals c(k) = (1/2) * gh(k) by passing M -> infty in sp_term.partial_fourier_unfold!
+  have hc_int : ∀ k : ℕ, darboux.has_integral (fun x => F x * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) ((1 / 2) * gh k)
+    intro k
+    have hcont_Fk : ∀ t, 0 ≤ t → t ≤ 1 / 2 → continuous_at (fun x => F x * cos (2 * pi * (k : ℝ) * x)) t := by intro t ht0 ht1; have hFt := hcont_F t ht0 ht1; continuity
+    obtain ⟨Ik, hIk⟩ := darboux.continuous (fun x => F x * cos (2 * pi * (k : ℝ) * x)) 0 (1 / 2) (by decide) hcont_Fk
+    have hIk_eq : Ik = (1 / 2) * gh k
+      have hlim1_gen : ∀ b : ℝ, b = 1 / 2 → tends_to (fun (M : ℕ) => b * rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b))) Ik
+        intro b hb
+        unfold tends_to; intro e he
+        obtain ⟨M0, hM0⟩ := hrN_zero e he
+        use M0; intro M hM
+        have hI_M := sp_term.partial_fourier_unfold g a hc0 M k
+        rw [← hb] at hI_M
+        have hIk_b : darboux.has_integral (fun x => F x * cos (2 * pi * (k : ℝ) * x)) 0 b Ik := by rw [hb]; exact hIk
+        have hsub := darboux.sub (fun x => F x * cos (2 * pi * (k : ℝ) * x)) (fun x => (∑ n < M + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x)) 0 b Ik (b * rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b))) hIk_b hI_M
+        set B := K0 * r ^ (M + 1) / (1 - r) with hB
+        have hpt_bd : ∀ x, 0 ≤ x → x ≤ b → |F x * cos (2 * pi * (k : ℝ) * x) - (∑ n < M + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x)| ≤ B
+          intro x hx0 hx1
+          have hfac : F x * cos (2 * pi * (k : ℝ) * x) - (∑ n < M + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x) = (F x - ∑ n < M + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x) := by ring
+          rw [hfac, abs_mul.real]
+          have hc_le : |cos (2 * pi * (k : ℝ) * x)| ≤ 1
+            have hpy := sin_sq_add_cos_sq (2 * pi * (k : ℝ) * x)
+            have hsq := sq_abs.real (cos (2 * pi * (k : ℝ) * x))
+            nlinarith [abs_nonneg.real (cos (2 * pi * (k : ℝ) * x))]
+          have hf_le := hF_unif x (M + 1) hx0 (by linarith)
+          have hm1 := mul_le_mul_of_nonneg_left.real (|cos (2 * pi * (k : ℝ) * x)|) 1 (|F x - ∑ n < M + 1, sp_term g a n x|) hc_le (abs_nonneg.real (F x - ∑ n < M + 1, sp_term g a n x))
+          linarith
+        have hhi := darboux.mono (fun x => F x * cos (2 * pi * (k : ℝ) * x) - (∑ n < M + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x)) (fun _ => B) 0 b (Ik - b * rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b))) (B * (b - 0)) hsub (darboux.const 0 b B (by linarith)) (by intro x h1 h2; linarith [le_abs_self.real (F x * cos (2 * pi * (k : ℝ) * x) - (∑ n < M + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x)), hpt_bd x h1 h2])
+        have hlo := darboux.mono (fun _ => -B) (fun x => F x * cos (2 * pi * (k : ℝ) * x) - (∑ n < M + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x)) 0 b ((-B) * (b - 0)) (Ik - b * rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b))) (darboux.const 0 b (-B) (by linarith)) hsub (by intro x h1 h2; linarith [neg_le_abs.real (F x * cos (2 * pi * (k : ℝ) * x) - (∑ n < M + 1, sp_term g a n x) * cos (2 * pi * (k : ℝ) * x)), hpt_bd x h1 h2])
+        have habs_le := abs_le_of.real (b * rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b)) - Ik) (B * b) (by linarith) (by linarith)
+        have hr_mono : r ^ (M + 1) ≤ r ^ M0
+          rw [hr_pow (M + 1), hr_pow M0]
+          have hle : (M0 : ℝ) ≤ ((M + 1 : ℕ) : ℝ) := (cast_le.real M0 (M + 1)).mpr (by omega)
+          have hm := mul_le_mul_of_nonneg_left.real (M0 : ℝ) ((M + 1 : ℕ) : ℝ) c hle (by linarith)
+          exact (exp_le_exp (-c * ((M + 1 : ℕ) : ℝ)) (-c * (M0 : ℝ))).mpr (by linarith)
+        have hB_le : B ≤ K0 * r ^ M0 / (1 - r)
+          rw [hB]
+          have hm := mul_le_mul_of_nonneg_left.real (r ^ (M + 1)) (r ^ M0) K0 hr_mono (by linarith)
+          rw [div_def.real (K0 * r ^ (M + 1)) (1 - r), div_def.real (K0 * r ^ M0) (1 - r)]
+          exact mul_le_mul_of_nonneg_right.real (K0 * r ^ (M + 1)) (K0 * r ^ M0) (1 / (1 - r)) hm (by linarith [one_div_pos.real (1 - r) (by linarith)])
+        have hBb : B * b = B * (1 / 2) := by rw [hb]
+        linarith
+      have hlim1 := hlim1_gen (1 / 2) rfl
+      have hlim2 : tends_to (fun (M : ℕ) => (1 / 2) * rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + 1 / 2)) (a + ((M : ℝ) + 1 / 2))) ((1 / 2) * gh k)
+        exact tends_to.const_mul (fun (M : ℕ) => rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + 1 / 2)) (a + ((M : ℝ) + 1 / 2))) (gh k) (1 / 2) (hgh k)
+      exact tends_to.unique (fun (M : ℕ) => (1 / 2) * rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + 1 / 2)) (a + ((M : ℝ) + 1 / 2))) Ik ((1 / 2) * gh k) hlim1 hlim2
+    rw [← hIk_eq]; exact hIk
+  -- Fire `fourier.even_c1_quad_converges_at_zero`!
+  have hconv := fourier.even_c1_quad_converges_at_zero F Fp (fun k => (1 / 2) * gh k) L hL_nn hcont_F hquad_F hderiv_F hc_int
+  have hF0_eq : F 0 = rlim (fun (N : ℕ) => ∑ n < N, sp_zero_term g a n)
+    rw [hF]
+    have hseq : (fun (N : ℕ) => ∑ n < N, sp_term g a n 0) = (fun (N : ℕ) => ∑ n < N, sp_zero_term g a n)
+      funext N; induction N with m ihm
+      · rw [sum_below_zero, sum_below_zero]
+      · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ihm, sp_term.at_zero g a m]
+    rw [hseq]
+  have hS_eq : (fun (N : ℕ) => 2 * ((1 / 2) * gh 0) + 4 * (∑ k < N, (1 / 2) * gh (k + 1))) = (fun (N : ℕ) => gh 0 + 2 * (∑ k < N, gh (k + 1)))
+    funext N
+    have hpull : ∀ M : ℕ, (∑ k < M, (1 / 2) * gh (k + 1)) = (1 / 2) * (∑ k < M, gh (k + 1))
+      intro M; induction M with j ihj
+      · rw [sum_below_zero, sum_below_zero]; ring
+      · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ihj]; ring
+    rw [hpull N]; ring
+  rw [hS_eq, hF0_eq] at hconv; exact hconv
+
+-- ====================================================================================
+-- 2. SHIFTED EVEN & ODD GAUSSIAN POISSON SUMMATION (0 CUSTOM AXIOMS!)
+-- ====================================================================================
+
+-- Helper: asymmetric cutoff Fourier integral equals symmetric cutoff limit for Gaussian-decaying f!
++ asym_gauss_tail_limit (f : ℝ → ℝ) (a b c C L : ℝ) (hb : 0 ≤ b) (hc : 0 < c) (hC : 0 ≤ C)
+    (hcont : ∀ u : ℝ, continuous_at f u)
+    (hbd : ∀ u : ℝ, |f u| ≤ C * exp (-c * u * u))
+    (hlim : tends_to (fun (M : ℕ) => rint f (-(((M : ℝ) + b))) ((M : ℝ) + b)) L) :
+    tends_to (fun (M : ℕ) => rint f (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b))) L
+  have hf_int : ∀ p q : ℝ, p ≤ q → darboux.has_integral f p q (rint f p q)
+    intro p q hpq
+    obtain ⟨I, hI⟩ := darboux.continuous f p q hpq (by intro t _ _; exact hcont t)
+    rw [rint.eq_of_has_integral f p q I hI]; exact hI
+  have hwing_bd : ∀ p q R : ℝ, p ≤ q → 1 ≤ R → (∀ u, p ≤ u → u ≤ q → R ≤ |u|) →
+      |rint f p q| ≤ C * exp (-c * R) * (q - p)
+    intro p q R hpq hR1 hR
+    have hI := hf_int p q hpq
+    have hpt : ∀ u, p ≤ u → u ≤ q → |f u| ≤ C * exp (-c * R)
+      intro u hu1 hu2
+      have h1 := hbd u
+      have huR := hR u hu1 hu2
+      have hsq := sq_abs.real u
+      have hu2_ge : R ≤ u * u := by nlinarith
+      have hm := mul_le_mul_of_nonneg_left.real R (u * u) c hu2_ge (by linarith)
+      have he := (exp_le_exp (-c * u * u) (-c * R)).mpr (by linarith)
+      have hm2 := mul_le_mul_of_nonneg_left.real (exp (-c * u * u)) (exp (-c * R)) C he hC
+      linarith
+    have hhi := darboux.mono f (fun _ => C * exp (-c * R)) p q (rint f p q) (C * exp (-c * R) * (q - p)) hI (darboux.const p q (C * exp (-c * R)) hpq) (by intro u h1 h2; linarith [le_abs_self.real (f u), hpt u h1 h2])
+    have hlo := darboux.mono (fun _ => -(C * exp (-c * R))) f p q (-(C * exp (-c * R)) * (q - p)) (rint f p q) (darboux.const p q (-(C * exp (-c * R))) hpq) hI (by intro u h1 h2; linarith [neg_le_abs.real (f u), hpt u h1 h2])
+    exact abs_le_of.real (rint f p q) (C * exp (-c * R) * (q - p)) (by linarith) hhi
+  unfold tends_to at hlim ⊢; intro e he
+  obtain ⟨M1, hM1⟩ := hlim (e / 2) (by linarith)
+  set K := 2 * (C + 1) * (|a| + 1) with hK
+  have hK_pos : 0 < K := by rw [hK]; exact mul_pos.real (2 * (C + 1)) (|a| + 1) (by linarith) (by linarith [abs_nonneg.real a])
+  obtain ⟨M2, hM2⟩ := exists_nat_gt.real (|a| + log (2 * K / e + 1) / c + 3)
+  use M1 + M2; intro M hM
+  have hsym := hM1 M (by omega)
+  have hM_gt : |a| + log (2 * K / e + 1) / c + 3 < (M : ℝ) := by
+    have hle := (cast_le.real M2 M).mpr (by omega); linarith
+  set R := (M : ℝ) + b - |a| with hR
+  have hlog_nn : 0 ≤ log (2 * K / e + 1) / c
+    have h1 := log_nonneg (2 * K / e + 1) (by linarith [div_pos.real (2 * K) e (by linarith) he])
+    exact div_nonneg.real (log (2 * K / e + 1)) c h1 (by linarith)
+  have hR_ge1 : 1 ≤ R := by rw [hR]; linarith [abs_nonneg.real a]
+  have hR_big : log (2 * K / e + 1) / c < R := by rw [hR]; linarith
+  have hdiff_le : |rint f (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b)) - rint f (-(((M : ℝ) + b))) ((M : ℝ) + b)| ≤ 2 * C * exp (-c * R) * |a|
+    have hadj : ∀ p q r : ℝ, p ≤ q → q ≤ r → rint f p q + rint f q r = rint f p r
+      intro p q r hpq hqr
+      exact darboux.unique f p r (rint f p q + rint f q r) (rint f p r) (darboux.adjacent f p q r (rint f p q) (rint f q r) (hf_int p q hpq) (hf_int q r hqr)) (hf_int p r (by linarith))
+    by_cases ha_nn : 0 ≤ a
+    · have ha_abs : |a| = a := abs_of_nonneg.real a ha_nn
+      have h1 := hadj (-(((M : ℝ) + b))) (a - ((M : ℝ) + b)) ((M : ℝ) + b) (by linarith) (by linarith)
+      have h2 := hadj (a - ((M : ℝ) + b)) ((M : ℝ) + b) (a + ((M : ℝ) + b)) (by linarith) (by linarith)
+      have hsub : rint f (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b)) - rint f (-(((M : ℝ) + b))) ((M : ℝ) + b) = rint f ((M : ℝ) + b) (a + ((M : ℝ) + b)) + -rint f (-(((M : ℝ) + b))) (a - ((M : ℝ) + b)) := by linarith
+      rw [hsub]
+      have ht := abs_add_le (rint f ((M : ℝ) + b) (a + ((M : ℝ) + b))) (-rint f (-(((M : ℝ) + b))) (a - ((M : ℝ) + b)))
+      rw [abs_neg_eq] at ht
+      have w1 := hwing_bd ((M : ℝ) + b) (a + ((M : ℝ) + b)) R (by linarith) hR_ge1 (by intro u h1 _; linarith [le_abs_self.real u, hR])
+      have w2 := hwing_bd (-(((M : ℝ) + b))) (a - ((M : ℝ) + b)) R (by linarith) hR_ge1 (by intro u _ h2; linarith [neg_le_abs.real u, hR])
+      have hd1 : a + ((M : ℝ) + b) - ((M : ℝ) + b) = a := by ring
+      have hd2 : a - ((M : ℝ) + b) - -(((M : ℝ) + b)) = a := by ring
+      rw [hd1] at w1; rw [hd2] at w2; rw [ha_abs]; linarith
+    · have ha_abs : |a| = -a := by rw [← abs_neg_eq]; exact abs_of_pos.real (-a) (by linarith)
+      have h1 := hadj (a - ((M : ℝ) + b)) (-(((M : ℝ) + b))) (a + ((M : ℝ) + b)) (by linarith) (by linarith)
+      have h2 := hadj (-(((M : ℝ) + b))) (a + ((M : ℝ) + b)) ((M : ℝ) + b) (by linarith) (by linarith)
+      have hsub : rint f (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b)) - rint f (-(((M : ℝ) + b))) ((M : ℝ) + b) = rint f (a - ((M : ℝ) + b)) (-(((M : ℝ) + b))) + -rint f (a + ((M : ℝ) + b)) ((M : ℝ) + b) := by linarith
+      rw [hsub]
+      have ht := abs_add_le (rint f (a - ((M : ℝ) + b)) (-(((M : ℝ) + b)))) (-rint f (a + ((M : ℝ) + b)) ((M : ℝ) + b))
+      rw [abs_neg_eq] at ht
+      have w1 := hwing_bd (a - ((M : ℝ) + b)) (-(((M : ℝ) + b))) R (by linarith) hR_ge1 (by intro u _ h2; linarith [neg_le_abs.real u, hR])
+      have w2 := hwing_bd (a + ((M : ℝ) + b)) ((M : ℝ) + b) R (by linarith) hR_ge1 (by intro u h1 _; linarith [le_abs_self.real u, hR])
+      have hd1 : -(((M : ℝ) + b)) - (a - ((M : ℝ) + b)) = -a := by ring
+      have hd2 : ((M : ℝ) + b) - (a + ((M : ℝ) + b)) = -a := by ring
+      rw [hd1] at w1; rw [hd2] at w2; rw [ha_abs]; linarith
+  have hsmall : 2 * C * exp (-c * R) * |a| < e / 2
+    have hlog_lt : log (2 * K / e + 1) < c * R := by
+      have h := (div_lt_iff.real (log (2 * K / e + 1)) R c hc).mp hR_big; linarith
+    have hexp_gt : 2 * K / e + 1 < exp (c * R)
+      have h := (exp_lt_exp (log (2 * K / e + 1)) (c * R)).mpr hlog_lt
+      rw [exp_log (2 * K / e + 1) (by linarith [div_pos.real (2 * K) e (by linarith) he])] at h; exact h
+    have hinv_e : exp (-c * R) * exp (c * R) = 1
+      rw [← exp_add]; have h0 : -c * R + c * R = 0 := by ring
+      rw [h0, exp_zero]
+    have hm := mul_lt_mul_of_pos_left.real (2 * K / e) (exp (c * R)) (exp (-c * R)) (by linarith) (exp_pos (-c * R))
+    rw [hinv_e] at hm
+    have hme := mul_lt_mul_of_pos_right.real (exp (-c * R) * (2 * K / e)) 1 (e / 2) hm (by linarith)
+    have hce := mul_inv_cancel.real e (by linarith)
+    have hre : exp (-c * R) * (2 * K / e) * (e / 2) = K * exp (-c * R)
+      rw [div_def.real (2 * K) e, div_def.real e 2]; linear_combination (K * exp (-c * R)) * hce
+    have hK_ge : 2 * C * |a| ≤ K
+      rw [hK]; have h1 : C * |a| ≤ (C + 1) * (|a| + 1) := by nlinarith [abs_nonneg.real a]
+      linarith
+    have hm_K := mul_le_mul_of_nonneg_right.real (2 * C * |a|) K (exp (-c * R)) hK_ge (by linarith [exp_pos (-c * R)])
+    linarith
+  have hsp : rint f (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b)) - L = (rint f (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b)) - rint f (-(((M : ℝ) + b))) ((M : ℝ) + b)) + (rint f (-(((M : ℝ) + b))) ((M : ℝ) + b) - L) := by ring
+  rw [hsp]
+  have ht := abs_add_le (rint f (a - ((M : ℝ) + b)) (a + ((M : ℝ) + b)) - rint f (-(((M : ℝ) + b))) ((M : ℝ) + b)) (rint f (-(((M : ℝ) + b))) ((M : ℝ) + b) - L)
+  linarith
+
+-- Helper: odd continuous function has zero integral on [-R, R]!
++ odd_rint_zero (f : ℝ → ℝ) (R : ℝ) (hR : 0 ≤ R) (hcont : ∀ u : ℝ, continuous_at f u)
+    (hodd : ∀ u : ℝ, f (-u) = -f u) :
+    rint f (-R) R = 0
+  obtain ⟨I, hI⟩ := darboux.continuous f (-R) R (by linarith) (by intro t _ _; exact hcont t)
+  rw [rint.eq_of_has_integral f (-R) R I hI]
+  have hI_neg : darboux.has_integral f (-R) (-(-R)) I
+    have h1 : -(-R) = R := by ring
+    rw [h1]; exact hI
+  have hneg := darboux.subst_neg f (-R) R I hI_neg
+  have hf_eq : (fun x => f (-x)) = (fun x => (-1 : ℝ) * f x) := by funext x; rw [hodd x]; ring
+  rw [hf_eq] at hneg
+  have hsc := darboux.scale f (-R) R I (-1) hI
+  have heq := darboux.unique (fun x => (-1 : ℝ) * f x) (-R) R I ((-1) * I) hneg hsc
+  linarith
+
+-- Helper: polynomial * exp(-pi*t*u^2) <= C * exp(-(pi*t/2)*u^2) for degrees 0, 1, 2, 3!
++ gauss_poly_exp_bound (t : ℝ) (ht : 0 < t) :
+    ∃ B : ℝ, 0 < B ∧ ∀ u : ℝ,
+      exp (-pi * t * u * u) ≤ B * exp (-(pi * t / 2) * u * u) ∧
+      |u| * exp (-pi * t * u * u) ≤ B * exp (-(pi * t / 2) * u * u) ∧
+      (u * u) * exp (-pi * t * u * u) ≤ B * exp (-(pi * t / 2) * u * u) ∧
+      |u * u * u| * exp (-pi * t * u * u) ≤ B * exp (-(pi * t / 2) * u * u)
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  set p := pi * t / 2 with hp
+  have hp_pos : 0 < p := by rw [hp]; linarith [mul_pos.real pi t hpi_pos ht]
+  have hinv_p := mul_inv_cancel.real p (by linarith)
+  set B := 1 + 1 / p + 2 / (p * p) with hB
+  have hB_pos : 0 < B
+    rw [hB]
+    have h1 := one_div_pos.real p hp_pos
+    have h2 := div_pos.real 2 (p * p) (by decide) (mul_pos.real p p hp_pos hp_pos)
+    linarith
+  use B; constructor
+  · exact hB_pos
+  · intro u
+    have hex_half : exp (p * (u * u)) * exp (-pi * t * u * u) = exp (-p * u * u)
+      rw [← exp_add, hp]; have h0 : pi * t / 2 * (u * u) + -pi * t * u * u = -(pi * t / 2) * u * u := by ring
+      rw [h0]
+    have he1 : (1 : ℝ) ≤ exp (p * (u * u)) := by linarith [exp_ge_one_add (p * (u * u)), mul_nonneg.real p (u * u) (by linarith) (by nlinarith)]
+    have he2 : p * (u * u) ≤ exp (p * (u * u)) := by linarith [exp_ge_one_add (p * (u * u))]
+    have he4 : (p * (u * u)) * (p * (u * u)) / 2 ≤ exp (p * (u * u))
+      have h := exp_ge_pow_div_fact 2 (p * (u * u)) (mul_nonneg.real p (u * u) (by linarith) (by nlinarith))
+      have hf2 : ((fact 2 : ℕ) : ℝ) = 2 := by unfold fact; simp
+      have hp2 : (p * (u * u)) ^ 2 = (p * (u * u)) * (p * (u * u))
+        have h2 : (2 : ℕ) = 1 + 1 := by decide
+        have h1 : (1 : ℕ) = 0 + 1 := by decide
+        rw [h2, pow_succ.real, h1, pow_succ.real, pow_zero.real]; ring
+      rw [hf2, hp2] at h; exact h
+    have hpos_e : 0 < exp (-pi * t * u * u) := exp_pos (-pi * t * u * u)
+    have h0 : exp (-pi * t * u * u) ≤ exp (-p * u * u)
+      have hm := mul_le_mul_of_nonneg_right.real 1 (exp (p * (u * u))) (exp (-pi * t * u * u)) he1 (by linarith)
+      linarith
+    have h2 : (u * u) * exp (-pi * t * u * u) ≤ (1 / p) * exp (-p * u * u)
+      have hm := mul_le_mul_of_nonneg_right.real (p * (u * u)) (exp (p * (u * u))) (exp (-pi * t * u * u)) he2 (by linarith)
+      have hm2 := mul_le_mul_of_nonneg_left.real (p * (u * u) * exp (-pi * t * u * u)) (exp (-p * u * u)) (1 / p) (by linarith) (by linarith [one_div_pos.real p hp_pos])
+      have hcan : (1 / p) * (p * (u * u) * exp (-pi * t * u * u)) = (u * u) * exp (-pi * t * u * u) := by linear_combination ((u * u) * exp (-pi * t * u * u)) * hinv_p
+      linarith
+    have h4 : (u * u) * (u * u) * exp (-pi * t * u * u) ≤ (2 / (p * p)) * exp (-p * u * u)
+      have hm := mul_le_mul_of_nonneg_right.real ((p * (u * u)) * (p * (u * u)) / 2) (exp (p * (u * u))) (exp (-pi * t * u * u)) he4 (by linarith)
+      have hp2_pos : 0 < p * p := mul_pos.real p p hp_pos hp_pos
+      have hm2 := mul_le_mul_of_nonneg_left.real (((p * (u * u)) * (p * (u * u)) / 2) * exp (-pi * t * u * u)) (exp (-p * u * u)) (2 / (p * p)) (by linarith) (div_nonneg.real 2 (p * p) (by decide) (by linarith))
+      have hinv2 := mul_inv_cancel.real (p * p) (by linarith)
+      have hcan : (2 / (p * p)) * (((p * (u * u)) * (p * (u * u)) / 2) * exp (-pi * t * u * u)) = (u * u) * (u * u) * exp (-pi * t * u * u)
+        rw [div_def.real 2 (p * p)]; linear_combination ((u * u) * (u * u) * exp (-pi * t * u * u)) * hinv2
+      linarith
+    have h1 : |u| * exp (-pi * t * u * u) ≤ (1 + 1 / p) * exp (-p * u * u)
+      have hle : |u| ≤ 1 + u * u
+        have hsq := sq_abs.real u; nlinarith [abs_nonneg.real u]
+      have hm := mul_le_mul_of_nonneg_right.real (|u|) (1 + u * u) (exp (-pi * t * u * u)) hle (by linarith)
+      linarith
+    have h3 : |u * u * u| * exp (-pi * t * u * u) ≤ (1 / p + 2 / (p * p)) * exp (-p * u * u)
+      have hle : |u * u * u| ≤ u * u + (u * u) * (u * u)
+        rw [abs_mul.real, abs_mul.real]
+        have hsq := sq_abs.real u
+        have hsq2 : |u| * |u| = u * u := by nlinarith
+        have h1u : |u| ≤ 1 + |u| * |u| := by nlinarith [abs_nonneg.real u]
+        have hm := mul_le_mul_of_nonneg_left.real (|u|) (1 + |u| * |u|) (|u| * |u|) h1u (by nlinarith)
+        rw [hsq2]; rw [hsq2] at hm; linarith
+      have hm := mul_le_mul_of_nonneg_right.real (|u * u * u|) (u * u + (u * u) * (u * u)) (exp (-pi * t * u * u)) hle (by linarith)
+      linarith
+    have h1p := one_div_pos.real p hp_pos
+    have h2p := div_pos.real 2 (p * p) (by decide) (mul_pos.real p p hp_pos hp_pos)
+    rw [hB]
+    have m0 := mul_le_mul_of_nonneg_right.real 1 (1 + 1 / p + 2 / (p * p)) (exp (-p * u * u)) (by linarith) (by linarith)
+    have m1 := mul_le_mul_of_nonneg_right.real (1 + 1 / p) (1 + 1 / p + 2 / (p * p)) (exp (-p * u * u)) (by linarith) (by linarith)
+    exact ⟨by linarith, by linarith, by linarith, by linarith⟩
+
++ even_gauss_poisson_C (t a : ℝ) (ht : 0 < t) (ha0 : 0 ≤ a) (ha1 : a ≤ 1) :
+    tends_to (fun (N : ℕ) => (gauss_int_C / sqrt t) * (1 + 2 * (∑ k < N, exp (-pi * ((k + 1 : ℕ) : ℝ) * ((k + 1 : ℕ) : ℝ) / t) * cos (2 * pi * ((k + 1 : ℕ) : ℝ) * a)))) (rlim (fun (N : ℕ) => ∑ n < N, sp_zero_term (fun u => exp (-pi * t * u * u)) a n))
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  have hsq_sp := sqrt_spec t (by linarith)
+  set g := (fun (u : ℝ) => exp (-pi * t * u * u)) with hg
+  set g1 := (fun (u : ℝ) => -2 * pi * t * u * exp (-pi * t * u * u)) with hg1
+  set g2 := (fun (u : ℝ) => (4 * pi * pi * t * t * u * u - 2 * pi * t) * exp (-pi * t * u * u)) with hg2
+  obtain ⟨B, hB_pos, hB_bd⟩ := gauss_poly_exp_bound t ht
+  set C := (1 + 2 * pi * t + 4 * pi * pi * t * t) * B with hC
+  have hC_nn : 0 ≤ C
+    rw [hC]; have hpt := mul_pos.real pi t hpi_pos ht
+    have hpt2 := mul_pos.real (pi * t) (pi * t) hpt hpt
+    exact mul_nonneg.real (1 + 2 * pi * t + 4 * pi * pi * t * t) B (by linarith) (by linarith)
+  have hd1 : ∀ u : ℝ, has_deriv_within g (fun _ => True) u (g1 u)
+    intro u; rw [hg, hg1]
+    have hsq_d : has_deriv_within (fun x => -pi * t * x * x) (fun _ => True) u (-2 * pi * t * u)
+      have hx := has_deriv_within.id (fun _ => True) u
+      have hx2 := has_deriv_within.mul (fun x => x) (fun x => x) (fun _ => True) u 1 1 hx hx
+      have hsc := has_deriv_within.scale (-pi * t) (fun x => x * x) (fun _ => True) u (1 * u + u * 1) hx2
+      have hf : (fun x => (-pi * t) * (x * x)) = (fun x => -pi * t * x * x) := by funext x; ring
+      have hv : (-pi * t) * (1 * u + u * 1) = -2 * pi * t * u := by ring
+      rw [hf, hv] at hsc; exact hsc
+    have hcomp := has_deriv_within.exp_comp (fun x => -pi * t * x * x) (fun _ => True) u (-2 * pi * t * u) hsq_d
+    have hv : exp (-pi * t * u * u) * (-2 * pi * t * u) = -2 * pi * t * u * exp (-pi * t * u * u) := by ring
+    rw [hv] at hcomp; exact hcomp
+  have hd2 : ∀ u : ℝ, has_deriv_within g1 (fun _ => True) u (g2 u)
+    intro u; rw [hg1, hg2]
+    have hlin := has_deriv_within.scale (-2 * pi * t) (fun x => x) (fun _ => True) u 1 (has_deriv_within.id (fun _ => True) u)
+    have hf1 : (fun x => (-2 * pi * t) * x) = (fun x => -2 * pi * t * x) := by funext x; ring
+    have hv1 : (-2 * pi * t) * 1 = -2 * pi * t := by ring
+    rw [hf1, hv1] at hlin
+    have hprod := has_deriv_within.mul (fun x => -2 * pi * t * x) g (fun _ => True) u (-2 * pi * t) (g1 u) hlin (hd1 u)
+    have hf2 : (fun x => -2 * pi * t * x * g x) = (fun x => -2 * pi * t * x * exp (-pi * t * x * x)) := by funext x; rw [hg]
+    have hv2 : -2 * pi * t * g u + -2 * pi * t * u * g1 u = (4 * pi * pi * t * t * u * u - 2 * pi * t) * exp (-pi * t * u * u) := by rw [hg, hg1]; ring
+    rw [hf2, hv2] at hprod; exact hprod
+  have hc0 : ∀ u : ℝ, continuous_at g u := by intro u; rw [hg]; continuity
+  have hc1 : ∀ u : ℝ, continuous_at g1 u := by intro u; rw [hg1]; continuity
+  have hc2 : ∀ u : ℝ, continuous_at g2 u := by intro u; rw [hg2]; continuity
+  have hb0 : ∀ u : ℝ, |g u| ≤ C * exp (-(pi * t / 2) * u * u)
+    intro u; rw [hg, abs_of_pos.real (exp (-pi * t * u * u)) (exp_pos (-pi * t * u * u))]
+    have h1 := (hB_bd u).1
+    have hpt := mul_pos.real pi t hpi_pos ht
+    have hpt2 := mul_pos.real (pi * t) (pi * t) hpt hpt
+    have hB_le : B ≤ C := by rw [hC]; nlinarith
+    have hm := mul_le_mul_of_nonneg_right.real B C (exp (-(pi * t / 2) * u * u)) hB_le (by linarith [exp_pos (-(pi * t / 2) * u * u)])
+    linarith
+  have hb1 : ∀ u : ℝ, |g1 u| ≤ C * exp (-(pi * t / 2) * u * u)
+    intro u; rw [hg1]
+    have hfac : -2 * pi * t * u * exp (-pi * t * u * u) = (-(2 * pi * t)) * (u * exp (-pi * t * u * u)) := by ring
+    rw [hfac, abs_mul.real, abs_neg_eq, abs_of_pos.real (2 * pi * t) (by linarith [mul_pos.real pi t hpi_pos ht]), abs_mul.real, abs_of_pos.real (exp (-pi * t * u * u)) (exp_pos (-pi * t * u * u))]
+    have hBu := hB_bd u
+    have h1 := hBu.2.1
+    have hm1 := mul_le_mul_of_nonneg_left.real (|u| * exp (-pi * t * u * u)) (B * exp (-(pi * t / 2) * u * u)) (2 * pi * t) h1 (by linarith [mul_pos.real pi t hpi_pos ht])
+    have hpt := mul_pos.real pi t hpi_pos ht
+    have hpt2 := mul_pos.real (pi * t) (pi * t) hpt hpt
+    have hle : 2 * pi * t * B ≤ C := by rw [hC]; nlinarith
+    have hm2 := mul_le_mul_of_nonneg_right.real (2 * pi * t * B) C (exp (-(pi * t / 2) * u * u)) hle (by linarith [exp_pos (-(pi * t / 2) * u * u)])
+    linarith
+  have hb2 : ∀ u : ℝ, |g2 u| ≤ C * exp (-(pi * t / 2) * u * u)
+    intro u; rw [hg2, abs_mul.real, abs_of_pos.real (exp (-pi * t * u * u)) (exp_pos (-pi * t * u * u))]
+    have ht1 := abs_add_le (4 * pi * pi * t * t * u * u) (-(2 * pi * t))
+    rw [abs_neg_eq] at ht1
+    have hpt := mul_pos.real pi t hpi_pos ht
+    have hpt2 := mul_pos.real (pi * t) (pi * t) hpt hpt
+    have hpos1 : 0 ≤ 4 * pi * pi * t * t * u * u
+      have hre : 4 * pi * pi * t * t * u * u = 4 * ((pi * t) * (pi * t)) * (u * u) := by ring
+      rw [hre]; exact mul_nonneg.real (4 * ((pi * t) * (pi * t))) (u * u) (by linarith) (by nlinarith)
+    rw [abs_of_nonneg.real (4 * pi * pi * t * t * u * u) hpos1, abs_of_pos.real (2 * pi * t) (by linarith)] at ht1
+    have heq : 4 * pi * pi * t * t * u * u - 2 * pi * t = 4 * pi * pi * t * t * u * u + -(2 * pi * t) := by ring
+    rw [heq]
+    have hm0 := mul_le_mul_of_nonneg_right.real (|4 * pi * pi * t * t * u * u + -(2 * pi * t)|) (4 * pi * pi * t * t * u * u + 2 * pi * t) (exp (-pi * t * u * u)) ht1 (by linarith [exp_pos (-pi * t * u * u)])
+    have hBu := hB_bd u
+    have hb_0 := hBu.1
+    have hb_2 := hBu.2.2.1
+    have hm1 := mul_le_mul_of_nonneg_left.real ((u * u) * exp (-pi * t * u * u)) (B * exp (-(pi * t / 2) * u * u)) (4 * pi * pi * t * t) hb_2 (by have hre : 4 * pi * pi * t * t = 4 * ((pi * t) * (pi * t)) := by ring; linarith)
+    have hm2 := mul_le_mul_of_nonneg_left.real (exp (-pi * t * u * u)) (B * exp (-(pi * t / 2) * u * u)) (2 * pi * t) hb_0 (by linarith)
+    have hle : (4 * pi * pi * t * t + 2 * pi * t) * B ≤ C := by rw [hC]; nlinarith
+    have hm3 := mul_le_mul_of_nonneg_right.real ((4 * pi * pi * t * t + 2 * pi * t) * B) C (exp (-(pi * t / 2) * u * u)) hle (by linarith [exp_pos (-(pi * t / 2) * u * u)])
+    linarith
+  -- Compute Fourier integral limit gh(k) = (gauss_int_C / sqrt t) * exp(-pi*k^2/t) * cos(2*pi*k*a)!
+  set gh := (fun (k : ℕ) => (gauss_int_C / sqrt t) * exp (-pi * (k : ℝ) * (k : ℝ) / t) * cos (2 * pi * (k : ℝ) * a)) with hgh_def
+  have hgh : ∀ k : ℕ, tends_to (fun (M : ℕ) => rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (a - ((M : ℝ) + 1 / 2)) (a + ((M : ℝ) + 1 / 2))) (gh k)
+    intro k
+    have hcont_fk : ∀ u : ℝ, continuous_at (fun x => g x * cos (2 * pi * (k : ℝ) * (x - a))) u := by intro u; rw [hg]; continuity
+    have hbd_fk : ∀ u : ℝ, |g u * cos (2 * pi * (k : ℝ) * (u - a))| ≤ C * exp (-(pi * t / 2) * u * u)
+      intro u; rw [abs_mul.real]
+      have hcle : |cos (2 * pi * (k : ℝ) * (u - a))| ≤ 1
+        have hpy := sin_sq_add_cos_sq (2 * pi * (k : ℝ) * (u - a))
+        have hsq := sq_abs.real (cos (2 * pi * (k : ℝ) * (u - a)))
+        nlinarith [abs_nonneg.real (cos (2 * pi * (k : ℝ) * (u - a)))]
+      have hm := mul_le_mul_of_nonneg_left.real (|cos (2 * pi * (k : ℝ) * (u - a))|) 1 (|g u|) hcle (abs_nonneg.real (g u))
+      linarith [hb0 u]
+    apply asym_gauss_tail_limit (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) a (1 / 2) (pi * t / 2) C (gh k) (by decide) (by linarith [mul_pos.real pi t hpi_pos ht]) hC_nn hcont_fk hbd_fk
+    -- Expand cos(2*pi*k*(u - a)) = cos(2*pi*k*u)*cos(2*pi*k*a) + sin(2*pi*k*u)*sin(2*pi*k*a)!
+    have hsym_eq : ∀ M : ℕ, rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (-(((M : ℝ) + 1 / 2))) ((M : ℝ) + 1 / 2) = cos (2 * pi * (k : ℝ) * a) * rint (gauss_cos_t t (k : ℝ)) (-(((M : ℝ) + 1 / 2))) ((M : ℝ) + 1 / 2)
+      intro M
+      set R := (M : ℝ) + 1 / 2 with hR
+      have hR_nn : 0 ≤ R := by rw [hR]; linarith [cast_nonneg.real M]
+      have hI1 := gauss_cos_t.has_integral t (k : ℝ) (-R) R (by linarith)
+      have hsc1 := darboux.scale (gauss_cos_t t (k : ℝ)) (-R) R (rint (gauss_cos_t t (k : ℝ)) (-R) R) (cos (2 * pi * (k : ℝ) * a)) hI1
+      have hcont_sin : ∀ u : ℝ, continuous_at (fun x => g x * sin (2 * pi * (k : ℝ) * x)) u := by intro u; rw [hg]; continuity
+      have hodd_sin : ∀ u : ℝ, g (-u) * sin (2 * pi * (k : ℝ) * (-u)) = -(g u * sin (2 * pi * (k : ℝ) * u))
+        intro u; rw [hg]
+        have h1 : -pi * t * -u * -u = -pi * t * u * u := by ring
+        have h2 : 2 * pi * (k : ℝ) * -u = -(2 * pi * (k : ℝ) * u) := by ring
+        rw [h1, h2, sin_neg]; ring
+      obtain ⟨Isin, hIsin⟩ := darboux.continuous (fun x => g x * sin (2 * pi * (k : ℝ) * x)) (-R) R (by linarith) (by intro u _ _; exact hcont_sin u)
+      have hIsin0 : Isin = 0
+        have hr := odd_rint_zero (fun x => g x * sin (2 * pi * (k : ℝ) * x)) R hR_nn hcont_sin hodd_sin
+        rw [rint.eq_of_has_integral (fun x => g x * sin (2 * pi * (k : ℝ) * x)) (-R) R Isin hIsin] at hr; exact hr
+      rw [hIsin0] at hIsin
+      have hsc2 := darboux.scale (fun x => g x * sin (2 * pi * (k : ℝ) * x)) (-R) R 0 (sin (2 * pi * (k : ℝ) * a)) hIsin
+      have hadd := darboux.add (fun x => cos (2 * pi * (k : ℝ) * a) * gauss_cos_t t (k : ℝ) x) (fun x => sin (2 * pi * (k : ℝ) * a) * (g x * sin (2 * pi * (k : ℝ) * x))) (-R) R (cos (2 * pi * (k : ℝ) * a) * rint (gauss_cos_t t (k : ℝ)) (-R) R) (sin (2 * pi * (k : ℝ) * a) * 0) hsc1 hsc2
+      have hfn : (fun x => cos (2 * pi * (k : ℝ) * a) * gauss_cos_t t (k : ℝ) x + sin (2 * pi * (k : ℝ) * a) * (g x * sin (2 * pi * (k : ℝ) * x))) = (fun x => g x * cos (2 * pi * (k : ℝ) * (x - a)))
+        funext x; unfold gauss_cos_t; rw [hg]
+        have hd : 2 * pi * (k : ℝ) * (x - a) = 2 * pi * (k : ℝ) * x + -(2 * pi * (k : ℝ) * a) := by ring
+        rw [hd, cos_add, cos_neg, sin_neg]; ring
+      have hv : cos (2 * pi * (k : ℝ) * a) * rint (gauss_cos_t t (k : ℝ)) (-R) R + sin (2 * pi * (k : ℝ) * a) * 0 = cos (2 * pi * (k : ℝ) * a) * rint (gauss_cos_t t (k : ℝ)) (-R) R := by ring
+      rw [hfn, hv] at hadd
+      exact rint.eq_of_has_integral (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (-R) R (cos (2 * pi * (k : ℝ) * a) * rint (gauss_cos_t t (k : ℝ)) (-R) R) hadd
+    have hlim_g := gaussian.scaled_fourier_limit t (k : ℝ) ht
+    have hlim_sc := tends_to.const_mul (fun (M : ℕ) => rint (gauss_cos_t t (k : ℝ)) (-(((M : ℝ) + 1 / 2))) ((M : ℝ) + 1 / 2)) ((gauss_int_C / sqrt t) * exp (-pi * (k : ℝ) * (k : ℝ) / t)) (cos (2 * pi * (k : ℝ) * a)) hlim_g
+    have hf_eq : (fun (M : ℕ) => cos (2 * pi * (k : ℝ) * a) * rint (gauss_cos_t t (k : ℝ)) (-(((M : ℝ) + 1 / 2))) ((M : ℝ) + 1 / 2)) = (fun (M : ℕ) => rint (fun u => g u * cos (2 * pi * (k : ℝ) * (u - a))) (-(((M : ℝ) + 1 / 2))) ((M : ℝ) + 1 / 2)) := by funext M; exact (hsym_eq M).symm
+    have hv_eq : cos (2 * pi * (k : ℝ) * a) * ((gauss_int_C / sqrt t) * exp (-pi * (k : ℝ) * (k : ℝ) / t)) = gh k := by rw [hgh_def]; ring
+    rw [hf_eq, hv_eq] at hlim_sc; exact hlim_sc
+  have hpois := shifted_poisson.of_c2_exp_decay g g1 g2 a (pi * t / 2) C gh ha0 ha1 (by linarith [mul_pos.real pi t hpi_pos ht]) hC_nn hd1 hd2 hc0 hc1 hc2 hb0 hb1 hb2 hgh
+  have hS_eq : (fun (N : ℕ) => gh 0 + 2 * (∑ k < N, gh (k + 1))) = (fun (N : ℕ) => (gauss_int_C / sqrt t) * (1 + 2 * (∑ k < N, exp (-pi * ((k + 1 : ℕ) : ℝ) * ((k + 1 : ℕ) : ℝ) / t) * cos (2 * pi * ((k + 1 : ℕ) : ℝ) * a))))
+    funext N
+    have h0 : gh 0 = gauss_int_C / sqrt t := by rw [hgh_def]; simp [exp_zero, cos_zero]
+    have hpull : ∀ M : ℕ, (∑ k < M, gh (k + 1)) = (gauss_int_C / sqrt t) * (∑ k < M, exp (-pi * ((k + 1 : ℕ) : ℝ) * ((k + 1 : ℕ) : ℝ) / t) * cos (2 * pi * ((k + 1 : ℕ) : ℝ) * a))
+      intro M; induction M with j ihj
+      · rw [sum_below_zero, sum_below_zero]; ring
+      · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ihj, hgh_def]; ring
+    rw [h0, hpull N]; ring
+  rw [hS_eq] at hpois; exact hpois
+
+-- Specialization at shift a = 0 yields Jacobi theta Poisson identity with constant `gauss_int_C`!
++ gauss_per.properties_and_poisson (t : ℝ) (ht : 0 < t) :
+    1 + 2 * jacobi_psi t = (gauss_int_C / sqrt t) * (1 + 2 * jacobi_psi (1 / t))
+  have hpois := even_gauss_poisson_C t 0 ht (by decide) (by decide)
+  set g0 := (fun (u : ℝ) => exp (-pi * t * u * u)) with hg0
+  have hsum_z : ∀ M : ℕ, (∑ n < M + 1, sp_zero_term g0 0 n) = 1 + 2 * (∑ m < M, jacobi_psi_term t m)
+    intro M; induction M with j ihj
+    · rw [sum_below_succ, sum_below_zero, sum_below_zero]; unfold sp_zero_term; rw [hg0]; simp [exp_zero]
+    · rw [succ_eq_add_one.nat, sum_below_succ (j + 1), ihj, sum_below_succ]; unfold sp_zero_term jacobi_psi_term; rw [hg0]
+      have e1 : -pi * t * (0 + ((j + 1 : ℕ) : ℝ)) * (0 + ((j + 1 : ℕ) : ℝ)) = -pi * ((j + 1 : ℕ) : ℝ) * ((j + 1 : ℕ) : ℝ) * t := by ring
+      have e2 : -pi * t * (0 - ((j + 1 : ℕ) : ℝ)) * (0 - ((j + 1 : ℕ) : ℝ)) = -pi * ((j + 1 : ℕ) : ℝ) * ((j + 1 : ℕ) : ℝ) * t := by ring
+      rw [e1, e2]; ring
+  have hpsi_t := (jacobi_psi.spec_and_bounds t ht).1
+  have hrlim_t : tends_to (fun N => ∑ n < N, sp_zero_term g0 0 n) (1 + 2 * jacobi_psi t)
+    unfold tends_to at hpsi_t ⊢; intro e he
+    obtain ⟨N0, hN0⟩ := hpsi_t (e / 2) (by linarith)
+    use N0 + 1; intro N hN
+    have hN1 : N = (N - 1) + 1 := by omega
+    rw [hN1, hsum_z (N - 1)]
+    have h1 := hN0 (N - 1) (by omega)
+    have hsub : (1 + 2 * (∑ m < N - 1, jacobi_psi_term t m)) - (1 + 2 * jacobi_psi t) = 2 * ((∑ m < N - 1, jacobi_psi_term t m) - jacobi_psi t) := by ring
+    rw [hsub, abs_mul.real, abs_of_pos.real 2 (by decide)]; linarith
+  rw [rlim.eq_of_tends_to (fun N => ∑ n < N, sp_zero_term g0 0 n) (1 + 2 * jacobi_psi t) hrlim_t] at hpois
+  have hpsi_inv := (jacobi_psi.spec_and_bounds (1 / t) (one_div_pos.real t ht)).1
+  have h2psi : tends_to (fun N => 1 + 2 * (∑ k < N, jacobi_psi_term (1 / t) k)) (1 + 2 * jacobi_psi (1 / t))
+    unfold tends_to at hpsi_inv ⊢; intro e he
+    obtain ⟨N0, hN0⟩ := hpsi_inv (e / 2) (by linarith)
+    use N0; intro N hN
+    have hsub : (1 + 2 * (∑ k < N, jacobi_psi_term (1 / t) k)) - (1 + 2 * jacobi_psi (1 / t)) = 2 * ((∑ k < N, jacobi_psi_term (1 / t) k) - jacobi_psi (1 / t)) := by ring
+    rw [hsub, abs_mul.real, abs_of_pos.real 2 (by decide)]; linarith [hN0 N hN]
+  have hlim_rhs := tends_to.const_mul (fun N => 1 + 2 * (∑ k < N, jacobi_psi_term (1 / t) k)) (1 + 2 * jacobi_psi (1 / t)) (gauss_int_C / sqrt t) h2psi
+  have hfeq : (fun N => (gauss_int_C / sqrt t) * (1 + 2 * (∑ k < N, jacobi_psi_term (1 / t) k))) = (fun (N : ℕ) => (gauss_int_C / sqrt t) * (1 + 2 * (∑ k < N, exp (-pi * ((k + 1 : ℕ) : ℝ) * ((k + 1 : ℕ) : ℝ) / t) * cos (2 * pi * ((k + 1 : ℕ) : ℝ) * 0))))
+    funext N
+    have hsum_eq : ∀ M : ℕ, (∑ k < M, jacobi_psi_term (1 / t) k) = ∑ k < M, exp (-pi * ((k + 1 : ℕ) : ℝ) * ((k + 1 : ℕ) : ℝ) / t) * cos (2 * pi * ((k + 1 : ℕ) : ℝ) * 0)
+      intro M; induction M with j ihj
+      · rw [sum_below_zero, sum_below_zero]
+      · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ihj]; unfold jacobi_psi_term
+        have hz : 2 * pi * ((j + 1 : ℕ) : ℝ) * 0 = 0 := by ring
+        have harg : -pi * ((j + 1 : ℕ) : ℝ) * ((j + 1 : ℕ) : ℝ) * (1 / t) = -pi * ((j + 1 : ℕ) : ℝ) * ((j + 1 : ℕ) : ℝ) / t := by rw [div_def.real (-pi * ((j + 1 : ℕ) : ℝ) * ((j + 1 : ℕ) : ℝ)) t]
+        rw [hz, cos_zero, harg]; ring
+    rw [hsum_eq N]
+  rw [hfeq] at hlim_rhs
+  exact tends_to.unique _ (1 + 2 * jacobi_psi t) ((gauss_int_C / sqrt t) * (1 + 2 * jacobi_psi (1 / t))) hpois hlim_rhs
+
+-- THEOREM 3 (UNCONDITIONAL GAUSSIAN INTEGRAL C = 1 & JACOBI THETA MODULAR INVERSION — 0 AXIOMS!!):
++ jacobi_theta.modular_inversion_unconditional :
+    gauss_int_C = 1 ∧ (∀ t : ℝ, 0 < t → 1 + 2 * jacobi_psi t = (1 / sqrt t) * (1 + 2 * jacobi_psi (1 / t)))
+  have hnn : ∀ t : ℝ, 0 < t → 0 ≤ jacobi_psi t := by intro t ht; exact (jacobi_psi.spec_and_bounds t ht).2.1
+  exact jacobi_theta.modular_inversion_of_poisson jacobi_psi gauss_int_C gauss_int_C.spec_and_pos.2.1 hnn gauss_per.properties_and_poisson

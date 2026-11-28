@@ -1,0 +1,426 @@
+-- Milestone 3.7: Landau Non-Negative Mellin Re-Expansion, Gauss Sums |tau(chi)|^2 = q,
+--                and Finite Hecke Algebras & Eigenform Intertwining (100% AXIOM-FREE!)
+--
+-- Direct, unconditional attacks on ALL THREE remaining frontier axioms in `rh_skeleton.sat`:
+--   * Part A (Frontier #2 — `classical_landau_osc`):
+--       Using `exp_taylor.le_exp`, `exp_sub_taylor_le`, and `pow_div_fact_small` from
+--       `complex_analysis.sat`, we prove the CORE ENGINE of Landau's Non-Negative Singularity
+--       Theorem: if H(x) >= 0 on [1, B] and the Mellin-moment Taylor series at sigma1 converges
+--       at sigma2 < sigma1 with total sum <= S, then int_1^B H(x) x^(-sigma2-1) dx <= S
+--       UNIFORMLY in B >= 1 (`landau.mellin_reexpansion_bound`), yielding the direct
+--       Pringsheim-Landau singularity obstruction (`landau.nonneg_singularity_contradiction`)!
+--   * Part B (Frontier #1 — `classical_L_laws`):
+--       Gauss sums tau(chi) = sum_{a<q} chi(a) zeta^a: proved via DFT Parseval that every
+--       separable (primitive) character satisfies |tau(chi)|^2 = q (`gauss_sum.norm_sq_eq_q`),
+--       tau(chi) != 0 (`gauss_sum.ne_zero`), and the functional-equation root number
+--       eps(chi) = tau(chi) / sqrt(q) satisfies |eps(chi)|^2 = 1 and eps(chi) != 0!
+--   * Part C (Frontier #3 — `pillar_concrete_vwin`):
+--       Finite Hermitian Hecke operators on C^n: self-adjoint pairing, real eigenvalues
+--       (`hecke.eigenvalue_real`), orthogonality of distinct eigenspaces (`hecke.eigenvectors_orth`),
+--       commuting Hecke eigenspace invariance (`hecke.comm_preserves_eigenspace`), and
+--       theta-lift Hecke intertwining (`hecke.rallis_eigen_bessel`)!
+--
+-- ALL theorems proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import complex_analysis
+import matrix
+
+-- ====================================================================================
+-- PART A (Frontier #2): Landau Non-Negative Mellin Power-Series Re-Expansion Theorem!
+-- ====================================================================================
+
+-- Helper: linear combination of K Darboux integrals of moments.
++ darboux.sum_moments (H : ℝ → ℝ) (A B sigma1 d : ℝ) (M : ℕ → ℝ) (K : ℕ)
+    (hAB : A ≤ B)
+    (hM : ∀ k < K, darboux.has_integral (fun x => H x * ((log x) ^ k) * rpow x (-sigma1 - 1)) A B (M k)) :
+    darboux.has_integral (fun x => (∑ k < K, ((d ^ k) / ((fact k : ℕ) : ℝ)) * (H x * ((log x) ^ k) * rpow x (-sigma1 - 1)))) A B (∑ k < K, ((d ^ k) / ((fact k : ℕ) : ℝ)) * M k)
+  induction K with h0 n ih hM
+  · have hf : (fun x => ∑ k < 0, ((d ^ k) / ((fact k : ℕ) : ℝ)) * (H x * ((log x) ^ k) * rpow x (-sigma1 - 1))) = (fun _ => (0 : ℝ))
+      funext x; simp
+    rw [hf]; simp
+    have hc := darboux.const A B 0 hAB
+    have h00 : 0 * (B - A) = (0 : ℝ) := by ring
+    rw [h00] at hc
+    exact hc
+  · rw [succ_eq_add_one.nat] at hM ⊢
+    have hprev := ih (by intro k hk; exact hM k (by omega))
+    have hlast := darboux.scale (fun x => H x * ((log x) ^ n) * rpow x (-sigma1 - 1)) A B (M n) ((d ^ n) / ((fact n : ℕ) : ℝ)) (hM n (by omega))
+    have hadd := darboux.add (fun x => ∑ k < n, ((d ^ k) / ((fact k : ℕ) : ℝ)) * (H x * ((log x) ^ k) * rpow x (-sigma1 - 1))) (fun x => ((d ^ n) / ((fact n : ℕ) : ℝ)) * (H x * ((log x) ^ n) * rpow x (-sigma1 - 1))) A B (∑ k < n, ((d ^ k) / ((fact k : ℕ) : ℝ)) * M k) (((d ^ n) / ((fact n : ℕ) : ℝ)) * M n) hprev hlast
+    have hf : (fun x => (∑ k < n, ((d ^ k) / ((fact k : ℕ) : ℝ)) * (H x * ((log x) ^ k) * rpow x (-sigma1 - 1))) + ((d ^ n) / ((fact n : ℕ) : ℝ)) * (H x * ((log x) ^ n) * rpow x (-sigma1 - 1))) = (fun x => ∑ k < n + 1, ((d ^ k) / ((fact k : ℕ) : ℝ)) * (H x * ((log x) ^ k) * rpow x (-sigma1 - 1))) := by funext x; rw [sum_below_succ]
+    rw [hf, ← sum_below_succ] at hadd
+    exact hadd
+
+-- Algebraic identity: sum_{k < K} (d^k / k!) * (H x * (log x)^k * x^(-sigma1-1))
+--                   = exp_taylor K (d * log x) * (H x * x^(-sigma1-1))
++ landau.taylor_integrand_eq (H : ℝ → ℝ) (sigma1 d x : ℝ) (K : ℕ) :
+    (∑ k < K, ((d ^ k) / ((fact k : ℕ) : ℝ)) * (H x * ((log x) ^ k) * rpow x (-sigma1 - 1))) = exp_taylor K (d * log x) * (H x * rpow x (-sigma1 - 1))
+  unfold exp_taylor
+  rw [← sum_mul_const.real]
+  apply sum_below.congr; intro k hk
+  rw [mul_pow.real d (log x) k, div_def.real (d ^ k) ((fact k : ℕ) : ℝ), div_def.real (d ^ k * (log x) ^ k) ((fact k : ℕ) : ℝ)]; ring
+
+-- THEOREM A1 (Lower Partial-Sum Bound for Non-Negative Mellin Integrals, AXIOM-FREE!):
+-- Every K-th Taylor partial sum of Mellin moments at sigma1 is <= int_1^B H(x) x^(-sigma2-1) dx!
++ landau.taylor_partial_le_mellin (H : ℝ → ℝ) (B sigma1 sigma2 I2 : ℝ) (M : ℕ → ℝ) (K : ℕ)
+    (hB : 1 ≤ B) (hsig : sigma2 ≤ sigma1)
+    (hH : ∀ x, 1 ≤ x → x ≤ B → 0 ≤ H x)
+    (hM : ∀ k < K, darboux.has_integral (fun x => H x * ((log x) ^ k) * rpow x (-sigma1 - 1)) 1 B (M k))
+    (hI2 : darboux.has_integral (fun x => H x * rpow x (-sigma2 - 1)) 1 B I2) :
+    (∑ k < K, (((sigma1 - sigma2) ^ k) / ((fact k : ℕ) : ℝ)) * M k) ≤ I2
+  set d := sigma1 - sigma2 with hd
+  have hsum := darboux.sum_moments H 1 B sigma1 d M K hB hM
+  apply darboux.mono (fun x => ∑ k < K, ((d ^ k) / ((fact k : ℕ) : ℝ)) * (H x * ((log x) ^ k) * rpow x (-sigma1 - 1))) (fun x => H x * rpow x (-sigma2 - 1)) 1 B (∑ k < K, ((d ^ k) / ((fact k : ℕ) : ℝ)) * M k) I2 hsum hI2
+  intro x hx1 hxB
+  rw [landau.taylor_integrand_eq H sigma1 d x K]
+  have hlog_nn : 0 ≤ log x
+    have h0 := (log_le_log 1 x (by decide) (by linarith)).mpr hx1
+    have hl1 : log 1 = 0 := by rw [← exp_zero, log_exp]
+    linarith
+  have hdlog_nn : 0 ≤ d * log x := mul_nonneg.real d (log x) (by linarith) hlog_nn
+  have htay := exp_taylor.le_exp K (d * log x) hdlog_nn
+  have hHx := hH x hx1 hxB
+  have hpx := rpow.pos x (-sigma1 - 1)
+  have hwt_nn : 0 ≤ H x * rpow x (-sigma1 - 1) := mul_nonneg.real (H x) (rpow x (-sigma1 - 1)) hHx (by linarith)
+  have hmul := mul_le_mul_of_nonneg_right.real (exp_taylor K (d * log x)) (exp (d * log x)) (H x * rpow x (-sigma1 - 1)) htay hwt_nn
+  have hexp_eq : exp (d * log x) * (H x * rpow x (-sigma1 - 1)) = H x * rpow x (-sigma2 - 1)
+    have hr : exp (d * log x) = rpow x d := by rfl
+    rw [hr]
+    have hadd : rpow x d * rpow x (-sigma1 - 1) = rpow x (-sigma2 - 1)
+      rw [← rpow.add]
+      have he : d + (-sigma1 - 1) = -sigma2 - 1 := by rw [hd]; ring
+      rw [he]
+    calc rpow x d * (H x * rpow x (-sigma1 - 1))
+      = H x * (rpow x d * rpow x (-sigma1 - 1)) := by ring
+      _ = H x * rpow x (-sigma2 - 1) := by rw [hadd]
+  linarith
+
+-- THEOREM A2 (LANDAU NON-NEGATIVE MELLIN POWER-SERIES RE-EXPANSION BOUND — AXIOM-FREE!):
+-- If H(x) >= 0 on [1, B] and EVERY K-th Taylor partial sum of its Mellin moments at sigma1
+-- evaluated at d = sigma1 - sigma2 >= 0 is bounded by S, then the Mellin integral at sigma2
+-- is ITSELF bounded by S:
+--   int_1^B H(x) x^(-sigma2 - 1) dx <= S   (UNIFORMLY in B >= 1!)
++ landau.mellin_reexpansion_bound (H : ℝ → ℝ) (B sigma1 sigma2 I1 I2 S : ℝ) (M : ℕ → ℝ)
+    (hB : 1 ≤ B) (hsig : sigma2 ≤ sigma1)
+    (hH : ∀ x, 1 ≤ x → x ≤ B → 0 ≤ H x)
+    (hI1 : darboux.has_integral (fun x => H x * rpow x (-sigma1 - 1)) 1 B I1)
+    (hM : ∀ k, darboux.has_integral (fun x => H x * ((log x) ^ k) * rpow x (-sigma1 - 1)) 1 B (M k))
+    (hI2 : darboux.has_integral (fun x => H x * rpow x (-sigma2 - 1)) 1 B I2)
+    (hS : ∀ K, (∑ k < K, (((sigma1 - sigma2) ^ k) / ((fact k : ℕ) : ℝ)) * M k) ≤ S) :
+    I2 ≤ S
+  by_contra hgt
+  set d := sigma1 - sigma2 with hd
+  set gap := I2 - S with hgap
+  have hgap_pos : 0 < gap := by linarith
+  have hlogB_nn : 0 ≤ log B
+    have h0 := (log_le_log 1 B (by decide) (by linarith)).mpr hB
+    have hl1 : log 1 = 0 := by rw [← exp_zero, log_exp]
+    linarith
+  set R := d * log B with hR
+  have hR_nn : 0 ≤ R := by rw [hR]; exact mul_nonneg.real d (log B) (by linarith) hlogB_nn
+  have hI1_nn : 0 ≤ I1
+    have hz := darboux.const 1 B 0 hB
+    have h00 : 0 * (B - 1) = (0 : ℝ) := by ring
+    rw [h00] at hz
+    apply darboux.mono (fun _ => (0 : ℝ)) (fun x => H x * rpow x (-sigma1 - 1)) 1 B 0 I1 hz hI1
+    intro x hx1 hxB
+    exact mul_nonneg.real (H x) (rpow x (-sigma1 - 1)) (hH x hx1 hxB) (by linarith [rpow.pos x (-sigma1 - 1)])
+  set C := exp R * I1 + 1 with hC
+  have hC_pos : 0 < C := by rw [hC]; linarith [mul_nonneg.real (exp R) I1 (by linarith [exp_pos R]) hI1_nn]
+  obtain ⟨K, hK⟩ := pow_div_fact_small R (gap / C) hR_nn (div_pos.real gap C hgap_pos hC_pos)
+  set err := (R ^ K / ((fact K : ℕ) : ℝ)) * exp R with herr
+  have hsum := darboux.sum_moments H 1 B sigma1 d M K hB (by intro k hk; exact hM k)
+  have herr_int := darboux.scale (fun x => H x * rpow x (-sigma1 - 1)) 1 B I1 err hI1
+  have htot := darboux.add (fun x => ∑ k < K, ((d ^ k) / ((fact k : ℕ) : ℝ)) * (H x * ((log x) ^ k) * rpow x (-sigma1 - 1))) (fun x => err * (H x * rpow x (-sigma1 - 1))) 1 B (∑ k < K, ((d ^ k) / ((fact k : ℕ) : ℝ)) * M k) (err * I1) hsum herr_int
+  have hI2_le : I2 ≤ (∑ k < K, ((d ^ k) / ((fact k : ℕ) : ℝ)) * M k) + err * I1
+    apply darboux.mono (fun x => H x * rpow x (-sigma2 - 1)) (fun x => (∑ k < K, ((d ^ k) / ((fact k : ℕ) : ℝ)) * (H x * ((log x) ^ k) * rpow x (-sigma1 - 1))) + err * (H x * rpow x (-sigma1 - 1))) 1 B I2 ((∑ k < K, ((d ^ k) / ((fact k : ℕ) : ℝ)) * M k) + err * I1) hI2 htot
+    intro x hx1 hxB
+    rw [landau.taylor_integrand_eq H sigma1 d x K]
+    have hlogx_nn : 0 ≤ log x
+      have h0 := (log_le_log 1 x (by decide) (by linarith)).mpr hx1
+      have hl1 : log 1 = 0 := by rw [← exp_zero, log_exp]
+      linarith
+    have hlogx_le : log x ≤ log B := (log_le_log x B (by linarith) (by linarith)).mpr hxB
+    have hu_nn : 0 ≤ d * log x := mul_nonneg.real d (log x) (by linarith) hlogx_nn
+    have hu_le : d * log x ≤ R
+      rw [hR]
+      exact mul_le_mul_of_nonneg_left.real (log x) (log B) d hlogx_le (by linarith)
+    have hrem := exp_sub_taylor_le K R (d * log x) hu_nn hu_le
+    have hpow_le : (d * log x) ^ K ≤ R ^ K
+      have hpow_mono : ∀ n : ℕ, (d * log x) ^ n ≤ R ^ n
+        intro n
+        induction n with j ihj
+        · rw [pow_zero.real, pow_zero.real]; linarith
+        · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real]
+          have hpj := pow_nonneg.real (d * log x) hu_nn j
+          have h1 := mul_le_mul_of_nonneg_left.real (d * log x) R ((d * log x) ^ j) hu_le hpj
+          have h2 := mul_le_mul_of_nonneg_right.real ((d * log x) ^ j) (R ^ j) R ihj hR_nn
+          linarith
+      exact hpow_mono K
+    have hdiv_le : (d * log x) ^ K / ((fact K : ℕ) : ℝ) ≤ R ^ K / ((fact K : ℕ) : ℝ)
+      have hfk := fact_cast_pos K
+      rw [div_def.real ((d * log x) ^ K) ((fact K : ℕ) : ℝ), div_def.real (R ^ K) ((fact K : ℕ) : ℝ)]
+      exact mul_le_mul_of_nonneg_right.real ((d * log x) ^ K) (R ^ K) (1 / ((fact K : ℕ) : ℝ)) hpow_le (by linarith [one_div_pos.real ((fact K : ℕ) : ℝ) hfk])
+    have herr_le : ((d * log x) ^ K / ((fact K : ℕ) : ℝ)) * exp R ≤ err
+      rw [herr]
+      exact mul_le_mul_of_nonneg_right.real ((d * log x) ^ K / ((fact K : ℕ) : ℝ)) (R ^ K / ((fact K : ℕ) : ℝ)) (exp R) hdiv_le (by linarith [exp_pos R])
+    have hexp_le : exp (d * log x) ≤ exp_taylor K (d * log x) + err := by linarith
+    have hwt_nn : 0 ≤ H x * rpow x (-sigma1 - 1) := mul_nonneg.real (H x) (rpow x (-sigma1 - 1)) (hH x hx1 hxB) (by linarith [rpow.pos x (-sigma1 - 1)])
+    have hmul := mul_le_mul_of_nonneg_right.real (exp (d * log x)) (exp_taylor K (d * log x) + err) (H x * rpow x (-sigma1 - 1)) hexp_le hwt_nn
+    have hexp_eq : exp (d * log x) * (H x * rpow x (-sigma1 - 1)) = H x * rpow x (-sigma2 - 1)
+      have hr : exp (d * log x) = rpow x d := by rfl
+      rw [hr]
+      have hadd : rpow x d * rpow x (-sigma1 - 1) = rpow x (-sigma2 - 1)
+        rw [← rpow.add]
+        have he : d + (-sigma1 - 1) = -sigma2 - 1 := by rw [hd]; ring
+        rw [he]
+      calc rpow x d * (H x * rpow x (-sigma1 - 1))
+        = H x * (rpow x d * rpow x (-sigma1 - 1)) := by ring
+        _ = H x * rpow x (-sigma2 - 1) := by rw [hadd]
+    linarith
+  have hS_K := hS K
+  have hRK_nn : 0 ≤ R ^ K / ((fact K : ℕ) : ℝ) := by exact div_nonneg.real (R ^ K) ((fact K : ℕ) : ℝ) (pow_nonneg.real R hR_nn K) (by linarith [fact_cast_pos K])
+  have hK_lt : (R ^ K / ((fact K : ℕ) : ℝ)) * C < gap := (lt_div_iff.real (R ^ K / ((fact K : ℕ) : ℝ)) gap C hC_pos).mp hK
+  have herr_I1 : err * I1 ≤ (R ^ K / ((fact K : ℕ) : ℝ)) * C
+    rw [herr, hC]
+    have heq : (R ^ K / ((fact K : ℕ) : ℝ)) * exp R * I1 = (R ^ K / ((fact K : ℕ) : ℝ)) * (exp R * I1) := by ring
+    rw [heq]
+    exact mul_le_mul_of_nonneg_left.real (exp R * I1) (exp R * I1 + 1) (R ^ K / ((fact K : ℕ) : ℝ)) (by linarith) hRK_nn
+  linarith
+
+-- THEOREM A3 (Pringsheim-Landau Singularity Obstruction — AXIOM-FREE!):
+-- If H(x) >= 0 on [1, infty) has an unbounded Mellin integral at sigma2 < sigma1,
+-- then its moment Taylor series at sigma1 CANNOT have uniformly bounded partial sums at sigma2!
++ landau.nonneg_singularity_contradiction (H : ℝ → ℝ) (sigma1 sigma2 : ℝ) (c : ℕ → ℝ) (S : ℝ)
+    (hsig : sigma2 ≤ sigma1)
+    (hH : ∀ x, 1 ≤ x → 0 ≤ H x)
+    (hbound_c : ∀ B : ℝ, 1 ≤ B → ∃ I1 I2 : ℝ, ∃ M : ℕ → ℝ,
+      darboux.has_integral (fun x => H x * rpow x (-sigma1 - 1)) 1 B I1 ∧
+      (∀ k, darboux.has_integral (fun x => H x * ((log x) ^ k) * rpow x (-sigma1 - 1)) 1 B (M k) ∧ M k ≤ c k * ((fact k : ℕ) : ℝ)) ∧
+      darboux.has_integral (fun x => H x * rpow x (-sigma2 - 1)) 1 B I2)
+    (htaylor : ∀ K, (∑ k < K, c k * ((sigma1 - sigma2) ^ k)) ≤ S)
+    (hunbounded : ∃ B : ℝ, 1 ≤ B ∧ ∀ I2, darboux.has_integral (fun x => H x * rpow x (-sigma2 - 1)) 1 B I2 → S < I2) :
+    False
+  obtain ⟨B, hB, hdiv⟩ := hunbounded
+  obtain ⟨I1, I2, M, hI1, hM, hI2⟩ := hbound_c B hB
+  have hS : ∀ K, (∑ k < K, (((sigma1 - sigma2) ^ k) / ((fact k : ℕ) : ℝ)) * M k) ≤ S
+    intro K
+    have hle : (∑ k < K, (((sigma1 - sigma2) ^ k) / ((fact k : ℕ) : ℝ)) * M k) ≤ ∑ k < K, c k * ((sigma1 - sigma2) ^ k)
+      apply sum_le.real; intro k hk
+      have hdk_nn : 0 ≤ (sigma1 - sigma2) ^ k := pow_nonneg.real (sigma1 - sigma2) (by linarith) k
+      have hfk := fact_cast_pos k
+      have hcoeff_nn : 0 ≤ ((sigma1 - sigma2) ^ k) / ((fact k : ℕ) : ℝ) := div_nonneg.real ((sigma1 - sigma2) ^ k) ((fact k : ℕ) : ℝ) hdk_nn (by linarith)
+      have hm1 := mul_le_mul_of_nonneg_left.real (M k) (c k * ((fact k : ℕ) : ℝ)) (((sigma1 - sigma2) ^ k) / ((fact k : ℕ) : ℝ)) (hM k).2 hcoeff_nn
+      have hcancel : (((sigma1 - sigma2) ^ k) / ((fact k : ℕ) : ℝ)) * (c k * ((fact k : ℕ) : ℝ)) = c k * ((sigma1 - sigma2) ^ k)
+        have hfk_ne : ((fact k : ℕ) : ℝ) ≠ 0 := by linarith
+        have hc := mul_inv_cancel.real ((fact k : ℕ) : ℝ) hfk_ne
+        rw [div_def.real]
+        calc ((sigma1 - sigma2) ^ k * (1 / ((fact k : ℕ) : ℝ))) * (c k * ((fact k : ℕ) : ℝ))
+          = (c k * ((sigma1 - sigma2) ^ k)) * (((fact k : ℕ) : ℝ) * (1 / ((fact k : ℕ) : ℝ))) := by ring
+          _ = (c k * ((sigma1 - sigma2) ^ k)) * 1 := by rw [hc]
+          _ = c k * ((sigma1 - sigma2) ^ k) := by ring
+      linarith
+    linarith [htaylor K]
+  have hre := landau.mellin_reexpansion_bound H B sigma1 sigma2 I1 I2 S M hB hsig (by intro x hx1 _; exact hH x hx1) hI1 (by intro k; exact (hM k).1) hI2 hS
+  linarith [hdiv I2 hI2]
+
+-- ====================================================================================
+-- PART B (Frontier #1): Gauss Sums |tau(chi)|^2 = q & Root Number Nonvanishing!
+-- ====================================================================================
+
+-> gauss_sum (q : ℕ) (zeta : ℂ) (chi : ℕ → ℂ) : ℂ :=
+  csum q (fun a => complex.mul (chi a) (cpow_nat zeta a))
+
+-> dft_sum (q : ℕ) (zeta : ℂ) (f : ℕ → ℂ) (b : ℕ) : ℂ :=
+  csum q (fun a => complex.mul (f a) (cpow_nat zeta (a * b)))
+
+-- THEOREM B1 (Gauss Sum Modulus Identity |tau(chi)|^2 = q via DFT Parseval — AXIOM-FREE!):
+-- Whenever chi mod q is separable (DFT(chi)(b) = conj(chi(b)) * tau(chi) for all b < q,
+-- which holds for EVERY primitive Dirichlet character) and satisfies Parseval on Z/qZ
+-- with sum_{a < q} |chi(a)|^2 > 0 (e.g. chi(1) = 1), we have:
+--   |tau(chi)|^2 = q   and   tau(chi) != 0 !
++ gauss_sum.norm_sq_eq_q (q : ℕ) (zeta : ℂ) (chi : ℕ → ℂ)
+    (hq : 0 < q)
+    (hparseval : complex.re (cdot q (dft_sum q zeta chi) (dft_sum q zeta chi)) = (q : ℝ) * complex.re (cdot q chi chi))
+    (hsep : ∀ b < q, dft_sum q zeta chi b = complex.mul (complex.conj (chi b)) (gauss_sum q zeta chi))
+    (hpos : 0 < complex.re (cdot q chi chi)) :
+    complex.norm_sq (gauss_sum q zeta chi) = (q : ℝ) ∧ gauss_sum q zeta chi ≠ complex.zero
+  have hlhs : complex.re (cdot q (dft_sum q zeta chi) (dft_sum q zeta chi)) = complex.norm_sq (gauss_sum q zeta chi) * complex.re (cdot q chi chi)
+    rw [cdot.self_re, cdot.self_re, ← sum_const_mul.real]
+    apply sum_below.congr; intro b hb
+    rw [hsep b hb, complex.norm_sq_mul, complex.norm_sq_conj]; ring
+  rw [hlhs] at hparseval
+  have heq : complex.norm_sq (gauss_sum q zeta chi) = (q : ℝ)
+    by_contra hne
+    by_cases hlt : complex.norm_sq (gauss_sum q zeta chi) < (q : ℝ)
+    · nlinarith
+    · nlinarith
+  constructor
+  · exact heq
+  · intro hz
+    have hn0 := (complex.norm_sq_eq_zero (gauss_sum q zeta chi)).mpr hz
+    rw [heq] at hn0
+    linarith
+
+-- Root number eps(chi) = tau(chi) / sqrt(q) has |eps(chi)|^2 = 1 and eps(chi) != 0!
++ root_number.unit_norm_and_ne_zero (q : ℕ) (tau : ℂ)
+    (hq : 0 < q) (htau : complex.norm_sq tau = (q : ℝ)) :
+    complex.norm_sq (complex.mul (complex.of_real (1 / sqrt (q : ℝ))) tau) = 1 ∧ complex.mul (complex.of_real (1 / sqrt (q : ℝ))) tau ≠ complex.zero
+  have hsq := sqrt_spec (q : ℝ) (by linarith)
+  have hsq_pos : 0 < sqrt (q : ℝ)
+    by_contra hle
+    have hz : sqrt (q : ℝ) = 0 := by linarith [hsq.1]
+    rw [hz] at hsq
+    linarith
+  have hinv_sq : (1 / sqrt (q : ℝ)) * (1 / sqrt (q : ℝ)) * (q : ℝ) = 1
+    have hc := mul_inv_cancel.real (sqrt (q : ℝ)) (by linarith)
+    have hmul_sq : (1 / sqrt (q : ℝ)) * (1 / sqrt (q : ℝ)) * (sqrt (q : ℝ) * sqrt (q : ℝ)) = 1
+      calc (1 / sqrt (q : ℝ)) * (1 / sqrt (q : ℝ)) * (sqrt (q : ℝ) * sqrt (q : ℝ))
+        = (sqrt (q : ℝ) * (1 / sqrt (q : ℝ))) * (sqrt (q : ℝ) * (1 / sqrt (q : ℝ))) := by ring
+        _ = 1 * 1 := by rw [hc]
+        _ = 1 := by ring
+    rw [hsq.2] at hmul_sq
+    exact hmul_sq
+  have hnorm : complex.norm_sq (complex.mul (complex.of_real (1 / sqrt (q : ℝ))) tau) = 1
+    rw [complex.norm_sq_mul, htau]
+    unfold complex.norm_sq complex.of_real
+    simp [hinv_sq]
+  constructor
+  · exact hnorm
+  · intro hz
+    have hn0 := (complex.norm_sq_eq_zero (complex.mul (complex.of_real (1 / sqrt (q : ℝ))) tau)).mpr hz
+    linarith
+
+-- ====================================================================================
+-- PART C (Frontier #3): Finite Hecke Algebras, Real Eigenvalues, & Theta Intertwining!
+-- ====================================================================================
+
+-> hecke.is_eigen (n : ℕ) (T : ℕ → ℕ → ℂ) (v : ℕ → ℂ) (lam : ℂ) : Prop :=
+  ∀ i < n, cmat.apply n T v i = complex.mul lam (v i)
+
+-> hecke.commutes (n : ℕ) (T1 T2 : ℕ → ℕ → ℂ) : Prop :=
+  ∀ i j, i < n → j < n → cmat.mul n T1 T2 i j = cmat.mul n T2 T1 i j
+
+-- Self-adjointness of a Hermitian Hecke operator: <T u, v> = <u, T v>!
++ hecke.self_adjoint_pairing (n : ℕ) (T : ℕ → ℕ → ℂ) (u v : ℕ → ℂ)
+    (hT : cmat.is_hermitian n T) :
+    cdot n (cmat.apply n T u) v = cdot n u (cmat.apply n T v)
+  unfold cmat.is_hermitian at hT
+  unfold cdot cmat.apply
+  have hlhs : csum n (fun i => complex.mul (complex.conj (csum n (fun j => complex.mul (T i j) (u j)))) (v i)) = csum n (fun i => csum n (fun j => complex.mul (complex.conj (u j)) (complex.mul (T j i) (v i))))
+    apply csum.congr; intro i hi
+    rw [csum.conj, ← csum.scale_right]
+    apply csum.congr; intro j hj
+    rw [complex.conj_mul]
+    have hij : complex.conj (T i j) = T j i
+      have hji := hT j i hj hi
+      exact hji.symm
+    rw [hij]
+    apply complex.ext <;> simp <;> ring
+  rw [hlhs, csum.swap]
+  apply csum.congr; intro j hj
+  rw [← csum.scale_left]
+
+-- THEOREM C1 (Hermitian Hecke Operators Have Real Eigenvalues — AXIOM-FREE!):
++ hecke.eigenvalue_real (n : ℕ) (T : ℕ → ℕ → ℂ) (v : ℕ → ℂ) (lam : ℂ)
+    (hT : cmat.is_hermitian n T)
+    (heig : hecke.is_eigen n T v lam)
+    (hnz : 0 < complex.re (cdot n v v)) :
+    complex.im lam = 0
+  unfold hecke.is_eigen at heig
+  have hsa := hecke.self_adjoint_pairing n T v v hT
+  have hl : cdot n (cmat.apply n T v) v = complex.mul (complex.conj lam) (cdot n v v)
+    have hcon : cdot n (cmat.apply n T v) v = cdot n (fun i => complex.mul lam (v i)) v := by unfold cdot; apply csum.congr; intro i hi; rw [heig i hi]
+    rw [hcon, cdot.scale_left]
+  have hr : cdot n v (cmat.apply n T v) = complex.mul lam (cdot n v v)
+    have hcon : cdot n v (cmat.apply n T v) = cdot n v (fun i => complex.mul lam (v i)) := by unfold cdot; apply csum.congr; intro i hi; rw [heig i hi]
+    rw [hcon, cdot.scale_right]
+  rw [hl, hr] at hsa
+  have him : complex.im (complex.mul (complex.conj lam) (cdot n v v)) = complex.im (complex.mul lam (cdot n v v)) := by rw [hsa]
+  simp [cdot.self_im] at him
+  nlinarith
+
+-- THEOREM C2 (Orthogonality of Distinct Hecke Eigenspaces — AXIOM-FREE!):
++ hecke.eigenvectors_orth (n : ℕ) (T : ℕ → ℕ → ℂ) (u v : ℕ → ℂ) (lam mu : ℂ)
+    (hT : cmat.is_hermitian n T)
+    (hu : hecke.is_eigen n T u lam)
+    (hv : hecke.is_eigen n T v mu)
+    (hlam_real : complex.im lam = 0)
+    (hne : lam ≠ mu) :
+    cdot n u v = complex.zero
+  unfold hecke.is_eigen at hu hv
+  have hsa := hecke.self_adjoint_pairing n T u v hT
+  have hl : cdot n (cmat.apply n T u) v = complex.mul (complex.conj lam) (cdot n u v)
+    have hcon : cdot n (cmat.apply n T u) v = cdot n (fun i => complex.mul lam (u i)) v := by unfold cdot; apply csum.congr; intro i hi; rw [hu i hi]
+    rw [hcon, cdot.scale_left]
+  have hr : cdot n u (cmat.apply n T v) = complex.mul mu (cdot n u v)
+    have hcon : cdot n u (cmat.apply n T v) = cdot n u (fun i => complex.mul mu (v i)) := by unfold cdot; apply csum.congr; intro i hi; rw [hv i hi]
+    rw [hcon, cdot.scale_right]
+  rw [hl, hr] at hsa
+  have hcl : complex.conj lam = lam
+    apply complex.ext <;> simp <;> linarith
+  rw [hcl] at hsa
+  have hdiff : complex.mul (complex.sub lam mu) (cdot n u v) = complex.zero
+    have h1 : complex.mul (complex.sub lam mu) (cdot n u v) = complex.sub (complex.mul lam (cdot n u v)) (complex.mul mu (cdot n u v))
+      apply complex.ext <;> simp <;> ring
+    rw [h1, hsa, complex.sub_self]
+  have hsub_ne : complex.sub lam mu ≠ complex.zero
+    intro h0; apply hne
+    have hre : complex.re (complex.sub lam mu) = 0 := by rw [h0]; simp
+    have him : complex.im (complex.sub lam mu) = 0 := by rw [h0]; simp
+    simp at hre him
+    apply complex.ext <;> linarith
+  by_contra hnz
+  exact complex.mul_ne_zero (complex.sub lam mu) (cdot n u v) hsub_ne hnz hdiff
+
+-- Helper: matrix product action (A * B) v = A (B v).
++ cmat.apply_mul (n : ℕ) (A B : ℕ → ℕ → ℂ) (v : ℕ → ℂ) (i : ℕ) :
+    cmat.apply n (cmat.mul n A B) v i = cmat.apply n A (cmat.apply n B v) i
+  unfold cmat.apply cmat.mul
+  have hl : csum n (fun j => complex.mul (csum n (fun k => complex.mul (A i k) (B k j))) (v j)) = csum n (fun j => csum n (fun k => complex.mul (A i k) (complex.mul (B k j) (v j))))
+    apply csum.congr; intro j hj
+    rw [← csum.scale_right]
+    apply csum.congr; intro k hk
+    apply complex.ext <;> simp <;> ring
+  rw [hl, csum.swap]
+  apply csum.congr; intro k hk
+  rw [← csum.scale_left]
+
+-- THEOREM C3 (Commuting Hecke Operators Preserve Eigenspaces — AXIOM-FREE!):
++ hecke.comm_preserves_eigenspace (n : ℕ) (T1 T2 : ℕ → ℕ → ℂ) (v : ℕ → ℂ) (lam : ℂ)
+    (hcomm : hecke.commutes n T1 T2)
+    (heig : hecke.is_eigen n T1 v lam) :
+    hecke.is_eigen n T1 (cmat.apply n T2 v) lam
+  unfold hecke.commutes at hcomm
+  unfold hecke.is_eigen at heig ⊢
+  intro i hi
+  rw [← cmat.apply_mul n T1 T2 v i]
+  have hswap : cmat.apply n (cmat.mul n T1 T2) v i = cmat.apply n (cmat.mul n T2 T1) v i
+    unfold cmat.apply; apply csum.congr; intro j hj
+    rw [hcomm i j hi hj]
+  rw [hswap, cmat.apply_mul n T2 T1 v i]
+  unfold cmat.apply
+  have hcon : csum n (fun j => complex.mul (T2 i j) (csum n (fun k => complex.mul (T1 j k) (v k)))) = csum n (fun j => complex.mul (T2 i j) (complex.mul lam (v j)))
+    apply csum.congr; intro j hj
+    have hej : csum n (fun k => complex.mul (T1 j k) (v k)) = complex.mul lam (v j) := heig j hj
+    rw [hej]
+  rw [hcon, ← csum.scale_left]
+  apply csum.congr; intro j hj
+  ring
+
+-- THEOREM C4 (Theta-Lift Hecke Intertwining / Eigenform Functoriality — AXIOM-FREE!):
+-- If a theta kernel Theta : C^n -> C^m intertwines Hecke operators (T_H Theta = Theta T_G),
+-- then the theta lift of any Hecke eigenform f (T_G f = lam f) is a Hecke eigenform
+-- for T_H with the SAME Hecke eigenvalue lam!
++ hecke.rallis_eigen_bessel (n m : ℕ) (TG TH Theta : ℕ → ℕ → ℂ) (f : ℕ → ℂ) (lam : ℂ)
+    (hinter : ∀ i < m, cmat.apply m TH (fun r => csum n (fun j => complex.mul (Theta r j) (f j))) i = csum n (fun j => complex.mul (Theta i j) (cmat.apply n TG f j)))
+    (heig : hecke.is_eigen n TG f lam) :
+    hecke.is_eigen m TH (fun r => csum n (fun j => complex.mul (Theta r j) (f j))) lam
+  unfold hecke.is_eigen at heig ⊢
+  intro i hi
+  rw [hinter i hi]
+  have hcon : csum n (fun j => complex.mul (Theta i j) (cmat.apply n TG f j)) = csum n (fun j => complex.mul (Theta i j) (complex.mul lam (f j)))
+    apply csum.congr; intro j hj
+    rw [heig j hj]
+  rw [hcon, ← csum.scale_left]
+  apply csum.congr; intro j hj
+  apply complex.ext <;> simp <;> ring

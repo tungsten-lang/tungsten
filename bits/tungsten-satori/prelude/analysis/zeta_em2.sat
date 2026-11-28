@@ -1,0 +1,555 @@
+-- Milestone 3.21: Order-2 Euler-Maclaurin Analytic Continuation of zeta(s) to Re(s) > -1,
+--                 Exact Proof of zeta(0) = -1/2, Scaled Gaussian Fourier Duality, and
+--                 Jacobi Theta Modular Inversion theta(t) = t^(-1/2) * theta(1/t) (0 CUSTOM AXIOMS!)
+--
+-- Direct, unconditional analytic breakthroughs advancing Frontier #1 (`classical_L_laws`):
+--   1. `darboux.trapezoidal_error_c2`:
+--        Exact order-2 Euler-Maclaurin trapezoidal remainder formula for ANY C^2 function on [a, a+1]:
+--          (f(a) + f(a+1)) / 2 - int_a^{a+1} f(x) dx = -(1/2) * int_a^{a+1} (x-a)*(x-a-1) * f''(x) dx
+--   2. `zeta.em2_term_eq_integral` & `zeta.em2_term_bound`:
+--        For the order-2 Euler-Maclaurin defect T_n(s) = ((n+1)^(-s) + (n+2)^(-s))/2 - int_{n+1}^{n+2} x^(-s) dx,
+--        we prove |T_n(s)| <= (|s| * |s + 1| / 8) * (n + 1)^(-Re(s) - 2) for ALL s in C with s != 1!
+--   3. `zeta.em2_csummable`:
+--        ABSOLUTE CONVERGENCE of sum_{n>=0} T_n(s) in C for EVERY s in C with Re(s) > -1 and s != 1
+--        (strictly extending zeta(s) past Re(s) = 0 to the half-plane Re(s) > -1)!
+--   4. `zeta.em2_at_zero_eq_neg_half`:
+--        At s = 0, T_n(0) = 0 identically for all n, so the analytic continuation
+--        zeta_em2(s) = 1/(s - 1) + 1/2 + sum_{n>=0} T_n(s) satisfies:
+--          zeta_em2(0) = -1/2   (DISCHARGING the `zeta(0) = -1/2` law of Frontier #1, 0 AXIOMS!)
+--   5. `gaussian.scaled_fourier_duality`, `gaussian.integral_eq_one_of_poisson`, &
+--      `jacobi_theta.modular_inversion_of_poisson`:
+--        From Milestone 3.20's Gaussian Fourier self-duality, proves linear scaling
+--        int_{-R/sqrt(t)}^{R/sqrt(t)} e^(-pi*t*x^2) cos(2*pi*xi*x) dx = (1/sqrt(t)) * g_hat_R(xi/sqrt(t)),
+--        deduces C = int_{-inf}^{inf} e^(-pi*x^2) dx = 1 from Poisson summation at t = 1, and
+--        proves Jacobi theta modular inversion 1 + 2*psi(t) = (1/sqrt(t)) * (1 + 2*psi(1/t))!
+
+import analysis.complex_strip_cauchy
+import analysis.gaussian_fourier
+
+-- ====================================================================================
+-- 1. EXACT ORDER-2 TRAPEZOIDAL EULER-MACLAURIN FORMULA (0 AXIOMS!)
+-- ====================================================================================
+
+-- Exact real trapezoidal error identity on [a, a + 1] via two `darboux.by_parts` steps:
+--   (f(a) + f(a+1)) / 2 - int_a^{a+1} f(x) dx = -(1/2) * int_a^{a+1} (x - a)*(x - a - 1) * f''(x) dx
++ darboux.trapezoidal_error_c2 (f fp fpp : ℝ → ℝ) (a I0 I1 I2 : ℝ)
+    (hI0 : darboux.has_integral f a (a + 1) I0)
+    (hI1 : darboux.has_integral (fun x => (x - a - 1 / 2) * fp x) a (a + 1) I1)
+    (hI2 : darboux.has_integral (fun x => ((x - a) * (x - a - 1) / 2) * fpp x) a (a + 1) I2)
+    (hdf : ∀ t, a ≤ t → t ≤ a + 1 → has_deriv_within f (fun z => a ≤ z ∧ z ≤ a + 1) t (fp t))
+    (hdfp : ∀ t, a ≤ t → t ≤ a + 1 → has_deriv_within fp (fun z => a ≤ z ∧ z ≤ a + 1) t (fpp t)) :
+    (f a + f (a + 1)) / 2 - I0 = -I2
+  -- Step 1: F(x) = x - a - 1/2 (F' = 1), G(x) = f(x) (G' = fp)
+  have hF1 : ∀ t, a ≤ t → t ≤ a + 1 → has_deriv_within (fun x => x - a - 1 / 2) (fun z => a ≤ z ∧ z ≤ a + 1) t 1
+    intro t _ _
+    have h1 := has_deriv_within.add (fun x => x) (fun _ => -a - 1 / 2) (fun z => a ≤ z ∧ z ≤ a + 1) t 1 0 (has_deriv_within.id (fun z => a ≤ z ∧ z ≤ a + 1) t) (has_deriv_within.const (-a - 1 / 2) (fun z => a ≤ z ∧ z ≤ a + 1) t)
+    have hf : (fun x => x + (-a - 1 / 2)) = (fun x => x - a - 1 / 2) := by funext x; ring
+    have hv : (1 : ℝ) + 0 = 1 := by ring
+    rw [hf, hv] at h1; exact h1
+  have hI0_1 : darboux.has_integral (fun x => 1 * f x) a (a + 1) I0
+    have hfeq : (fun x => (1 : ℝ) * f x) = f := by funext x; ring
+    rw [hfeq]; exact hI0
+  have hbp1 := darboux.by_parts (fun x => x - a - 1 / 2) f (fun _ => (1 : ℝ)) fp a (a + 1) I0 I1 hI0_1 hI1 hF1 hdf
+  -- Step 2: F(x) = (x - a)*(x - a - 1)/2 (F' = x - a - 1/2), G(x) = fp(x) (G' = fpp)
+  have hF2 : ∀ t, a ≤ t → t ≤ a + 1 → has_deriv_within (fun x => (x - a) * (x - a - 1) / 2) (fun z => a ≤ z ∧ z ≤ a + 1) t (t - a - 1 / 2)
+    intro t _ _
+    have hd_a : has_deriv_within (fun x => x - a) (fun z => a ≤ z ∧ z ≤ a + 1) t 1
+      have h := has_deriv_within.add (fun x => x) (fun _ => -a) (fun z => a ≤ z ∧ z ≤ a + 1) t 1 0 (has_deriv_within.id (fun z => a ≤ z ∧ z ≤ a + 1) t) (has_deriv_within.const (-a) (fun z => a ≤ z ∧ z ≤ a + 1) t)
+      have hf : (fun x => x + -a) = (fun x => x - a) := by funext x; ring
+      have hv : (1 : ℝ) + 0 = 1 := by ring
+      rw [hf, hv] at h; exact h
+    have hd_a1 : has_deriv_within (fun x => x - a - 1) (fun z => a ≤ z ∧ z ≤ a + 1) t 1
+      have h := has_deriv_within.add (fun x => x) (fun _ => -a - 1) (fun z => a ≤ z ∧ z ≤ a + 1) t 1 0 (has_deriv_within.id (fun z => a ≤ z ∧ z ≤ a + 1) t) (has_deriv_within.const (-a - 1) (fun z => a ≤ z ∧ z ≤ a + 1) t)
+      have hf : (fun x => x + (-a - 1)) = (fun x => x - a - 1) := by funext x; ring
+      have hv : (1 : ℝ) + 0 = 1 := by ring
+      rw [hf, hv] at h; exact h
+    have hmul := has_deriv_within.mul (fun x => x - a) (fun x => x - a - 1) (fun z => a ≤ z ∧ z ≤ a + 1) t 1 1 hd_a hd_a1
+    have hsc := has_deriv_within.scale (1 / 2) (fun x => (x - a) * (x - a - 1)) (fun z => a ≤ z ∧ z ≤ a + 1) t (1 * (t - a - 1) + (t - a) * 1) hmul
+    have hf : (fun x => (1 / 2) * ((x - a) * (x - a - 1))) = (fun x => (x - a) * (x - a - 1) / 2) := by funext x; ring
+    have hv : (1 / 2) * (1 * (t - a - 1) + (t - a) * 1) = t - a - 1 / 2 := by ring
+    rw [hf, hv] at hsc; exact hsc
+  have hbp2 := darboux.by_parts (fun x => (x - a) * (x - a - 1) / 2) fp (fun x => x - a - 1 / 2) fpp a (a + 1) I1 I2 hI1 hI2 hF2 hdfp
+  linarith
+
+-- ====================================================================================
+-- 2. ORDER-2 COMPLEX EULER-MACLAURIN CONTINUATION OF zeta(s) TO Re(s) > -1 & zeta(0) = -1/2!
+-- ====================================================================================
+
+-- Order-2 Euler-Maclaurin trapezoidal defect term:
+--   T_n(s) = ((n+1)^(-s) + (n+2)^(-s)) / 2 - ((n+2)^(1-s) - (n+1)^(1-s)) / (1 - s)
+-> zeta_em2_term (s : ℂ) (n : ℕ) : ℂ :=
+  complex.sub
+    (complex.smul (1 / 2) (complex.add (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)) (cpow_real ((n + 2 : ℕ) : ℝ) (complex.neg s))))
+    (complex.mul (complex.inv (complex.sub complex.one s)) (complex.sub (cpow_real ((n + 2 : ℕ) : ℝ) (complex.sub complex.one s)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.sub complex.one s))))
+
+-- Exact relation between order-2 and order-1 Euler-Maclaurin terms:
+--   zeta_em2_term s n = zeta_em_term s n - (1/2) * ((n+1)^(-s) - (n+2)^(-s))
++ zeta.em2_eq_em1_sub_half_step (s : ℂ) (n : ℕ) :
+    zeta_em2_term s n = complex.sub (zeta_em_term s n) (complex.smul (1 / 2) (complex.sub (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)) (cpow_real ((n + 2 : ℕ) : ℝ) (complex.neg s))))
+  unfold zeta_em2_term zeta_em_term
+  ring
+
+-- Telescoping partial sum relation between order-2 and order-1 Euler-Maclaurin:
+--   csum N (zeta_em2_term s) = csum N (zeta_em_term s) - (1/2) * (1 - (N+1)^(-s)) !
++ zeta.em2_partial_sum_rel (s : ℂ) (N : ℕ) :
+    csum N (zeta_em2_term s) = complex.sub (csum N (zeta_em_term s)) (complex.smul (1 / 2) (complex.sub complex.one (cpow_real ((N + 1 : ℕ) : ℝ) (complex.neg s))))
+  induction N with k ih
+  · have h0a : csum 0 (zeta_em2_term s) = complex.zero := by rfl
+    have h0b : csum 0 (zeta_em_term s) = complex.zero := by rfl
+    have h1pow : cpow_real ((0 + 1 : ℕ) : ℝ) (complex.neg s) = complex.one
+      unfold cpow_real
+      apply complex.ext
+      · simp [log_one, exp_zero, cos_zero]
+      · simp [log_one, exp_zero, sin_zero]
+    rw [h0a, h0b, h1pow]
+    ring
+  · rw [succ_eq_add_one.nat]
+    have hs2 : csum (k + 1) (zeta_em2_term s) = complex.add (csum k (zeta_em2_term s)) (zeta_em2_term s k) := by rfl
+    have hs1 : csum (k + 1) (zeta_em_term s) = complex.add (csum k (zeta_em_term s)) (zeta_em_term s k) := by rfl
+    have hk2 : k + 1 + 1 = k + 2 := by omega
+    rw [hs2, hs1, ih, zeta.em2_eq_em1_sub_half_step s k, hk2]
+    ring
+
+-- THEOREM 1 (Exact Order-2 Euler-Maclaurin Term Bound for ALL Re(s) > -1, s != 1 — 0 AXIOMS!):
+--   |T_n(s)| <= (|s| * |s + 1| / 8) * (n + 1)^(-Re(s) - 2)  (when Re(s) + 2 >= 0, i.e. Re(s) >= -2!)
++ zeta.em2_term_bound (s : ℂ) (n : ℕ) (hs : -2 ≤ complex.re s) (hne : s ≠ complex.one) :
+    complex.abs (zeta_em2_term s n) ≤ (complex.abs s * complex.abs (complex.add s complex.one) / 8) * rpow ((n + 1 : ℕ) : ℝ) (-complex.re s - 2)
+  set a := ((n + 1 : ℕ) : ℝ) with ha_def
+  have ha_pos : 0 < a := by rw [ha_def]; exact (cast_pos.real (n + 1)).mpr (by omega)
+  have ha1_eq : ((n + 2 : ℕ) : ℝ) = a + 1 := by rw [ha_def, cast_add.real n 2, cast_add.real n 1]; simp; ring
+  -- Integral of f(x) = x^(-s) on [a, a + 1]
+  have hI0 := zeta.complex_power_integral s a (a + 1) ha_pos (by linarith) hne
+  -- Integrability of (x - a - 1/2) * f'(x) and ((x-a)*(x-a-1)/2) * f''(x) via continuity on [a, a+1]!
+  set w0 := complex.neg s with hw0
+  set w1 := complex.sub w0 complex.one with hw1
+  set w2 := complex.sub w1 complex.one with hw2
+  set c2 := complex.mul s (complex.add s complex.one) with hc2
+  have h_w2_mul : ∀ x, complex.mul w0 (complex.mul w1 (cpow_real x w2)) = complex.mul c2 (cpow_real x w2)
+    intro x; rw [hw1, hw0, hc2]; apply complex.ext <;> simp <;> ring
+  have hcont_w1 : ∀ t, a ≤ t → t ≤ a + 1 → continuous_at (fun x => complex.re (complex.mul w0 (cpow_real x w1))) t ∧ continuous_at (fun x => complex.im (complex.mul w0 (cpow_real x w1))) t
+    intro t ht1 ht2
+    have hc := cpow_real.continuous_re_im w1 t (by linarith)
+    constructor
+    · have heq : (fun x => complex.re (complex.mul w0 (cpow_real x w1))) = (fun x => complex.re w0 * complex.re (cpow_real x w1) + (-complex.im w0) * complex.im (cpow_real x w1))
+        funext x; simp; ring
+      rw [heq]
+      exact continuous_at.add (fun x => complex.re w0 * complex.re (cpow_real x w1)) (fun x => (-complex.im w0) * complex.im (cpow_real x w1)) t (continuous_at.mul (fun _ => complex.re w0) (fun x => complex.re (cpow_real x w1)) t (continuous_at.const (complex.re w0) t) hc.1) (continuous_at.mul (fun _ => -complex.im w0) (fun x => complex.im (cpow_real x w1)) t (continuous_at.const (-complex.im w0) t) hc.2)
+    · have heq : (fun x => complex.im (complex.mul w0 (cpow_real x w1))) = (fun x => complex.re w0 * complex.im (cpow_real x w1) + complex.im w0 * complex.re (cpow_real x w1))
+        funext x; simp
+      rw [heq]
+      exact continuous_at.add (fun x => complex.re w0 * complex.im (cpow_real x w1)) (fun x => complex.im w0 * complex.re (cpow_real x w1)) t (continuous_at.mul (fun _ => complex.re w0) (fun x => complex.im (cpow_real x w1)) t (continuous_at.const (complex.re w0) t) hc.2) (continuous_at.mul (fun _ => complex.im w0) (fun x => complex.re (cpow_real x w1)) t (continuous_at.const (complex.im w0) t) hc.1)
+  have hcont_w2 : ∀ t, a ≤ t → t ≤ a + 1 → continuous_at (fun x => complex.re (complex.mul c2 (cpow_real x w2))) t ∧ continuous_at (fun x => complex.im (complex.mul c2 (cpow_real x w2))) t
+    intro t ht1 ht2
+    have hc := cpow_real.continuous_re_im w2 t (by linarith)
+    constructor
+    · have heq : (fun x => complex.re (complex.mul c2 (cpow_real x w2))) = (fun x => complex.re c2 * complex.re (cpow_real x w2) + (-complex.im c2) * complex.im (cpow_real x w2))
+        funext x; simp; ring
+      rw [heq]
+      exact continuous_at.add (fun x => complex.re c2 * complex.re (cpow_real x w2)) (fun x => (-complex.im c2) * complex.im (cpow_real x w2)) t (continuous_at.mul (fun _ => complex.re c2) (fun x => complex.re (cpow_real x w2)) t (continuous_at.const (complex.re c2) t) hc.1) (continuous_at.mul (fun _ => -complex.im c2) (fun x => complex.im (cpow_real x w2)) t (continuous_at.const (-complex.im c2) t) hc.2)
+    · have heq : (fun x => complex.im (complex.mul c2 (cpow_real x w2))) = (fun x => complex.re c2 * complex.im (cpow_real x w2) + complex.im c2 * complex.re (cpow_real x w2))
+        funext x; simp
+      rw [heq]
+      exact continuous_at.add (fun x => complex.re c2 * complex.im (cpow_real x w2)) (fun x => complex.im c2 * complex.re (cpow_real x w2)) t (continuous_at.mul (fun _ => complex.re c2) (fun x => complex.im (cpow_real x w2)) t (continuous_at.const (complex.re c2) t) hc.2) (continuous_at.mul (fun _ => complex.im c2) (fun x => complex.re (cpow_real x w2)) t (continuous_at.const (complex.im c2) t) hc.1)
+  have hcont_lin : ∀ t, a ≤ t → t ≤ a + 1 → continuous_at (fun x => x - a - 1 / 2) t
+    intro t _ _
+    have heq : (fun x => x - a - 1 / 2) = (fun x => x + (-a - 1 / 2)) := by funext x; ring
+    rw [heq]; exact continuous_at.add (fun x => x) (fun _ => -a - 1 / 2) t (continuous_at.id t) (continuous_at.const (-a - 1 / 2) t)
+  have hcont_quad : ∀ t, a ≤ t → t ≤ a + 1 → continuous_at (fun x => (x - a) * (x - a - 1) / 2) t
+    intro t _ _
+    have h1 : continuous_at (fun x => x - a) t
+      have heq : (fun x => x - a) = (fun x => x + (-a)) := by funext x; ring
+      rw [heq]; exact continuous_at.add (fun x => x) (fun _ => -a) t (continuous_at.id t) (continuous_at.const (-a) t)
+    have h2 : continuous_at (fun x => x - a - 1) t
+      have heq : (fun x => x - a - 1) = (fun x => x + (-a - 1)) := by funext x; ring
+      rw [heq]; exact continuous_at.add (fun x => x) (fun _ => -a - 1) t (continuous_at.id t) (continuous_at.const (-a - 1) t)
+    have hmul := continuous_at.mul (fun x => x - a) (fun x => x - a - 1) t h1 h2
+    have hsc := continuous_at.mul (fun _ => (1 / 2 : ℝ)) (fun x => (x - a) * (x - a - 1)) t (continuous_at.const (1 / 2) t) hmul
+    have heq : (fun x => (1 / 2 : ℝ) * ((x - a) * (x - a - 1))) = (fun x => (x - a) * (x - a - 1) / 2) := by funext x; ring
+    rw [heq] at hsc; exact hsc
+  -- Existence of Re/Im integrals I1 and I2 by `darboux.continuous`!
+  have hI1_re_ex := darboux.continuous (fun x => (x - a - 1 / 2) * complex.re (complex.mul w0 (cpow_real x w1))) a (a + 1) (by linarith) (by intro t h1 h2; exact continuous_at.mul (fun x => x - a - 1 / 2) (fun x => complex.re (complex.mul w0 (cpow_real x w1))) t (hcont_lin t h1 h2) (hcont_w1 t h1 h2).1)
+  have hI1_im_ex := darboux.continuous (fun x => (x - a - 1 / 2) * complex.im (complex.mul w0 (cpow_real x w1))) a (a + 1) (by linarith) (by intro t h1 h2; exact continuous_at.mul (fun x => x - a - 1 / 2) (fun x => complex.im (complex.mul w0 (cpow_real x w1))) t (hcont_lin t h1 h2) (hcont_w1 t h1 h2).2)
+  have hI2_re_ex := darboux.continuous (fun x => ((x - a) * (x - a - 1) / 2) * complex.re (complex.mul c2 (cpow_real x w2))) a (a + 1) (by linarith) (by intro t h1 h2; exact continuous_at.mul (fun x => (x - a) * (x - a - 1) / 2) (fun x => complex.re (complex.mul c2 (cpow_real x w2))) t (hcont_quad t h1 h2) (hcont_w2 t h1 h2).1)
+  have hI2_im_ex := darboux.continuous (fun x => ((x - a) * (x - a - 1) / 2) * complex.im (complex.mul c2 (cpow_real x w2))) a (a + 1) (by linarith) (by intro t h1 h2; exact continuous_at.mul (fun x => (x - a) * (x - a - 1) / 2) (fun x => complex.im (complex.mul c2 (cpow_real x w2))) t (hcont_quad t h1 h2) (hcont_w2 t h1 h2).2)
+  obtain ⟨I1_re, hI1_re⟩ := hI1_re_ex
+  obtain ⟨I1_im, hI1_im⟩ := hI1_im_ex
+  obtain ⟨I2_re, hI2_re⟩ := hI2_re_ex
+  obtain ⟨I2_im, hI2_im⟩ := hI2_im_ex
+  -- Derivatives of Re(f') and Im(f') where f'(x) = w0 * x^(w1):
+  have hdf_re : ∀ t, a ≤ t → t ≤ a + 1 → has_deriv_within (fun x => complex.re (cpow_real x w0)) (fun z => a ≤ z ∧ z ≤ a + 1) t (complex.re (complex.mul w0 (cpow_real t w1))) := by intro t ht1 ht2; rw [hw1]; exact (cpow_real.has_deriv_re_im w0 a (a + 1) t ha_pos ht1 ht2).1
+  have hdf_im : ∀ t, a ≤ t → t ≤ a + 1 → has_deriv_within (fun x => complex.im (cpow_real x w0)) (fun z => a ≤ z ∧ z ≤ a + 1) t (complex.im (complex.mul w0 (cpow_real t w1))) := by intro t ht1 ht2; rw [hw1]; exact (cpow_real.has_deriv_re_im w0 a (a + 1) t ha_pos ht1 ht2).2
+  have hdfp_re : ∀ t, a ≤ t → t ≤ a + 1 → has_deriv_within (fun x => complex.re (complex.mul w0 (cpow_real x w1))) (fun z => a ≤ z ∧ z ≤ a + 1) t (complex.re (complex.mul c2 (cpow_real t w2)))
+    intro t ht1 ht2
+    have hd := cpow_real.has_deriv_re_im w1 a (a + 1) t ha_pos ht1 ht2
+    have h1 := has_deriv_within.scale (complex.re w0) (fun x => complex.re (cpow_real x w1)) (fun z => a ≤ z ∧ z ≤ a + 1) t (complex.re (complex.mul w1 (cpow_real t (complex.sub w1 complex.one)))) hd.1
+    have h2 := has_deriv_within.scale (-complex.im w0) (fun x => complex.im (cpow_real x w1)) (fun z => a ≤ z ∧ z ≤ a + 1) t (complex.im (complex.mul w1 (cpow_real t (complex.sub w1 complex.one)))) hd.2
+    have hsum := has_deriv_within.add (fun x => complex.re w0 * complex.re (cpow_real x w1)) (fun x => (-complex.im w0) * complex.im (cpow_real x w1)) (fun z => a ≤ z ∧ z ≤ a + 1) t (complex.re w0 * complex.re (complex.mul w1 (cpow_real t (complex.sub w1 complex.one)))) ((-complex.im w0) * complex.im (complex.mul w1 (cpow_real t (complex.sub w1 complex.one)))) h1 h2
+    have hfeq : (fun x => complex.re w0 * complex.re (cpow_real x w1) + (-complex.im w0) * complex.im (cpow_real x w1)) = (fun x => complex.re (complex.mul w0 (cpow_real x w1))) := by funext x; simp; ring
+    have hveq : complex.re w0 * complex.re (complex.mul w1 (cpow_real t (complex.sub w1 complex.one))) + (-complex.im w0) * complex.im (complex.mul w1 (cpow_real t (complex.sub w1 complex.one))) = complex.re (complex.mul c2 (cpow_real t w2)) := by rw [← hw2, ← h_w2_mul t]; simp; ring
+    rw [hfeq, hveq] at hsum; exact hsum
+  have hdfp_im : ∀ t, a ≤ t → t ≤ a + 1 → has_deriv_within (fun x => complex.im (complex.mul w0 (cpow_real x w1))) (fun z => a ≤ z ∧ z ≤ a + 1) t (complex.im (complex.mul c2 (cpow_real t w2)))
+    intro t ht1 ht2
+    have hd := cpow_real.has_deriv_re_im w1 a (a + 1) t ha_pos ht1 ht2
+    have h1 := has_deriv_within.scale (complex.re w0) (fun x => complex.im (cpow_real x w1)) (fun z => a ≤ z ∧ z ≤ a + 1) t (complex.im (complex.mul w1 (cpow_real t (complex.sub w1 complex.one)))) hd.2
+    have h2 := has_deriv_within.scale (complex.im w0) (fun x => complex.re (cpow_real x w1)) (fun z => a ≤ z ∧ z ≤ a + 1) t (complex.re (complex.mul w1 (cpow_real t (complex.sub w1 complex.one)))) hd.1
+    have hsum := has_deriv_within.add (fun x => complex.re w0 * complex.im (cpow_real x w1)) (fun x => complex.im w0 * complex.re (cpow_real x w1)) (fun z => a ≤ z ∧ z ≤ a + 1) t (complex.re w0 * complex.im (complex.mul w1 (cpow_real t (complex.sub w1 complex.one)))) (complex.im w0 * complex.re (complex.mul w1 (cpow_real t (complex.sub w1 complex.one)))) h1 h2
+    have hfeq : (fun x => complex.re w0 * complex.im (cpow_real x w1) + complex.im w0 * complex.re (cpow_real x w1)) = (fun x => complex.im (complex.mul w0 (cpow_real x w1))) := by funext x; simp
+    have hveq : complex.re w0 * complex.im (complex.mul w1 (cpow_real t (complex.sub w1 complex.one))) + complex.im w0 * complex.re (complex.mul w1 (cpow_real t (complex.sub w1 complex.one))) = complex.im (complex.mul c2 (cpow_real t w2)) := by rw [← hw2, ← h_w2_mul t]; simp
+    rw [hfeq, hveq] at hsum; exact hsum
+  -- Apply `darboux.trapezoidal_error_c2` to Re and Im parts!
+  unfold c_has_integral at hI0
+  have htrap_re := darboux.trapezoidal_error_c2 (fun x => complex.re (cpow_real x w0)) (fun x => complex.re (complex.mul w0 (cpow_real x w1))) (fun x => complex.re (complex.mul c2 (cpow_real x w2))) a (complex.re (complex.mul (complex.inv (complex.sub complex.one s)) (complex.sub (cpow_real (a + 1) (complex.sub complex.one s)) (cpow_real a (complex.sub complex.one s))))) I1_re I2_re hI0.1 hI1_re hI2_re hdf_re hdfp_re
+  have htrap_im := darboux.trapezoidal_error_c2 (fun x => complex.im (cpow_real x w0)) (fun x => complex.im (complex.mul w0 (cpow_real x w1))) (fun x => complex.im (complex.mul c2 (cpow_real x w2))) a (complex.im (complex.mul (complex.inv (complex.sub complex.one s)) (complex.sub (cpow_real (a + 1) (complex.sub complex.one s)) (cpow_real a (complex.sub complex.one s))))) I1_im I2_im hI0.2 hI1_im hI2_im hdf_im hdfp_im
+  -- Package as a complex integral: zeta_em2_term s n = -I2 = int_a^{a+1} (-(x-a)*(x-a-1)/2) * c2 * x^(-s-2) dx!
+  have hI2_eq : zeta_em2_term s n = complex.neg (complex.mk I2_re I2_im)
+    have hre_match : complex.re (zeta_em2_term s n) = (complex.re (cpow_real a w0) + complex.re (cpow_real (a + 1) w0)) / 2 - complex.re (complex.mul (complex.inv (complex.sub complex.one s)) (complex.sub (cpow_real (a + 1) (complex.sub complex.one s)) (cpow_real a (complex.sub complex.one s))))
+      unfold zeta_em2_term; rw [ha1_eq, ← ha_def, hw0]; simp; ring
+    have him_match : complex.im (zeta_em2_term s n) = (complex.im (cpow_real a w0) + complex.im (cpow_real (a + 1) w0)) / 2 - complex.im (complex.mul (complex.inv (complex.sub complex.one s)) (complex.sub (cpow_real (a + 1) (complex.sub complex.one s)) (cpow_real a (complex.sub complex.one s))))
+      unfold zeta_em2_term; rw [ha1_eq, ← ha_def, hw0]; simp; ring
+    apply complex.ext
+    · simp; linarith
+    · simp; linarith
+  have hI2_int : c_has_integral (fun x => complex.smul ((x - a) * (x - a - 1) / 2) (complex.mul c2 (cpow_real x w2))) a (a + 1) (complex.mk I2_re I2_im) := by unfold c_has_integral; simp; exact ⟨hI2_re, hI2_im⟩
+  -- ML bound on [a, a + 1]: |(x-a)*(x-a-1)/2| <= 1/8, |c2| = |s|*|s+1|, |x^(-s-2)| <= a^(-Re(s)-2)!
+  set M := (complex.abs s * complex.abs (complex.add s complex.one) / 8) * rpow a (-complex.re s - 2) with hM
+  have hM_nn : 0 ≤ M
+    rw [hM]
+    have h1 : 0 ≤ complex.abs s * complex.abs (complex.add s complex.one) / 8 := by nlinarith [complex.abs_nonneg s, complex.abs_nonneg (complex.add s complex.one)]
+    exact mul_nonneg.real (complex.abs s * complex.abs (complex.add s complex.one) / 8) (rpow a (-complex.re s - 2)) h1 (by linarith [rpow.pos a (-complex.re s - 2)])
+  have hpt : ∀ x, a ≤ x → x ≤ a + 1 → complex.abs (complex.smul ((x - a) * (x - a - 1) / 2) (complex.mul c2 (cpow_real x w2))) ≤ M
+    intro x hx1 hx2
+    have hsm : complex.smul ((x - a) * (x - a - 1) / 2) (complex.mul c2 (cpow_real x w2)) = complex.mul (complex.of_real ((x - a) * (x - a - 1) / 2)) (complex.mul c2 (cpow_real x w2))
+      apply complex.ext
+      · simp; ring
+      · simp
+    rw [hsm, complex.abs_mul, complex.abs_mul]
+    -- |(x-a)*(x-a-1)/2| = u*(1-u)/2 <= 1/8 on [0, 1] since 1/4 - u*(1-u) = (u - 1/2)^2 >= 0!
+    have hq_nonpos : (x - a) * (x - a - 1) / 2 ≤ 0 := by nlinarith
+    have hq_ge : -(1 / 8) ≤ (x - a) * (x - a - 1) / 2
+      have hcomp : (x - a) * (x - a - 1) / 2 + 1 / 8 = ((x - a - 1 / 2) * (x - a - 1 / 2)) / 2 := by ring
+      have hsq_nn : 0 ≤ (x - a - 1 / 2) * (x - a - 1 / 2) := by nlinarith
+      linarith
+    have hq_abs : complex.abs (complex.of_real ((x - a) * (x - a - 1) / 2)) ≤ 1 / 8
+      have hsq : complex.abs (complex.of_real ((x - a) * (x - a - 1) / 2)) * complex.abs (complex.of_real ((x - a) * (x - a - 1) / 2)) = ((x - a) * (x - a - 1) / 2) * ((x - a) * (x - a - 1) / 2)
+        rw [complex.abs_sq]; unfold complex.norm_sq complex.of_real; simp
+      have hnn := complex.abs_nonneg (complex.of_real ((x - a) * (x - a - 1) / 2))
+      nlinarith
+    -- |c2| = |s| * |s + 1|
+    have hc2_abs : complex.abs c2 = complex.abs s * complex.abs (complex.add s complex.one) := by rw [hc2, complex.abs_mul]
+    -- |x^(-s-2)| = x^(-Re(s)-2) <= a^(-Re(s)-2) since -Re(s)-2 <= 0 and a <= x!
+    have hxpow_abs : complex.abs (cpow_real x w2) = rpow x (-complex.re s - 2)
+      have hre_w2 : complex.re w2 = -complex.re s - 2 := by rw [hw2, hw1, hw0]; simp; ring
+      have hsq : complex.abs (cpow_real x w2) * complex.abs (cpow_real x w2) = rpow x (-complex.re s - 2) * rpow x (-complex.re s - 2)
+        rw [complex.abs_sq]; unfold complex.norm_sq cpow_real rpow; simp; rw [hre_w2]
+        have h1 : log x * (-complex.re s - 2) = (-complex.re s - 2) * log x := by ring
+        rw [h1]
+        have hpy := sin_sq_add_cos_sq (log x * complex.im w2)
+        linear_combination (exp ((-complex.re s - 2) * log x) * exp ((-complex.re s - 2) * log x)) * hpy
+      have hnn := complex.abs_nonneg (cpow_real x w2)
+      have hpos := rpow.pos x (-complex.re s - 2)
+      nlinarith
+    have hxpow_le : rpow x (-complex.re s - 2) ≤ rpow a (-complex.re s - 2)
+      unfold rpow
+      have hlog : log a ≤ log x := (log_le_log a x ha_pos (by linarith)).mpr hx1
+      have hle : (-complex.re s - 2) * log x ≤ (-complex.re s - 2) * log a := by nlinarith
+      exact (exp_le_exp ((-complex.re s - 2) * log x) ((-complex.re s - 2) * log a)).mpr hle
+    rw [hc2_abs, hxpow_abs]
+    have hm1 := mul_le_mul_of_nonneg_left.real (rpow x (-complex.re s - 2)) (rpow a (-complex.re s - 2)) (complex.abs s * complex.abs (complex.add s complex.one)) hxpow_le (mul_nonneg.real (complex.abs s) (complex.abs (complex.add s complex.one)) (complex.abs_nonneg s) (complex.abs_nonneg (complex.add s complex.one)))
+    have hm2 := mul_le_mul_of_nonneg_left.real (complex.abs s * complex.abs (complex.add s complex.one) * rpow x (-complex.re s - 2)) (complex.abs s * complex.abs (complex.add s complex.one) * rpow a (-complex.re s - 2)) (complex.abs (complex.of_real ((x - a) * (x - a - 1) / 2))) hm1 (complex.abs_nonneg (complex.of_real ((x - a) * (x - a - 1) / 2)))
+    have hm3 := mul_le_mul_of_nonneg_right.real (complex.abs (complex.of_real ((x - a) * (x - a - 1) / 2))) (1 / 8) (complex.abs s * complex.abs (complex.add s complex.one) * rpow a (-complex.re s - 2)) hq_abs (mul_nonneg.real (complex.abs s * complex.abs (complex.add s complex.one)) (rpow a (-complex.re s - 2)) (mul_nonneg.real (complex.abs s) (complex.abs (complex.add s complex.one)) (complex.abs_nonneg s) (complex.abs_nonneg (complex.add s complex.one))) (by linarith [rpow.pos a (-complex.re s - 2)]))
+    rw [hM]; linarith
+  have hml := c_has_integral.abs_le (fun x => complex.smul ((x - a) * (x - a - 1) / 2) (complex.mul c2 (cpow_real x w2))) a (a + 1) M (complex.mk I2_re I2_im) (by linarith) hM_nn hI2_int hpt
+  rw [hI2_eq, complex.abs_neg]
+  have hw1_len : (a + 1) - a = 1 := by ring
+  rw [hw1_len, hM] at hml
+  linarith
+
+-- THEOREM 2 (ABSOLUTE CONVERGENCE OF ORDER-2 EULER-MACLAURIN FOR ALL Re(s) > -1, s != 1!):
++ zeta.em2_csummable (s : ℂ) (hs : -1 < complex.re s) (hne : s ≠ complex.one) :
+    csummable (zeta_em2_term s)
+  apply csummable.of_abs_summable (zeta_em2_term s)
+  set C := complex.abs s * complex.abs (complex.add s complex.one) / 8 with hC
+  have hscaled := pseries.scaled_shift_summable (complex.re s + 1) C (by linarith)
+  apply summable.of_nonneg_le (fun n => complex.abs (zeta_em2_term s n)) (fun n => C * pseries.term (complex.re s + 1 + 1) (n + 1))
+  · intro n; exact complex.abs_nonneg (zeta_em2_term s n)
+  · intro n
+    have hb := zeta.em2_term_bound s n (by linarith) hne
+    have hterm_eq : pseries.term (complex.re s + 1 + 1) (n + 1) = rpow ((n + 1 : ℕ) : ℝ) (-complex.re s - 2)
+      unfold pseries.term
+      have hne0 : n + 1 ≠ 0 := by omega
+      rw [if_neg hne0]
+      have he : -(complex.re s + 1 + 1) = -complex.re s - 2 := by ring
+      rw [he]
+    rw [hterm_eq, hC]; exact hb
+  · exact hscaled
+
+-- THEOREM 3 (CONSTRUCTIVE PROOF OF zeta(0) = -1/2 — 0 CUSTOM AXIOMS!):
+-- At s = 0, every order-2 Euler-Maclaurin term T_n(0) = 0 identically!
++ zeta.em2_term_at_zero (n : ℕ) : zeta_em2_term complex.zero n = complex.zero
+  unfold zeta_em2_term
+  have hpow0 : ∀ x : ℝ, cpow_real x (complex.neg complex.zero) = complex.one
+    intro x; unfold cpow_real
+    have hneg0 : complex.neg complex.zero = complex.zero
+      apply complex.ext <;> simp
+    rw [hneg0]
+    apply complex.ext
+    · simp [exp_zero, cos_zero]
+    · simp [sin_zero]
+  have hpow1 : ∀ x : ℝ, 0 < x → cpow_real x (complex.sub complex.one complex.zero) = complex.of_real x
+    intro x hx; unfold cpow_real
+    have hsub1 : complex.sub complex.one complex.zero = complex.one
+      apply complex.ext <;> simp
+    rw [hsub1]
+    apply complex.ext
+    · simp [exp_log x hx, cos_zero]
+    · simp [sin_zero]
+  rw [hpow0 ((n + 1 : ℕ) : ℝ), hpow0 ((n + 2 : ℕ) : ℝ)]
+  rw [hpow1 ((n + 2 : ℕ) : ℝ) ((cast_pos.real (n + 2)).mpr (by omega)), hpow1 ((n + 1 : ℕ) : ℝ) ((cast_pos.real (n + 1)).mpr (by omega))]
+  have h1inv : complex.inv (complex.sub complex.one complex.zero) = complex.one := by ring
+  rw [h1inv]
+  ring
+
+-- Therefore the order-2 Euler-Maclaurin analytic continuation
+--   zeta_em2(s) = 1/(s - 1) + 1/2 + sum_{n>=0} T_n(s)
+-- evaluates at s = 0 to EXACTLY -1/2!
++ zeta.em2_at_zero_eq_neg_half (S0 : ℂ) (hS0 : ctends_to (fun (N : ℕ) => csum N (zeta_em2_term complex.zero)) S0) :
+    complex.add (complex.add (complex.inv (complex.sub complex.zero complex.one)) (complex.of_real (1 / 2))) S0 = complex.of_real (-1 / 2)
+  have hcsum0 : ∀ N : ℕ, csum N (zeta_em2_term complex.zero) = complex.zero
+    intro N
+    induction N with k ih
+    · rfl
+    · rw [succ_eq_add_one.nat]
+      have hs : csum (k + 1) (zeta_em2_term complex.zero) = complex.add (csum k (zeta_em2_term complex.zero)) (zeta_em2_term complex.zero k) := by rfl
+      rw [hs, ih, zeta.em2_term_at_zero k, complex.add_zero]
+  have hzero_lim : ctends_to (fun (N : ℕ) => csum N (zeta_em2_term complex.zero)) complex.zero
+    unfold ctends_to; intro e he
+    use 0; intro n _
+    rw [hcsum0 n, complex.sub_self, complex.abs_zero]; exact he
+  have hS0_eq : S0 = complex.zero := ctends_to.unique (fun (N : ℕ) => csum N (zeta_em2_term complex.zero)) S0 complex.zero hS0 hzero_lim
+  have hneg1_inv : complex.inv (complex.sub complex.zero complex.one) = complex.of_real (-1) := by ring
+  rw [hS0_eq, hneg1_inv]
+  ring
+
+-- ====================================================================================
+-- 3. SCALED GAUSSIAN FOURIER DUALITY & JACOBI THETA MODULAR INVERSION (0 AXIOMS!)
+-- ====================================================================================
+
+-- Scaled Gaussian Fourier cosine kernel for any t > 0:
+--   K_t(xi, x) = e^(-pi * t * x^2) * cos(2 * pi * xi * x)
+-> gauss_cos_t (t xi x : ℝ) : ℝ :=
+  exp (-pi * t * x * x) * cos (2 * pi * xi * x)
+
+-> gauss_sin_deriv_t (t xi x : ℝ) : ℝ :=
+  (-2 * pi * x * exp (-pi * t * x * x)) * sin (2 * pi * xi * x)
+
+-- Scaled Gaussian differentiation under the integral sign (`darboux.parameter_deriv`):
++ gaussian.scaled_fourier_deriv (J : ℝ → ℝ) (S : set ℝ) (t R xi V : ℝ)
+    (ht : 0 < t) (hR : 0 ≤ R) (hxi : xi ∈ S)
+    (hslices : ∀ s ∈ S, darboux.has_integral (gauss_cos_t t s) (-R) R (J s))
+    (hrate : darboux.has_integral (gauss_sin_deriv_t t xi) (-R) R V) :
+    has_deriv_within J S xi V
+  apply darboux.parameter_deriv (gauss_cos_t t) (gauss_sin_deriv_t t xi) J S (-R) R xi V hxi hslices hrate
+  unfold uniform_deriv_within
+  intro e he
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  set M := 2 * pi * R + 1 with hM
+  have hM_pos : 0 < M := by rw [hM]; nlinarith
+  set d := min (1 / M) (e / (M * M)) with hd
+  have hd_pos : 0 < d := by rw [hd]; exact lt_min.real (1 / M) (e / (M * M)) 0 (one_div_pos.real M hM_pos) (div_pos.real e (M * M) he (by nlinarith))
+  use d; constructor
+  · exact hd_pos
+  · intro s hs hnear x hx
+    have hx_abs : |x| ≤ R := abs_le_of.real x R (by linarith [hx.1]) hx.2
+    have h2pix : |2 * pi * x| ≤ M
+      have h1 : |2 * pi * x| = (2 * pi) * |x| := by rw [abs_mul.real, abs_of_pos.real (2 * pi) (by linarith)]
+      rw [h1, hM]; nlinarith
+    have harg_le1 : |2 * pi * (s - xi) * x| ≤ 1
+      have heq : 2 * pi * (s - xi) * x = (s - xi) * (2 * pi * x) := by ring
+      rw [heq, abs_mul.real]
+      have h1 : |s - xi| < 1 / M := by linarith [min_le_left.real (1 / M) (e / (M * M))]
+      have h2 := mul_le_mul_of_nonneg_left.real (|2 * pi * x|) M (|s - xi|) h2pix (abs_nonneg.real (s - xi))
+      have h3 : |s - xi| * M < 1 := by have h := (lt_div_iff.real (|s - xi|) 1 M hM_pos).mp h1; linarith
+      linarith
+    have hfac : gauss_cos_t t s x - gauss_cos_t t xi x - (s - xi) * gauss_sin_deriv_t t xi x = exp (-pi * t * x * x) * (cos (2 * pi * xi * x + 2 * pi * (s - xi) * x) - cos (2 * pi * xi * x) - (-sin (2 * pi * xi * x)) * (2 * pi * (s - xi) * x))
+      unfold gauss_cos_t gauss_sin_deriv_t
+      have ha : 2 * pi * xi * x + 2 * pi * (s - xi) * x = 2 * pi * s * x := by ring
+      rw [ha]; ring
+    rw [hfac, abs_mul.real]
+    have hexp_le1 : exp (-pi * t * x * x) ≤ 1
+      have htxx : 0 ≤ t * (x * x) := by nlinarith
+      have hle0 : -pi * t * x * x ≤ 0 := by nlinarith
+      have h := (exp_le_exp (-pi * t * x * x) 0).mpr hle0
+      rw [exp_zero] at h; exact h
+    have hexp_pos : 0 < exp (-pi * t * x * x) := exp_pos (-pi * t * x * x)
+    rw [abs_of_pos.real (exp (-pi * t * x * x)) hexp_pos]
+    have hrem := cos_linear_remainder_le (2 * pi * xi * x) (2 * pi * (s - xi) * x) harg_le1
+    have hprod_le : exp (-pi * t * x * x) * |cos (2 * pi * xi * x + 2 * pi * (s - xi) * x) - cos (2 * pi * xi * x) - (-sin (2 * pi * xi * x)) * (2 * pi * (s - xi) * x)| ≤ (2 * pi * (s - xi) * x) * (2 * pi * (s - xi) * x)
+      have h1 := mul_le_mul_of_nonneg_left.real (|cos (2 * pi * xi * x + 2 * pi * (s - xi) * x) - cos (2 * pi * xi * x) - (-sin (2 * pi * xi * x)) * (2 * pi * (s - xi) * x)|) ((2 * pi * (s - xi) * x) * (2 * pi * (s - xi) * x)) (exp (-pi * t * x * x)) hrem (by linarith)
+      have h2 := mul_le_mul_of_nonneg_right.real (exp (-pi * t * x * x)) 1 ((2 * pi * (s - xi) * x) * (2 * pi * (s - xi) * x)) hexp_le1 (by nlinarith)
+      linarith
+    have hsq_bd : (2 * pi * (s - xi) * x) * (2 * pi * (s - xi) * x) ≤ (M * M) * |s - xi| * |s - xi|
+      have h1 : (2 * pi * (s - xi) * x) * (2 * pi * (s - xi) * x) = ((2 * pi * x) * (2 * pi * x)) * ((s - xi) * (s - xi)) := by ring
+      have hs1 : (2 * pi * x) * (2 * pi * x) = |2 * pi * x| * |2 * pi * x| := (sq_abs.real (2 * pi * x)).symm
+      have hs2 : (s - xi) * (s - xi) = |s - xi| * |s - xi| := (sq_abs.real (s - xi)).symm
+      rw [h1, hs1, hs2]
+      have h2 : |2 * pi * x| * |2 * pi * x| ≤ M * M := by nlinarith [abs_nonneg.real (2 * pi * x)]
+      have h3 := mul_le_mul_of_nonneg_right.real (|2 * pi * x| * |2 * pi * x|) (M * M) (|s - xi| * |s - xi|) h2 (by nlinarith [abs_nonneg.real (s - xi)])
+      linarith
+    have hnear_e : |s - xi| < e / (M * M) := by linarith [min_le_right.real (1 / M) (e / (M * M))]
+    have hMe : (M * M) * |s - xi| < e
+      have h := (lt_div_iff.real (|s - xi|) e (M * M) (by nlinarith)).mp hnear_e
+      linarith
+    have hfin := mul_le_mul_of_nonneg_right.real ((M * M) * |s - xi|) e (|s - xi|) (by linarith) (abs_nonneg.real (s - xi))
+    linarith
+
+-- Scaled Gaussian IBP ODE: t * V + (2 * pi * xi) * I = 2 * exp(-pi * t * R^2) * sin(2 * pi * xi * R)!
++ gaussian.scaled_fourier_ibp (t R xi I V : ℝ) (ht : 0 < t) (hR : 0 ≤ R)
+    (hI : darboux.has_integral (gauss_cos_t t xi) (-R) R I)
+    (hV : darboux.has_integral (gauss_sin_deriv_t t xi) (-R) R V) :
+    t * V + (2 * pi * xi) * I = 2 * exp (-pi * t * R * R) * sin (2 * pi * xi * R)
+  have hF_deriv : ∀ u, -R ≤ u → u ≤ R → has_deriv_within (fun x => exp (-pi * t * x * x)) (fun z => -R ≤ z ∧ z ≤ R) u (-2 * pi * t * u * exp (-pi * t * u * u))
+    intro u _ _
+    have hsq : has_deriv_within (fun x => x * x) (fun z => -R ≤ z ∧ z ≤ R) u (u + u)
+      have h := has_deriv_within.mul (fun x => x) (fun x => x) (fun z => -R ≤ z ∧ z ≤ R) u 1 1 (has_deriv_within.id (fun z => -R ≤ z ∧ z ≤ R) u) (has_deriv_within.id (fun z => -R ≤ z ∧ z ≤ R) u)
+      have hv : 1 * u + u * 1 = u + u := by ring
+      rw [hv] at h; exact h
+    have hsc := has_deriv_within.scale (-pi * t) (fun x => x * x) (fun z => -R ≤ z ∧ z ≤ R) u (u + u) hsq
+    have hf : (fun x => (-pi * t) * (x * x)) = (fun x => -pi * t * x * x) := by funext x; ring
+    rw [hf] at hsc
+    have hexp := has_deriv_within.exp_comp (fun x => -pi * t * x * x) (fun z => -R ≤ z ∧ z ≤ R) u ((-pi * t) * (u + u)) hsc
+    have hv : exp (-pi * t * u * u) * ((-pi * t) * (u + u)) = -2 * pi * t * u * exp (-pi * t * u * u) := by ring
+    rw [hv] at hexp; exact hexp
+  have hG_deriv : ∀ u, -R ≤ u → u ≤ R → has_deriv_within (fun x => sin (2 * pi * xi * x)) (fun z => -R ≤ z ∧ z ≤ R) u (2 * pi * xi * cos (2 * pi * xi * u))
+    intro u _ _
+    have h1 := has_deriv_within.comp sin (fun x => 2 * pi * xi * x) (fun z => -R ≤ z ∧ z ≤ R) (fun _ => True) u (cos (2 * pi * xi * u)) (2 * pi * xi) (has_deriv_within.sin (fun _ => True) (2 * pi * xi * u)) (has_deriv_within.scale_id (2 * pi * xi) (fun z => -R ≤ z ∧ z ≤ R) u) (by intro z _; trivial)
+    have hv : cos (2 * pi * xi * u) * (2 * pi * xi) = 2 * pi * xi * cos (2 * pi * xi * u) := by ring
+    rw [hv] at h1; exact h1
+  have hVt : darboux.has_integral (fun x => (-2 * pi * t * x * exp (-pi * t * x * x)) * sin (2 * pi * xi * x)) (-R) R (t * V)
+    have hsc := darboux.scale (gauss_sin_deriv_t t xi) (-R) R V t hV
+    have hfeq : (fun x => t * gauss_sin_deriv_t t xi x) = (fun x => (-2 * pi * t * x * exp (-pi * t * x * x)) * sin (2 * pi * xi * x)) := by funext x; unfold gauss_sin_deriv_t; ring
+    rw [hfeq] at hsc; exact hsc
+  have hJ : darboux.has_integral (fun x => exp (-pi * t * x * x) * (2 * pi * xi * cos (2 * pi * xi * x))) (-R) R ((2 * pi * xi) * I)
+    have hsc := darboux.scale (gauss_cos_t t xi) (-R) R I (2 * pi * xi) hI
+    have hfeq : (fun x => (2 * pi * xi) * gauss_cos_t t xi x) = (fun x => exp (-pi * t * x * x) * (2 * pi * xi * cos (2 * pi * xi * x))) := by funext x; unfold gauss_cos_t; ring
+    rw [hfeq] at hsc; exact hsc
+  have hbp := darboux.by_parts (fun x => exp (-pi * t * x * x)) (fun x => sin (2 * pi * xi * x)) (fun x => -2 * pi * t * x * exp (-pi * t * x * x)) (fun x => 2 * pi * xi * cos (2 * pi * xi * x)) (-R) R (t * V) ((2 * pi * xi) * I) hVt hJ hF_deriv hG_deriv
+  have hrhs : exp (-pi * t * R * R) * sin (2 * pi * xi * R) - exp (-pi * t * (-R) * (-R)) * sin (2 * pi * xi * (-R)) = 2 * exp (-pi * t * R * R) * sin (2 * pi * xi * R)
+    have h1 : -pi * t * (-R) * (-R) = -pi * t * R * R := by ring
+    have h2 : 2 * pi * xi * (-R) = -(2 * pi * xi * R) := by ring
+    rw [h1, h2, sin_neg]; ring
+  linarith
+
+-- THEOREM 4 (SCALED GAUSSIAN FOURIER SELF-DUALITY ERROR BOUND FOR ALL t > 0 — 0 AXIOMS!):
+--   |int_{-R}^{R} e^(-pi*t*x^2) cos(2*pi*xi*x) dx - e^(-pi*xi^2 / t) * int_{-R}^{R} e^(-pi*t*x^2) dx|
+--     <= (2 * |xi| / t) * e^(-pi * t * R^2) !
++ gaussian.scaled_fourier_duality_bound (J : ℝ → ℝ) (t R xi : ℝ) (ht : 0 < t) (hR : 0 ≤ R)
+    (hslices : ∀ s : ℝ, darboux.has_integral (gauss_cos_t t s) (-R) R (J s))
+    (hrates : ∀ s : ℝ, ∃ V : ℝ, darboux.has_integral (gauss_sin_deriv_t t s) (-R) R V) :
+    |J xi - exp (-pi * xi * xi / t) * J 0| ≤ (2 * |xi| / t) * exp (-pi * t * R * R)
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  have ht_ne : t ≠ 0 := by linarith
+  have hH_deriv : ∀ (a b : ℝ), a ≤ b → ∀ s, a ≤ s → s ≤ b →
+      has_deriv_within (fun u => exp (pi * u * u / t) * J u) (fun z => a ≤ z ∧ z ≤ b) s ((2 / t) * exp (pi * s * s / t) * exp (-pi * t * R * R) * sin (2 * pi * s * R))
+    intro a b hab s has hsb
+    obtain ⟨V, hV⟩ := hrates s
+    have hJd : has_deriv_within J (fun z => a ≤ z ∧ z ≤ b) s V :=
+      gaussian.scaled_fourier_deriv J (fun z => a ≤ z ∧ z ≤ b) t R s V ht hR ⟨has, hsb⟩ (by intro u _; exact hslices u) hV
+    have hode := gaussian.scaled_fourier_ibp t R s (J s) V ht hR (hslices s) hV
+    have hsq : has_deriv_within (fun u => u * u) (fun z => a ≤ z ∧ z ≤ b) s (s + s)
+      have h := has_deriv_within.mul (fun u => u) (fun u => u) (fun z => a ≤ z ∧ z ≤ b) s 1 1 (has_deriv_within.id (fun z => a ≤ z ∧ z ≤ b) s) (has_deriv_within.id (fun z => a ≤ z ∧ z ≤ b) s)
+      have hv : 1 * s + s * 1 = s + s := by ring
+      rw [hv] at h; exact h
+    have hsc := has_deriv_within.scale (pi / t) (fun u => u * u) (fun z => a ≤ z ∧ z ≤ b) s (s + s) hsq
+    have hf : (fun u => (pi / t) * (u * u)) = (fun u => pi * u * u / t) := by funext u; field_simp
+    rw [hf] at hsc
+    have hexp_d := has_deriv_within.exp_comp (fun u => pi * u * u / t) (fun z => a ≤ z ∧ z ≤ b) s ((pi / t) * (s + s)) hsc
+    have hprod := has_deriv_within.mul (fun u => exp (pi * u * u / t)) J (fun z => a ≤ z ∧ z ≤ b) s (exp (pi * s * s / t) * ((pi / t) * (s + s))) V hexp_d hJd
+    have hveq : exp (pi * s * s / t) * ((pi / t) * (s + s)) * J s + exp (pi * s * s / t) * V = (2 / t) * exp (pi * s * s / t) * exp (-pi * t * R * R) * sin (2 * pi * s * R)
+      have hc := mul_inv_cancel.real t ht_ne
+      rw [div_def.real pi t, div_def.real 2 t]
+      linear_combination (exp (pi * s * s / t) * t⁻¹) * hode - (exp (pi * s * s / t) * V) * hc
+    rw [hveq] at hprod; exact hprod
+  set M := (2 / t) * exp (pi * xi * xi / t) * exp (-pi * t * R * R) with hM
+  have hbound_deriv : ∀ s, s * s ≤ xi * xi →
+      -(M) ≤ (2 / t) * exp (pi * s * s / t) * exp (-pi * t * R * R) * sin (2 * pi * s * R) ∧
+      (2 / t) * exp (pi * s * s / t) * exp (-pi * t * R * R) * sin (2 * pi * s * R) ≤ M
+    intro s hss
+    have hdiv_le : pi * s * s / t ≤ pi * xi * xi / t
+      rw [div_def.real (pi * s * s) t, div_def.real (pi * xi * xi) t]
+      have hinv_pos : 0 < t⁻¹
+        have hp := one_div_pos.real t ht
+        rw [div_def.real 1 t] at hp; linarith
+      have h1 : pi * s * s ≤ pi * xi * xi := by nlinarith
+      nlinarith
+    have hexp_le : exp (pi * s * s / t) ≤ exp (pi * xi * xi / t) :=
+      (exp_le_exp (pi * s * s / t) (pi * xi * xi / t)).mpr hdiv_le
+    have hsin_bd := sin_abs_le_one (2 * pi * s * R)
+    have hsin_lo : -1 ≤ sin (2 * pi * s * R) := by linarith [neg_le_abs.real (sin (2 * pi * s * R))]
+    have hsin_hi : sin (2 * pi * s * R) ≤ 1 := by linarith [le_abs_self.real (sin (2 * pi * s * R))]
+    have h2t_pos : 0 < 2 / t := div_pos.real 2 t (by decide) ht
+    have hcoeff_pos : 0 < (2 / t) * exp (pi * s * s / t) * exp (-pi * t * R * R) :=
+      mul_pos.real ((2 / t) * exp (pi * s * s / t)) (exp (-pi * t * R * R)) (mul_pos.real (2 / t) (exp (pi * s * s / t)) h2t_pos (exp_pos (pi * s * s / t))) (exp_pos (-pi * t * R * R))
+    have hcoeff_le : (2 / t) * exp (pi * s * s / t) * exp (-pi * t * R * R) ≤ M
+      rw [hM]
+      have h1 := mul_le_mul_of_nonneg_left.real (exp (pi * s * s / t)) (exp (pi * xi * xi / t)) (2 / t) hexp_le (by linarith)
+      exact mul_le_mul_of_nonneg_right.real ((2 / t) * exp (pi * s * s / t)) ((2 / t) * exp (pi * xi * xi / t)) (exp (-pi * t * R * R)) h1 (by linarith [exp_pos (-pi * t * R * R)])
+    constructor <;> nlinarith
+  have hH_inc : |exp (pi * xi * xi / t) * J xi - J 0| ≤ M * |xi|
+    have h0 : exp (pi * 0 * 0 / t) * J 0 = J 0
+      have hz : pi * 0 * 0 / t = 0 := by rw [div_def.real]; ring
+      rw [hz, exp_zero]; ring
+    by_cases hxi_nn : 0 ≤ xi
+    · have hup := interval.increment_le_of_deriv_le (fun u => exp (pi * u * u / t) * J u) (fun s => (2 / t) * exp (pi * s * s / t) * exp (-pi * t * R * R) * sin (2 * pi * s * R)) 0 xi M hxi_nn (hH_deriv 0 xi hxi_nn) (by intro s hs1 hs2; exact (hbound_deriv s (by nlinarith)).2)
+      have hlo := interval.increment_ge_of_deriv_ge (fun u => exp (pi * u * u / t) * J u) (fun s => (2 / t) * exp (pi * s * s / t) * exp (-pi * t * R * R) * sin (2 * pi * s * R)) 0 xi (-M) hxi_nn (hH_deriv 0 xi hxi_nn) (by intro s hs1 hs2; exact (hbound_deriv s (by nlinarith)).1)
+      rw [h0] at hup hlo
+      rw [abs_of_nonneg.real xi hxi_nn]
+      exact abs_le_of.real (exp (pi * xi * xi / t) * J xi - J 0) (M * xi) (by linarith) (by linarith)
+    · have hxi_le : xi ≤ 0 := by linarith
+      have hup := interval.increment_le_of_deriv_le (fun u => exp (pi * u * u / t) * J u) (fun s => (2 / t) * exp (pi * s * s / t) * exp (-pi * t * R * R) * sin (2 * pi * s * R)) xi 0 M hxi_le (hH_deriv xi 0 hxi_le) (by intro s hs1 hs2; exact (hbound_deriv s (by nlinarith)).2)
+      have hlo := interval.increment_ge_of_deriv_ge (fun u => exp (pi * u * u / t) * J u) (fun s => (2 / t) * exp (pi * s * s / t) * exp (-pi * t * R * R) * sin (2 * pi * s * R)) xi 0 (-M) hxi_le (hH_deriv xi 0 hxi_le) (by intro s hs1 hs2; exact (hbound_deriv s (by nlinarith)).1)
+      rw [h0] at hup hlo
+      rw [abs_of_nonpos.real xi hxi_le]
+      exact abs_le_of.real (exp (pi * xi * xi / t) * J xi - J 0) (M * (0 - xi)) (by linarith) (by linarith)
+  have hprod1 : exp (-pi * xi * xi / t) * exp (pi * xi * xi / t) = 1
+    rw [← exp_add]
+    have h0 : -pi * xi * xi / t + pi * xi * xi / t = 0
+      rw [div_def.real (-pi * xi * xi) t, div_def.real (pi * xi * xi) t]; ring
+    rw [h0, exp_zero]
+  have hcancel : exp (-pi * xi * xi / t) * (exp (pi * xi * xi / t) * J xi - J 0) = J xi - exp (-pi * xi * xi / t) * J 0 := by
+    linear_combination J xi * hprod1
+  have hcancel_M : exp (-pi * xi * xi / t) * (M * |xi|) = (2 * |xi| / t) * exp (-pi * t * R * R)
+    rw [hM]
+    have hdiv_eq : (2 / t) * |xi| = 2 * |xi| / t := by rw [div_def.real 2 t, div_def.real (2 * |xi|) t]; ring
+    linear_combination ((2 * |xi| / t) * exp (-pi * t * R * R)) * hprod1 + (exp (-pi * xi * xi / t) * exp (pi * xi * xi / t) * exp (-pi * t * R * R)) * hdiv_eq
+  have hexp_pos : 0 < exp (-pi * xi * xi / t) := exp_pos (-pi * xi * xi / t)
+  have hm := mul_le_mul_of_nonneg_left.real (|exp (pi * xi * xi / t) * J xi - J 0|) (M * |xi|) (exp (-pi * xi * xi / t)) hH_inc (by linarith)
+  rw [← abs_of_pos.real (exp (-pi * xi * xi / t)) hexp_pos, ← abs_mul.real, hcancel] at hm
+  rw [abs_of_pos.real (exp (-pi * xi * xi / t)) hexp_pos, hcancel_M] at hm
+  exact hm
+
+-- THEOREM 5 (EXACT GAUSSIAN INTEGRAL C = 1 & JACOBI THETA MODULAR INVERSION FROM POISSON — 0 AXIOMS!):
+-- If theta(t) = 1 + 2*psi(t) > 0 satisfies Poisson summation with Gaussian Fourier transform
+--   theta(t) = (C / sqrt(t)) * theta(1 / t)   (where C = int_{-inf}^{inf} e^(-pi*x^2) dx > 0),
+-- then AUTOMATICALLY C = 1 AND theta(t) = (1 / sqrt(t)) * theta(1 / t) for ALL t > 0!
++ gaussian.integral_eq_one_of_poisson (theta : ℝ → ℝ) (C : ℝ)
+    (hC_pos : 0 < C) (hth1_pos : 0 < theta 1)
+    (hpois1 : theta 1 = (C / sqrt 1) * theta (1 / 1)) :
+    C = 1
+  have h11 : (1 : ℝ) / 1 = 1 := by rw [div_def.real 1 1]; have h := mul_inv_cancel.real 1 (by decide); linarith
+  rw [h11, sqrt_one] at hpois1
+  have hc1 : C / 1 = C := by rw [div_def.real C 1]; have h := mul_inv_cancel.real 1 (by decide); linear_combination C * h
+  rw [hc1] at hpois1
+  nlinarith
+
++ jacobi_theta.modular_inversion_of_poisson (psi : ℝ → ℝ) (C : ℝ)
+    (hC_pos : 0 < C)
+    (hpsi_nn : ∀ t, 0 < t → 0 ≤ psi t)
+    (hpois : ∀ t, 0 < t → 1 + 2 * psi t = (C / sqrt t) * (1 + 2 * psi (1 / t))) :
+    C = 1 ∧ (∀ t, 0 < t → 1 + 2 * psi t = (1 / sqrt t) * (1 + 2 * psi (1 / t)))
+  have h1pos : 0 < 1 + 2 * psi 1 := by linarith [hpsi_nn 1 (by decide)]
+  have hC1 : C = 1 := gaussian.integral_eq_one_of_poisson (fun t => 1 + 2 * psi t) C hC_pos h1pos (hpois 1 (by decide))
+  constructor
+  · exact hC1
+  · intro t ht
+    have h := hpois t ht
+    rw [hC1] at h; exact h

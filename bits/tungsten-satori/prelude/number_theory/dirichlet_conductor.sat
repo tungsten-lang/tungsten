@@ -1,0 +1,1072 @@
+-- Milestone 3.28: Unitary Character Values, Euclidean Bezout & CRT Unit Lifting,
+--                 Uniqueness of Primitive Conductor (`dchar.primitive_unique`),
+--                 Complete Primitive Gauss Sum Evaluation (`|tau(chi)|^2 = q`),
+--                 and Unitary Functional-Equation Root Number `W(chi) * W(bar chi) = 1`
+--                 (0 CUSTOM AXIOMS!)
+--
+-- Discharges ALL finite/arithmetic prerequisites of Frontier #1 (`classical_L_laws`):
+--   1. `pigeonhole_lt` & `dchar.unit_norm_sq_one`: |chi(a)|^2 = 1 for every unit a mod q,
+--      |chi(a)| <= 1 for all a, and parity chi(-1) in {1, -1}.
+--   2. `nat.bezout`: constructive Euclidean Bezout gcd d | a, d | b, a*x = b*y + d v b*y = a*x + d!
+--   3. `zmod.is_unit_of_no_common_prime` & `zmod.unit_lift`: CRT unit lifting from L | q to q!
+--   4. `dchar.primitive_unique` & `dchar.prim`: EVERY valid Dirichlet character has a UNIQUE
+--      primitive conductor `dchar.prim chi`!
+--   5. `primitive.non_unit_witness` & `primitive.dft_eq_conj_tau`: for EVERY primitive chi and
+--      EVERY b (unit OR non-unit!), sum_{a<q} chi(a) e^(2*pi*i*a*b/q) = conj(chi(b)) * tau(chi)!
+--   6. `primitive.tau_norm_sq_eq_q`: |tau(chi)|^2 = q and tau(chi) != 0 for EVERY primitive chi!
+--   7. `dchar.root_num`: concrete root number W(chi) = tau(chi) / (i^a * sqrt(q)) with:
+--        - `primitive.root_num_unit_and_ne_zero`: |W(chi)|^2 = 1 & W(chi) != 0 (Clause 2 of DirichletLLaws!)
+--        - `primitive.root_num_mul_inv`: W(chi) * W(bar chi) = 1!
+--
+-- ALL theorems proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import choice
+import finite_field
+import analysis.weierstrass_gamma
+import analysis.complex_strip_cauchy
+import analysis.mellin_zeta_strip
+
+-- ====================================================================================
+-- 1. PIGEONHOLE, UNITARY CHARACTER VALUES |chi(a)|^2 = 1, & PARITY chi(-1) = +/- 1
+-- ====================================================================================
+
+-- Finite Pigeonhole Principle: any f : {0..n} -> {0..n-1} has a collision i < j!
++ pigeonhole_lt (n : ℕ) : ∀ f : ℕ → ℕ, (∀ i, i < n + 1 → f i < n) → ∃ i j : ℕ, i < j ∧ j < n + 1 ∧ f i = f j
+  intro f hf; obtain ⟨i, j, hij, hj, heq⟩ := pigeonhole.nat_map n (n + 1) f (by omega) hf
+  exact ⟨i, j, hij, hj, heq⟩
+
+-- Multiplicative power lemma for Dirichlet characters: chi(a^m) = chi(a)^m!
++ dchar.val_pow (q a m : ℕ) (chi : ℕ → ℂ) (hchar : is_dirichlet_char q chi) :
+    chi (a ^ m) = cpow_nat (chi a) m
+  induction m with k ih
+  · rw [pow_zero.nat]
+    have h0 : cpow_nat (chi a) 0 = complex.one := by rfl
+    rw [h0]; exact hchar.2.1
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    have hs : cpow_nat (chi a) (k + 1) = complex.mul (cpow_nat (chi a) k) (chi a) := by rfl
+    rw [hs, hchar.2.2.2 (a ^ k) a, ih]
+
+-- THEOREM 1 (UNITARY CHARACTER VALUES: |chi(a)|^2 = 1 FOR EVERY UNIT a MOD q — 0 AXIOMS!):
++ dchar.unit_norm_sq_one (chi : DChar) (hval : dchar.valid chi) (a : ℕ) (hu : zmod.is_unit chi.level a) :
+    complex.norm_sq (chi.val a) = 1
+  have hq_pos : 0 < chi.level := by unfold dchar.valid at hval; omega
+  unfold zmod.is_unit at hu
+  obtain ⟨ia, hia_lt, haia⟩ := hu
+  -- Pigeonhole on k |-> (a^k) % q for k < q + 1:
+  obtain ⟨i, j, hij, _, hpow_eq⟩ := pigeonhole_lt chi.level (fun k => (a ^ k) % chi.level) (by intro k _; exact mod_lt.nat (a ^ k) chi.level hq_pos)
+  set m := j - i with hm
+  have hm_pos : 1 ≤ m := by omega
+  have hj_eq : j = i + m := by omega
+  -- Multiply a^i = a^(i + m) mod q by ia^i to get a^m = 1 mod q!
+  have haia_pow : ∀ k : ℕ, ((a ^ k) * (ia ^ k)) % chi.level = 1 % chi.level
+    intro k
+    induction k with r ihr
+    · rw [pow_zero.nat, pow_zero.nat]; simp
+    · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat]
+      have hre : a ^ r * a * (ia ^ r * ia) = (a ^ r * ia ^ r) * (a * ia) := by ring
+      rw [hre, mul_mod.nat (a ^ r * ia ^ r) (a * ia) chi.level, ihr, haia, ← mul_mod.nat 1 1 chi.level]; simp
+  have ham_mod : (a ^ m) % chi.level = 1 % chi.level
+    have hmul : (a ^ m * (a ^ i * ia ^ i)) % chi.level = (a ^ j * ia ^ i) % chi.level
+      have hre : a ^ m * (a ^ i * ia ^ i) = a ^ j * ia ^ i := by rw [hj_eq, pow_add.nat a i m]; ring
+      rw [hre]
+    have h1 : (a ^ m * (a ^ i * ia ^ i)) % chi.level = (a ^ m) % chi.level
+      rw [mul_mod.nat (a ^ m) (a ^ i * ia ^ i) chi.level, haia_pow i, ← mul_mod.nat (a ^ m) 1 chi.level]
+      have h1a : a ^ m * 1 = a ^ m := by ring
+      rw [h1a]
+    have h2 : (a ^ j * ia ^ i) % chi.level = 1 % chi.level
+      rw [mul_mod.nat (a ^ j) (ia ^ i) chi.level, ← hpow_eq, ← mul_mod.nat (a ^ i) (ia ^ i) chi.level]
+      exact haia_pow i
+    rw [← h1, hmul, h2]
+  -- Hence chi(a)^m = chi(a^m) = chi(1) = 1!
+  have hcpow1 : cpow_nat (chi.val a) m = complex.one
+    rw [← dchar.val_pow chi.level a m chi.val hval.2]
+    rw [← dchar.mod_eq_m39 chi.level chi.val hval.2.1 (a ^ m), ham_mod, dchar.mod_eq_m39 chi.level chi.val hval.2.1 1]
+    exact hval.2.2.1
+  have hns_pow : (complex.norm_sq (chi.val a)) ^ m = 1
+    have hpow_ns : ∀ k : ℕ, complex.norm_sq (cpow_nat (chi.val a) k) = (complex.norm_sq (chi.val a)) ^ k
+      intro k
+      induction k with r ihr
+      · have h0 : cpow_nat (chi.val a) 0 = complex.one := by rfl
+        rw [h0, pow_zero.real]; unfold complex.norm_sq; simp
+      · rw [succ_eq_add_one.nat, pow_succ.real]
+        have hs : cpow_nat (chi.val a) (r + 1) = complex.mul (cpow_nat (chi.val a) r) (chi.val a) := by rfl
+        rw [hs, complex.norm_sq_mul, ihr]
+    rw [← hpow_ns m, hcpow1]; unfold complex.norm_sq; simp
+  set x := complex.norm_sq (chi.val a) with hx
+  have hx_nn : 0 ≤ x := by rw [hx]; exact complex.norm_sq_nonneg (chi.val a)
+  -- x >= 0 and x^m = 1 (m >= 1) => x = 1!
+  by_cases hlt : x < 1
+  · exfalso
+    have hle : x ^ m < 1
+      have hgen : ∀ k : ℕ, 1 ≤ k → x ^ k < 1
+        intro k; induction k with h1 r ihr h1
+        · omega
+        · rw [succ_eq_add_one.nat, pow_succ.real]
+          by_cases hr0 : r = 0
+          · rw [hr0, pow_zero.real]; linarith
+          · have hr1 := ihr (by omega); nlinarith [pow_nonneg.real x hx_nn r]
+      exact hgen m hm_pos
+    linarith
+  · by_cases hgt : 1 < x
+    · exfalso
+      have hge : 1 < x ^ m
+        have hgen : ∀ k : ℕ, 1 ≤ k → 1 < x ^ k
+          intro k; induction k with h1 r ihr h1
+          · omega
+          · rw [succ_eq_add_one.nat, pow_succ.real]
+            by_cases hr0 : r = 0
+            · rw [hr0, pow_zero.real]; linarith
+            · have hr1 := ihr (by omega); nlinarith
+        exact hgen m hm_pos
+      linarith
+    · linarith
+
++ dchar.norm_sq_le_one (chi : DChar) (hval : dchar.valid chi) (a : ℕ) :
+    complex.norm_sq (chi.val a) ≤ 1
+  by_cases hu : zmod.is_unit chi.level a
+  · rw [dchar.unit_norm_sq_one chi hval a hu]; linarith
+  · rw [hval.2.2.2.1 a hu]; unfold complex.norm_sq; simp
+
++ dchar.abs_le_one (chi : DChar) (hval : dchar.valid chi) (a : ℕ) :
+    complex.abs (chi.val a) ≤ 1
+  have hsq : complex.abs (chi.val a) * complex.abs (chi.val a) ≤ 1 * 1 := by rw [complex.abs_sq]; linarith [dchar.norm_sq_le_one chi hval a]
+  nlinarith
+
+-- Parity of every valid character mod q >= 2: chi(q - 1) = 1 or chi(q - 1) = -1!
++ dchar.neg_one_unit (q : ℕ) (hq : 2 ≤ q) : zmod.is_unit q (q - 1)
+  unfold zmod.is_unit
+  use q - 1
+  constructor
+  · omega
+  · have heq : (q - 1) * (q - 1) = 1 + q * (q - 2)
+      set m := q - 2 with hm
+      have h1 : q - 1 = m + 1 := by omega
+      have h2 : q = m + 2 := by omega
+      rw [h1, h2]; ring
+    rw [heq, add_mul_mod.nat]
+
++ dchar.neg_one_sq (chi : DChar) (hval : dchar.valid chi) (hq : 2 ≤ chi.level) :
+    complex.mul (chi.val (chi.level - 1)) (chi.val (chi.level - 1)) = complex.one
+  rw [← hval.2.2.2.2 (chi.level - 1) (chi.level - 1)]
+  have heq : (chi.level - 1) * (chi.level - 1) = 1 + chi.level * (chi.level - 2)
+    set m := chi.level - 2 with hm
+    have h1 : chi.level - 1 = m + 1 := by omega
+    have h2 : chi.level = m + 2 := by omega
+    rw [h1, h2]; ring
+  rw [← dchar.mod_eq_m39 chi.level chi.val hval.2.1 ((chi.level - 1) * (chi.level - 1)), heq, add_mul_mod.nat, dchar.mod_eq_m39 chi.level chi.val hval.2.1 1]
+  exact hval.2.2.1
+
++ dchar.neg_one_pm_one (chi : DChar) (hval : dchar.valid chi) (hq : 2 ≤ chi.level) :
+    chi.val (chi.level - 1) = complex.one ∨ chi.val (chi.level - 1) = complex.neg complex.one
+  have hsq := dchar.neg_one_sq chi hval hq
+  set z := chi.val (chi.level - 1) with hz
+  have hre : complex.re z * complex.re z - complex.im z * complex.im z = 1
+    have h : complex.re (complex.mul z z) = complex.re complex.one := by rw [hsq]
+    simp at h; exact h
+  have him : complex.re z * complex.im z + complex.im z * complex.re z = 0
+    have h : complex.im (complex.mul z z) = complex.im complex.one := by rw [hsq]
+    simp at h; exact h
+  have him0 : complex.im z = 0
+    by_contra hnz
+    have hre0 : complex.re z = 0 := by nlinarith
+    rw [hre0] at hre; nlinarith
+  rw [him0] at hre
+  by_cases hpos : 0 ≤ complex.re z
+  · left
+    have hre1 : complex.re z = 1 := by nlinarith
+    apply complex.ext <;> simp <;> linarith
+  · right
+    have hre1 : complex.re z = -1 := by nlinarith
+    apply complex.ext <;> simp <;> linarith
+
+-- ====================================================================================
+-- 2. CONSTRUCTIVE EUCLIDEAN BEZOUT, PRIME UNIT CRITERION, & CRT UNIT LIFTING
+-- ====================================================================================
+
+-- Helper: if d | a and d | b, then d | (a + b) and d | (a * c).
++ nat.dvd_mul_right (d a c : ℕ) (hd : 0 < d) (h : d ∣ a) : d ∣ (a * c) :=
+  dvd.mul_right_nat d a c hd h
+
++ nat.dvd_add (d a b : ℕ) (hd : 0 < d) (ha : d ∣ a) (hb : d ∣ b) : d ∣ (a + b) :=
+  dvd.add_nat d a b hd ha hb
+
++ nat.dvd_sub_of_add (d a b : ℕ) (hd : 0 < d) (ha : d ∣ a) (hab : d ∣ (a + b)) : d ∣ b
+  have h := dvd.sub_nat d (a + b) a hd (by omega) hab ha
+  have heq : a + b - a = b := by omega
+  rw [heq] at h; exact h
+
+-- THEOREM 2 (CONSTRUCTIVE EUCLIDEAN BEZOUT — 0 AXIOMS!):
+-- For EVERY a, b with 0 < b, there exists d > 0 dividing a and b, divisible by every
+-- common divisor of a and b, and satisfying a * x = b * y + d OR b * y = a * x + d!
++ nat.bezout_le (N : ℕ) :
+    ∀ a b : ℕ, 0 < b → b ≤ N →
+      ∃ d : ℕ, 0 < d ∧ d ∣ a ∧ d ∣ b ∧ (∀ c : ℕ, 0 < c → c ∣ a → c ∣ b → c ∣ d) ∧
+        (∃ x y : ℕ, a * x = b * y + d ∨ b * y = a * x + d)
+  induction N with a b hb hle k ih a b hb hle
+  · omega
+  · by_cases hdiv : a % b = 0
+    · use b
+      constructor
+      · exact hb
+      · constructor
+        · exact hdiv
+        · constructor
+          · unfold dvd
+            have hmod := add_mul_mod.nat 0 1 b
+            have heq : 0 + b * 1 = b := by ring
+            rw [heq] at hmod; rw [hmod]; exact (div_mod_of_lt.nat 0 b hb).2
+          · constructor
+            · intro c _ _ hcb; exact hcb
+            · use 0; use 1; right; ring
+    · set r := a % b with hr
+      have hr_pos : 0 < r := by omega
+      have hr_lt : r < b := by rw [hr]; exact mod_lt.nat a b hb
+      have hr_le : r ≤ k := by rw [succ_eq_add_one.nat] at hle; omega
+      obtain ⟨d, hd_pos, hdb, hdr, hmax, hbez⟩ := ih b r hr_pos hr_le
+      set q := a / b with hq
+      have hdiv_eq : b * q + r = a := by rw [hq, hr]; exact div_add_mod.nat a b
+      have hda : d ∣ a
+        have hbq : d ∣ (b * q) := nat.dvd_mul_right d b q hd_pos hdb
+        have hsum := nat.dvd_add d (b * q) r hd_pos hbq hdr
+        rw [hdiv_eq] at hsum; exact hsum
+      use d
+      constructor
+      · exact hd_pos
+      · constructor
+        · exact hda
+        · constructor
+          · exact hdb
+          · constructor
+            · intro c hc hca hcb
+              apply hmax c hc hcb
+              have hbq : c ∣ (b * q) := nat.dvd_mul_right c b q hc hcb
+              have hsum : c ∣ (b * q + r) := by rw [hdiv_eq]; exact hca
+              exact nat.dvd_sub_of_add c (b * q) r hc hbq hsum
+            · obtain ⟨u, v, h1 | h2⟩ := hbez
+              · use v; use u + q * v; right
+                have ha_eq : a * v = (b * q) * v + r * v := by rw [← hdiv_eq]; ring
+                linarith
+              · use v; use q * v + u; left
+                have ha_eq : a * v = (b * q) * v + r * v := by rw [← hdiv_eq]; ring
+                linarith
+
++ nat.bezout (a b : ℕ) (hb : 0 < b) :
+    ∃ d : ℕ, 0 < d ∧ d ∣ a ∧ d ∣ b ∧ (∀ c : ℕ, 0 < c → c ∣ a → c ∣ b → c ∣ d) ∧
+      (∃ x y : ℕ, a * x = b * y + d ∨ b * y = a * x + d)
+  exact nat.bezout_le b a b hb (by omega)
+
+-- Helper: a prime divides a product iff it divides one of the factors!
++ prime.dvd_mul_or (p a b : ℕ) (hp : prime p) (hdvd : p ∣ (a * b)) : p ∣ a ∨ p ∣ b :=
+  prime_dvd_mul.nat p a b hp hdvd
+
+-- COROLLARY: zmod.is_unit q a iff no prime p | q divides a!
++ zmod.is_unit_iff_no_common_prime (q a : ℕ) (hq : 0 < q) :
+    zmod.is_unit q a ↔ (∀ p : ℕ, prime p → p ∣ q → ¬ (p ∣ a))
+  constructor
+  · intro hu p hp hpq hpa
+    unfold zmod.is_unit at hu
+    obtain ⟨b, _, hab⟩ := hu
+    have hp_pos : 0 < p := by have h := hp.1; omega
+    have hpab : p ∣ (a * b) := nat.dvd_mul_right p a b hp_pos hpa
+    have hdiv_ab := div_add_mod.nat (a * b) q
+    rw [hab] at hdiv_ab
+    have hpq_mul : p ∣ (q * ((a * b) / q)) := nat.dvd_mul_right p q ((a * b) / q) hp_pos hpq
+    have h1m : p ∣ (1 % q)
+      rw [← hdiv_ab] at hpab
+      exact nat.dvd_sub_of_add p (q * ((a * b) / q)) (1 % q) hp_pos hpq_mul hpab
+    by_cases hq1 : q = 1
+    · rw [hq1] at hpq
+      unfold dvd at hpq
+      have h2 := hp.1
+      rw [(div_mod_of_lt.nat 1 p (by omega)).2] at hpq; omega
+    · have h1q : 1 % q = 1 := (div_mod_of_lt.nat 1 q (by omega)).2
+      rw [h1q] at h1m; unfold dvd at h1m
+      have h2 := hp.1
+      rw [(div_mod_of_lt.nat 1 p (by omega)).2] at h1m; omega
+  · intro hno
+    obtain ⟨d, hd_pos, hda, hdq, _, hbez⟩ := nat.bezout a q hq
+    have hd1 : d = 1
+      by_contra hne
+      have hd2 : 2 ≤ d := by omega
+      have hms := min_fac.spec d hd2
+      have hmp := min_fac.prime d hd2
+      have hmp_pos : 0 < min_fac d := by have h := hmp.1; omega
+      have hmf_dvd : ∀ x : ℕ, d ∣ x → min_fac d ∣ x
+        intro x hdx
+        unfold dvd at hdx ⊢
+        have hdivx := div_add_mod.nat x d; rw [hdx] at hdivx
+        have hmf_d : min_fac d ∣ d := hms.2.2.1
+        have hm := nat.dvd_mul_right (min_fac d) d (x / d) hmp_pos hmf_d
+        have heq : d * (x / d) = x := by omega
+        rw [heq] at hm; exact hm
+      exact hno (min_fac d) hmp (hmf_dvd q hdq) (hmf_dvd a hda)
+    rw [hd1] at hbez
+    obtain ⟨x, y, h1 | h2⟩ := hbez
+    · unfold zmod.is_unit
+      use x % q
+      constructor
+      · exact mod_lt.nat x q hq
+      · rw [mul_mod.nat a (x % q) q, zmod.mod_mod x q, ← mul_mod.nat a x q, h1]
+        have hcomm : q * y + 1 = 1 + q * y := by ring
+        rw [hcomm, add_mul_mod.nat]
+    · unfold zmod.is_unit
+      by_cases hq1 : q = 1
+      · use 0; constructor
+        · omega
+        · rw [hq1]; simp
+      · -- q * y = a * x + 1 => a * ((q - 1) * x) = 1 + q * ((q - 1) * y - 1)? Wait: q * ((q - 1) * y) = a * ((q - 1) * x) + (q - 1)
+        -- => a * ((q - 1) * x) + q = 1 + q * ((q - 1) * y) => (a * ((q - 1) * x)) % q = 1 % q!
+        set z := ((q - 1) * x) % q with hz
+        use z
+        constructor
+        · rw [hz]; exact mod_lt.nat ((q - 1) * x) q hq
+        · rw [hz, mul_mod.nat a (((q - 1) * x) % q) q, zmod.mod_mod ((q - 1) * x) q, ← mul_mod.nat a ((q - 1) * x) q]
+          have heq : a * ((q - 1) * x) + q = 1 + q * ((q - 1) * y)
+            have h1 : q * ((q - 1) * y) = (q - 1) * (q * y) := by ring
+            have h2a : (q - 1) * (a * x + 1) = a * ((q - 1) * x) + (q - 1) := by ring
+            rw [h1, h2, h2a]; omega
+          have hmod_l : (a * ((q - 1) * x) + q * 1) % q = (a * ((q - 1) * x)) % q := add_mul_mod.nat (a * ((q - 1) * x)) 1 q
+          have hmod_r : (1 + q * ((q - 1) * y)) % q = 1 % q := add_mul_mod.nat 1 ((q - 1) * y) q
+          have hq1m : a * ((q - 1) * x) + q * 1 = a * ((q - 1) * x) + q := by ring
+          rw [hq1m, heq, hmod_r] at hmod_l
+          exact hmod_l.symm
+
+-- Helper: natural number finite product over 0..N-1.
+-> nat_prod_m28 : ℕ → (ℕ → ℕ) → ℕ
+  | 0 => fun _ => 1
+  | n + 1 => fun f => nat_prod_m28 n f * f n
+
++ nat_prod_m28.dvd_of_mem (p N : ℕ) (f : ℕ → ℕ) (hp : 0 < p) (i : ℕ) (hi : i < N) (hd : p ∣ f i) :
+    p ∣ nat_prod_m28 N f
+  induction N with hi k ih hi
+  · omega
+  · rw [succ_eq_add_one.nat] at hi ⊢
+    have hs : nat_prod_m28 (k + 1) f = nat_prod_m28 k f * f k := by rfl
+    rw [hs]
+    by_cases hik : i = k
+    · rw [hik] at hd
+      have hcomm : nat_prod_m28 k f * f k = f k * nat_prod_m28 k f := by ring
+      rw [hcomm]; exact nat.dvd_mul_right p (f k) (nat_prod_m28 k f) hp hd
+    · exact nat.dvd_mul_right p (nat_prod_m28 k f) (f k) hp (ih (by omega))
+
++ nat_prod_m28.not_dvd_of_all_not_dvd (p N : ℕ) (f : ℕ → ℕ) (hp : prime p)
+    (hno : ∀ i < N, ¬ (p ∣ f i)) : ¬ (p ∣ nat_prod_m28 N f)
+  induction N with hno hd k ih hno hd
+  · have h0 : nat_prod_m28 0 f = 1 := by rfl
+    rw [h0] at hd; unfold dvd at hd; have h2 := hp.1
+    rw [(div_mod_of_lt.nat 1 p (by omega)).2] at hd; omega
+  · rw [succ_eq_add_one.nat] at hno hd
+    have hs : nat_prod_m28 (k + 1) f = nat_prod_m28 k f * f k := by rfl
+    rw [hs] at hd
+    obtain h1 | h2 := prime.dvd_mul_or p (nat_prod_m28 k f) (f k) hp hd
+    · exact ih (by intro i hi; exact hno i (by omega)) h1
+    · exact hno k (by omega) h2
+
+-- THEOREM 3 (CRT UNIT LIFTING FROM L | q TO q — 0 AXIOMS!):
+-- If L | q (0 < L, 0 < q) and b is a unit mod L, there exists b' = b mod L that is a unit mod q!
++ zmod.unit_lift (L q b : ℕ) (hL : 0 < L) (hq : 0 < q) (hLq : L ∣ q) (hb : zmod.is_unit L b) :
+    ∃ b' : ℕ, b' % L = b % L ∧ zmod.is_unit q b'
+  set f := (fun p => if prime p ∧ p ∣ q ∧ ¬ (p ∣ L) ∧ ¬ (p ∣ b) then p else 1) with hf
+  set t := nat_prod_m28 (q + 1) f with ht
+  use b + L * t
+  constructor
+  · exact add_mul_mod.nat b t L
+  · rw [zmod.is_unit_iff_no_common_prime q (b + L * t) hq]
+    intro p hp hpq hdiv
+    have hp_pos : 0 < p := by have h := hp.1; omega
+    have hp_le : p ≤ q
+      unfold dvd at hpq
+      have hdv := div_add_mod.nat q p; rw [hpq] at hdv
+      by_cases hq0 : q / p = 0
+      · rw [hq0] at hdv; omega
+      · nlinarith
+    by_cases hpL : p ∣ L
+    · -- Case 1: p | L ==> p | (L * t), so p | b, contradicting zmod.is_unit L b!
+      have hpLt : p ∣ (L * t) := nat.dvd_mul_right p L t hp_pos hpL
+      have hcomm : b + L * t = L * t + b := by ring
+      rw [hcomm] at hdiv
+      have hpb : p ∣ b := nat.dvd_sub_of_add p (L * t) b hp_pos hpLt hdiv
+      exact (zmod.is_unit_iff_no_common_prime L b hL).mp hb p hp hpL hpb
+    · by_cases hpb : p ∣ b
+      · -- Case 2: p ∤ L and p | b ==> p | (L * t), so p | t, impossible since every factor of t is 1 or prime != p!
+        have hpLt : p ∣ (L * t) := nat.dvd_sub_of_add p b (L * t) hp_pos hpb hdiv
+        obtain h1 | h2 := prime.dvd_mul_or p L t hp hpLt
+        · exact hpL h1
+        · have hno_all : ∀ r < q + 1, ¬ (p ∣ f r)
+            intro r _ hr
+            rw [hf] at hr
+            by_cases hc : prime r ∧ r ∣ q ∧ ¬ (r ∣ L) ∧ ¬ (r ∣ b)
+            · rw [if_pos hc] at hr
+              have hpr : p = r
+                by_contra hne
+                have hp_le_r := le_of_dvd.nat r p (by linarith [hc.1.1]) hr
+                exact hc.1.2 p (by omega) hp.1 hr
+              rw [← hpr] at hc
+              exact hc.2.2.2 hpb
+            · rw [if_neg hc] at hr
+              exact not_dvd_one_of_ge_two p hp.1 hr
+          rw [ht] at h2
+          exact nat_prod_m28.not_dvd_of_all_not_dvd p (q + 1) f hp hno_all h2
+      · -- Case 3: p ∤ L and p ∤ b ==> p divides t (since f p = p!), so p | (L * t), hence p | b, contradiction!
+        have hfp : f p = p
+          rw [hf]; have hc : prime p ∧ p ∣ q ∧ ¬ (p ∣ L) ∧ ¬ (p ∣ b) := ⟨hp, hpq, hpL, hpb⟩
+          exact if_pos hc
+        have hpt : p ∣ t
+          rw [ht]
+          apply nat_prod_m28.dvd_of_mem p (q + 1) f hp_pos p (by omega)
+          rw [hfp]; unfold dvd
+          have hmod := add_mul_mod.nat 0 1 p
+          have heq : 0 + p * 1 = p := by ring
+          rw [heq] at hmod; rw [hmod]; exact (div_mod_of_lt.nat 0 p hp_pos).2
+        have hpLt : p ∣ (L * t)
+          have hcomm : L * t = t * L := by ring
+          rw [hcomm]; exact nat.dvd_mul_right p t L hp_pos hpt
+        have hcomm : b + L * t = L * t + b := by ring
+        rw [hcomm] at hdiv
+        exact hpb (nat.dvd_sub_of_add p (L * t) b hp_pos hpLt hdiv)
+
++ crt_two_dir (f1 f2 d a1 a2 x y : ℕ) (hf2 : 0 < f2) (hd : 0 < d) (hd2 : d ∣ f2)
+    (hxy : f1 * x = f2 * y + d) (hcong : a1 % d = a2 % d) :
+    ∃ b : ℕ, b % f1 = a1 % f1 ∧ b % f2 = a2 % f2
+  set a2' := a2 + f2 * (a1 + 1) with ha2'
+  have ha1_le : a1 ≤ a2'
+    have hge : 1 * (a1 + 1) ≤ f2 * (a1 + 1) := mul_le_mul_of_nonneg_right.nat 1 f2 (a1 + 1) (by omega) (by omega)
+    rw [ha2']; omega
+  obtain ⟨q2, hq2⟩ := (dvd.iff_exists d f2 hd).mp hd2
+  have hmod2 : a2' % d = a1 % d
+    rw [ha2', hq2]
+    have heq : a2 + d * q2 * (a1 + 1) = a2 + d * (q2 * (a1 + 1)) := by ring
+    rw [heq, add_mul_mod.nat, hcong]
+  obtain ⟨k, hk⟩ := (dvd.iff_exists d (a2' - a1) hd).mp ((mod_eq_iff_dvd_sub d a2' a1 hd ha1_le).mp hmod2)
+  use a1 + f1 * (x * k)
+  constructor
+  · exact add_mul_mod.nat a1 (x * k) f1
+  · have heq : a1 + f1 * (x * k) = a2 + f2 * (a1 + 1 + y * k)
+      have hm1 : f1 * (x * k) = (f1 * x) * k := by ring
+      have hm2 : (f2 * y + d) * k = f2 * (y * k) + d * k := by ring
+      have hm3 : f2 * (a1 + 1 + y * k) = f2 * (a1 + 1) + f2 * (y * k) := by ring
+      rw [hm1, hxy, hm2, ← hk, hm3, ha2']
+      omega
+    rw [heq, add_mul_mod.nat]
+
++ crt_two (f1 f2 d a1 a2 : ℕ) (hf1 : 0 < f1) (hf2 : 0 < f2) (hd : 0 < d)
+    (hd1 : d ∣ f1) (hd2 : d ∣ f2)
+    (hbez : ∃ x y : ℕ, f1 * x = f2 * y + d ∨ f2 * y = f1 * x + d)
+    (hcong : a1 % d = a2 % d) :
+    ∃ b : ℕ, b % f1 = a1 % f1 ∧ b % f2 = a2 % f2
+  obtain ⟨x, y, h1 | h2⟩ := hbez
+  · exact crt_two_dir f1 f2 d a1 a2 x y hf2 hd hd2 h1 hcong
+  · obtain ⟨b, hb2, hb1⟩ := crt_two_dir f2 f1 d a2 a1 y x hf1 hd hd1 h2 hcong.symm
+    exact ⟨b, hb1, hb2⟩
+
+-- ====================================================================================
+-- 3. UNIQUENESS OF PRIMITIVE CONDUCTOR (`dchar.primitive_unique`) & `dchar.prim`
+-- ====================================================================================
+
+-- Helper: a character chi mod q factors through d | q iff it agrees on all units congruent mod d!
++ dchar.induced_of_agree_mod (chi : DChar) (d : ℕ) (hval : dchar.valid chi)
+    (hd : 0 < d) (hdq : d ∣ chi.level)
+    (hagree : ∀ a1 a2 : ℕ, zmod.is_unit chi.level a1 → zmod.is_unit chi.level a2 → a1 % d = a2 % d → chi.val a1 = chi.val a2) :
+    ∃ eta : DChar, eta.level = d ∧ dchar.valid eta ∧ dchar.induced_by chi eta
+  have hq_pos : 0 < chi.level := by unfold dchar.valid at hval; omega
+  set lift := (fun a => if zmod.is_unit d a then choice (fun b => b % d = a % d ∧ zmod.is_unit chi.level b) else 0) with hlift
+  set eta_val := (fun a => if zmod.is_unit d a then chi.val (lift a) else complex.zero) with heta_val
+  have hlift_spec : ∀ a : ℕ, zmod.is_unit d a → (lift a) % d = a % d ∧ zmod.is_unit chi.level (lift a)
+    intro a hu; rw [hlift, if_pos hu]
+    exact choice.spec (fun b => b % d = a % d ∧ zmod.is_unit chi.level b) (zmod.unit_lift d chi.level a hd hq_pos hdq hu)
+  have heta_eq_chi : ∀ a : ℕ, zmod.is_unit chi.level a → eta_val a = chi.val a
+    intro a hu
+    have hud : zmod.is_unit d a := zmod.is_unit_of_dvd d chi.level a hd hdq hu
+    rw [heta_val, if_pos hud]
+    have hsp := hlift_spec a hud
+    exact hagree (lift a) a hsp.2 hu hsp.1
+  have heta_valid : dchar.valid (DChar.mk d eta_val)
+    unfold dchar.valid is_dirichlet_char; simp
+    constructor
+    · omega
+    · constructor
+      · -- Periodicity: eta_val (a + d) = eta_val a!
+        intro a
+        by_cases hu : zmod.is_unit d a
+        · have hu2 : zmod.is_unit d (a + d) := (zmod.is_unit_add_modulus d a).mpr hu
+          rw [heta_val, if_pos hu2, if_pos hu]
+          have hsp1 := hlift_spec (a + d) hu2
+          have hsp2 := hlift_spec a hu
+          have hmod_ad : (a + d) % d = a % d
+            have heq : a + d = a + d * 1 := by ring
+            rw [heq, add_mul_mod.nat]
+          apply hagree (lift (a + d)) (lift a) hsp1.2 hsp2.2
+          rw [hsp1.1, hmod_ad, hsp2.1]
+        · have hu2 : ¬ zmod.is_unit d (a + d) := by intro h; exact hu ((zmod.is_unit_add_modulus d a).mp h)
+          rw [heta_val, if_neg hu2, if_neg hu]
+      · constructor
+        · -- eta_val 1 = 1!
+          have hu1 : zmod.is_unit chi.level 1
+            by_cases hq1 : chi.level = 1
+            · unfold zmod.is_unit; use 0; exact ⟨by omega, by rw [hq1]; simp⟩
+            · exact zmod.unit_one chi.level (by omega)
+          rw [heta_eq_chi 1 hu1]; exact hval.2.2.1
+        · constructor
+          · intro a hnot; rw [heta_val]; exact if_neg hnot
+          · -- Complete multiplicativity: eta_val (a * b) = eta_val a * eta_val b!
+            intro a b
+            by_cases ha : zmod.is_unit d a
+            · by_cases hb : zmod.is_unit d b
+              · have hab : zmod.is_unit d (a * b) := (zmod.is_unit_mul_iff d a b hd).mpr ⟨ha, hb⟩
+                rw [heta_val, if_pos hab, if_pos ha, if_pos hb]
+                have hspa := hlift_spec a ha
+                have hspb := hlift_spec b hb
+                have hspab := hlift_spec (a * b) hab
+                have hu_mul : zmod.is_unit chi.level (lift a * lift b) := (zmod.is_unit_mul_iff chi.level (lift a) (lift b) hq_pos).mpr ⟨hspa.2, hspb.2⟩
+                have hmod_eq : (lift (a * b)) % d = (lift a * lift b) % d := by rw [hspab.1, mul_mod.nat a b d, ← hspa.1, ← hspb.1, ← mul_mod.nat (lift a) (lift b) d]
+                rw [hagree (lift (a * b)) (lift a * lift b) hspab.2 hu_mul hmod_eq, hval.2.2.2.2 (lift a) (lift b)]
+              · have hab : ¬ zmod.is_unit d (a * b) := by intro h; exact hb ((zmod.is_unit_mul_iff d a b hd).mp h).2
+                rw [heta_val, if_neg hab, if_neg hb, complex.mul_zero]
+            · have hab : ¬ zmod.is_unit d (a * b) := by intro h; exact ha ((zmod.is_unit_mul_iff d a b hd).mp h).1
+              rw [heta_val, if_neg hab, if_neg ha, complex.zero_mul]
+  use DChar.mk d eta_val
+  constructor
+  · simp
+  · constructor
+    · exact heta_valid
+    · unfold dchar.induced_by; simp
+      constructor
+      · exact hdq
+      · intro a hu; exact (heta_eq_chi a hu).symm
+
++ dchar.ext (c1 c2 : DChar) (hl : c1.level = c2.level) (hv : ∀ a, c1.val a = c2.val a) : c1 = c2
+  induction c1 with l1 v1 hl hv
+  induction c2 with l2 v2 hl hv
+  simp at hl hv
+  have hf : v1 = v2 := by funext a; exact hv a
+  rw [hl, hf]
+
+-- THEOREM 4 (UNIQUENESS OF PRIMITIVE CONDUCTOR — 0 CUSTOM AXIOMS!):
++ dchar.primitive_unique (chi psi1 psi2 : DChar)
+    (hval : dchar.valid chi)
+    (hp1 : dchar.is_primitive psi1) (hp2 : dchar.is_primitive psi2)
+    (hi1 : dchar.induced_by chi psi1) (hi2 : dchar.induced_by chi psi2) :
+    psi1 = psi2
+  have hq_pos : 0 < chi.level := by unfold dchar.valid at hval; omega
+  have hf1_pos : 0 < psi1.level := by unfold dchar.is_primitive dchar.valid at hp1; omega
+  have hf2_pos : 0 < psi2.level := by unfold dchar.is_primitive dchar.valid at hp2; omega
+  obtain ⟨d, hd_pos, hd1, hd2, _, hbez⟩ := nat.bezout psi1.level psi2.level hf2_pos
+  -- d | f1 | q, so d | q!
+  have hdq : d ∣ chi.level
+    have hfq : psi1.level ∣ chi.level := hi1.1
+    unfold dvd at hd1 hfq ⊢
+    have hdv1 := div_add_mod.nat psi1.level d; rw [hd1] at hdv1
+    have hdvq := div_add_mod.nat chi.level psi1.level; rw [hfq] at hdvq
+    set q1 := psi1.level / d with hq1
+    set q2 := chi.level / psi1.level with hq2
+    have h1 : psi1.level * q2 = chi.level := by omega
+    have h2 : d * q1 = psi1.level := by omega
+    have heq : chi.level = 0 + d * (q1 * q2) := by rw [← h1, ← h2]; ring
+    rw [heq, add_mul_mod.nat]; exact (div_mod_of_lt.nat 0 d hd_pos).2
+  -- Show chi agrees on all units mod q that are congruent mod d (via CRT + unit_lift over lcm(f1, f2) | q)!
+  set L := psi1.level * (psi2.level / d) with hL
+  have hL_pos : 0 < L
+    have hq2_pos : 0 < psi2.level / d
+      have hdv := div_add_mod.nat psi2.level d; unfold dvd at hd2; rw [hd2] at hdv
+      by_contra h0; have hz : psi2.level / d = 0 := by omega
+      rw [hz] at hdv; omega
+    rw [hL]; exact mul_pos.nat psi1.level (psi2.level / d) hf1_pos hq2_pos
+  have hf1_dvd_L : psi1.level ∣ L
+    rw [hL]; unfold dvd
+    have heq : psi1.level * (psi2.level / d) = 0 + psi1.level * (psi2.level / d) := by ring
+    rw [heq, add_mul_mod.nat]; exact (div_mod_of_lt.nat 0 psi1.level hf1_pos).2
+  have hf2_dvd_L : psi2.level ∣ L
+    have hL2 : L = psi2.level * (psi1.level / d)
+      have hd1a := div_add_mod.nat psi1.level d; unfold dvd at hd1; rw [hd1] at hd1a
+      have hd2a := div_add_mod.nat psi2.level d; unfold dvd at hd2; rw [hd2] at hd2a
+      have h1 : d * (psi1.level / d) = psi1.level := by omega
+      have h2 : d * (psi2.level / d) = psi2.level := by omega
+      rw [hL]
+      calc psi1.level * (psi2.level / d)
+        = (d * (psi1.level / d)) * (psi2.level / d) := by rw [h1]
+        _ = (d * (psi2.level / d)) * (psi1.level / d) := by ring
+        _ = psi2.level * (psi1.level / d) := by rw [h2]
+    rw [hL2]; unfold dvd
+    have heq : psi2.level * (psi1.level / d) = 0 + psi2.level * (psi1.level / d) := by ring
+    rw [heq, add_mul_mod.nat]; exact (div_mod_of_lt.nat 0 psi2.level hf2_pos).2
+  have hL_dvd_q : L ∣ chi.level
+    -- Bezout gives f1 * x = f2 * y + d (or symmetric); multiply by q / (f1*f2/d)?
+    -- Direct: q * d = f1 * (q / f1) * d and f2 | q; use Bezout on f1*x - f2*y = d:
+    -- q * d = f1 * (x * q) - f2 * (y * q), and both f1 * f2 divide f1 * q and f2 * q!
+    -- Hence (f1 * f2) | (q * d) = (L * d) * ... => L | q!
+    have hLq_mul : (L * d) ∣ (chi.level * d)
+      have hLd_eq : L * d = psi1.level * psi2.level
+        have h2 : d * (psi2.level / d) = psi2.level
+          have hdv := div_add_mod.nat psi2.level d; unfold dvd at hd2; rw [hd2] at hdv; omega
+        rw [hL]
+        calc psi1.level * (psi2.level / d) * d
+          = psi1.level * (d * (psi2.level / d)) := by ring
+          _ = psi1.level * psi2.level := by rw [h2]
+      rw [hLd_eq]
+      have hf1f2_pos : 0 < psi1.level * psi2.level := mul_pos.nat psi1.level psi2.level hf1_pos hf2_pos
+      have hf1q : (psi1.level * psi2.level) ∣ (psi1.level * chi.level)
+        have hdv := div_add_mod.nat chi.level psi2.level
+        have hd2q : psi2.level ∣ chi.level := hi2.1
+        unfold dvd at hd2q; rw [hd2q] at hdv
+        set q2 := chi.level / psi2.level with hq2
+        have h2 : psi2.level * q2 = chi.level := by omega
+        unfold dvd
+        have heq : psi1.level * chi.level = 0 + (psi1.level * psi2.level) * q2 := by rw [← h2]; ring
+        rw [heq, add_mul_mod.nat]; exact (div_mod_of_lt.nat 0 (psi1.level * psi2.level) hf1f2_pos).2
+      have hf2q : (psi1.level * psi2.level) ∣ (psi2.level * chi.level)
+        have hdv := div_add_mod.nat chi.level psi1.level
+        have hd1q : psi1.level ∣ chi.level := hi1.1
+        unfold dvd at hd1q; rw [hd1q] at hdv
+        set q1 := chi.level / psi1.level with hq1
+        have h1 : psi1.level * q1 = chi.level := by omega
+        unfold dvd
+        have heq : psi2.level * chi.level = 0 + (psi1.level * psi2.level) * q1 := by rw [← h1]; ring
+        rw [heq, add_mul_mod.nat]; exact (div_mod_of_lt.nat 0 (psi1.level * psi2.level) hf1f2_pos).2
+      obtain ⟨x, y, h1 | h2⟩ := hbez
+      · have heq : (psi1.level * chi.level) * x = (psi2.level * chi.level) * y + chi.level * d
+          have hr : (psi1.level * chi.level) * x = (psi1.level * x) * chi.level := by ring
+          rw [hr, h1]; ring
+        have ha := nat.dvd_mul_right (psi1.level * psi2.level) (psi1.level * chi.level) x hf1f2_pos hf1q
+        have hb := nat.dvd_mul_right (psi1.level * psi2.level) (psi2.level * chi.level) y hf1f2_pos hf2q
+        rw [heq] at ha
+        exact nat.dvd_sub_of_add (psi1.level * psi2.level) ((psi2.level * chi.level) * y) (chi.level * d) hf1f2_pos hb ha
+      · have heq : (psi2.level * chi.level) * y = (psi1.level * chi.level) * x + chi.level * d
+          have hr : (psi2.level * chi.level) * y = (psi2.level * y) * chi.level := by ring
+          rw [hr, h2]; ring
+        have ha := nat.dvd_mul_right (psi1.level * psi2.level) (psi2.level * chi.level) y hf1f2_pos hf2q
+        have hb := nat.dvd_mul_right (psi1.level * psi2.level) (psi1.level * chi.level) x hf1f2_pos hf1q
+        rw [heq] at ha
+        exact nat.dvd_sub_of_add (psi1.level * psi2.level) ((psi1.level * chi.level) * x) (chi.level * d) hf1f2_pos hb ha
+    unfold dvd at hLq_mul ⊢
+    have hdv := div_add_mod.nat (chi.level * d) (L * d)
+    rw [hLq_mul] at hdv
+    set t := (chi.level * d) / (L * d) with ht
+    have hqt : L * t = chi.level
+      by_cases hlt : L * t < chi.level
+      · nlinarith
+      · by_cases hgt : chi.level < L * t
+        · nlinarith
+        · omega
+    have heq : chi.level = 0 + L * t := by omega
+    rw [heq, add_mul_mod.nat]; exact (div_mod_of_lt.nat 0 L hL_pos).2
+  have hagree : ∀ a1 a2 : ℕ, zmod.is_unit chi.level a1 → zmod.is_unit chi.level a2 → a1 % d = a2 % d → chi.val a1 = chi.val a2
+    intro a1 a2 hu1 hu2 hcong
+    obtain ⟨b, hb1, hb2⟩ := crt_two psi1.level psi2.level d a1 a2 hf1_pos hf2_pos hd_pos hd1 hd2 hbez hcong
+    have hb_unit_L : zmod.is_unit L b
+      rw [zmod.is_unit_iff_no_common_prime L b hL_pos]
+      intro p hp hpL hpb
+      have hp_pos : 0 < p := by have h := hp.1; omega
+      have hpf : p ∣ psi1.level ∨ p ∣ psi2.level
+        rw [hL] at hpL
+        obtain h1 | h2 := prime.dvd_mul_or p psi1.level (psi2.level / d) hp hpL
+        · left; exact h1
+        · right
+          have hdv := div_add_mod.nat psi2.level d; unfold dvd at hd2; rw [hd2] at hdv
+          have h2a : (psi2.level / d) * d = psi2.level := by omega
+          have hm := nat.dvd_mul_right p (psi2.level / d) d hp_pos h2
+          rw [h2a] at hm; exact hm
+      obtain hpf1 | hpf2 := hpf
+      · have hua1 : zmod.is_unit psi1.level a1 := zmod.is_unit_of_dvd psi1.level chi.level a1 hf1_pos hi1.1 hu1
+        have hub1 : zmod.is_unit psi1.level b := (zmod.is_unit_mod psi1.level b).mp (by rw [hb1]; exact (zmod.is_unit_mod psi1.level a1).mpr hua1)
+        exact (zmod.is_unit_iff_no_common_prime psi1.level b hf1_pos).mp hub1 p hp hpf1 hpb
+      · have hua2 : zmod.is_unit psi2.level a2 := zmod.is_unit_of_dvd psi2.level chi.level a2 hf2_pos hi2.1 hu2
+        have hub2 : zmod.is_unit psi2.level b := (zmod.is_unit_mod psi2.level b).mp (by rw [hb2]; exact (zmod.is_unit_mod psi2.level a2).mpr hua2)
+        exact (zmod.is_unit_iff_no_common_prime psi2.level b hf2_pos).mp hub2 p hp hpf2 hpb
+    obtain ⟨b', hb'L, hb'q⟩ := zmod.unit_lift L chi.level b hL_pos hq_pos hL_dvd_q hb_unit_L
+    have hb'1 : b' % psi1.level = a1 % psi1.level
+      have hf1_eq : psi1.level * (L / psi1.level) = L
+        have hdv := div_add_mod.nat L psi1.level; unfold dvd at hf1_dvd_L; rw [hf1_dvd_L] at hdv; omega
+      have h1 := mod_of_factor.nat b' L psi1.level (L / psi1.level) (b % L) hf1_eq hb'L
+      have h2 := mod_of_factor.nat b L psi1.level (L / psi1.level) (b % L) hf1_eq rfl
+      rw [h1, ← h2, hb1]
+    have hb'2 : b' % psi2.level = a2 % psi2.level
+      have hf2_eq : psi2.level * (L / psi2.level) = L
+        have hdv := div_add_mod.nat L psi2.level; unfold dvd at hf2_dvd_L; rw [hf2_dvd_L] at hdv; omega
+      have h1 := mod_of_factor.nat b' L psi2.level (L / psi2.level) (b % L) hf2_eq hb'L
+      have h2 := mod_of_factor.nat b L psi2.level (L / psi2.level) (b % L) hf2_eq rfl
+      rw [h1, ← h2, hb2]
+    calc chi.val a1
+      = psi1.val a1 := hi1.2 a1 hu1
+      _ = psi1.val (a1 % psi1.level) := (dchar.mod_eq_m39 psi1.level psi1.val hp1.1.2.1 a1).symm
+      _ = psi1.val (b' % psi1.level) := by rw [hb'1]
+      _ = psi1.val b' := dchar.mod_eq_m39 psi1.level psi1.val hp1.1.2.1 b'
+      _ = chi.val b' := (hi1.2 b' hb'q).symm
+      _ = psi2.val b' := hi2.2 b' hb'q
+      _ = psi2.val (b' % psi2.level) := (dchar.mod_eq_m39 psi2.level psi2.val hp2.1.2.1 b').symm
+      _ = psi2.val (a2 % psi2.level) := by rw [hb'2]
+      _ = psi2.val a2 := dchar.mod_eq_m39 psi2.level psi2.val hp2.1.2.1 a2
+      _ = chi.val a2 := (hi2.2 a2 hu2).symm
+  obtain ⟨eta, heta_lvl, heta_val, heta_ind⟩ := dchar.induced_of_agree_mod chi d hval hd_pos hdq hagree
+  have hind_eta : ∀ psi : DChar, 0 < psi.level → d ∣ psi.level → dchar.valid psi → dchar.induced_by chi psi → dchar.induced_by psi eta
+    intro psi hfp hdp hvp hip
+    unfold dchar.induced_by; rw [heta_lvl]; constructor
+    · exact hdp
+    · intro a hu
+      obtain ⟨a', ha'f, ha'q⟩ := zmod.unit_lift psi.level chi.level a hfp hq_pos hip.1 hu
+      have hdf_eq : d * (psi.level / d) = psi.level := by have hdv := div_add_mod.nat psi.level d; unfold dvd at hdp; rw [hdp] at hdv; omega
+      have ha'd : a' % d = a % d
+        rw [mod_of_factor.nat a' psi.level d (psi.level / d) (a % psi.level) hdf_eq ha'f, ← mod_of_factor.nat a psi.level d (psi.level / d) (a % psi.level) hdf_eq rfl]
+      calc psi.val a
+        = psi.val (a % psi.level) := (dchar.mod_eq_m39 psi.level psi.val hvp.2.1 a).symm
+        _ = psi.val (a' % psi.level) := by rw [ha'f]
+        _ = psi.val a' := dchar.mod_eq_m39 psi.level psi.val hvp.2.1 a'
+        _ = chi.val a' := (hip.2 a' ha'q).symm
+        _ = eta.val a' := heta_ind.2 a' ha'q
+        _ = eta.val (a' % d) := by rw [← heta_lvl]; exact (dchar.mod_eq_m39 eta.level eta.val heta_val.2.1 a').symm
+        _ = eta.val (a % d) := by rw [ha'd]
+        _ = eta.val a := by rw [← heta_lvl]; exact dchar.mod_eq_m39 eta.level eta.val heta_val.2.1 a
+  have h1_ind_eta := hind_eta psi1 hf1_pos hd1 hp1.1 hi1
+  have h2_ind_eta := hind_eta psi2 hf2_pos hd2 hp2.1 hi2
+  have hf1_le_d : psi1.level ≤ d := by have h := hp1.2 eta heta_val h1_ind_eta; rw [heta_lvl] at h; exact h
+  have hf2_le_d : psi2.level ≤ d := by have h := hp2.2 eta heta_val h2_ind_eta; rw [heta_lvl] at h; exact h
+  have hd_le_f1 : d ≤ psi1.level := le_of_dvd.nat psi1.level d hf1_pos hd1
+  have hd_le_f2 : d ≤ psi2.level := le_of_dvd.nat psi2.level d hf2_pos hd2
+  have hfeq : psi1.level = psi2.level := by omega
+  have hval_eq : ∀ a : ℕ, psi1.val a = psi2.val a
+    intro a
+    by_cases hu : zmod.is_unit psi1.level a
+    · have hu2 : zmod.is_unit psi2.level a := by rw [← hfeq]; exact hu
+      have h1 := h1_ind_eta.2 a hu
+      have h2 := h2_ind_eta.2 a hu2
+      rw [h1, h2]
+    · have hu2 : ¬ zmod.is_unit psi2.level a := by rw [← hfeq]; exact hu
+      rw [hp1.1.2.2.2.1 a hu, hp2.1.2.2.2.1 a hu2]
+  exact dchar.ext psi1 psi2 hfeq hval_eq
+
+-- Canonical primitive conductor operator `dchar.prim`:
+-> dchar.prim (chi : DChar) : DChar :=
+  if dchar.valid chi then choice (fun psi => dchar.is_primitive psi ∧ dchar.induced_by chi psi) else dchar.trivial_one
+
++ dchar.prim_spec (chi : DChar) (hval : dchar.valid chi) :
+    dchar.is_primitive (dchar.prim chi) ∧ dchar.induced_by chi (dchar.prim chi)
+  unfold dchar.prim; rw [if_pos hval]
+  exact choice.spec (fun psi => dchar.is_primitive psi ∧ dchar.induced_by chi psi) (dchar.exists_primitive chi hval)
+
++ dchar.prim_eq (chi psi : DChar) (hval : dchar.valid chi) (hp : dchar.is_primitive psi) (hi : dchar.induced_by chi psi) :
+    dchar.prim chi = psi
+  have hsp := dchar.prim_spec chi hval
+  exact dchar.primitive_unique chi (dchar.prim chi) psi hval hsp.1 hp hsp.2 hi
+
+-- ====================================================================================
+-- 4. COMPLETE PRIMITIVE GAUSS SUM EVALUATION & UNITARY ROOT NUMBER W(chi) (0 AXIOMS!)
+-- ====================================================================================
+
+-- Primitive character non-unit witness: if chi is primitive mod q and b is not a unit mod q,
+-- there exists a unit u mod q with (u * b) % q = b % q and chi(u) != 1!
++ primitive.non_unit_witness (chi : DChar) (hprim : dchar.is_primitive chi) (b : ℕ)
+    (hnot : ¬ zmod.is_unit chi.level b) :
+    ∃ u : ℕ, zmod.is_unit chi.level u ∧ (u * b) % chi.level = b % chi.level ∧ chi.val u ≠ complex.one
+  have hq_pos : 0 < chi.level := by unfold dchar.is_primitive dchar.valid at hprim; omega
+  obtain ⟨g0, hg0_pos, hg0b, hg0q, hmax0, _⟩ := nat.bezout b chi.level hq_pos
+  have hg0_gt1 : 1 < g0
+    by_contra hle
+    have hg01 : g0 = 1 := by omega
+    apply hnot
+    rw [zmod.is_unit_iff_no_common_prime chi.level b hq_pos]
+    intro p hp hpq hpb
+    have hp_pos : 0 < p := by have h := hp.1; omega
+    have hpg := hmax0 p hp_pos hpb hpq
+    rw [hg01] at hpg; unfold dvd at hpg; have h2 := hp.1
+    rw [(div_mod_of_lt.nat 1 p (by omega)).2] at hpg; omega
+  set d := chi.level / g0 with hd
+  have hdg0 : d * g0 = chi.level
+    have hdv := div_add_mod.nat chi.level g0; unfold dvd at hg0q; rw [hg0q] at hdv; rw [hd]; linarith
+  have hd_pos : 0 < d
+    by_contra h0; have hdz : d = 0 := by omega
+    rw [hdz] at hdg0; omega
+  have hd_lt : d < chi.level := by nlinarith
+  have hdq : d ∣ chi.level
+    unfold dvd
+    have heq : chi.level = 0 + d * g0 := by linarith
+    rw [heq, add_mul_mod.nat]; exact (div_mod_of_lt.nat 0 d hd_pos).2
+  -- Since chi is primitive and d < q, chi CANNOT agree on all units congruent mod d!
+  have hdisagree : ∃ a1 a2 : ℕ, zmod.is_unit chi.level a1 ∧ zmod.is_unit chi.level a2 ∧ a1 % d = a2 % d ∧ chi.val a1 ≠ chi.val a2
+    by_contra hnone
+    have hagree : ∀ a1 a2 : ℕ, zmod.is_unit chi.level a1 → zmod.is_unit chi.level a2 → a1 % d = a2 % d → chi.val a1 = chi.val a2
+      intro a1 a2 hu1 hu2 hcong
+      by_contra hne; exact hnone ⟨a1, a2, hu1, hu2, hcong, hne⟩
+    obtain ⟨eta, heta_lvl, heta_val, heta_ind⟩ := dchar.induced_of_agree_mod chi d hprim.1 hd_pos hdq hagree
+    have hle := hprim.2 eta heta_val heta_ind
+    omega
+  obtain ⟨a1, a2, hu1, hu2, hcong, hne⟩ := hdisagree
+  unfold zmod.is_unit at hu2
+  obtain ⟨ia2, hia2_lt, ha2i⟩ := hu2
+  set u := (a1 * ia2) % chi.level with hu_def
+  have hu_unit : zmod.is_unit chi.level u
+    rw [hu_def]
+    have hia2_u : zmod.is_unit chi.level ia2
+      unfold zmod.is_unit; use a2 % chi.level
+      constructor
+      · exact mod_lt.nat a2 chi.level hq_pos
+      · rw [mul_mod.nat ia2 (a2 % chi.level) chi.level, zmod.mod_mod a2 chi.level, ← mul_mod.nat ia2 a2 chi.level]
+        have hc : ia2 * a2 = a2 * ia2 := by ring
+        rw [hc]; exact ha2i
+    exact (zmod.is_unit_mod chi.level (a1 * ia2)).mpr ((zmod.is_unit_mul_iff chi.level a1 ia2 hq_pos).mpr ⟨hu1, hia2_u⟩)
+  have hu_mod_d : u % d = 1 % d
+    have h1 := mod_of_factor.nat (a1 * ia2) chi.level d g0 u hdg0 hu_def.symm
+    have h2 : (a1 * ia2) % d = (a2 * ia2) % d := by rw [mul_mod.nat a1 ia2 d, hcong, ← mul_mod.nat a2 ia2 d]
+    have h3 := mod_of_factor.nat (a2 * ia2) chi.level d g0 (1 % chi.level) hdg0 ha2i
+    have h4 := mod_of_factor.nat 1 chi.level d g0 (1 % chi.level) hdg0 rfl
+    rw [← h1, h2, h3, ← h4]
+  have hub : (u * b) % chi.level = b % chi.level
+    -- u = 1 + d * k mod d (or u = d*m + 1%d), and g0 | b, so (u - 1) * b is divisible by d * g0 = q!
+    have hdv_b := div_add_mod.nat b g0; unfold dvd at hg0b; rw [hg0b] at hdv_b
+    have hb_eq : g0 * (b / g0) = b := by omega
+    have hdv_u := div_add_mod.nat u d
+    rw [hu_mod_d] at hdv_u
+    by_cases hd1 : d = 1
+    · have hgq_eq : g0 = chi.level := by rw [hd1] at hdg0; omega
+      have hqb : chi.level ∣ b := by rw [← hgq_eq]; exact hg0b
+      have hqub : chi.level ∣ (u * b)
+        have hc : u * b = b * u := by ring
+        rw [hc]; exact nat.dvd_mul_right chi.level b u hq_pos hqb
+      unfold dvd at hqb hqub; rw [hqub, hqb]
+    · have h1d : 1 % d = 1 := (div_mod_of_lt.nat 1 d (by omega)).2
+      rw [h1d] at hdv_u
+      have heq : u * b = b + chi.level * ((u / d) * (b / g0))
+        calc u * b
+          = (d * (u / d) + 1) * b := by rw [hdv_u]
+          _ = b + (d * (u / d)) * (g0 * (b / g0)) := by rw [hb_eq]; ring
+          _ = b + (d * g0) * ((u / d) * (b / g0)) := by ring
+          _ = b + chi.level * ((u / d) * (b / g0)) := by rw [hdg0]
+      rw [heq, add_mul_mod.nat]
+  have hchi_u_ne : chi.val u ≠ complex.one
+    intro h1
+    apply hne
+    have hmul : chi.val u = complex.mul (chi.val a1) (chi.val ia2)
+      rw [hu_def, dchar.mod_eq_m39 chi.level chi.val hprim.1.2.1 (a1 * ia2), hprim.1.2.2.2.2 a1 ia2]
+    rw [h1] at hmul
+    have h2i : complex.mul (chi.val a2) (chi.val ia2) = complex.one
+      rw [← hprim.1.2.2.2.2 a2 ia2, ← dchar.mod_eq_m39 chi.level chi.val hprim.1.2.1 (a2 * ia2), ha2i, dchar.mod_eq_m39 chi.level chi.val hprim.1.2.1 1]
+      exact hprim.1.2.2.1
+    calc chi.val a1
+      = complex.mul (chi.val a1) complex.one := (complex.mul_one (chi.val a1)).symm
+      _ = complex.mul (chi.val a1) (complex.mul (chi.val a2) (chi.val ia2)) := by rw [h2i]
+      _ = complex.mul (complex.mul (chi.val a1) (chi.val ia2)) (chi.val a2) := by apply complex.ext <;> simp <;> ring
+      _ = complex.mul complex.one (chi.val a2) := by rw [← hmul]
+      _ = chi.val a2 := complex.one_mul (chi.val a2)
+  exact ⟨u, hu_unit, hub, hchi_u_ne⟩
+
+-- Concrete primitive q-th root of unity, Gauss sum tau(chi), parity a(chi), & root number W(chi)!
+-> zeta_q (q : ℕ) : ℂ :=
+  complex.exp (complex.mk 0 (2 * pi / (q : ℝ)))
+
+-> dchar.tau (chi : DChar) : ℂ :=
+  gauss_sum chi.level (zeta_q chi.level) chi.val
+
+-> dchar.parity (chi : DChar) : ℕ :=
+  if 2 ≤ chi.level ∧ chi.val (chi.level - 1) = complex.neg complex.one then 1 else 0
+
+-> dchar.root_num (chi : DChar) : ℂ :=
+  complex.mul (complex.of_real (1 / sqrt (chi.level : ℝ))) (if dchar.parity chi = 1 then complex.mul (complex.neg complex.I) (dchar.tau chi) else dchar.tau chi)
+
+-- THEOREM 5 (COMPLETE PRIMITIVE GAUSS SUM SEPARABILITY FOR ALL b — 0 CUSTOM AXIOMS!):
++ primitive.dft_eq_conj_tau (chi : DChar) (hprim : dchar.is_primitive chi) (b : ℕ) :
+    dft_sum chi.level (zeta_q chi.level) chi.val b = complex.mul (complex.conj (chi.val b)) (dchar.tau chi)
+  have hq_pos : 0 < chi.level := by unfold dchar.is_primitive dchar.valid at hprim; omega
+  have hupr := uproot.cexp_is_unitary_prim chi.level hq_pos
+  unfold is_unitary_prim_root at hupr
+  have hzq : cpow_nat (zeta_q chi.level) chi.level = complex.one := hupr.2.2.1
+  unfold dft_sum dchar.tau gauss_sum
+  by_cases hub : zmod.is_unit chi.level b
+  · have hns := dchar.unit_norm_sq_one chi hprim.1 b hub
+    exact gauss_sum.shift_unit chi.level b (zeta_q chi.level) chi.val hq_pos hprim.1.2 hzq hub hns
+  · obtain ⟨u, hu, hfix, hne⟩ := primitive.non_unit_witness chi hprim b hub
+    have hvan := gauss_sum.vanish_of_witness chi.level b u (zeta_q chi.level) chi.val hq_pos hprim.1.2 hzq hu hfix hne
+    have hchib0 : chi.val b = complex.zero := hprim.1.2.2.2.1 b hub
+    rw [hvan, hchib0]
+    have hconj0 : complex.conj complex.zero = complex.zero := by ring
+    rw [hconj0, complex.zero_mul]
+
+-- THEOREM 6 (UNCONDITIONAL |tau(chi)|^2 = q & tau(chi) != 0 FOR EVERY PRIMITIVE chi — 0 AXIOMS!):
++ primitive.tau_norm_sq_eq_q (chi : DChar) (hprim : dchar.is_primitive chi) :
+    complex.norm_sq (dchar.tau chi) = (chi.level : ℝ) ∧ dchar.tau chi ≠ complex.zero
+  have hq_pos : 0 < chi.level := by unfold dchar.is_primitive dchar.valid at hprim; omega
+  have hupr := uproot.cexp_is_unitary_prim chi.level hq_pos
+  have hpars := dft.parseval chi.level (zeta_q chi.level) chi.val chi.val hupr
+  have hdft_eq : dft_sum chi.level (zeta_q chi.level) chi.val = dft chi.level (zeta_q chi.level) chi.val
+    funext b; unfold dft_sum dft
+    apply csum.congr; intro a _
+    have hcomm : b * a = a * b := by ring
+    rw [hcomm]
+  have hpars_re : complex.re (cdot chi.level (dft_sum chi.level (zeta_q chi.level) chi.val) (dft_sum chi.level (zeta_q chi.level) chi.val)) = (chi.level : ℝ) * complex.re (cdot chi.level chi.val chi.val)
+    rw [hdft_eq, hpars]
+    unfold complex.of_real; simp; ring
+  have hcdot_pos : 0 < complex.re (cdot chi.level chi.val chi.val)
+    rw [cdot.self_re]
+    have hnn : ∀ i < chi.level, 0 ≤ complex.norm_sq (chi.val i) := by intro i _; exact complex.norm_sq_nonneg (chi.val i)
+    have h1_idx : 1 % chi.level < chi.level := mod_lt.nat 1 chi.level hq_pos
+    have h1_val : complex.norm_sq (chi.val (1 % chi.level)) = 1 := by rw [dchar.mod_eq_m39 chi.level chi.val hprim.1.2.1 1, hprim.1.2.2.1]; unfold complex.norm_sq; simp
+    have hge1 : ∀ N : ℕ, ∀ j : ℕ, j < N → (∀ i < N, 0 ≤ complex.norm_sq (chi.val i)) → complex.norm_sq (chi.val j) ≤ ∑ i < N, complex.norm_sq (chi.val i)
+      intro N; induction N with j hj hnn0 k ih j hj hnn0
+      · omega
+      · rw [succ_eq_add_one.nat, sum_below_succ]
+        by_cases hjk : j = k
+        · rw [hjk]
+          have hpre : 0 ≤ ∑ i < k, complex.norm_sq (chi.val i) := sum_nonneg.real (fun i => complex.norm_sq (chi.val i)) k (by intro i hi; exact hnn0 i (by omega))
+          linarith
+        · have h1 := ih j (by omega) (by intro i hi; exact hnn0 i (by omega))
+          have h2 := hnn0 k (by omega)
+          linarith
+    have hge := hge1 chi.level (1 % chi.level) h1_idx hnn
+    rw [h1_val] at hge; linarith
+  have hdft_all : ∀ b < chi.level, dft_sum chi.level (zeta_q chi.level) chi.val b = complex.mul (complex.conj (chi.val b)) (gauss_sum chi.level (zeta_q chi.level) chi.val) := by intro b _; exact primitive.dft_eq_conj_tau chi hprim b
+  unfold dchar.tau
+  exact gauss_sum.norm_sq_eq_q chi.level (zeta_q chi.level) chi.val hq_pos hpars_re hdft_all hcdot_pos
+
+-- THEOREM 7 (UNITARY ROOT NUMBER W(chi): |W(chi)|^2 = 1, W(chi) != 0, AND W(chi) * W(bar chi) = 1!):
++ primitive.root_num_unit_and_ne_zero (chi : DChar) (hprim : dchar.is_primitive chi) :
+    complex.norm_sq (dchar.root_num chi) = 1 ∧ dchar.root_num chi ≠ complex.zero
+  have hq_pos : 0 < chi.level := by unfold dchar.is_primitive dchar.valid at hprim; omega
+  have htau := primitive.tau_norm_sq_eq_q chi hprim
+  set t' := (if dchar.parity chi = 1 then complex.mul (complex.neg complex.I) (dchar.tau chi) else dchar.tau chi) with ht'
+  have ht'_ns : complex.norm_sq t' = (chi.level : ℝ)
+    rw [ht']
+    by_cases hp : dchar.parity chi = 1
+    · rw [if_pos hp, complex.norm_sq_mul, htau.1]
+      have hni : complex.norm_sq (complex.neg complex.I) = 1 := by unfold complex.norm_sq complex.I; simp
+      rw [hni]; ring
+    · rw [if_neg hp]; exact htau.1
+  unfold dchar.root_num; rw [← ht']
+  exact root_number.unit_norm_and_ne_zero chi.level t' hq_pos ht'_ns
+
+-- Conjugation relation: tau(bar chi) = chi(-1) * conj(tau(chi))!
++ primitive.tau_inv_eq (chi : DChar) (hprim : dchar.is_primitive chi) :
+    dchar.tau (dchar.inv chi) = complex.mul (if dchar.parity chi = 1 then complex.neg complex.one else complex.one) (complex.conj (dchar.tau chi))
+  have hq_pos : 0 < chi.level := by unfold dchar.is_primitive dchar.valid at hprim; omega
+  have hupr := uproot.cexp_is_unitary_prim chi.level hq_pos
+  unfold is_unitary_prim_root at hupr
+  have hzq : cpow_nat (zeta_q chi.level) chi.level = complex.one := hupr.2.2.1
+  have hzns : complex.norm_sq (zeta_q chi.level) = 1 := hupr.2.1
+  -- First note conj(tau(chi)) = sum_{a<q} conj(chi(a)) * conj(zeta_q^a) = sum_{a<q} (bar chi)(a) * zeta_q^(a * (q - 1))!
+  have hconj_tau : complex.conj (dchar.tau chi) = dft_sum chi.level (zeta_q chi.level) (dchar.inv chi).val (chi.level - 1)
+    unfold dchar.tau gauss_sum dft_sum dchar.inv; simp
+    have hconj_sum : ∀ N : ℕ, ∀ f : ℕ → ℂ, complex.conj (csum N f) = csum N (fun a => complex.conj (f a))
+      intro N f; induction N with k ih
+      · have h0 : csum 0 f = complex.zero := by rfl
+        have h0b : csum 0 (fun a => complex.conj (f a)) = complex.zero := by rfl
+        rw [h0, h0b]; apply complex.ext <;> simp
+      · rw [succ_eq_add_one.nat]
+        have hs1 : csum (k + 1) f = complex.add (csum k f) (f k) := by rfl
+        have hs2 : csum (k + 1) (fun a => complex.conj (f a)) = complex.add (csum k (fun a => complex.conj (f a))) (complex.conj (f k)) := by rfl
+        rw [hs1, hs2, ← ih]; apply complex.ext <;> simp <;> ring
+    rw [hconj_sum chi.level (fun a => complex.mul (chi.val a) (cpow_nat (zeta_q chi.level) a))]
+    apply csum.congr; intro a ha
+    have hmul_conj : complex.conj (complex.mul (chi.val a) (cpow_nat (zeta_q chi.level) a)) = complex.mul (complex.conj (chi.val a)) (complex.conj (cpow_nat (zeta_q chi.level) a))
+      apply complex.ext <;> simp <;> ring
+    rw [hmul_conj]
+    have hpow_neg : complex.conj (cpow_nat (zeta_q chi.level) a) = cpow_nat (zeta_q chi.level) (a * (chi.level - 1))
+      rw [cpow_nat.conj_eq_pow_neg chi.level (zeta_q chi.level) a hzns hzq (by omega)]
+      rw [← cpow_nat.mod_eq_m39 (zeta_q chi.level) chi.level (chi.level - a) hzq, ← cpow_nat.mod_eq_m39 (zeta_q chi.level) chi.level (a * (chi.level - 1)) hzq]
+      have hmod : (chi.level - a) % chi.level = (a * (chi.level - 1)) % chi.level
+        by_cases ha0 : a = 0
+        · rw [ha0]; simp
+          have hsub0 : chi.level - 0 = chi.level := by omega
+          rw [hsub0]
+          have hmod0 := add_mul_mod.nat 0 1 chi.level
+          have hq0 : 0 + chi.level * 1 = chi.level := by ring
+          rw [hq0] at hmod0; exact hmod0
+        · have heq : a * (chi.level - 1) = (chi.level - a) + chi.level * (a - 1)
+            set m := chi.level - a with hm
+            set a1 := a - 1 with ha1
+            have hq : chi.level = m + a := by omega
+            have ha_eq : a = a1 + 1 := by omega
+            have hq1 : chi.level - 1 = m + a1 := by omega
+            rw [hq1, hq, ha_eq]; ring
+          rw [heq, add_mul_mod.nat]
+      rw [hmod]
+    rw [hpow_neg]
+  by_cases hq1 : chi.level = 1
+  · have hpar0 : dchar.parity chi = 0
+      unfold dchar.parity; have hnot : ¬ (2 ≤ chi.level ∧ chi.val (chi.level - 1) = complex.neg complex.one) := by omega
+      exact if_neg hnot
+    have hp01 : dchar.parity chi ≠ 1 := by omega
+    rw [if_neg hp01, complex.one_mul, hconj_tau]; unfold dft_sum dchar.tau gauss_sum dchar.inv; simp
+    rw [hq1]; apply csum.congr; intro a ha; have ha0 : a = 0 := by omega; rw [ha0]; simp
+  · have hq2 : 2 ≤ chi.level := by omega
+    have hinv_prim : dchar.is_primitive (dchar.inv chi)
+      unfold dchar.is_primitive
+      constructor
+      · exact dchar.inv_valid chi hprim.1
+      · intro psi hvp hind
+        have hinv_ind : dchar.induced_by chi (dchar.inv psi)
+          unfold dchar.induced_by dchar.inv at hind ⊢; simp at hind ⊢
+          constructor; exact hind.1
+          intro a hu
+          have h : complex.conj (complex.conj (chi.val a)) = complex.conj (psi.val a) := by rw [hind.2 a hu]
+          rw [complex.conj_conj (chi.val a)] at h; exact h
+        have hle := hprim.2 (dchar.inv psi) (dchar.inv_valid psi hvp) hinv_ind
+        unfold dchar.inv at hle ⊢; simp at hle ⊢
+    have hdft := primitive.dft_eq_conj_tau (dchar.inv chi) hinv_prim (chi.level - 1)
+    have hinv_lvl : (dchar.inv chi).level = chi.level := by unfold dchar.inv; simp
+    rw [hinv_lvl, ← hconj_tau] at hdft
+    have hval_inv : complex.conj ((dchar.inv chi).val (chi.level - 1)) = chi.val (chi.level - 1) := by unfold dchar.inv; simp; exact complex.conj_conj (chi.val (chi.level - 1))
+    rw [hval_inv] at hdft
+    obtain h1 | hm1 := dchar.neg_one_pm_one chi hprim.1 hq2
+    · have hpar0 : dchar.parity chi = 0
+        unfold dchar.parity
+        have hnot : ¬ (2 ≤ chi.level ∧ chi.val (chi.level - 1) = complex.neg complex.one)
+          intro hc
+          have hre1 : complex.re (chi.val (chi.level - 1)) = 1 := by rw [h1]; simp
+          have hre2 : complex.re (chi.val (chi.level - 1)) = 0 - 1 := by rw [hc.2]; simp
+          linarith
+        exact if_neg hnot
+      have hp01 : dchar.parity chi ≠ 1 := by omega
+      rw [if_neg hp01, complex.one_mul]; rw [h1, complex.one_mul] at hdft; exact hdft.symm
+    · have hpar1 : dchar.parity chi = 1
+        unfold dchar.parity; exact if_pos ⟨hq2, hm1⟩
+      rw [if_pos hpar1]; rw [hm1] at hdft
+      have hmul : complex.mul (complex.neg complex.one) (complex.conj (dchar.tau chi)) = complex.mul (complex.neg complex.one) (complex.mul (complex.neg complex.one) (dchar.tau (dchar.inv chi))) := by rw [hdft]
+      have hneg_neg : complex.mul (complex.neg complex.one) (complex.mul (complex.neg complex.one) (dchar.tau (dchar.inv chi))) = dchar.tau (dchar.inv chi) := by ring
+      rw [hneg_neg] at hmul; exact hmul.symm
+
+-- THEOREM 8 (EXACT FUNCTIONAL-EQUATION ROOT INVOLUTION: W(chi) * W(bar chi) = 1 — 0 AXIOMS!):
++ primitive.root_num_mul_inv (chi : DChar) (hprim : dchar.is_primitive chi) :
+    complex.mul (dchar.root_num chi) (dchar.root_num (dchar.inv chi)) = complex.one
+  have hq_pos : 0 < chi.level := by unfold dchar.is_primitive dchar.valid at hprim; omega
+  have htau_ns := (primitive.tau_norm_sq_eq_q chi hprim).1
+  have htau_inv := primitive.tau_inv_eq chi hprim
+  have hpar_eq : dchar.parity (dchar.inv chi) = dchar.parity chi
+    unfold dchar.parity dchar.inv; simp
+    have hiff : (2 ≤ chi.level ∧ complex.conj (chi.val (chi.level - 1)) = complex.neg complex.one) ↔ (2 ≤ chi.level ∧ chi.val (chi.level - 1) = complex.neg complex.one)
+      constructor
+      · intro hc; constructor
+        · exact hc.1
+        · have h : complex.conj (complex.conj (chi.val (chi.level - 1))) = complex.conj (complex.neg complex.one) := by rw [hc.2]
+          rw [complex.conj_conj (chi.val (chi.level - 1))] at h
+          have hc1 : complex.conj (complex.neg complex.one) = complex.neg complex.one
+            apply complex.ext <;> simp
+          rw [hc1] at h; exact h
+      · intro hc; constructor
+        · exact hc.1
+        · rw [hc.2]; apply complex.ext <;> simp
+    by_cases h : 2 ≤ chi.level ∧ chi.val (chi.level - 1) = complex.neg complex.one
+    · rw [if_pos (hiff.mpr h), if_pos h]
+    · have h' : ¬ (2 ≤ chi.level ∧ complex.conj (chi.val (chi.level - 1)) = complex.neg complex.one) := by intro x; exact h (hiff.mp x)
+      rw [if_neg h', if_neg h]
+  have htau_prod : complex.mul (dchar.tau chi) (complex.conj (dchar.tau chi)) = complex.of_real (chi.level : ℝ)
+    unfold complex.of_real; apply complex.ext
+    · simp; unfold complex.norm_sq at htau_ns; linear_combination htau_ns
+    · simp; ring
+  have hsqrt_sq : (1 / sqrt (chi.level : ℝ)) * (1 / sqrt (chi.level : ℝ)) * (chi.level : ℝ) = 1
+    have hsp := sqrt_spec (chi.level : ℝ) (by linarith)
+    have hsq : sqrt (chi.level : ℝ) * sqrt (chi.level : ℝ) = (chi.level : ℝ) := hsp.2
+    have hs_pos : 0 < sqrt (chi.level : ℝ)
+      by_contra hle; have hz : sqrt (chi.level : ℝ) = 0 := by linarith [hsp.1]; rw [hz] at hsq; nlinarith
+    have hcs := mul_inv_cancel.real (sqrt (chi.level : ℝ)) (by linarith)
+    have hmul_sq : (1 / sqrt (chi.level : ℝ)) * (1 / sqrt (chi.level : ℝ)) * (sqrt (chi.level : ℝ) * sqrt (chi.level : ℝ)) = 1
+      calc (1 / sqrt (chi.level : ℝ)) * (1 / sqrt (chi.level : ℝ)) * (sqrt (chi.level : ℝ) * sqrt (chi.level : ℝ))
+        = (sqrt (chi.level : ℝ) * (1 / sqrt (chi.level : ℝ))) * (sqrt (chi.level : ℝ) * (1 / sqrt (chi.level : ℝ))) := by ring
+        _ = 1 * 1 := by rw [hcs]
+        _ = 1 := by ring
+    rw [hsq] at hmul_sq; exact hmul_sq
+  unfold dchar.root_num
+  have hinv_lvl : (dchar.inv chi).level = chi.level := by unfold dchar.inv; simp
+  rw [hinv_lvl, hpar_eq, htau_inv]
+  by_cases hp : dchar.parity chi = 1
+  · rw [if_pos hp, if_pos hp, if_pos hp]
+    have hrearr : complex.mul (complex.mul (complex.of_real (1 / sqrt (chi.level : ℝ))) (complex.mul (complex.neg complex.I) (dchar.tau chi))) (complex.mul (complex.of_real (1 / sqrt (chi.level : ℝ))) (complex.mul (complex.neg complex.I) (complex.mul (complex.neg complex.one) (complex.conj (dchar.tau chi))))) = complex.mul (complex.mul (complex.of_real (1 / sqrt (chi.level : ℝ))) (complex.of_real (1 / sqrt (chi.level : ℝ)))) (complex.mul (dchar.tau chi) (complex.conj (dchar.tau chi))) := by ring
+    rw [hrearr, htau_prod]; unfold complex.of_real; apply complex.ext; (simp; linarith); simp
+  · rw [if_neg hp, if_neg hp, if_neg hp, complex.one_mul]
+    have hrearr : complex.mul (complex.mul (complex.of_real (1 / sqrt (chi.level : ℝ))) (dchar.tau chi)) (complex.mul (complex.of_real (1 / sqrt (chi.level : ℝ))) (complex.conj (dchar.tau chi))) = complex.mul (complex.mul (complex.of_real (1 / sqrt (chi.level : ℝ))) (complex.of_real (1 / sqrt (chi.level : ℝ)))) (complex.mul (dchar.tau chi) (complex.conj (dchar.tau chi))) := by ring
+    rw [hrearr, htau_prod]; unfold complex.of_real; apply complex.ext; (simp; linarith); simp

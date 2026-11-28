@@ -1,0 +1,1000 @@
+-- Milestone 3.74: Compact-Rectangle Maximum Modulus, Hadamard Three-Lines Theorem,
+--                 Concrete Mobius Function & Dirichlet Inverse, u-Coordinate Gaussian
+--                 Theta Tail Bounds, Mean-Square Jacobi Twist Zero-Density Estimate,
+--                 and `sernau.exists_classical_L_quad_twist_ne_zero` (0 CUSTOM AXIOMS!)
+
+import analysis.cauchy_circle
+import number_theory.dirichlet_twists
+
+-- ====================================================================================
+-- SECTION 1: 1D/2D COMPACTNESS, RECTANGLE MAXIMUM MODULUS, & HADAMARD THREE-LINES
+-- ====================================================================================
+
++ cont_within.bounded_above (f : ℝ → ℝ) (a b : ℝ) (hab : a ≤ b)
+    (hc : ∀ x : ℝ, a ≤ x → x ≤ b → continuous_within_at f (fun z => a ≤ z ∧ z ≤ b) x) :
+    ∃ B : ℝ, ∀ x : ℝ, a ≤ x → x ≤ b → f x ≤ B
+  apply interval.propagate (fun z => ∃ B : ℝ, ∀ w : ℝ, a ≤ w → w ≤ z → f w ≤ B) a b hab
+  · exact ⟨f a, by intro w hw1 hw2; have he : w = a := by linarith; rw [he]; linarith⟩
+  · intro t ht1 ht2
+    have hct := hc t ht1 ht2; unfold continuous_within_at at hct
+    obtain ⟨d, hd_pos, hd⟩ := hct 1 (by decide)
+    use d; constructor; exact hd_pos
+    intro x y hx1 hxt hty hy2 htx hyt ⟨Bx, hBx⟩
+    use max Bx (f t + 1)
+    intro w hw1 hwy
+    by_cases hwx : w ≤ x
+    · linarith [hBx w hw1 hwx, le_max_left.real Bx (f t + 1)]
+    · have close : |w - t| < d := abs_lt_of.real (w - t) d (by linarith) (by linarith)
+      have h1 := hd w ⟨hw1, by linarith⟩ close
+      linarith [le_abs_self.real (f w - f t), le_max_right.real Bx (f t + 1)]
+
++ cont_within.exists_max (f : ℝ → ℝ) (a b : ℝ) (hab : a ≤ b)
+    (hc : ∀ x : ℝ, a ≤ x → x ≤ b → continuous_within_at f (fun z => a ≤ z ∧ z ≤ b) x) :
+    ∃ x_max : ℝ, a ≤ x_max ∧ x_max ≤ b ∧ ∀ x : ℝ, a ≤ x → x ≤ b → f x ≤ f x_max
+  obtain ⟨B, hB⟩ := cont_within.bounded_above f a b hab hc
+  set S := (fun y : ℝ => ∃ x : ℝ, a ≤ x ∧ x ≤ b ∧ y = f x) with hS
+  have hne : ∃ y : ℝ, S y := ⟨f a, by rw [hS]; exact ⟨a, by linarith, hab, rfl⟩⟩
+  have hub : upper_bound S B := by unfold upper_bound; intro y hy; rw [hS] at hy; obtain ⟨x, hx1, hx2, hy_eq⟩ := hy; rw [hy_eq]; exact hB x hx1 hx2
+  obtain ⟨M, hM⟩ := sup_exists S hne ⟨B, hub⟩
+  have hle_M : ∀ x : ℝ, a ≤ x → x ≤ b → f x ≤ M :=
+    by intro x hx1 hx2; exact is_sup.le_of_mem S M (f x) hM (by rw [hS]; exact ⟨x, hx1, hx2, rfl⟩)
+  by_contra hno
+  have hlt_M : ∀ x : ℝ, a ≤ x → x ≤ b → f x < M
+    intro x hx1 hx2; have hle := hle_M x hx1 hx2
+    by_contra hge; have heq : f x = M := by linarith
+    exact hno ⟨x, hx1, hx2, by intro w hw1 hw2; rw [heq]; exact hle_M w hw1 hw2⟩
+  set g := (fun x : ℝ => 1 / (M - f x)) with hg
+  have hgc : ∀ x : ℝ, a ≤ x → x ≤ b → continuous_within_at g (fun z => a ≤ z ∧ z ≤ b) x
+    intro x hx1 hx2
+    set gap := M - f x with hgap
+    have hgap_pos : 0 < gap := by rw [hgap]; linarith [hlt_M x hx1 hx2]
+    unfold continuous_within_at; intro e he
+    have hcx := hc x hx1 hx2; unfold continuous_within_at at hcx
+    set d_val := min (gap / 2) ((e * (gap * gap)) / 4) with hdval
+    have hdval_pos : 0 < d_val
+      rw [hdval]
+      exact lt_min.real (gap / 2) ((e * (gap * gap)) / 4) 0 (by linarith) (div_pos.real (e * (gap * gap)) 4 (mul_pos.real e (gap * gap) he (mul_pos.real gap gap hgap_pos hgap_pos)) (by decide))
+    obtain ⟨d, hd_pos, hd⟩ := hcx d_val hdval_pos
+    use d; constructor; exact hd_pos
+    intro w hw hclose
+    have hfw := hd w hw hclose
+    have hfw1 : |f w - f x| < gap / 2 := by linarith [min_le_left.real (gap / 2) ((e * (gap * gap)) / 4)]
+    have hfw2 : |f w - f x| < (e * (gap * gap)) / 4 := by linarith [min_le_right.real (gap / 2) ((e * (gap * gap)) / 4)]
+    have hMw_gt : gap / 2 < M - f w := by rw [hgap]; linarith [le_abs_self.real (f w - f x)]
+    have hden_pos : 0 < (M - f w) * gap := mul_pos.real (M - f w) gap (by linarith) hgap_pos
+    have hdiff : g w - g x = (f w - f x) / ((M - f w) * gap) := by rw [hg, hgap]; field_simp
+    rw [hdiff, div_def.real (f w - f x) ((M - f w) * gap), abs_mul.real, abs_of_pos.real (1 / ((M - f w) * gap)) (one_div_pos.real ((M - f w) * gap) hden_pos)]
+    have hden_ge : (gap * gap) / 2 ≤ (M - f w) * gap := by nlinarith
+    have hinv_le : 1 / ((M - f w) * gap) ≤ 2 / (gap * gap)
+      have hm := mul_le_mul_of_nonneg_right.real ((gap * gap) / 2) ((M - f w) * gap) (1 / ((M - f w) * gap)) hden_ge (by linarith [one_div_pos.real ((M - f w) * gap) hden_pos])
+      have hc1 := mul_inv_cancel.real ((M - f w) * gap) (by linarith)
+      rw [hc1] at hm
+      exact (le_div_iff.real (1 / ((M - f w) * gap)) 2 (gap * gap) (mul_pos.real gap gap hgap_pos hgap_pos)).mpr (by linarith)
+    have hm1 := mul_le_mul_of_nonneg_left.real (1 / ((M - f w) * gap)) (2 / (gap * gap)) (|f w - f x|) hinv_le (abs_nonneg.real (f w - f x))
+    have hm2 := mul_lt_mul_of_pos_right.real (|f w - f x|) ((e * (gap * gap)) / 4) (2 / (gap * gap)) hfw2 (div_pos.real 2 (gap * gap) (by decide) (mul_pos.real gap gap hgap_pos hgap_pos))
+    have hsimp : ((e * (gap * gap)) / 4) * (2 / (gap * gap)) = e / 2 := by field_simp
+    linarith
+  obtain ⟨K, hK⟩ := cont_within.bounded_above g a b hab hgc
+  set K1 := max K 0 + 1 with hK1
+  have hK1_pos : 0 < K1 := by rw [hK1]; linarith [le_max_right.real K 0]
+  obtain ⟨y0, hy0_S, hy0_gt⟩ := is_sup.exists_gt S M (M - 1 / (2 * K1)) hM (by linarith [div_pos.real 1 (2 * K1) (by decide) (by linarith)])
+  rw [hS] at hy0_S; obtain ⟨x0, hx01, hx02, hy0_eq⟩ := hy0_S
+  have hgx0 : g x0 ≤ K1 := by linarith [hK x0 hx01 hx02, le_max_left.real K 0]
+  have hgx0_eq : g x0 = 1 / (M - f x0) := by rw [hg]
+  have hMx0_pos : 0 < M - f x0 := by linarith [hlt_M x0 hx01 hx02]
+  have hm := mul_le_mul_of_nonneg_right.real (1 / (M - f x0)) K1 (M - f x0) (by rw [← hgx0_eq]; exact hgx0) (by linarith)
+  have hc1 := mul_inv_cancel.real (M - f x0) (by linarith)
+  have hcan1 : (1 / (M - f x0)) * (M - f x0) = 1 := by linear_combination hc1
+  rw [hcan1] at hm
+  have hMx0_lt : M - f x0 < 1 / (2 * K1) := by linarith
+  have hm2 := mul_lt_mul_of_pos_left.real (M - f x0) (1 / (2 * K1)) K1 hMx0_lt hK1_pos
+  have hc2 : K1 * (1 / (2 * K1)) = 1 / 2 := by field_simp
+  linarith
+
++ cont_within.exists_min (f : ℝ → ℝ) (a b : ℝ) (hab : a ≤ b)
+    (hc : ∀ x : ℝ, a ≤ x → x ≤ b → continuous_within_at f (fun z => a ≤ z ∧ z ≤ b) x) :
+    ∃ x_min : ℝ, a ≤ x_min ∧ x_min ≤ b ∧ ∀ x : ℝ, a ≤ x → x ≤ b → f x_min ≤ f x
+  have hc_neg : ∀ x : ℝ, a ≤ x → x ≤ b → continuous_within_at (fun w => -(f w)) (fun z => a ≤ z ∧ z ≤ b) x
+    intro x hx1 hx2; have hcx := hc x hx1 hx2; unfold continuous_within_at at hcx ⊢
+    intro e he; obtain ⟨d, hd_pos, hd⟩ := hcx e he; use d; constructor; exact hd_pos
+    intro w hw hclose; have hre : -(f w) - -(f x) = -(f w - f x) := by ring
+    rw [hre, abs_neg_eq]; exact hd w hw hclose
+  obtain ⟨xm, hxm1, hxm2, hmax⟩ := cont_within.exists_max (fun w => -(f w)) a b hab hc_neg
+  exact ⟨xm, hxm1, hxm2, by intro x hx1 hx2; linarith [hmax x hx1 hx2]⟩
+
++ canalytic.abs_cont_within_im (F : ℂ → ℂ) (x c d y0 : ℝ) (hy1 : c ≤ y0) (hy2 : y0 ≤ d)
+    (hf : is_canalytic_at F (complex.mk x y0)) :
+    continuous_within_at (fun y => complex.abs (F (complex.mk x y))) (fun y => c ≤ y ∧ y ≤ d) y0
+  have hfc := canalytic.continuous_at F (complex.mk x y0) hf
+  unfold continuous_within_at; intro e he
+  obtain ⟨df, hdf_pos, hdf⟩ := hfc e he
+  use df; constructor; exact hdf_pos
+  intro y _ hclose
+  have hdist : complex.abs (complex.sub (complex.mk x y) (complex.mk x y0)) = |y - y0|
+    have hsub : complex.sub (complex.mk x y) (complex.mk x y0) = complex.mk 0 (y - y0) := by apply complex.ext <;> simp <;> ring
+    have hsq : complex.abs (complex.mk 0 (y - y0)) * complex.abs (complex.mk 0 (y - y0)) = |y - y0| * |y - y0|
+      rw [complex.abs_sq]; unfold complex.norm_sq; simp; linear_combination -(sq_abs.real (y - y0))
+    rw [hsub]; exact eq_of_sq_eq_nonneg (complex.abs (complex.mk 0 (y - y0))) (|y - y0|) (complex.abs_nonneg (complex.mk 0 (y - y0))) (abs_nonneg.real (y - y0)) hsq
+  have hlt := hdf (complex.mk x y) (by rw [hdist]; exact hclose)
+  have htri1 := complex.abs_add_le (complex.sub (F (complex.mk x y)) (F (complex.mk x y0))) (F (complex.mk x y0))
+  have htri2 := complex.abs_add_le (complex.sub (F (complex.mk x y0)) (F (complex.mk x y))) (F (complex.mk x y))
+  have ha1 : complex.add (complex.sub (F (complex.mk x y)) (F (complex.mk x y0))) (F (complex.mk x y0)) = F (complex.mk x y) := by apply complex.ext <;> simp <;> ring
+  have ha2 : complex.add (complex.sub (F (complex.mk x y0)) (F (complex.mk x y))) (F (complex.mk x y)) = F (complex.mk x y0) := by apply complex.ext <;> simp <;> ring
+  rw [ha1] at htri1; rw [ha2, complex.abs_sub_comm] at htri2
+  exact abs_lt_of.real (complex.abs (F (complex.mk x y)) - complex.abs (F (complex.mk x y0))) e (by linarith) (by linarith)
+
+-- Uniform slice continuity along y in [c, d] via 1D `interval.propagate`!
++ canalytic.unif_slice_diff (F : ℂ → ℂ) (a b c d x0 e : ℝ)
+    (hab : a ≤ b) (hcd : c ≤ d) (hx1 : a ≤ x0) (hx2 : x0 ≤ b) (he : 0 < e)
+    (hana : ∀ z : ℂ, a ≤ complex.re z → complex.re z ≤ b → c ≤ complex.im z → complex.im z ≤ d → is_canalytic_at F z) :
+    ∃ del : ℝ, 0 < del ∧ ∀ x : ℝ, a ≤ x → x ≤ b → |x - x0| < del →
+      ∀ y : ℝ, c ≤ y → y ≤ d → |complex.abs (F (complex.mk x y)) - complex.abs (F (complex.mk x0 y))| < e
+  have hdiff_abs : ∀ z w : ℂ, |complex.abs z - complex.abs w| ≤ complex.abs (complex.sub z w)
+    intro z w
+    have h1 := complex.abs_add_le (complex.sub z w) w
+    have h2 := complex.abs_add_le (complex.sub w z) z
+    have e1 : complex.add (complex.sub z w) w = z := by apply complex.ext <;> simp <;> ring
+    have e2 : complex.add (complex.sub w z) z = w := by apply complex.ext <;> simp <;> ring
+    rw [e1] at h1; rw [e2, complex.abs_sub_comm] at h2
+    exact abs_le_of.real (complex.abs z - complex.abs w) (complex.abs (complex.sub z w)) (by linarith) (by linarith)
+  set P := (fun w : ℝ => ∃ del : ℝ, 0 < del ∧ ∀ x : ℝ, a ≤ x → x ≤ b → |x - x0| < del → ∀ y : ℝ, c ≤ y → y ≤ w → |complex.abs (F (complex.mk x y)) - complex.abs (F (complex.mk x0 y))| < e) with hP
+  have hPc : P d
+    apply interval.propagate P c d hcd
+    · rw [hP]; have hfc := canalytic.continuous_at F (complex.mk x0 c) (hana (complex.mk x0 c) hx1 hx2 (by simp) hcd)
+      obtain ⟨df, hdf_pos, hdf⟩ := hfc e he
+      use df / 2; constructor
+      · linarith
+      · intro x _ _ hclose y hy1 hy2
+        have hyc : y = c := by linarith
+        rw [hyc]
+        have hle := complex.abs_le_re_im (complex.sub (complex.mk x c) (complex.mk x0 c)); simp at hle
+        have hcc0 : |c - c| = 0 := by have h0 : c - c = 0 := by ring; rw [h0, abs_of_nonneg.real 0 (by decide)]
+        exact lt_of_le_of_lt.real (|complex.abs (F (complex.mk x c)) - complex.abs (F (complex.mk x0 c))|) (complex.abs (complex.sub (F (complex.mk x c)) (F (complex.mk x0 c)))) e (hdiff_abs (F (complex.mk x c)) (F (complex.mk x0 c))) (hdf (complex.mk x c) (by linarith))
+    · intro t ht1 ht2
+      have hfc := canalytic.continuous_at F (complex.mk x0 t) (hana (complex.mk x0 t) hx1 hx2 ht1 ht2)
+      obtain ⟨df, hdf_pos, hdf⟩ := hfc (e / 2) (by linarith)
+      set eta := df / 3 with heta
+      have heta_pos : 0 < eta := by rw [heta]; linarith
+      use eta; constructor; exact heta_pos
+      intro y1 y2 hy1_c hy1_t ht_y2 hy2_d hty1 hy2t hp1
+      rw [hP] at hp1 ⊢
+      obtain ⟨del1, hdel1_pos, hdel1⟩ := hp1
+      use min del1 eta; constructor; exact lt_min.real del1 eta 0 hdel1_pos heta_pos
+      intro x hxa hxb hx_cl y hyc hy_y2
+      by_cases hy_y1 : y ≤ y1
+      · exact hdel1 x hxa hxb (by linarith [min_le_left.real del1 eta]) y hyc hy_y1
+      · have hx_eta : |x - x0| < eta := by linarith [min_le_right.real del1 eta]
+        have hy_eta : |y - t| < eta := abs_lt_of.real (y - t) eta (by linarith) (by linarith)
+        have hle1 := complex.abs_le_re_im (complex.sub (complex.mk x y) (complex.mk x0 t)); simp at hle1
+        have hle2 := complex.abs_le_re_im (complex.sub (complex.mk x0 y) (complex.mk x0 t)); simp at hle2
+        have hxx0 : |x0 - x0| = 0 := by have h0 : x0 - x0 = 0 := by ring; rw [h0, abs_of_nonneg.real 0 (by decide)]
+        have hb1 := hdf (complex.mk x y) (by rw [heta] at hx_eta hy_eta; linarith)
+        have hb2 := hdf (complex.mk x0 y) (by rw [heta] at hy_eta; linarith)
+        have htri := complex.abs_add_le (complex.sub (F (complex.mk x y)) (F (complex.mk x0 t))) (complex.sub (F (complex.mk x0 t)) (F (complex.mk x0 y)))
+        have hsum : complex.add (complex.sub (F (complex.mk x y)) (F (complex.mk x0 t))) (complex.sub (F (complex.mk x0 t)) (F (complex.mk x0 y))) = complex.sub (F (complex.mk x y)) (F (complex.mk x0 y)) := by apply complex.ext <;> simp <;> ring
+        rw [hsum, complex.abs_sub_comm (F (complex.mk x0 t)) (F (complex.mk x0 y))] at htri
+        linarith [hdiff_abs (F (complex.mk x y)) (F (complex.mk x0 y))]
+  rw [hP] at hPc; exact hPc
+
+-- 2D Extreme Value Theorem (both max & min) for |F(z)| on a closed rectangle [a, b] x [c, d]!
++ canalytic.rect_exists_min (F : ℂ → ℂ) (a b c d : ℝ) (hab : a ≤ b) (hcd : c ≤ d)
+    (hana : ∀ z : ℂ, a ≤ complex.re z → complex.re z ≤ b → c ≤ complex.im z → complex.im z ≤ d → is_canalytic_at F z) :
+    ∃ z_min : ℂ, a ≤ complex.re z_min ∧ complex.re z_min ≤ b ∧ c ≤ complex.im z_min ∧ complex.im z_min ≤ d ∧
+      ∀ z : ℂ, a ≤ complex.re z → complex.re z ≤ b → c ≤ complex.im z → complex.im z ≤ d →
+        complex.abs (F z_min) ≤ complex.abs (F z)
+  have hex_y : ∀ x : ℝ, a ≤ x → x ≤ b → ∃ ym : ℝ, c ≤ ym ∧ ym ≤ d ∧ ∀ y : ℝ, c ≤ y → y ≤ d → complex.abs (F (complex.mk x ym)) ≤ complex.abs (F (complex.mk x y))
+    intro x hx1 hx2
+    exact cont_within.exists_min (fun y => complex.abs (F (complex.mk x y))) c d hcd (by intro y hy1 hy2; exact canalytic.abs_cont_within_im F x c d y hy1 hy2 (hana (complex.mk x y) hx1 hx2 hy1 hy2))
+  set y_of := (fun x : ℝ => if a ≤ x ∧ x ≤ b then choice (fun ym => c ≤ ym ∧ ym ≤ d ∧ ∀ y : ℝ, c ≤ y → y ≤ d → complex.abs (F (complex.mk x ym)) ≤ complex.abs (F (complex.mk x y))) else c) with hyof
+  set mu := (fun x : ℝ => complex.abs (F (complex.mk x (y_of x)))) with hmu
+  have hmu_sp : ∀ x : ℝ, a ≤ x → x ≤ b → c ≤ y_of x ∧ y_of x ≤ d ∧ ∀ y : ℝ, c ≤ y → y ≤ d → mu x ≤ complex.abs (F (complex.mk x y))
+    intro x hx1 hx2; rw [hmu, hyof, if_pos ⟨hx1, hx2⟩]
+    exact choice.spec (fun ym => c ≤ ym ∧ ym ≤ d ∧ ∀ y : ℝ, c ≤ y → y ≤ d → complex.abs (F (complex.mk x ym)) ≤ complex.abs (F (complex.mk x y))) (hex_y x hx1 hx2)
+  have hmu_cont : ∀ x0 : ℝ, a ≤ x0 → x0 ≤ b → continuous_within_at mu (fun z => a ≤ z ∧ z ≤ b) x0
+    intro x0 hx01 hx02; unfold continuous_within_at; intro e he
+    obtain ⟨del, hdel_pos, hdel⟩ := canalytic.unif_slice_diff F a b c d x0 e hab hcd hx01 hx02 he hana
+    use del; constructor; exact hdel_pos
+    intro x hx hclose
+    have hsx := hmu_sp x hx.1 hx.2; have hsx0 := hmu_sp x0 hx01 hx02
+    have h1 := hdel x hx.1 hx.2 hclose (y_of x0) hsx0.1 hsx0.2.1
+    have h2 := hdel x hx.1 hx.2 hclose (y_of x) hsx.1 hsx.2.1
+    have hlo1 := hsx.2.2 (y_of x0) hsx0.1 hsx0.2.1
+    have hlo2 := hsx0.2.2 (y_of x) hsx.1 hsx.2.1
+    rw [hmu] at hlo1 hlo2 ⊢
+    exact abs_lt_of.real (complex.abs (F (complex.mk x (y_of x))) - complex.abs (F (complex.mk x0 (y_of x0)))) e (by linarith [neg_le_abs.real (complex.abs (F (complex.mk x (y_of x))) - complex.abs (F (complex.mk x0 (y_of x))))]) (by linarith [le_abs_self.real (complex.abs (F (complex.mk x (y_of x0))) - complex.abs (F (complex.mk x0 (y_of x0))))])
+  obtain ⟨xm, hxm1, hxm2, hxm_min⟩ := cont_within.exists_min mu a b hab hmu_cont
+  have hsp_xm := hmu_sp xm hxm1 hxm2
+  have hall : ∀ z : ℂ, a ≤ complex.re z → complex.re z ≤ b → c ≤ complex.im z → complex.im z ≤ d → complex.abs (F (complex.mk xm (y_of xm))) ≤ complex.abs (F z)
+    intro z hz1 hz2 hz3 hz4
+    have hz_mk : z = complex.mk (complex.re z) (complex.im z) := by apply complex.ext <;> simp
+    have hmu_xm : mu xm = complex.abs (F (complex.mk xm (y_of xm))) := by rw [hmu]
+    rw [hz_mk, ← hmu_xm]
+    exact le_trans.real (mu xm) (mu (complex.re z)) (complex.abs (F (complex.mk (complex.re z) (complex.im z)))) (hxm_min (complex.re z) hz1 hz2) ((hmu_sp (complex.re z) hz1 hz2).2.2 (complex.im z) hz3 hz4)
+  use complex.mk xm (y_of xm)
+  simp
+  exact ⟨hxm1, hxm2, hsp_xm.1, hsp_xm.2.1, hall⟩
+
+-- Bounded-Rectangle Maximum Modulus Principle (via `canalytic.mean_value_circle` + `darboux.pos_of_pos_at`)!
++ canalytic.max_modulus_rect (F : ℂ → ℂ) (a b H M : ℝ) (z0 : ℂ)
+    (hab : a < b) (hH : 0 < H) (hM : 0 ≤ M)
+    (hana : ∀ z : ℂ, a ≤ complex.re z → complex.re z ≤ b → -H ≤ complex.im z → complex.im z ≤ H → is_canalytic_at F z)
+    (hleft : ∀ y : ℝ, -H ≤ y → y ≤ H → complex.abs (F (complex.mk a y)) ≤ M)
+    (hright : ∀ y : ℝ, -H ≤ y → y ≤ H → complex.abs (F (complex.mk b y)) ≤ M)
+    (hbot : ∀ x : ℝ, a ≤ x → x ≤ b → complex.abs (F (complex.mk x (-H))) ≤ M)
+    (htop : ∀ x : ℝ, a ≤ x → x ≤ b → complex.abs (F (complex.mk x H)) ≤ M)
+    (hx0 : a ≤ complex.re z0) (hx1 : complex.re z0 ≤ b) (hy0 : -H ≤ complex.im z0) (hy1 : complex.im z0 ≤ H) :
+    complex.abs (F z0) ≤ M
+  have hHH : -H ≤ H := by linarith
+  have hex_y : ∀ x : ℝ, a ≤ x → x ≤ b → ∃ ym : ℝ, -H ≤ ym ∧ ym ≤ H ∧ ∀ y : ℝ, -H ≤ y → y ≤ H → complex.abs (F (complex.mk x y)) ≤ complex.abs (F (complex.mk x ym))
+    intro x hx_a hx_b
+    exact cont_within.exists_max (fun y => complex.abs (F (complex.mk x y))) (-H) H hHH (by intro y hy1' hy2'; exact canalytic.abs_cont_within_im F x (-H) H y hy1' hy2' (hana (complex.mk x y) hx_a hx_b hy1' hy2'))
+  set y_of := (fun x : ℝ => if a ≤ x ∧ x ≤ b then choice (fun ym => -H ≤ ym ∧ ym ≤ H ∧ ∀ y : ℝ, -H ≤ y → y ≤ H → complex.abs (F (complex.mk x y)) ≤ complex.abs (F (complex.mk x ym))) else 0) with hyof
+  set mx := (fun x : ℝ => complex.abs (F (complex.mk x (y_of x)))) with hmx
+  have hmx_sp : ∀ x : ℝ, a ≤ x → x ≤ b → -H ≤ y_of x ∧ y_of x ≤ H ∧ ∀ y : ℝ, -H ≤ y → y ≤ H → complex.abs (F (complex.mk x y)) ≤ mx x
+    intro x hx_a hx_b; rw [hmx, hyof, if_pos ⟨hx_a, hx_b⟩]
+    exact choice.spec (fun ym => -H ≤ ym ∧ ym ≤ H ∧ ∀ y : ℝ, -H ≤ y → y ≤ H → complex.abs (F (complex.mk x y)) ≤ complex.abs (F (complex.mk x ym))) (hex_y x hx_a hx_b)
+  have hmx_cont : ∀ x : ℝ, a ≤ x → x ≤ b → continuous_within_at mx (fun z => a ≤ z ∧ z ≤ b) x
+    intro xc hxc1 hxc2; unfold continuous_within_at; intro e he
+    obtain ⟨del, hdel_pos, hdel⟩ := canalytic.unif_slice_diff F a b (-H) H xc e (by linarith) hHH hxc1 hxc2 he hana
+    use del; constructor; exact hdel_pos
+    intro x hx hclose
+    have hsx := hmx_sp x hx.1 hx.2; have hsxc := hmx_sp xc hxc1 hxc2
+    have h1 := hdel x hx.1 hx.2 hclose (y_of xc) hsxc.1 hsxc.2.1
+    have h2 := hdel x hx.1 hx.2 hclose (y_of x) hsx.1 hsx.2.1
+    have hhi1 := hsx.2.2 (y_of xc) hsxc.1 hsxc.2.1
+    have hhi2 := hsxc.2.2 (y_of x) hsx.1 hsx.2.1
+    rw [hmx] at hhi1 hhi2 ⊢
+    exact abs_lt_of.real (complex.abs (F (complex.mk x (y_of x))) - complex.abs (F (complex.mk xc (y_of xc)))) e (by linarith [neg_le_abs.real (complex.abs (F (complex.mk x (y_of xc))) - complex.abs (F (complex.mk xc (y_of xc))))]) (by linarith [le_abs_self.real (complex.abs (F (complex.mk x (y_of x))) - complex.abs (F (complex.mk xc (y_of x))))])
+  obtain ⟨xm0, hxm0_a, hxm0_b, hxm0_max⟩ := cont_within.exists_max mx a b (by linarith) hmx_cont
+  set Mr := mx xm0 with hMr
+  have hz0_le : complex.abs (F z0) ≤ Mr
+    have hz_mk : z0 = complex.mk (complex.re z0) (complex.im z0) := by apply complex.ext <;> simp
+    have h1 := (hmx_sp (complex.re z0) hx0 hx1).2.2 (complex.im z0) hy0 hy1
+    have h2 := hxm0_max (complex.re z0) hx0 hx1
+    rw [← hz_mk] at h1
+    linarith
+  by_contra hgt_M
+  have hMr_gt : M < Mr := by linarith
+  have hMr_pos : 0 < Mr := by linarith
+  -- Take rightmost maximizer xs = sup {x in [a, b] : mx x = Mr}!
+  set S_top := (fun x : ℝ => a ≤ x ∧ x ≤ b ∧ mx x = Mr) with hStop
+  have hne_top : ∃ x : ℝ, S_top x := ⟨xm0, by rw [hStop]; exact ⟨hxm0_a, hxm0_b, hMr.symm⟩⟩
+  have hub_top : upper_bound S_top b := by unfold upper_bound; intro x hx; rw [hStop] at hx; exact hx.2.1
+  obtain ⟨xs, hxs_sup⟩ := sup_exists S_top hne_top ⟨b, hub_top⟩
+  have hxs_a : a ≤ xs := by have h := is_sup.le_of_mem S_top xs xm0 hxs_sup (by rw [hStop]; exact ⟨hxm0_a, hxm0_b, hMr.symm⟩); linarith
+  have hxs_b : xs ≤ b := by unfold is_sup at hxs_sup; exact hxs_sup.2 b hub_top
+  -- By continuity of mx at xs, mx xs = Mr!
+  have hmx_xs : mx xs = Mr
+    have hle := hxm0_max xs hxs_a hxs_b
+    by_contra hne; have hgap : 0 < Mr - mx xs := by linarith
+    have hc_xs := hmx_cont xs hxs_a hxs_b; unfold continuous_within_at at hc_xs
+    obtain ⟨d, hd_pos, hd⟩ := hc_xs ((Mr - mx xs) / 2) (by linarith)
+    obtain ⟨w, hw_S, hw_gt⟩ := is_sup.exists_gt S_top xs (xs - d) hxs_sup (by linarith)
+    have hw_le := is_sup.le_of_mem S_top xs w hxs_sup hw_S
+    rw [hStop] at hw_S
+    have hcl : |w - xs| < d := abs_lt_of.real (w - xs) d (by linarith) (by linarith)
+    have hnear := hd w ⟨hw_S.1, hw_S.2.1⟩ hcl
+    rw [hw_S.2.2] at hnear; linarith [le_abs_self.real (Mr - mx xs)]
+  set ys := y_of xs with hys
+  have hsp_xs := hmx_sp xs hxs_a hxs_b
+  rw [← hys] at hsp_xs
+  set zs := complex.mk xs ys with hzs
+  have hmx_xs_eq : mx xs = complex.abs (F (complex.mk xs (y_of xs))) := by rw [hmx]
+  have habs_zs : complex.abs (F zs) = Mr := by rw [hzs, hys, ← hmx_xs_eq, hmx_xs]
+  -- (xs, ys) cannot lie on any of the 4 boundary edges since Mr > M!
+  have hxs_gt_a : a < xs
+    by_contra hle; have heq : xs = a := by linarith
+    have hb := hleft ys hsp_xs.1 hsp_xs.2.1; rw [← heq, ← hzs, habs_zs] at hb; linarith
+  have hxs_lt_b : xs < b
+    by_contra hge; have heq : xs = b := by linarith
+    have hb := hright ys hsp_xs.1 hsp_xs.2.1; rw [← heq, ← hzs, habs_zs] at hb; linarith
+  have hys_gt : -H < ys
+    by_contra hle; have heq : ys = -H := by linarith
+    have hb := hbot xs hxs_a hxs_b; rw [← heq, ← hzs, habs_zs] at hb; linarith
+  have hys_lt : ys < H
+    by_contra hge; have heq : ys = H := by linarith
+    have hb := htop xs hxs_a hxs_b; rw [← heq, ← hzs, habs_zs] at hb; linarith
+  set r := min (min (xs - a) (b - xs)) (min (ys + H) (H - ys)) / 2 with hr_def
+  have hr_pos : 0 < r
+    rw [hr_def]
+    have hm1 := lt_min.real (xs - a) (b - xs) 0 (by linarith) (by linarith)
+    have hm2 := lt_min.real (ys + H) (H - ys) 0 (by linarith) (by linarith)
+    have hm := lt_min.real (min (xs - a) (b - xs)) (min (ys + H) (H - ys)) 0 hm1 hm2; linarith
+  have hr_xa : r < xs - a
+    have h1 := min_le_left.real (min (xs - a) (b - xs)) (min (ys + H) (H - ys))
+    have h2 := min_le_left.real (xs - a) (b - xs); rw [hr_def]; linarith
+  have hr_xb : r < b - xs
+    have h1 := min_le_left.real (min (xs - a) (b - xs)) (min (ys + H) (H - ys))
+    have h2 := min_le_right.real (xs - a) (b - xs); rw [hr_def]; linarith
+  have hr_y1 : r < ys + H
+    have h1 := min_le_right.real (min (xs - a) (b - xs)) (min (ys + H) (H - ys))
+    have h2 := min_le_left.real (ys + H) (H - ys); rw [hr_def]; linarith
+  have hr_y2 : r < H - ys
+    have h1 := min_le_right.real (min (xs - a) (b - xs)) (min (ys + H) (H - ys))
+    have h2 := min_le_right.real (ys + H) (H - ys); rw [hr_def]; linarith
+  have hdisk_rect : ∀ z : ℂ, complex.abs (complex.sub z zs) ≤ r →
+      a ≤ complex.re z ∧ complex.re z ≤ b ∧ -H ≤ complex.im z ∧ complex.im z ≤ H
+    intro z hzr
+    have hre_d := complex.re_abs_le (complex.sub z zs); have him_d := complex.im_abs_le (complex.sub z zs)
+    rw [hzs] at hre_d him_d hzr; simp at hre_d him_d
+    exact ⟨by linarith [neg_le_abs.real (complex.re z - xs)], by linarith [le_abs_self.real (complex.re z - xs)], by linarith [neg_le_abs.real (complex.im z - ys)], by linarith [le_abs_self.real (complex.im z - ys)]⟩
+  -- Rotate by omega = conj(F zs) / Mr so omega * F zs = Mr and |omega| = 1!
+  set om := complex.smul (1 / Mr) (complex.conj (F zs)) with hom
+  have hom_abs : complex.abs om = 1
+    rw [hom, complex.abs_smul, abs_of_pos.real (1 / Mr) (one_div_pos.real Mr hMr_pos), complex.abs_conj, habs_zs]
+    have hc := mul_inv_cancel.real Mr (by linarith); linarith
+  have hom_zs : complex.re (complex.mul om (F zs)) = Mr
+    rw [hom]
+    have hns := complex.abs_sq (F zs); rw [habs_zs] at hns
+    have hmul : complex.re (complex.mul (complex.smul (1 / Mr) (complex.conj (F zs))) (F zs)) = (1 / Mr) * complex.norm_sq (F zs)
+      unfold complex.norm_sq; simp; ring
+    rw [hmul, ← hns]
+    have hc := mul_inv_cancel.real Mr (by linarith)
+    linear_combination Mr * hc
+  have hmvt := canalytic.mean_value_circle (fun z => complex.mul om (F z)) zs r hr_pos (by intro z hzr; have hdr := hdisk_rect z hzr; exact is_canalytic_at.mul (fun _ => om) F z (is_canalytic_at.const om z) (hana z hdr.1 hdr.2.1 hdr.2.2.1 hdr.2.2.2))
+  unfold c_has_integral at hmvt
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  set phi := (fun theta : ℝ => Mr - complex.re (complex.mul om (F (circle_pt zs r theta)))) with hphi
+  have hphi_int : darboux.has_integral phi 0 (2 * pi) 0
+    have hc := darboux.const 0 (2 * pi) Mr (by linarith)
+    have hsub := darboux.sub (fun _ => Mr) (fun theta => complex.re (complex.mul om (F (circle_pt zs r theta)))) 0 (2 * pi) (Mr * (2 * pi - 0)) (complex.re (complex.smul (2 * pi) (complex.mul om (F zs)))) hc hmvt.1
+    have hv : Mr * (2 * pi - 0) - complex.re (complex.smul (2 * pi) (complex.mul om (F zs))) = 0
+      have hre_sm : complex.re (complex.smul (2 * pi) (complex.mul om (F zs))) = (2 * pi) * complex.re (complex.mul om (F zs)) := by simp
+      rw [hre_sm, hom_zs]; ring
+    rw [hv] at hsub; rw [hphi]; exact hsub
+  have hphi_nn : ∀ theta : ℝ, 0 ≤ theta → theta ≤ 2 * pi → 0 ≤ phi theta
+    intro theta _ _; rw [hphi]
+    set zt := circle_pt zs r theta with hzt
+    have hzr : complex.abs (complex.sub zt zs) ≤ r := by rw [hzt, circle_pt.dist zs r theta (by linarith)]; linarith
+    have hdr := hdisk_rect zt hzr
+    have hzt_mk : zt = complex.mk (complex.re zt) (complex.im zt) := by apply complex.ext <;> simp
+    have habs_zt : complex.abs (F zt) ≤ Mr
+      have h1 := (hmx_sp (complex.re zt) hdr.1 hdr.2.1).2.2 (complex.im zt) hdr.2.2.1 hdr.2.2.2
+      have h2 := hxm0_max (complex.re zt) hdr.1 hdr.2.1
+      rw [← hzt_mk] at h1
+      linarith
+    have hre_le := complex.re_abs_le (complex.mul om (F zt))
+    rw [complex.abs_mul, hom_abs] at hre_le
+    linarith [le_abs_self.real (complex.re (complex.mul om (F zt)))]
+  have hphi_cont0 : continuous_within_at phi (fun z => 0 ≤ z ∧ z ≤ 2 * pi) 0
+    have hzr0 : complex.abs (complex.sub (circle_pt zs r 0) zs) ≤ r := by rw [circle_pt.dist zs r 0 (by linarith)]; linarith
+    have hdr0 := hdisk_rect (circle_pt zs r 0) hzr0
+    have hbox := canalytic.box_cont_on_circle (fun z => complex.mul om (F z)) zs r r 0 (by linarith) (by linarith) (is_canalytic_at.mul (fun _ => om) F (circle_pt zs r 0) (is_canalytic_at.const om (circle_pt zs r 0)) (hana (circle_pt zs r 0) hdr0.1 hdr0.2.1 hdr0.2.2.1 hdr0.2.2.2))
+    have hsl := continuous_within_box.slice (fun s y => complex.re (complex.mul om (F (circle_pt zs s y)))) (fun z => 0 ≤ z ∧ z ≤ r) (fun z => 0 ≤ z ∧ z ≤ 2 * pi) r 0 ⟨by linarith, by linarith⟩ hbox.1
+    unfold continuous_within_at at hsl ⊢; intro e he
+    obtain ⟨d, hd_pos, hd⟩ := hsl e he; use d; constructor; exact hd_pos
+    intro y hy hclose; rw [hphi]
+    have hre : (Mr - complex.re (complex.mul om (F (circle_pt zs r y)))) - (Mr - complex.re (complex.mul om (F (circle_pt zs r 0)))) = -(complex.re (complex.mul om (F (circle_pt zs r y))) - complex.re (complex.mul om (F (circle_pt zs r 0)))) := by ring
+    rw [hre, abs_neg_eq]; exact hd y hy hclose
+  -- At theta = 0, circle_pt zs r 0 = (xs + r) + i*ys; since xs + r > xs = sup S_top, mx (xs + r) < Mr!
+  have hpt0 : circle_pt zs r 0 = complex.mk (xs + r) ys
+    unfold circle_pt; rw [hzs]; apply complex.ext <;> simp [exp_zero, cos_zero, sin_zero] <;> ring
+  have hmx_lt : mx (xs + r) < Mr
+    have hle := hxm0_max (xs + r) (by linarith) (by linarith)
+    by_contra hge; have heq : mx (xs + r) = Mr := by linarith
+    have hmem : (xs + r) ∈ S_top := by rw [hStop]; exact ⟨by linarith, by linarith, heq⟩
+    have hle_sup := is_sup.le_of_mem S_top xs (xs + r) hxs_sup hmem
+    linarith
+  have hphi0_pos : 0 < phi 0
+    rw [hphi, hpt0]
+    have habs_le : complex.abs (F (complex.mk (xs + r) ys)) ≤ mx (xs + r) := (hmx_sp (xs + r) (by linarith) (by linarith)).2.2 ys hsp_xs.1 hsp_xs.2.1
+    have hre_le := complex.re_abs_le (complex.mul om (F (complex.mk (xs + r) ys)))
+    rw [complex.abs_mul, hom_abs] at hre_le
+    linarith [le_abs_self.real (complex.re (complex.mul om (F (complex.mk (xs + r) ys))))]
+  have hpos_int := darboux.pos_of_pos_at phi 0 (2 * pi) 0 0 (by linarith) (by linarith) (by linarith) hphi_int hphi_nn hphi_cont0 hphi0_pos
+  linarith
+
+-- Hadamard Three-Lines Theorem on a closed vertical strip [x0, x1]!
++ canalytic.hadamard_three_lines_strip (F : ℂ → ℂ) (x0 x1 M0 M1 B : ℝ) (s : ℂ)
+    (hx01 : x0 < x1) (hM0 : 0 < M0) (hM1 : 0 < M1) (hB : 0 ≤ B)
+    (hana : ∀ z : ℂ, x0 ≤ complex.re z → complex.re z ≤ x1 → is_canalytic_at F z)
+    (hstrip : ∀ z : ℂ, x0 ≤ complex.re z → complex.re z ≤ x1 → complex.abs (F z) ≤ B)
+    (hl0 : ∀ y : ℝ, complex.abs (F (complex.mk x0 y)) ≤ M0)
+    (hl1 : ∀ y : ℝ, complex.abs (F (complex.mk x1 y)) ≤ M1)
+    (hs0 : x0 ≤ complex.re s) (hs1 : complex.re s ≤ x1) :
+    complex.abs (F s) ≤ rpow M0 (1 - (complex.re s - x0) / (x1 - x0)) * rpow M1 ((complex.re s - x0) / (x1 - x0))
+  set th := (complex.re s - x0) / (x1 - x0) with hth
+  set al := (log M1 - log M0) / (x1 - x0) with hal
+  set be := log M0 - al * x0 with hbe
+  have hal_x0 : al * x0 + be = log M0 := by rw [hbe]; ring
+  have hal_x1 : al * x1 + be = log M1 := by rw [hbe, hal]; field_simp
+  have hrhs_eq : exp (al * complex.re s + be) = rpow M0 (1 - th) * rpow M1 th
+    unfold rpow; rw [← exp_add]
+    have hlin : al * complex.re s + be = (1 - th) * log M0 + th * log M1
+      rw [hbe, hal, hth]; field_simp
+    rw [hlin]
+  rw [← hrhs_eq]
+  set Xm := max (|x0|) (|x1|) + 1 with hXm
+  have hx_Xm : ∀ x : ℝ, x0 ≤ x → 1 ≤ x + Xm
+    intro x hx_a; rw [hXm]; linarith [neg_le_abs.real x0, le_max_left.real (|x0|) (|x1|)]
+  -- Rational barrier (1 + eps * (z + Xm))⁻¹ * exp(-(al * z + be)) * F(z) <= 1 on [x0, x1] x [-H, H]!
+  have heps_bd : ∀ eps : ℝ, 0 < eps →
+      complex.abs (F s) ≤ (1 + eps * complex.abs (complex.add s (complex.of_real Xm))) * exp (al * complex.re s + be)
+    intro eps heps
+    set m_ab := min (log M0) (log M1) with hmab
+    have hal_ge : ∀ x : ℝ, x0 ≤ x → x ≤ x1 → m_ab ≤ al * x + be
+      intro x hx_a hx_b
+      set t1 := (x1 - x) / (x1 - x0) with ht1_def
+      set t2 := (x - x0) / (x1 - x0) with ht2_def
+      have hconv : al * x + be = t1 * (al * x0 + be) + t2 * (al * x1 + be) := by rw [ht1_def, ht2_def]; field_simp
+      rw [hconv, hal_x0, hal_x1]
+      have ht1 : 0 ≤ t1 := by rw [ht1_def]; exact div_nonneg.real (x1 - x) (x1 - x0) (by linarith) (by linarith)
+      have ht2 : 0 ≤ t2 := by rw [ht2_def]; exact div_nonneg.real (x - x0) (x1 - x0) (by linarith) (by linarith)
+      have hsum1 : t1 + t2 = 1 := by rw [ht1_def, ht2_def]; field_simp
+      have hl0_ge : m_ab ≤ log M0 := by rw [hmab]; exact min_le_left.real (log M0) (log M1)
+      have hl1_ge : m_ab ≤ log M1 := by rw [hmab]; exact min_le_right.real (log M0) (log M1)
+      have hm_sum : t1 * m_ab + t2 * m_ab = m_ab := by linear_combination m_ab * hsum1
+      linarith [mul_le_mul_of_nonneg_left.real m_ab (log M0) t1 hl0_ge ht1, mul_le_mul_of_nonneg_left.real m_ab (log M1) t2 hl1_ge ht2]
+    set C_top := (B + 1) * exp (-m_ab) with hCtop
+    have hCtop_pos : 0 < C_top := by rw [hCtop]; exact mul_pos.real (B + 1) (exp (-m_ab)) (by linarith) (exp_pos (-m_ab))
+    set H := |complex.im s| + C_top / eps + 1 with hH_def
+    have hH_pos : 0 < H := by rw [hH_def]; linarith [abs_nonneg.real (complex.im s), div_pos.real C_top eps hCtop_pos heps]
+    set E_lin := (fun z : ℂ => cpow_real (exp 1) (complex.add (complex.smul (-al) z) (complex.of_real (-be)))) with hE_def
+    set D_den := (fun z : ℂ => complex.add complex.one (complex.mul (complex.of_real eps) (complex.add z (complex.of_real Xm)))) with hD_def
+    set G := (fun z : ℂ => complex.mul (complex.mul (E_lin z) (complex.inv (D_den z))) (F z)) with hG_def
+    have hD_re : ∀ z : ℂ, x0 ≤ complex.re z → 1 ≤ complex.re (D_den z)
+      intro z hz0; rw [hD_def]
+      have hre : complex.re (complex.add complex.one (complex.mul (complex.of_real eps) (complex.add z (complex.of_real Xm)))) = 1 + eps * (complex.re z + Xm) := by unfold complex.of_real; simp; ring
+      rw [hre]; have h1 := hx_Xm (complex.re z) hz0; nlinarith
+    have hD_abs_ge1 : ∀ z : ℂ, x0 ≤ complex.re z → 1 ≤ complex.abs (D_den z)
+      intro z hz0
+      have h1 := hD_re z hz0; have h2 := complex.re_abs_le (D_den z)
+      linarith [le_abs_self.real (complex.re (D_den z))]
+    have habs1 : complex.abs complex.one = 1
+      have hsq : complex.abs complex.one * complex.abs complex.one = 1 * 1 := by rw [complex.abs_sq]; unfold complex.norm_sq; simp
+      exact eq_of_sq_eq_nonneg (complex.abs complex.one) 1 (complex.abs_nonneg complex.one) (by decide) hsq
+    have habs_inv : ∀ w : ℂ, 0 < complex.abs w → complex.abs (complex.inv w) = 1 / complex.abs w
+      intro w hw_pos
+      have hnz : w ≠ complex.zero := by intro hz; rw [hz, complex.abs_zero] at hw_pos; linarith
+      have hm : complex.abs (complex.mul w (complex.inv w)) = complex.abs complex.one := by rw [complex.mul_inv_cancel w hnz]
+      rw [complex.abs_mul, habs1] at hm
+      have hc := mul_inv_cancel.real (complex.abs w) (by linarith)
+      linear_combination (1 / complex.abs w) * hm - complex.abs (complex.inv w) * hc
+    have hD_inv_le1 : ∀ z : ℂ, x0 ≤ complex.re z → complex.abs (complex.inv (D_den z)) ≤ 1
+      intro z hz0
+      have hd1 := hD_abs_ge1 z hz0
+      rw [habs_inv (D_den z) (by linarith)]
+      exact (div_le_iff.real 1 1 (complex.abs (D_den z)) (by linarith)).mpr (by linarith)
+    have hE_abs : ∀ z : ℂ, complex.abs (E_lin z) = exp (-(al * complex.re z + be))
+      intro z; rw [hE_def]; unfold cpow_real
+      rw [complex.abs_exp, log_exp 1]
+      have hre : complex.re (complex.smul 1 (complex.add (complex.smul (-al) z) (complex.of_real (-be)))) = -(al * complex.re z + be) := by unfold complex.of_real; simp; ring
+      rw [hre]
+    have hG_ana : ∀ z : ℂ, x0 ≤ complex.re z → complex.re z ≤ x1 → -H ≤ complex.im z → complex.im z ≤ H → is_canalytic_at G z
+      intro z hz0 hz1 _ _
+      have hE_z : is_canalytic_at E_lin z := by rw [hE_def]; exact cpow_real.is_canalytic_at_linear (exp 1) (-al) (complex.of_real (-be)) (exp_pos 1) z
+      have hD_z : is_canalytic_at D_den z
+        rw [hD_def]
+        exact is_canalytic_at.add _ _ z (is_canalytic_at.const complex.one z) (is_canalytic_at.const_mul (complex.of_real eps) _ z (is_canalytic_at.add _ _ z (is_canalytic_at.id z) (is_canalytic_at.const (complex.of_real Xm) z)))
+      have hD_nz : D_den z ≠ complex.zero
+        intro hz_eq; have hr := hD_re z hz0; rw [hz_eq] at hr; have hr0 : complex.re complex.zero = 0 := by simp
+        rw [hr0] at hr; linarith
+      rw [hG_def]
+      exact is_canalytic_at.mul _ F z (is_canalytic_at.mul E_lin (fun w => complex.inv (D_den w)) z hE_z (is_canalytic_at.inv D_den z hD_z hD_nz)) (hana z hz0 hz1)
+    have hG_left : ∀ y : ℝ, -H ≤ y → y ≤ H → complex.abs (G (complex.mk x0 y)) ≤ 1
+      intro y _ _; rw [hG_def, complex.abs_mul, complex.abs_mul, hE_abs (complex.mk x0 y)]
+      have hre0 : complex.re (complex.mk x0 y) = x0 := by simp
+      rw [hre0, hal_x0]
+      have hd_le := hD_inv_le1 (complex.mk x0 y) (by simp)
+      have hf_le := hl0 y
+      have hm1 := mul_le_mul_of_nonneg_left.real (complex.abs (complex.inv (D_den (complex.mk x0 y)))) 1 (exp (-log M0)) hd_le (by linarith [exp_pos (-log M0)])
+      have hm2 := mul_le_mul_of_nonneg_left.real (complex.abs (F (complex.mk x0 y))) M0 (exp (-log M0) * complex.abs (complex.inv (D_den (complex.mk x0 y)))) hf_le (mul_nonneg.real (exp (-log M0)) (complex.abs (complex.inv (D_den (complex.mk x0 y)))) (by linarith [exp_pos (-log M0)]) (complex.abs_nonneg (complex.inv (D_den (complex.mk x0 y)))))
+      have hm3 := mul_le_mul_of_nonneg_right.real (exp (-log M0) * complex.abs (complex.inv (D_den (complex.mk x0 y)))) (exp (-log M0) * 1) M0 hm1 (by linarith)
+      have hcan : (exp (-log M0) * 1) * M0 = 1
+        have h1 : exp (-log M0) * exp (log M0) = 1 := by rw [← exp_add]; have hz : -log M0 + log M0 = 0 := by ring; rw [hz, exp_zero]
+        rw [exp_log M0 hM0] at h1; linarith
+      linarith
+    have hG_right : ∀ y : ℝ, -H ≤ y → y ≤ H → complex.abs (G (complex.mk x1 y)) ≤ 1
+      intro y _ _; rw [hG_def, complex.abs_mul, complex.abs_mul, hE_abs (complex.mk x1 y)]
+      have hre1 : complex.re (complex.mk x1 y) = x1 := by simp
+      rw [hre1, hal_x1]
+      have hd_le := hD_inv_le1 (complex.mk x1 y) (by simp; linarith)
+      have hf_le := hl1 y
+      have hm1 := mul_le_mul_of_nonneg_left.real (complex.abs (complex.inv (D_den (complex.mk x1 y)))) 1 (exp (-log M1)) hd_le (by linarith [exp_pos (-log M1)])
+      have hm2 := mul_le_mul_of_nonneg_left.real (complex.abs (F (complex.mk x1 y))) M1 (exp (-log M1) * complex.abs (complex.inv (D_den (complex.mk x1 y)))) hf_le (mul_nonneg.real (exp (-log M1)) (complex.abs (complex.inv (D_den (complex.mk x1 y)))) (by linarith [exp_pos (-log M1)]) (complex.abs_nonneg (complex.inv (D_den (complex.mk x1 y)))))
+      have hm3 := mul_le_mul_of_nonneg_right.real (exp (-log M1) * complex.abs (complex.inv (D_den (complex.mk x1 y)))) (exp (-log M1) * 1) M1 hm1 (by linarith)
+      have hcan : (exp (-log M1) * 1) * M1 = 1
+        have h1 : exp (-log M1) * exp (log M1) = 1 := by rw [← exp_add]; have hz : -log M1 + log M1 = 0 := by ring; rw [hz, exp_zero]
+        rw [exp_log M1 hM1] at h1; linarith
+      linarith
+    have hG_horiz : ∀ (x y : ℝ), x0 ≤ x → x ≤ x1 → |y| = H → complex.abs (G (complex.mk x y)) ≤ 1
+      intro x y hx_a hx_b hyH
+      rw [hG_def, complex.abs_mul, complex.abs_mul, hE_abs (complex.mk x y)]
+      have hrex : complex.re (complex.mk x y) = x := by simp
+      rw [hrex]
+      have him_D : complex.im (D_den (complex.mk x y)) = eps * y
+        rw [hD_def]; unfold complex.of_real; simp
+      have him_le := complex.im_abs_le (D_den (complex.mk x y))
+      rw [him_D, abs_mul.real, abs_of_pos.real eps heps, hyH] at him_le
+      have hepsH_pos : 0 < eps * H := mul_pos.real eps H heps hH_pos
+      have hd_inv_le : complex.abs (complex.inv (D_den (complex.mk x y))) ≤ 1 / (eps * H)
+        have hd_pos : 0 < complex.abs (D_den (complex.mk x y)) := by linarith [hD_abs_ge1 (complex.mk x y) (by rw [hrex]; exact hx_a)]
+        rw [habs_inv (D_den (complex.mk x y)) hd_pos]
+        have hm := mul_le_mul_of_nonneg_right.real (eps * H) (complex.abs (D_den (complex.mk x y))) (1 / complex.abs (D_den (complex.mk x y))) him_le (by linarith [one_div_pos.real (complex.abs (D_den (complex.mk x y))) hd_pos])
+        have hc := mul_inv_cancel.real (complex.abs (D_den (complex.mk x y))) (by linarith)
+        rw [hc] at hm
+        exact (le_div_iff.real (1 / complex.abs (D_den (complex.mk x y))) 1 (eps * H) hepsH_pos).mpr (by linarith)
+      have he_le : exp (-(al * x + be)) ≤ exp (-m_ab) := (exp_le_exp (-(al * x + be)) (-m_ab)).mpr (by linarith [hal_ge x hx_a hx_b])
+      have hf_le : complex.abs (F (complex.mk x y)) ≤ B + 1 := by linarith [hstrip (complex.mk x y) (by rw [hrex]; exact hx_a) (by rw [hrex]; exact hx_b)]
+      have hprod1 : exp (-(al * x + be)) * complex.abs (complex.inv (D_den (complex.mk x y))) ≤ exp (-m_ab) * (1 / (eps * H))
+        have hm1 := mul_le_mul_of_nonneg_right.real (exp (-(al * x + be))) (exp (-m_ab)) (complex.abs (complex.inv (D_den (complex.mk x y)))) he_le (complex.abs_nonneg (complex.inv (D_den (complex.mk x y))))
+        have hm2 := mul_le_mul_of_nonneg_left.real (complex.abs (complex.inv (D_den (complex.mk x y)))) (1 / (eps * H)) (exp (-m_ab)) hd_inv_le (by linarith [exp_pos (-m_ab)])
+        linarith
+      have hm3 := mul_le_mul_of_nonneg_left.real (complex.abs (F (complex.mk x y))) (B + 1) (exp (-(al * x + be)) * complex.abs (complex.inv (D_den (complex.mk x y)))) hf_le (mul_nonneg.real (exp (-(al * x + be))) (complex.abs (complex.inv (D_den (complex.mk x y)))) (by linarith [exp_pos (-(al * x + be))]) (complex.abs_nonneg (complex.inv (D_den (complex.mk x y)))))
+      have hm4 := mul_le_mul_of_nonneg_right.real (exp (-(al * x + be)) * complex.abs (complex.inv (D_den (complex.mk x y)))) (exp (-m_ab) * (1 / (eps * H))) (B + 1) hprod1 (by linarith)
+      have hC_le : C_top ≤ eps * H
+        have h1 : C_top / eps < H := by rw [hH_def]; linarith [abs_nonneg.real (complex.im s)]
+        have hm := mul_lt_mul_of_pos_left.real (C_top / eps) H eps h1 heps
+        have hc : eps * (C_top / eps) = C_top := by field_simp
+        linarith
+      have htop_le1 : (exp (-m_ab) * (1 / (eps * H))) * (B + 1) ≤ 1
+        have hre : (exp (-m_ab) * (1 / (eps * H))) * (B + 1) = C_top / (eps * H) := by rw [hCtop]; field_simp
+        rw [hre]; exact (div_le_iff.real C_top 1 (eps * H) hepsH_pos).mpr (by linarith)
+      linarith
+    have hs_im0 : -H ≤ complex.im s := by rw [hH_def]; linarith [neg_le_abs.real (complex.im s), div_pos.real C_top eps hCtop_pos heps]
+    have hs_im1 : complex.im s ≤ H := by rw [hH_def]; linarith [le_abs_self.real (complex.im s), div_pos.real C_top eps hCtop_pos heps]
+    have hGs_le := canalytic.max_modulus_rect G x0 x1 H 1 s hx01 hH_pos (by decide) hG_ana hG_left hG_right (by intro x hxa hxb; exact hG_horiz x (-H) hxa hxb (by rw [abs_neg_eq, abs_of_pos.real H hH_pos])) (by intro x hxa hxb; exact hG_horiz x H hxa hxb (abs_of_pos.real H hH_pos)) hs0 hs1 hs_im0 hs_im1
+    have hDs_pos : 0 < complex.abs (D_den s) := by linarith [hD_abs_ge1 s hs0]
+    rw [hG_def, complex.abs_mul, complex.abs_mul, hE_abs s, habs_inv (D_den s) hDs_pos] at hGs_le
+    set E0 := al * complex.re s + be with hE0
+    have hm1 := mul_le_mul_of_nonneg_left.real ((exp (-E0) * (1 / complex.abs (D_den s))) * complex.abs (F s)) 1 (complex.abs (D_den s) * exp E0) hGs_le (mul_nonneg.real (complex.abs (D_den s)) (exp E0) (by linarith) (by linarith [exp_pos E0]))
+    have hcan_s : (complex.abs (D_den s) * exp E0) * ((exp (-E0) * (1 / complex.abs (D_den s))) * complex.abs (F s)) = complex.abs (F s)
+      have hc1 := mul_inv_cancel.real (complex.abs (D_den s)) (by linarith)
+      have hc2 : exp E0 * exp (-E0) = 1 := by rw [← exp_add]; have hz : E0 + -E0 = 0 := by ring; rw [hz, exp_zero]
+      have hre : (complex.abs (D_den s) * exp E0) * ((exp (-E0) * (1 / complex.abs (D_den s))) * complex.abs (F s)) = (complex.abs (D_den s) * (1 / complex.abs (D_den s))) * (exp E0 * exp (-E0)) * complex.abs (F s) := by ring
+      rw [hre, hc1, hc2]; ring
+    rw [hcan_s] at hm1
+    have hDs_tri : complex.abs (D_den s) ≤ 1 + eps * complex.abs (complex.add s (complex.of_real Xm))
+      rw [hD_def]
+      have ht := complex.abs_add_le complex.one (complex.mul (complex.of_real eps) (complex.add s (complex.of_real Xm)))
+      rw [habs1, complex.abs_mul, complex.abs_of_real_nonneg eps (by linarith)] at ht
+      exact ht
+    have hm2 := mul_le_mul_of_nonneg_right.real (complex.abs (D_den s)) (1 + eps * complex.abs (complex.add s (complex.of_real Xm))) (exp E0) hDs_tri (by linarith [exp_pos E0])
+    linarith
+  -- Let eps -> 0+ linearly!
+  by_contra hgt
+  set E_rhs := exp (al * complex.re s + be) with hErhs
+  set K0 := complex.abs (complex.add s (complex.of_real Xm)) * E_rhs + 1 with hK0
+  have hK0_pos : 0 < K0 := by rw [hK0]; linarith [mul_nonneg.real (complex.abs (complex.add s (complex.of_real Xm))) E_rhs (complex.abs_nonneg (complex.add s (complex.of_real Xm))) (by rw [hErhs]; linarith [exp_pos (al * complex.re s + be)])]
+  set gap := complex.abs (F s) - E_rhs with hgap
+  have hgap_pos : 0 < gap := by rw [hgap]; linarith
+  set eps0 := gap / (2 * K0) with heps0
+  have heps0_pos : 0 < eps0 := by rw [heps0]; exact div_pos.real gap (2 * K0) hgap_pos (by linarith)
+  have hb := heps_bd eps0 heps0_pos
+  have hle_K0 : complex.abs (complex.add s (complex.of_real Xm)) * E_rhs ≤ K0 := by rw [hK0]; linarith
+  have hm := mul_le_mul_of_nonneg_left.real (complex.abs (complex.add s (complex.of_real Xm)) * E_rhs) K0 eps0 hle_K0 (by linarith)
+  have hprod : eps0 * K0 = gap / 2 := by rw [heps0]; field_simp
+  linarith
+
+-- ====================================================================================
+-- SECTION 2: CONCRETE MOBIUS FUNCTION `moebius` & DIRICHLET INVERSE ON Re(z) > 1
+-- ====================================================================================
+
+-> moebius_fuel : ℕ → ℕ → ℤ
+  | 0 => fun _ => 0
+  | k + 1 => fun n =>
+      if n = 0 then 0
+      else if n = 1 then 1
+      else if (min_fac n * min_fac n) ∣ n then 0 else - moebius_fuel k (n / min_fac n)
+
++ moebius_fuel.zero (n : ℕ) : moebius_fuel 0 n = 0 := by rfl
++ moebius_fuel.succ (k n : ℕ) : moebius_fuel (k + 1) n = (if n = 0 then 0 else if n = 1 then 1 else if (min_fac n * min_fac n) ∣ n then 0 else - moebius_fuel k (n / min_fac n)) := by rfl
+
+-> moebius (n : ℕ) : ℤ := moebius_fuel n n
+
++ moebius_fuel.eq_of_ge (k1 k2 n : ℕ) (h1 : n ≤ k1) (h2 : n ≤ k2) :
+    moebius_fuel k1 n = moebius_fuel k2 n
+  have hrec : ∀ k : ℕ, ∀ m : ℕ, m ≤ k → ∀ j : ℕ, m ≤ j → moebius_fuel k m = moebius_fuel j m
+    intro k; induction k with m hm0 j hmj l ihl m hml j hmj
+    · have hm_z : m = 0 := by omega
+      rw [hm_z, moebius_fuel.zero]
+      by_cases hj0 : j = 0; (rw [hj0, moebius_fuel.zero])
+      have hjs : j = (j - 1) + 1 := by omega
+      rw [hjs, moebius_fuel.succ]; simp
+    · rw [succ_eq_add_one.nat] at hml ⊢
+      by_cases hm0 : m = 0
+      · rw [hm0, moebius_fuel.succ]; by_cases hj0 : j = 0; (rw [hj0, moebius_fuel.zero]; simp); (have hs : j = (j - 1) + 1 := by omega; rw [hs, moebius_fuel.succ]; simp)
+      · have hjs : j = (j - 1) + 1 := by omega
+        rw [hjs, moebius_fuel.succ, moebius_fuel.succ, if_neg hm0, if_neg hm0]
+        by_cases hm1 : m = 1
+        · rw [if_pos hm1, if_pos hm1]
+        · rw [if_neg hm1, if_neg hm1]
+          by_cases hsq : (min_fac m * min_fac m) ∣ m
+          · rw [if_pos hsq, if_pos hsq]
+          · rw [if_neg hsq, if_neg hsq]
+            have hp2 : 2 ≤ min_fac m := (min_fac.prime m (by omega)).1
+            have hdiv_lt : m / min_fac m < m := by
+              have hdm := div_add_mod.nat m (min_fac m)
+              have hge := mul_le_mul_of_nonneg_right.nat 2 (min_fac m) (m / min_fac m) hp2 (by omega)
+              by_cases hq0 : m / min_fac m = 0; omega; omega
+            rw [ihl (m / min_fac m) (by omega) (j - 1) (by omega)]
+  exact hrec k1 n h1 k2 h2
+
++ moebius.one : moebius 1 = 1
+  unfold moebius; have h10 : (1 : ℕ) = 0 + 1 := rfl; rw [h10, moebius_fuel.succ]; decide
+
++ moebius.step_ge_two (n : ℕ) (hn : 2 ≤ n) :
+    moebius n = if (min_fac n * min_fac n) ∣ n then 0 else - moebius (n / min_fac n)
+  unfold moebius
+  have hns : n = (n - 1) + 1 := by omega
+  have hstep1 : ∀ a : ℕ, a = (n - 1) + 1 → moebius_fuel a n = moebius_fuel ((n - 1) + 1) n := by intro a ha; rw [ha]
+  rw [hstep1 n hns, moebius_fuel.succ, if_neg (by omega), if_neg (by omega)]
+  by_cases hsq : (min_fac n * min_fac n) ∣ n
+  · rw [if_pos hsq, if_pos hsq]
+  · rw [if_neg hsq, if_neg hsq]
+    have hp2 : 2 ≤ min_fac n := (min_fac.prime n hn).1
+    have hdiv_lt : n / min_fac n < n
+      have hdm := div_add_mod.nat n (min_fac n)
+      have hge := mul_le_mul_of_nonneg_right.nat 2 (min_fac n) (n / min_fac n) hp2 (by omega)
+      by_cases hq0 : n / min_fac n = 0; omega; omega
+    rw [moebius_fuel.eq_of_ge (n - 1) (n / min_fac n) (n / min_fac n) (by omega) (by omega)]
+
++ moebius.abs_le_one (n : ℕ) : -1 ≤ moebius n ∧ moebius n ≤ 1
+  have hrec : ∀ k m : ℕ, -1 ≤ moebius_fuel k m ∧ moebius_fuel k m ≤ 1
+    intro k; induction k with m l ihl m
+    · rw [moebius_fuel.zero]; omega
+    · rw [succ_eq_add_one.nat, moebius_fuel.succ]
+      by_cases hm0 : m = 0; (rw [if_pos hm0]; omega)
+      rw [if_neg hm0]; by_cases hm1 : m = 1; (rw [if_pos hm1]; omega)
+      rw [if_neg hm1]; by_cases hsq : (min_fac m * min_fac m) ∣ m
+      · rw [if_pos hsq]; omega
+      · rw [if_neg hsq]; have hb := ihl (m / min_fac m); omega
+  unfold moebius; exact hrec n n
+
++ min_fac.le_of_prime_dvd (n q : ℕ) (hn : 2 ≤ n) (hq : prime q) (hqd : q ∣ n) : min_fac n ≤ q
+  have hsp := min_fac.spec n hn
+  by_contra hgt; exact hsp.2.2.2 q hq.1 (by omega) hqd
+
++ moebius.sum_divisors_eq_ite (n : ℕ) (hn : 1 ≤ n) :
+    (∑ d < n + 1, if d ∣ n then moebius d else 0) = if n = 1 then 1 else 0
+  by_cases hn1 : n = 1
+  · rw [hn1, if_pos (by rfl)]
+    have h2 : (1 + 1 : ℕ) = (0 + 1) + 1 := rfl
+    have h01 : (0 + 1 : ℕ) = 1 := rfl
+    rw [h2, sum_below_succ, sum_below_succ, sum_below_zero]
+    have hd0 : ¬ (0 ∣ 1) := by unfold dvd; decide
+    have hd1 : 1 ∣ 1 := by unfold dvd; decide
+    rw [if_neg hd0, h01, if_pos hd1, moebius.one]; ring
+  · rw [if_neg hn1]
+    have hn2 : 2 ≤ n := by omega
+    set p := min_fac n with hp_def
+    have hp_pr : prime p := by rw [hp_def]; exact min_fac.prime n hn2
+    have hp2 : 2 ≤ p := hp_pr.1
+    have hpn : p ∣ n := by rw [hp_def]; exact (min_fac.spec n hn2).2.2.1
+    obtain ⟨n1, hn1_eq⟩ := (dvd.iff_exists p n (by omega)).mp hpn
+    have hn1_pos : 1 ≤ n1 := by by_contra h0; have hz : n1 = 0 := by omega; rw [hz] at hn1_eq; omega
+    -- Every divisor d | n with p <= min_fac d (true for ALL d >= 2 dividing n!) satisfies:
+    --   * if (p * p) | d: min_fac d = p, so moebius d = 0
+    --   * if d = p * u with u | n1 and ¬(p | u): min_fac (p * u) = p, ¬((p*p) | (p*u)), (p*u)/p = u, so moebius (p*u) = - moebius u!
+    have hmf_div_n : ∀ d : ℕ, 2 ≤ d → d ∣ n → p ∣ d → min_fac d = p
+      intro d hd2 hdn hpd
+      have hle1 : min_fac d ≤ p := min_fac.le_of_prime_dvd d p hd2 hp_pr hpd
+      set q := min_fac d with hq_def
+      have hmf_pr : prime q := by rw [hq_def]; exact min_fac.prime d hd2
+      have hmf_d : q ∣ d := by rw [hq_def]; exact (min_fac.spec d hd2).2.2.1
+      obtain ⟨k, hk⟩ := (dvd.iff_exists q d (by linarith [hmf_pr.1])).mp hmf_d
+      obtain ⟨l, hl⟩ := (dvd.iff_exists d n (by omega)).mp hdn
+      have hmf_n : q ∣ n := (dvd.iff_exists q n (by linarith [hmf_pr.1])).mpr ⟨k * l, by rw [hl, hk]; ring⟩
+      have hle2 : p ≤ q := by rw [hp_def]; exact min_fac.le_of_prime_dvd n q hn2 hmf_pr hmf_n
+      omega
+    -- Split sum over d < n + 1 into: (1) d | n ∧ ¬(p | d), (2) d | n ∧ p | d ∧ ¬((p*p) | d), (3) d | n ∧ (p*p) | d (zero!)
+    have hpt_split : ∀ d < n + 1,
+        (if d ∣ n then moebius d else 0) =
+        (if d ∣ n ∧ ¬ (p ∣ d) then moebius d else 0) +
+        (if d ∣ n ∧ p ∣ d ∧ ¬ ((p * p) ∣ d) then moebius d else 0)
+      intro d _
+      by_cases hdn : d ∣ n
+      · rw [if_pos hdn]
+        have hd_pos : 1 ≤ d := by by_contra h0; have hz : d = 0 := by omega; rw [hz] at hdn; unfold dvd at hdn; have hdv := div_add_mod.nat n 0; rw [hdn] at hdv; omega
+        by_cases hpd : p ∣ d
+        · rw [if_neg (by intro hc; exact hc.2 hpd)]
+          by_cases hpp : (p * p) ∣ d
+          · rw [if_neg (by intro hc; exact hc.2.2 hpp)]
+            have hd2 : 2 ≤ d := by have hle := le_of_dvd.nat d p (by omega) hpd; omega
+            have hmf := hmf_div_n d hd2 hdn hpd
+            rw [moebius.step_ge_two d hd2, hmf, if_pos hpp]; ring
+          · rw [if_pos ⟨hdn, hpd, hpp⟩]; ring
+        · rw [if_pos ⟨hdn, hpd⟩, if_neg (by intro hc; exact hpd hc.2.1)]; ring
+      · rw [if_neg hdn, if_neg (by intro hc; exact hdn hc.1), if_neg (by intro hc; exact hdn hc.1)]; ring
+    have hsum_sp : (∑ d < n + 1, if d ∣ n then moebius d else 0) =
+        (∑ d < n + 1, if d ∣ n ∧ ¬ (p ∣ d) then moebius d else 0) +
+        (∑ d < n + 1, if d ∣ n ∧ p ∣ d ∧ ¬ ((p * p) ∣ d) then moebius d else 0)
+      have hrec : ∀ K : ℕ, K ≤ n + 1 → (∑ d < K, if d ∣ n then moebius d else 0) =
+          (∑ d < K, if d ∣ n ∧ ¬ (p ∣ d) then moebius d else 0) + (∑ d < K, if d ∣ n ∧ p ∣ d ∧ ¬ ((p * p) ∣ d) then moebius d else 0)
+        intro K; induction K with _ l ihl hl; (rw [sum_below_zero, sum_below_zero, sum_below_zero]; ring)
+        rw [succ_eq_add_one.nat] at hl ⊢; rw [sum_below_succ, sum_below_succ, sum_below_succ, ihl (by omega), hpt_split l (by omega)]; ring
+      exact hrec (n + 1) (by omega)
+    rw [hsum_sp]
+    -- Part A: d | n ∧ ¬(p | d) <-> d | n1 ∧ ¬(p | d), and d <= n1, so sum over d < n + 1 equals sum over u < n1 + 1!
+    have hdvd_n1_iff : ∀ u : ℕ, (u ∣ n ∧ ¬ (p ∣ u)) ↔ (u ∣ n1 ∧ ¬ (p ∣ u)) := by
+      intro u; constructor
+      · intro ⟨hun, hnpu⟩; constructor
+        · by_cases hu0 : u = 0; (rw [hu0] at hun; unfold dvd at hun; have hdv := div_add_mod.nat n 0; rw [hun] at hdv; omega)
+          obtain ⟨g, hg_pos, hgp, hgu, _, hbez⟩ := nat.bezout p u (by omega)
+          have hg1 : g = 1 := by
+            obtain c1 | c2 := is_prime_nat.dvd_cases p g ((prime_iff_is_prime_nat p).mp hp_pr) hg_pos hgp
+            · exact c1
+            · exfalso; rw [c2] at hgu; exact hnpu hgu
+          rw [hg1] at hbez
+          obtain ⟨k, hk⟩ := (dvd.iff_exists u n (by omega)).mp hun
+          obtain ⟨x, y, h1 | h2⟩ := hbez
+          · have heq : n1 = u * (k * x - n1 * y)
+              have hm : (p * x) * n1 = (u * y + 1) * n1 := by rw [h1]
+              have hp_n1 : (p * x) * n1 = u * (k * x)
+                calc (p * x) * n1 = (p * n1) * x := by ring
+                  _ = (u * k) * x := by rw [← hn1_eq, ← hk]
+                  _ = u * (k * x) := by ring
+              have hge : n1 * y ≤ k * x := by nlinarith
+              have hsub := sub_add_cancel.nat (k * x) (n1 * y) hge
+              have hdist : u * (k * x - n1 * y) + u * (n1 * y) = u * (k * x - n1 * y + n1 * y) := by ring
+              rw [hsub] at hdist
+              have hrhs : (u * y + 1) * n1 = u * (n1 * y) + n1 := by ring
+              omega
+            exact (dvd.iff_exists u n1 (by omega)).mpr ⟨k * x - n1 * y, heq⟩
+          · have heq : u * (n1 * y - k * x) = n1
+              have hm : (u * y) * n1 = (p * x + 1) * n1 := by rw [h2]
+              have hp_n1 : (p * x) * n1 = u * (k * x)
+                calc (p * x) * n1 = (p * n1) * x := by ring
+                  _ = (u * k) * x := by rw [← hn1_eq, ← hk]
+                  _ = u * (k * x) := by ring
+              have hge : k * x ≤ n1 * y := by nlinarith
+              have hsub := sub_add_cancel.nat (n1 * y) (k * x) hge
+              have hdist : u * (n1 * y - k * x) + u * (k * x) = u * (n1 * y - k * x + k * x) := by ring
+              rw [hsub] at hdist
+              have hlhs : (u * y) * n1 = u * (n1 * y) := by ring
+              have hrhs : (p * x + 1) * n1 = (p * x) * n1 + n1 := by ring
+              omega
+            exact (dvd.iff_exists u n1 (by omega)).mpr ⟨n1 * y - k * x, heq.symm⟩
+        · exact hnpu
+      · intro ⟨hun1, hnpu⟩; constructor
+        · obtain ⟨k, hk⟩ := (dvd.iff_exists u n1 (by by_contra h0; have hz : u = 0 := by omega; rw [hz] at hun1; unfold dvd at hun1; have hdv := div_add_mod.nat n1 0; rw [hun1] at hdv; omega)).mp hun1
+          exact (dvd.iff_exists u n (by by_contra h0; have hz : u = 0 := by omega; rw [hz] at hun1; unfold dvd at hun1; have hdv := div_add_mod.nat n1 0; rw [hun1] at hdv; omega)).mpr ⟨p * k, by rw [hn1_eq, hk]; ring⟩
+        · exact hnpu
+    have hsum1 : (∑ d < n + 1, if d ∣ n ∧ ¬ (p ∣ d) then moebius d else 0) =
+        ∑ u < n1 + 1, if u ∣ n1 ∧ ¬ (p ∣ u) then moebius u else 0
+      have htrim : ∀ A B : ℕ, n1 + 1 ≤ B → A = n1 + 1 →
+          (∑ d < B, if d ∣ n1 ∧ ¬ (p ∣ d) then moebius d else 0) = ∑ d < A, if d ∣ n1 ∧ ¬ (p ∣ d) then moebius d else 0
+        intro A B hB hA; rw [hA]
+        have hrec : ∀ Q : ℕ, (∑ d < n1 + 1 + Q, if d ∣ n1 ∧ ¬ (p ∣ d) then moebius d else 0) = ∑ d < n1 + 1, if d ∣ n1 ∧ ¬ (p ∣ d) then moebius d else 0
+          intro Q; induction Q with q ihq; (have h0 : n1 + 1 + 0 = n1 + 1 := by omega; rw [h0])
+          rw [succ_eq_add_one.nat]; have hs : n1 + 1 + (q + 1) = (n1 + 1 + q) + 1 := by omega
+          rw [hs, sum_below_succ, ihq]
+          have hnd : ¬ ((n1 + 1 + q) ∣ n1) := not_dvd_of_pos_lt (n1 + 1 + q) n1 (by omega) (by omega)
+          rw [if_neg (by intro hc; exact hnd hc.1)]; ring
+        have hBe : B = (n1 + 1) + (B - (n1 + 1)) := by omega
+        rw [hBe]; exact hrec (B - (n1 + 1))
+      have hcon : ∀ K : ℕ, (∑ d < K, if d ∣ n ∧ ¬ (p ∣ d) then moebius d else 0) = ∑ d < K, if d ∣ n1 ∧ ¬ (p ∣ d) then moebius d else 0
+        intro K; induction K with l ihl; rw [sum_below_zero, sum_below_zero]
+        rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ihl]
+        by_cases hc : l ∣ n1 ∧ ¬ (p ∣ l)
+        · rw [if_pos ((hdvd_n1_iff l).mpr hc), if_pos hc]
+        · rw [if_neg (by intro h; exact hc ((hdvd_n1_iff l).mp h)), if_neg hc]
+      rw [hcon (n + 1)]
+      exact htrim (n1 + 1) (n + 1) (by nlinarith) rfl
+    -- Part B: group d < p * (n1 + 1) by blocks of size p; only multiples p * u satisfy p | d!
+    have hsum2 : (∑ d < n + 1, if d ∣ n ∧ p ∣ d ∧ ¬ ((p * p) ∣ d) then moebius d else 0) =
+        ∑ u < n1 + 1, if u ∣ n1 ∧ ¬ (p ∣ u) then - moebius u else 0
+      set g2 := (fun d : ℕ => if d ∣ n ∧ p ∣ d ∧ ¬ ((p * p) ∣ d) then moebius d else 0) with hg2
+      have hg2_at : ∀ d : ℕ, g2 d = if d ∣ n ∧ p ∣ d ∧ ¬ ((p * p) ∣ d) then moebius d else 0 := by intro d; rw [hg2]
+      -- Extend n + 1 to p * (n1 + 1) = n + p (for n < d < n + p, ¬(d | n)!):
+      have hext : (∑ d < p * (n1 + 1), g2 d) = ∑ d < n + 1, g2 d := by
+        have hnp_eq : p * (n1 + 1) = (n + 1) + (p - 1) := by rw [hn1_eq]; have hd : p * (n1 + 1) = p * n1 + p := by ring; omega
+        have hrec : ∀ Q : ℕ, (∑ d < (n + 1) + Q, g2 d) = ∑ d < n + 1, g2 d
+          intro Q; induction Q with q ihq; (have h0 : (n + 1) + 0 = n + 1 := by omega; rw [h0])
+          rw [succ_eq_add_one.nat]; have hs : (n + 1) + (q + 1) = ((n + 1) + q) + 1 := by omega
+          rw [hs, sum_below_succ, ihq, hg2_at ((n + 1) + q)]
+          have hnd : ¬ (((n + 1) + q) ∣ n) := not_dvd_of_pos_lt ((n + 1) + q) n (by omega) (by omega)
+          rw [if_neg (by intro hc; exact hnd hc.1)]; ring
+        rw [hnp_eq]; exact hrec (p - 1)
+      -- Block sum: for each u, ∑ r < p, g2 (p * u + r) = g2 (p * u)!
+      have hblk : ∀ u : ℕ, (∑ d < p * (u + 1), g2 d) = (∑ d < p * u, g2 d) + g2 (p * u) := by
+        intro u
+        have hrec : ∀ r : ℕ, 1 ≤ r → r ≤ p → (∑ d < p * u + r, g2 d) = (∑ d < p * u, g2 d) + g2 (p * u)
+          intro r; induction r with hr1 hrp k ihk hk1 hkp; omega
+          rw [succ_eq_add_one.nat] at hk1 hkp ⊢
+          by_cases hk0 : k = 0
+          · rw [hk0]; have h1 : p * u + (0 + 1) = (p * u) + 1 := by omega
+            rw [h1, sum_below_succ]
+          · have hs : p * u + (k + 1) = (p * u + k) + 1 := by omega
+            rw [hs, sum_below_succ, ihk (by omega) (by omega), hg2_at (p * u + k)]
+            have hnpd : ¬ (p ∣ (p * u + k)) := by
+              unfold dvd; have hsw : p * u + k = k + p * u := by ring
+              rw [hsw, add_mul_mod.nat, (div_mod_of_lt.nat k p (by omega)).2]; omega
+            rw [if_neg (by intro hc; exact hnpd hc.2.1)]; ring
+        have hpu : p * (u + 1) = p * u + p := by ring
+        rw [hpu]; exact hrec p (by omega) (by omega)
+      have hblocks : ∀ U : ℕ, (∑ d < p * U, g2 d) = ∑ u < U, g2 (p * u)
+        intro U; induction U with u ihu
+        · have h0 : p * 0 = 0 := by omega; rw [h0, sum_below_zero, sum_below_zero]
+        · rw [succ_eq_add_one.nat, hblk u, sum_below_succ, ihu]
+      rw [← hext, hblocks (n1 + 1)]
+      -- Evaluate g2 (p * u) for every u < n1 + 1!
+      have hcon2 : ∀ U : ℕ, U ≤ n1 + 1 → (∑ u < U, g2 (p * u)) = ∑ u < U, if u ∣ n1 ∧ ¬ (p ∣ u) then - moebius u else 0
+        intro U; induction U with _ u ihu hu; rw [sum_below_zero, sum_below_zero]
+        rw [succ_eq_add_one.nat] at hu ⊢; rw [sum_below_succ, sum_below_succ, ihu (by omega), hg2_at (p * u)]
+        by_cases hu0 : u = 0
+        · rw [hu0]; have hpz : p * 0 = 0 := by omega
+          have hnd0 : ¬ (0 ∣ n) := by unfold dvd; have hdv := div_add_mod.nat n 0; omega
+          have hnd0' : ¬ (0 ∣ n1) := by unfold dvd; have hdv := div_add_mod.nat n1 0; omega
+          rw [hpz, if_neg (by intro hc; exact hnd0 hc.1), if_neg (by intro hc; exact hnd0' hc.1)]
+        · have hu_pos : 1 ≤ u := by omega
+          have hpu_iff : (p * u ∣ n ∧ p ∣ (p * u) ∧ ¬ ((p * p) ∣ (p * u))) ↔ (u ∣ n1 ∧ ¬ (p ∣ u)) := by
+            constructor
+            · intro ⟨hpun, _, hnpp⟩; constructor
+              · obtain ⟨k, hk⟩ := (dvd.iff_exists (p * u) n (mul_pos.nat p u (by omega) (by omega))).mp hpun
+                rw [hn1_eq] at hk
+                have heq : u * k = n1 := by nlinarith
+                exact (dvd.iff_exists u n1 (by omega)).mpr ⟨k, heq.symm⟩
+              · intro hpu_d; obtain ⟨k, hk⟩ := (dvd.iff_exists p u (by omega)).mp hpu_d
+                exact hnpp ((dvd.iff_exists (p * p) (p * u) (by nlinarith)).mpr ⟨k, by rw [hk]; ring⟩)
+            · intro ⟨hun1, hnpu⟩
+              obtain ⟨k, hk⟩ := (dvd.iff_exists u n1 (by omega)).mp hun1
+              have hd1 : (p * u) ∣ n := (dvd.iff_exists (p * u) n (mul_pos.nat p u (by omega) (by omega))).mpr ⟨k, by rw [hn1_eq, hk]; ring⟩
+              have hd2 : p ∣ (p * u) := (dvd.iff_exists p (p * u) (by omega)).mpr ⟨u, rfl⟩
+              have hd3 : ¬ ((p * p) ∣ (p * u))
+                intro hpp; obtain ⟨l, hl⟩ := (dvd.iff_exists (p * p) (p * u) (by nlinarith)).mp hpp
+                have heq : u = p * l := by nlinarith
+                exact hnpu ((dvd.iff_exists p u (by omega)).mpr ⟨l, heq⟩)
+              exact ⟨hd1, hd2, hd3⟩
+          by_cases hc : u ∣ n1 ∧ ¬ (p ∣ u)
+          · have hc' := hpu_iff.mpr hc
+            rw [if_pos hc', if_pos hc]
+            have hpu2 : 2 ≤ p * u := by nlinarith
+            have hmf := hmf_div_n (p * u) hpu2 hc'.1 hc'.2.1
+            have hdiv_pu : (p * u) / p = u := (div_mod_unique.nat (p * u) p u 0 (by ring) (by omega)).1.symm
+            rw [moebius.step_ge_two (p * u) hpu2, hmf, if_neg hc'.2.2, hdiv_pu]
+          · rw [if_neg (by intro h; exact hc (hpu_iff.mp h)), if_neg hc]
+      exact hcon2 (n1 + 1) (by omega)
+    rw [hsum1, hsum2]
+    have hcancel : ∀ K : ℕ, (∑ u < K, if u ∣ n1 ∧ ¬ (p ∣ u) then moebius u else 0) + (∑ u < K, if u ∣ n1 ∧ ¬ (p ∣ u) then - moebius u else 0) = 0
+      intro K; induction K with l ihl; (rw [sum_below_zero, sum_below_zero]; ring)
+      rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+      by_cases hc : l ∣ n1 ∧ ¬ (p ∣ l); (rw [if_pos hc, if_pos hc]; linarith); (rw [if_neg hc, if_neg hc]; linarith)
+    exact hcancel (n1 + 1)
+
+-- Bounded general Dirichlet series on Re(s) > 1:
+-> gen_dseries_term (c : ℕ → ℂ) (s : ℂ) (n : ℕ) : ℂ :=
+  complex.mul (c (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s))
+
+-> gen_dseries (c : ℕ → ℂ) (s : ℂ) : ℂ :=
+  clim (fun N => csum N (gen_dseries_term c s))
+
++ gen_dseries.abs_summable_and_tends_to (c : ℕ → ℂ) (s : ℂ)
+    (hc : ∀ n : ℕ, complex.abs (c n) ≤ 1) (hs : 1 < complex.re s) :
+    summable (fun n => complex.abs (gen_dseries_term c s n)) ∧
+    ctends_to (fun N => csum N (gen_dseries_term c s)) (gen_dseries c s)
+  have hscaled := pseries.scaled_shift_summable (complex.re s - 1) 1 (by linarith)
+  have habs : summable (fun n => complex.abs (gen_dseries_term c s n))
+    apply summable.of_nonneg_le (fun n => complex.abs (gen_dseries_term c s n)) (fun n => 1 * pseries.term (complex.re s - 1 + 1) (n + 1))
+    · intro n; exact complex.abs_nonneg (gen_dseries_term c s n)
+    · intro n; unfold gen_dseries_term; rw [complex.abs_mul, cpow_real.abs_eq ((n + 1 : ℕ) : ℝ) (complex.neg s) ((cast_pos.real (n + 1)).mpr (by omega))]
+      have hpt : pseries.term (complex.re s - 1 + 1) (n + 1) = rpow ((n + 1 : ℕ) : ℝ) (-(complex.re s)) := by
+        unfold pseries.term; rw [if_neg (by omega)]; have he : -(complex.re s - 1 + 1) = -(complex.re s) := by ring; rw [he]
+      have hre_neg : complex.re (complex.neg s) = -(complex.re s) := by simp; ring
+      rw [hpt, hre_neg]
+      have hm := mul_le_mul_of_nonneg_right.real (complex.abs (c (n + 1))) 1 (rpow ((n + 1 : ℕ) : ℝ) (-(complex.re s))) (hc (n + 1)) (by linarith [rpow.pos ((n + 1 : ℕ) : ℝ) (-(complex.re s))])
+      linarith
+    · exact hscaled
+  constructor; exact habs
+  have hcs := csummable.of_abs_summable (gen_dseries_term c s) habs
+  unfold csummable cconverges at hcs; obtain ⟨L, hL⟩ := hcs
+  unfold gen_dseries; rw [clim.eq_of_tends_to (fun N => csum N (gen_dseries_term c s)) L hL]; exact hL
+
+-> dchar.mul_moebius (chi : DChar) (n : ℕ) : ℂ :=
+  complex.mul (chi.val n) (c_of_int (moebius n))
+
++ dchar.mul_moebius_abs_le_one (chi : DChar) (hval : dchar.valid chi) (n : ℕ) :
+    complex.abs (dchar.mul_moebius chi n) ≤ 1
+  unfold dchar.mul_moebius; rw [complex.abs_mul]
+  have hc := dchar.abs_le_one chi hval n
+  have hm := moebius.abs_le_one n
+  have habs_m : complex.abs (c_of_int (moebius n)) ≤ 1 := by
+    unfold c_of_int; rw [complex.abs_of_real]
+    have hlo : (-1 : ℝ) ≤ (moebius n : ℝ) := by have h := (int_cast_le.real (-1) (moebius n)).mpr hm.1; simp at h; exact h
+    have hhi : (moebius n : ℝ) ≤ 1 := by have h := (int_cast_le.real (moebius n) 1).mpr hm.2; simp at h; exact h
+    exact abs_le_of.real (moebius n : ℝ) 1 hlo hhi
+  have hmul := mul_le_mul_of_nonneg_right.real (complex.abs (chi.val n)) 1 (complex.abs (c_of_int (moebius n))) hc (complex.abs_nonneg _)
+  linarith
+
+-- For any valid Dirichlet character `chi` and `Re(s) > 1`:
+--   dchar_dseries chi s * gen_dseries (dchar.mul_moebius chi) s = 1 !
++ dseries.mul_moebius_eq_one_re_gt_one (chi : DChar) (hval : dchar.valid chi) (s : ℂ) (hs : 1 < complex.re s) :
+    complex.mul (dchar_dseries chi s) (gen_dseries (dchar.mul_moebius chi) s) = complex.one
+  have ha := gen_dseries.abs_summable_and_tends_to chi.val s (dchar.abs_le_one chi hval) hs
+  have hb := gen_dseries.abs_summable_and_tends_to (dchar.mul_moebius chi) s (dchar.mul_moebius_abs_le_one chi hval) hs
+  set c1 := (fun n : ℕ => if n = 1 then complex.one else complex.zero) with hc1_def
+  have hc1_lim : ctends_to (fun N => csum N (fun n => complex.mul (c1 (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) complex.one
+    unfold ctends_to; intro e he; use 1; intro N hN
+    have hsum1 : ∀ K : ℕ, 1 ≤ K → csum K (fun n => complex.mul (c1 (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s))) = complex.one
+      intro K; induction K with hK0 k ihk hk1; omega
+      rw [succ_eq_add_one.nat] at hk1 ⊢
+      by_cases hk0 : k = 0
+      · rw [hk0, csum.succ, csum.zero, complex.zero_add, hc1_def]; simp
+        unfold cpow_real; apply complex.ext <;> simp [log_one, exp_zero, cos_zero, sin_zero]
+      · rw [csum.succ, ihk (by omega), hc1_def, if_neg (by omega), complex.zero_mul, complex.add_zero]
+    rw [hsum1 N hN, complex.sub_self, complex.abs_zero]; exact he
+  apply dseries.dirichlet_mul_re_gt_one chi.val (dchar.mul_moebius chi) c1 s (dchar_dseries chi s) (gen_dseries (dchar.mul_moebius chi) s) complex.one ha.1 hb.1 (dchar_dseries.tends_to chi hval s hs) hb.2 hc1_lim
+  intro m hm
+  -- Convolution: sum_{d | m} chi(d) * (chi(m/d) * moebius(m/d)) = chi(m) * sum_{d | m} moebius(m/d) = chi(m) * [m = 1] = [m = 1]!
+  have hcon1 : csum (m + 1) (fun d => if d ∣ m then complex.mul (chi.val d) (dchar.mul_moebius chi (m / d)) else complex.zero) =
+      csum (m + 1) (fun d => complex.mul (chi.val m) (c_of_int (if d ∣ m then moebius (m / d) else 0)))
+    apply csum.congr; intro d _
+    by_cases hdvd : d ∣ m
+    · rw [if_pos hdvd, if_pos hdvd]; unfold dchar.mul_moebius
+      have hdm : d * (m / d) = m := by have hdv := div_add_mod.nat m d; unfold dvd at hdvd; rw [hdvd] at hdv; omega
+      have hmul_chi := hval.2.2.2.2 d (m / d); rw [hdm] at hmul_chi
+      have hassoc : complex.mul (chi.val d) (complex.mul (chi.val (m / d)) (c_of_int (moebius (m / d)))) =
+          complex.mul (complex.mul (chi.val d) (chi.val (m / d))) (c_of_int (moebius (m / d))) := by apply complex.ext <;> simp <;> ring
+      rw [hassoc, hmul_chi]
+    · rw [if_neg hdvd, if_neg hdvd, c_of_int.zero, complex.mul_zero]
+  have hpull_int : ∀ (K : ℕ) (f : ℕ → ℤ), csum K (fun d => c_of_int (f d)) = c_of_int (∑ d < K, f d)
+    intro K f; induction K with l ihl
+    · rw [csum.zero, sum_below_zero, c_of_int.zero]
+    · rw [succ_eq_add_one.nat, csum.succ, sum_below_succ, ihl, c_of_int.add]
+  rw [hcon1, csum.scale_left, hpull_int (m + 1)]
+  -- Flip divisor sum: ∑ d < m + 1, (if d | m then moebius (m / d) else 0) = ∑ e < m + 1, (if e | m then moebius e else 0)!
+  have hflip : (∑ d < m + 1, if d ∣ m then moebius (m / d) else 0) = ∑ e < m + 1, if e ∣ m then moebius e else 0
+    have hsingle_z : ∀ (N k0 : ℕ) (f : ℕ → ℤ), k0 < N → (∑ k < N, if k = k0 then f k else 0) = f k0
+      intro N k0 f hk0
+      have hrec : ∀ M : ℕ, (∑ k < M, if k = k0 then f k else 0) = if k0 < M then f k0 else 0
+        intro M; induction M with l ihl; (rw [sum_below_zero, if_neg (by omega)])
+        rw [succ_eq_add_one.nat, sum_below_succ, ihl]
+        by_cases hlt : k0 < l; (rw [if_pos hlt, if_neg (by omega), if_pos (by omega)]; ring)
+        by_cases heq : l = k0; (rw [if_neg hlt, if_pos heq, if_pos (by omega), heq]; ring)
+        rw [if_neg hlt, if_neg heq, if_neg (by omega)]; ring
+      rw [hrec N, if_pos hk0]
+    have hzero_z : ∀ (N : ℕ) (f : ℕ → ℤ), (∀ k < N, f k = 0) → (∑ k < N, f k) = 0
+      intro N f; induction N with _ l ihl hz; rw [sum_below_zero]; (rw [succ_eq_add_one.nat, sum_below_succ, ihl (by intro k hk; exact hz k (by omega)), hz l (by omega)]; ring)
+    have hswap_z : ∀ (P Q : ℕ) (f : ℕ → ℕ → ℤ), (∑ i < P, ∑ j < Q, f i j) = ∑ j < Q, ∑ i < P, f i j
+      intro P Q f; induction P with p ihp
+      · rw [sum_below_zero]; exact (hzero_z Q (fun j => ∑ i < 0, f i j) (by intro j _; rw [sum_below_zero])).symm
+      · rw [succ_eq_add_one.nat, sum_below_succ, ihp]
+        have h1 : ∀ M : ℕ, (∑ j < M, ∑ i < p, f i j) + (∑ j < M, f p j) = ∑ j < M, ∑ i < p + 1, f i j
+          intro M; induction M with l ihl; (rw [sum_below_zero, sum_below_zero, sum_below_zero]; ring); (rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ← ihl]; ring)
+        exact h1 Q
+    have hcon_z : ∀ (N : ℕ) (f g : ℕ → ℤ), (∀ k < N, f k = g k) → (∑ k < N, f k) = ∑ k < N, g k
+      intro N f g; induction N with _ l ihl hfg; rw [sum_below_zero, sum_below_zero]; (rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, ihl (by intro k hk; exact hfg k (by omega)), hfg l (by omega)])
+    have hlhs : (∑ d < m + 1, if d ∣ m then moebius (m / d) else 0) = ∑ d < m + 1, ∑ e < m + 1, if d * e = m then moebius e else 0
+      apply hcon_z (m + 1); intro d _
+      by_cases hdvd : d ∣ m
+      · have hd_pos : 1 ≤ d := by by_contra h0; have hz : d = 0 := by omega; rw [hz] at hdvd; unfold dvd at hdvd; have hdv := div_add_mod.nat m 0; rw [hdvd] at hdv; omega
+        have hdm : d * (m / d) = m := by have hdv := div_add_mod.nat m d; unfold dvd at hdvd; rw [hdvd] at hdv; omega
+        have hq_le : m / d ≤ m := by nlinarith
+        rw [if_pos hdvd]
+        have h1 : (∑ e < m + 1, if d * e = m then moebius e else 0) = ∑ e < m + 1, if e = m / d then moebius e else 0
+          apply hcon_z (m + 1); intro e _
+          by_cases hee : e = m / d; (rw [if_pos (by rw [hee]; exact hdm), if_pos hee])
+          have hne : d * e ≠ m := by intro heq; apply hee; by_cases hlt : e < m / d; nlinarith; nlinarith
+          rw [if_neg hne, if_neg hee]
+        rw [h1, hsingle_z (m + 1) (m / d) moebius (by omega)]
+      · rw [if_neg hdvd]
+        have hfn0_l : ∀ e : ℕ, e < m + 1 → (if d * e = m then moebius e else 0) = 0
+          intro e _; apply if_neg; intro heq; apply hdvd
+          have hd_pos : 1 ≤ d := by by_contra h0; have hz : d = 0 := by omega; rw [hz] at heq; omega
+          exact (dvd.iff_exists d m (by omega)).mpr ⟨e, heq.symm⟩
+        exact (hzero_z (m + 1) (fun e => if d * e = m then moebius e else 0) hfn0_l).symm
+    have hrhs : (∑ e < m + 1, if e ∣ m then moebius e else 0) = ∑ e < m + 1, ∑ d < m + 1, if d * e = m then moebius e else 0
+      apply hcon_z (m + 1); intro e _
+      by_cases hevd : e ∣ m
+      · have he_pos : 1 ≤ e := by by_contra h0; have hz : e = 0 := by omega; rw [hz] at hevd; unfold dvd at hevd; have hdv := div_add_mod.nat m 0; rw [hevd] at hdv; omega
+        have hem : (m / e) * e = m := by have hdv := div_add_mod.nat m e; unfold dvd at hevd; rw [hevd] at hdv; nlinarith
+        have hq_le : m / e ≤ m := by nlinarith
+        rw [if_pos hevd]
+        have h1 : (∑ d < m + 1, if d * e = m then moebius e else 0) = ∑ d < m + 1, if d = m / e then moebius e else 0
+          apply hcon_z (m + 1); intro d _
+          by_cases hdd : d = m / e; (rw [if_pos (by rw [hdd]; exact hem), if_pos hdd])
+          have hne : d * e ≠ m := by intro heq; apply hdd; by_cases hlt : d < m / e; nlinarith; nlinarith
+          rw [if_neg hne, if_neg hdd]
+        rw [h1, hsingle_z (m + 1) (m / e) (fun _ => moebius e) (by omega)]
+      · rw [if_neg hevd]
+        have hfn0_r : ∀ d : ℕ, d < m + 1 → (if d * e = m then moebius e else 0) = 0
+          intro d _; apply if_neg; intro heq; apply hevd
+          have he_pos : 1 ≤ e := by by_contra h0; have hz : e = 0 := by omega; rw [hz] at heq; omega
+          exact (dvd.iff_exists e m (by omega)).mpr ⟨d, by nlinarith⟩
+        exact (hzero_z (m + 1) (fun d => if d * e = m then moebius e else 0) hfn0_r).symm
+    rw [hlhs, hrhs, hswap_z (m + 1) (m + 1)]
+  have hc1_m : c1 m = if m = 1 then complex.one else complex.zero := by rw [hc1_def]
+  rw [hflip, moebius.sum_divisors_eq_ite m hm, hc1_m]
+  by_cases hm1 : m = 1
+  · rw [if_pos hm1, if_pos hm1, hm1, c_of_int.one, hval.2.2.1, complex.mul_one]
+  · rw [if_neg hm1, if_neg hm1, c_of_int.zero, complex.mul_zero]

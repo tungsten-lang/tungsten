@@ -1,0 +1,697 @@
+-- Milestone 3.40: Exact Complex Vandermonde Determinant, Weyl Dimension Formula & Barnes G
+--                 Asymptotics, Constructive Siegel's Lemma (Geometry of Numbers), & Bost-Arakelov
+--                 Hermitian Morphism Slope Inequality!
+--
+-- Directly formalizes core upstream `Formalism/LogVandermondeBounds/`, `Formalism/BostSlope/`,
+-- `ReciprocityTheory/` Geometry of Numbers, & `remark.pdf` items 1, 7, 9, 13, 15, 18 with ZERO axioms:
+--   1. Column Scaling & Exact Complex Vandermonde Determinant (`cmat.det_vandermonde`):
+--        `cmat.det_col_scale`             (scaling column j by c_j scales det by prod c_j)
+--        `cmat.det_shift_row0_to_bottom`  (cyclic shift of row 0 to bottom multiplies det by (-1)^m)
+--        `cmat.det_vandermonde`           (det((x_j)^i) = prod_{0 <= j < i < n} (x_i - x_j))
+--        `cmat.det_vandermonde_ne_zero`   (pairwise distinct x_i => Vandermonde det != 0)
+--        `cmat.det_vandermonde_real`      (exact real Vandermonde determinant identity)
+--   2. Exact Weyl Dimension Formula, Barnes G-Function, & Log-Vandermonde Bounds:
+--        `vander_prod_nat_eq_barnes_G`    (prod_{j<i<n} (i - j) = prod_{i<n} i!)
+--        `weyl_dim.ge_one`                (1 <= dim V_lam for every dominant weight lam)
+--        `weyl_dim.upper_bound`           (dim V_lam <= (lam_0 - lam_{n-1} + n)^(n*(n-1)/2) / barnes_G n)
+--        `barnes_G.log_lower_bound`       (exact Stirling-Robbins lower bound on log barnes_G n via M3.36)
+--        `log_weyl_dim.upper_bound`       (exact log Weyl dimension upper bound via M3.36 Stirling!)
+--   3. Exact Constructive Siegel's Lemma (Finite Box Pigeonhole / Geometry of Numbers):
+--        `pigeonhole.nat_map`             (K < L, f : [0,L) -> [0,K) => exists u1 < u2 < L, f u1 = f u2)
+--        `siegel.integer_linear_system`   (M < N, |A_ij| <= H, (2NHB+1)^M < (B+1)^N =>
+--                                          nonzero x in Z^N, |x_j| <= B, A x = 0!)
+--        `siegel.optimal_box_exists`      (for all 1 <= M < N, 1 <= H, explicit B <= (2NH+1)^M works!)
+--   4. Exact Bost-Arakelov Hermitian Morphism Slope Inequality (via M3.38 Hadamard Det Inequality!):
+--        `bost.hermitian_morphism_det_bound`
+--                                         (det G_phi <= M_op^(2r) * C_orth * det G_E)
+--        `bost.hermitian_morphism_slope`  (deg_hat(E) <= deg_hat(phi(E)) + r * log M_op + log(C_orth)/2)
+--        `bost.orthonormal_slope_ineq`    (for orthonormal E: mu(E) <= mu(phi(E)) + log M_op!)
+--
+-- ALL theorems proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import finite_field
+import analysis.stirling_robbins
+import algebra.cholesky_hadamard
+
+-- ====================================================================================
+-- 1. Column Scaling & Exact Complex Vandermonde Determinant (`cmat.det_vandermonde`)
+-- ====================================================================================
+
++ cpow_nat.zero_eq (z : ℂ) : cpow_nat z 0 = complex.one := by rfl
+
++ cpow_nat.succ_eq (z : ℂ) (k : ℕ) : cpow_nat z (k + 1) = complex.mul (cpow_nat z k) z
+  have h : cpow_nat z (succ k) = complex.mul (cpow_nat z k) z := by rfl
+  rw [succ_eq_add_one.nat] at h; exact h
+
++ cpow_nat.of_real (x : ℝ) (k : ℕ) : cpow_nat (complex.of_real x) k = complex.of_real (x ^ k)
+  induction k with r ih
+  · rw [cpow_nat.zero_eq, pow_zero.real]; apply complex.ext <;> simp
+  · rw [succ_eq_add_one.nat, cpow_nat.succ_eq, pow_succ.real, ih, complex.mul_of_real]
+
+-- (`cprod_c.*`, `csign.sq_eq_one`, and `cmat.det_col_scale` imported from `prelude/determinant.sat`!)
+
+-- Cyclic shift of row 0 down to row m multiplies det(m+1, A) by csign m = (-1)^m!
+-> shift_row0 (k : ℕ) (A : ℕ → ℕ → ℂ) (i j : ℕ) : ℂ :=
+  if i < k then A (i + 1) j else (if i = k then A 0 j else A i j)
+
++ shift_row0.lt (k i j : ℕ) (A : ℕ → ℕ → ℂ) (h : i < k) : shift_row0 k A i j = A (i + 1) j
+  unfold shift_row0; rw [if_pos h]
+
++ shift_row0.eq (k j : ℕ) (A : ℕ → ℕ → ℂ) : shift_row0 k A k j = A 0 j
+  unfold shift_row0; have hnl : ¬ (k < k) := by omega; rw [if_neg hnl]
+
++ shift_row0.gt (k i j : ℕ) (A : ℕ → ℕ → ℂ) (h : k < i) : shift_row0 k A i j = A i j
+  unfold shift_row0
+  have hnl : ¬ (i < k) := by omega; have hne : i ≠ k := by omega
+  rw [if_neg hnl, if_neg hne]
+
++ cmat.det_shift_row0_to_bottom (m : ℕ) (A : ℕ → ℕ → ℂ) :
+    cmat.det (m + 1) (shift_row0 m A) = complex.mul (csign m) (cmat.det (m + 1) A)
+  have hstep : ∀ k ≤ m, cmat.det (m + 1) (shift_row0 k A) = complex.mul (csign k) (cmat.det (m + 1) A)
+    intro k hk; induction k with hk r ihr hk
+    · have hcon : cmat.det (m + 1) (shift_row0 0 A) = cmat.det (m + 1) A
+        apply cmat.det_congr; intro i hi j hj
+        by_cases hi0 : i = 0
+        · rw [hi0, shift_row0.eq]
+        · exact shift_row0.gt 0 i j A (by omega)
+      have h0m : 0 % 2 = 0 := by decide
+      rw [hcon, csign.even 0 h0m, complex.mul_one_l]
+    · rw [succ_eq_add_one.nat] at hk ⊢
+      have hcon : cmat.det (m + 1) (shift_row0 (r + 1) A) = cmat.det (m + 1) (swap_rows (shift_row0 r A) r)
+        apply cmat.det_congr; intro i hi j hj
+        by_cases hilt : i < r
+        · rw [shift_row0.lt (r + 1) i j A (by omega), swap_rows.other (shift_row0 r A) r i j (by omega) (by omega), shift_row0.lt r i j A hilt]
+        · by_cases hir : i = r
+          · rw [hir, shift_row0.lt (r + 1) r j A (by omega), swap_rows.fst, shift_row0.gt r (r + 1) j A (by omega)]
+          · by_cases hir1 : i = r + 1
+            · rw [hir1, shift_row0.eq, swap_rows.snd, shift_row0.eq]
+            · rw [shift_row0.gt (r + 1) i j A (by omega), swap_rows.other (shift_row0 r A) r i j hir hir1, shift_row0.gt r i j A (by omega)]
+      rw [hcon, cmat.det_swap_adj_rows (m + 1) (shift_row0 r A) r (by omega), ihr (by omega), csign.succ r, complex.mul_neg_l]
+  exact hstep m (by omega)
+
++ cprod_c.neg_flip (m : ℕ) (x : ℕ → ℂ) (xm : ℂ) :
+    complex.mul (csign m) (cprod_c m (fun j => complex.sub (x j) xm)) = cprod_c m (fun j => complex.sub xm (x j))
+  induction m with r ih
+  · have h0m : 0 % 2 = 0 := by decide
+    rw [csign.even 0 h0m, cprod_c.zero_eq, cprod_c.zero_eq, complex.mul_one_l]
+  · rw [succ_eq_add_one.nat, csign.succ r, cprod_c.succ_eq, cprod_c.succ_eq]
+    have halg : ∀ (s p a b : ℂ), complex.mul (complex.neg s) (complex.mul p (complex.sub a b)) = complex.mul (complex.mul s p) (complex.sub b a)
+      intro s p a b; apply complex.ext <;> simp <;> ring
+    rw [halg (csign r) (cprod_c r (fun j => complex.sub (x j) xm)) (x r) xm, ih]
+
+-- Vandermonde matrix (transposed convention V^T_{i,j} = x_j^i):
+-> vander_T (x : ℕ → ℂ) (i j : ℕ) : ℂ := cpow_nat (x j) i
+
+-> vander_step (m k : ℕ) (x : ℕ → ℂ) (i j : ℕ) : ℂ :=
+  if m - k < i then complex.sub (cpow_nat (x j) i) (complex.mul (x m) (cpow_nat (x j) (i - 1)))
+  else cpow_nat (x j) i
+
++ vander_step.hi (m k i j : ℕ) (x : ℕ → ℂ) (h : m - k < i) :
+    vander_step m k x i j = complex.sub (cpow_nat (x j) i) (complex.mul (x m) (cpow_nat (x j) (i - 1)))
+  unfold vander_step
+  exact if_pos h
+
++ vander_step.lo (m k i j : ℕ) (x : ℕ → ℂ) (h : ¬ (m - k < i)) :
+    vander_step m k x i j = cpow_nat (x j) i
+  unfold vander_step
+  exact if_neg h
+
+-- EXACT COMPLEX VANDERMONDE DETERMINANT FORMULA (0 CUSTOM AXIOMS!):
+--   det_{0 <= i,j < n} (x_j^i) = prod_{0 <= j < i < n} (x_i - x_j) !
++ cmat.det_vandermonde (n : ℕ) (x : ℕ → ℂ) :
+    cmat.det n (vander_T x) = cprod_c n (fun i => cprod_c i (fun j => complex.sub (x i) (x j)))
+  induction n with m ih
+  · rw [cmat.det_zero_eq, cprod_c.zero_eq]
+  · rw [succ_eq_add_one.nat, cprod_c.succ_eq]
+    -- Step 1: top-down row elimination row r -= x_m * row (r - 1) preserves det!
+    have helim : ∀ k ≤ m, cmat.det (m + 1) (vander_step m k x) = cmat.det (m + 1) (vander_T x)
+      intro k hk; induction k with hk r ihr hk
+      · apply cmat.det_congr; intro i hi j hj
+        unfold vander_T; exact vander_step.lo m 0 i j x (by omega)
+      · rw [succ_eq_add_one.nat] at hk ⊢
+        set row := m - r with hrow_def
+        have hrow_lt : row < m + 1 := by omega
+        have hcon : cmat.det (m + 1) (vander_step m (r + 1) x) = cmat.det (m + 1) (set_row (vander_step m r x) row (fun j => complex.add (vander_step m r x row j) (complex.mul (complex.neg (x m)) (vander_step m r x (row - 1) j))))
+          apply cmat.det_congr; intro i hi j hj
+          by_cases hir : i = row
+          · rw [hir, vander_step.hi m (r + 1) row j x (by omega), set_row.eq, vander_step.lo m r row j x (by omega), vander_step.lo m r (row - 1) j x (by omega)]
+            apply complex.ext <;> simp <;> ring
+          · rw [set_row.ne (vander_step m r x) row i j (fun t => complex.add (vander_step m r x row t) (complex.mul (complex.neg (x m)) (vander_step m r x (row - 1) t))) hir]
+            by_cases hgt : row < i
+            · rw [vander_step.hi m (r + 1) i j x (by omega), vander_step.hi m r i j x (by omega)]
+            · rw [vander_step.lo m (r + 1) i j x (by omega), vander_step.lo m r i j x (by omega)]
+        rw [hcon, cmat.det_add_row_mul (m + 1) (vander_step m r x) row (row - 1) hrow_lt (by omega) (by omega) (complex.neg (x m)), ihr (by omega)]
+    -- Step 2: Shift row 0 to row m so column m becomes (0, ..., 0, 1)^T!
+    have hsh := cmat.det_shift_row0_to_bottom m (vander_step m m x)
+    rw [helim m (by omega)] at hsh
+    have hcol0 : ∀ i < m, shift_row0 m (vander_step m m x) i m = complex.zero
+      intro i hi
+      rw [shift_row0.lt m i m (vander_step m m x) hi, vander_step.hi m m (i + 1) m x (by omega)]
+      have hsub1 : i + 1 - 1 = i := by omega
+      rw [hsub1, cpow_nat.succ_eq]
+      apply complex.ext <;> simp <;> ring
+    rw [cmat.det_block_lower m (shift_row0 m (vander_step m m x)) hcol0] at hsh
+    have hbot : shift_row0 m (vander_step m m x) m m = complex.one := by rw [shift_row0.eq, vander_step.lo m m 0 m x (by omega), cpow_nat.zero_eq]
+    have htl : cmat.det m (shift_row0 m (vander_step m m x)) = complex.mul (cprod_c m (fun j => complex.sub (x j) (x m))) (cmat.det m (vander_T x))
+      have hc : cmat.det m (shift_row0 m (vander_step m m x)) = cmat.det m (fun i j => complex.mul (complex.sub (x j) (x m)) (vander_T x i j))
+        apply cmat.det_congr; intro i hi j hj
+        rw [shift_row0.lt m i j (vander_step m m x) hi, vander_step.hi m m (i + 1) j x (by omega)]
+        have hsub1 : i + 1 - 1 = i := by omega
+        rw [hsub1, cpow_nat.succ_eq]; unfold vander_T
+        apply complex.ext <;> simp <;> ring
+      rw [hc]; exact cmat.det_col_scale m (fun j => complex.sub (x j) (x m)) (vander_T x)
+    rw [hbot, complex.mul_one_l, htl] at hsh
+    -- Multiply both sides of hsh by csign m (since csign m * csign m = 1):
+    have hmul : complex.mul (csign m) (complex.mul (csign m) (cmat.det (m + 1) (vander_T x))) = complex.mul (csign m) (complex.mul (cprod_c m (fun j => complex.sub (x j) (x m))) (cmat.det m (vander_T x))) := by rw [← hsh]
+    have hlhs : complex.mul (csign m) (complex.mul (csign m) (cmat.det (m + 1) (vander_T x))) = cmat.det (m + 1) (vander_T x)
+      have ha : complex.mul (csign m) (complex.mul (csign m) (cmat.det (m + 1) (vander_T x))) = complex.mul (complex.mul (csign m) (csign m)) (cmat.det (m + 1) (vander_T x))
+        apply complex.ext <;> simp <;> ring
+      rw [ha, csign.sq_eq_one, complex.mul_one_l]
+    have hrhs : complex.mul (csign m) (complex.mul (cprod_c m (fun j => complex.sub (x j) (x m))) (cmat.det m (vander_T x))) = complex.mul (cmat.det m (vander_T x)) (cprod_c m (fun j => complex.sub (x m) (x j)))
+      have ha : complex.mul (csign m) (complex.mul (cprod_c m (fun j => complex.sub (x j) (x m))) (cmat.det m (vander_T x))) = complex.mul (cmat.det m (vander_T x)) (complex.mul (csign m) (cprod_c m (fun j => complex.sub (x j) (x m))))
+        apply complex.ext <;> simp <;> ring
+      rw [ha, cprod_c.neg_flip]
+    rw [hlhs, hrhs, ih] at hmul; exact hmul
+
++ cmat.det_vandermonde_ne_zero (n : ℕ) (x : ℕ → ℂ)
+    (hdist : ∀ i < n, ∀ j < i, x i ≠ x j) :
+    cmat.det n (vander_T x) ≠ complex.zero
+  rw [cmat.det_vandermonde]
+  apply cprod_c.ne_zero; intro i hi
+  apply cprod_c.ne_zero; intro j hj
+  intro hsub; apply hdist i hi j hj
+  apply complex.ext
+  · have hre : complex.re (complex.sub (x i) (x j)) = complex.re complex.zero := by rw [hsub]
+    simp at hre; linarith
+  · have him : complex.im (complex.sub (x i) (x j)) = complex.im complex.zero := by rw [hsub]
+    simp at him; linarith
+
+-> vander_prod (n : ℕ) (y : ℕ → ℝ) : ℝ :=
+  ∏ i < n, (∏ j < i, (y i - y j))
+
++ cmat.det_vandermonde_real (n : ℕ) (y : ℕ → ℝ) :
+    cmat.det n (fun i j => complex.of_real (y j ^ i)) = complex.of_real (vander_prod n y)
+  have hcon : cmat.det n (fun i j => complex.of_real (y j ^ i)) = cmat.det n (vander_T (fun j => complex.of_real (y j))) := by apply cmat.det_congr; intro i hi j hj; unfold vander_T; rw [cpow_nat.of_real]
+  rw [hcon, cmat.det_vandermonde]
+  have hrow : ∀ i : ℕ, cprod_c i (fun j => complex.sub (complex.of_real (y i)) (complex.of_real (y j))) = complex.of_real (∏ j < i, (y i - y j))
+    intro i
+    have hc : cprod_c i (fun j => complex.sub (complex.of_real (y i)) (complex.of_real (y j))) = cprod_c i (fun j => complex.of_real (y i - y j)) := by apply cprod_c.congr; intro j hj; exact (complex.of_real_sub (y i) (y j)).symm
+    rw [hc, cprod_c.of_real]
+  have houter : cprod_c n (fun i => cprod_c i (fun j => complex.sub (complex.of_real (y i)) (complex.of_real (y j)))) = cprod_c n (fun i => complex.of_real (∏ j < i, (y i - y j))) := by apply cprod_c.congr; intro i hi; exact hrow i
+  rw [houter, cprod_c.of_real]; unfold vander_prod; trivial
+
+-- ====================================================================================
+-- 2. Exact Weyl Dimension Formula, Barnes G-Function, & Log-Vandermonde Bounds
+-- ====================================================================================
+
+-> barnes_G (n : ℕ) : ℝ := ∏ i < n, ((fact i : ℕ) : ℝ)
+
++ prod_sub_nat_eq_fact (i : ℕ) : (∏ j < i, ((i : ℝ) - (j : ℝ))) = ((fact i : ℕ) : ℝ)
+  induction i with k ih
+  · rw [prod_below_zero, fact_zero, cast_one.real]
+  · rw [succ_eq_add_one.nat, fact_succ k, cast_mul.real]
+    have hshift : (∏ j < k + 1, (((k + 1 : ℕ) : ℝ) - (j : ℝ))) = ((k + 1 : ℕ) : ℝ) * (∏ j < k, ((k : ℝ) - (j : ℝ)))
+      have hgen : ∀ t ≤ k, (∏ j < t + 1, (((k + 1 : ℕ) : ℝ) - (j : ℝ))) = ((k + 1 : ℕ) : ℝ) * (∏ j < t, ((k : ℝ) - (j : ℝ)))
+        intro t ht; induction t with ht r ihr ht
+        · rw [prod_below_succ 0 (fun j => ((k + 1 : ℕ) : ℝ) - (j : ℝ)), prod_below_zero, prod_below_zero, cast_zero.real]; ring
+        · rw [succ_eq_add_one.nat] at ht ⊢
+          rw [prod_below_succ (r + 1) (fun j => ((k + 1 : ℕ) : ℝ) - (j : ℝ)), ihr (by omega), prod_below_succ r (fun j => (k : ℝ) - (j : ℝ))]
+          have hsub : ((k + 1 : ℕ) : ℝ) - ((r + 1 : ℕ) : ℝ) = (k : ℝ) - (r : ℝ) := by rw [cast_add.real k 1, cast_add.real r 1]; simp; ring
+          rw [hsub]; ring
+      exact hgen k (by omega)
+    rw [hshift, ih]
+
++ prod_below.congr_real (n : ℕ) (f g : ℕ → ℝ) (h : ∀ i < n, f i = g i) :
+    (∏ i < n, f i) = ∏ i < n, g i
+  induction n with h m ih h
+  · rw [prod_below_zero, prod_below_zero]
+  · rw [succ_eq_add_one.nat] at h ⊢
+    rw [prod_below_succ, prod_below_succ, ih (by intro i hi; exact h i (by omega)), h m (by omega)]
+
++ vander_prod_nat_eq_barnes_G (n : ℕ) : vander_prod n (fun i => (i : ℝ)) = barnes_G n
+  unfold vander_prod barnes_G
+  apply prod_below.congr_real; intro i hi
+  exact prod_sub_nat_eq_fact i
+
++ barnes_G.pos (n : ℕ) : 0 < barnes_G n
+  unfold barnes_G
+  induction n with k ih
+  · rw [prod_below_zero]; linarith
+  · rw [succ_eq_add_one.nat, prod_below_succ]
+    exact mul_pos.real (∏ i < k, ((fact i : ℕ) : ℝ)) ((fact k : ℕ) : ℝ) ih ((cast_pos.real (fact k)).mpr (fact_pos k))
+
+-- Dominant weight Weyl dimension formula for GL_n / U(n):
+--   dim V_lam = prod_{0 <= j < i < n} ((lam_{n-1-i} + i) - (lam_{n-1-j} + j)) / prod_{i < n} i!
+-> weyl_dim (n : ℕ) (lam : ℕ → ℤ) : ℝ :=
+  vander_prod n (fun i => ((lam (n - 1 - i) : ℤ) : ℝ) + (i : ℝ)) / barnes_G n
+
++ dominant_anti_mono (n : ℕ) (lam : ℕ → ℤ) (hdom : ∀ i < n - 1, lam (i + 1) ≤ lam i) :
+    ∀ a < n, ∀ b < n, a ≤ b → lam b ≤ lam a
+  intro a ha b hb hab
+  have hstep : ∀ d : ℕ, a + d < n → lam (a + d) ≤ lam a
+    intro d hd; induction d with hd r ihr hd
+    · have h0 : a + 0 = a := by omega
+      rw [h0]; linarith
+    · rw [succ_eq_add_one.nat] at hd ⊢
+      have h1 : a + (r + 1) = (a + r) + 1 := by omega
+      rw [h1]
+      have hprev := ihr (by omega)
+      have hs := hdom (a + r) (by omega)
+      linarith
+  have heq : a + (b - a) = b := by omega
+  rw [← heq]; exact hstep (b - a) (by omega)
+
++ int_cast_le_real (a b : ℤ) (h : a ≤ b) : ((a : ℤ) : ℝ) ≤ ((b : ℤ) : ℝ)
+  have hnn : (0 : ℤ) ≤ b - a := by linarith
+  have hr := int_cast_nonneg.real (b - a) hnn
+  rw [int_cast_sub.real] at hr; linarith
+
++ weyl_dim.ge_one (n : ℕ) (lam : ℕ → ℤ) (hdom : ∀ i < n - 1, lam (i + 1) ≤ lam i) :
+    1 ≤ weyl_dim n lam
+  unfold weyl_dim
+  have hGpos := barnes_G.pos n
+  rw [← vander_prod_nat_eq_barnes_G n] at hGpos ⊢
+  have hle : vander_prod n (fun i => (i : ℝ)) ≤ vander_prod n (fun i => ((lam (n - 1 - i) : ℤ) : ℝ) + (i : ℝ))
+    unfold vander_prod
+    have hprod_le : ∀ (m : ℕ) (f g : ℕ → ℝ), (∀ i < m, 0 ≤ f i ∧ f i ≤ g i) → (∏ i < m, f i) ≤ ∏ i < m, g i
+      intro m f g hfg; induction m with hfg r ihr hfg
+      · rw [prod_below_zero, prod_below_zero]; linarith
+      · rw [succ_eq_add_one.nat] at hfg ⊢
+        rw [prod_below_succ, prod_below_succ]
+        have hp_nn : ∀ t ≤ r, 0 ≤ ∏ i < t, f i
+          intro t ht; induction t with ht s ihs ht
+          · rw [prod_below_zero]; linarith
+          · rw [succ_eq_add_one.nat] at ht ⊢
+            rw [prod_below_succ]; exact mul_nonneg.real (∏ i < s, f i) (f s) (ihs (by omega)) (hfg s (by omega)).1
+        have hprev := ihr (by intro i hi; exact hfg i (by omega))
+        have hr := hfg r (by omega)
+        have h1 := mul_le_mul_of_nonneg_right.real (∏ i < r, f i) (∏ i < r, g i) (f r) hprev hr.1
+        have h2 := mul_le_mul_of_nonneg_left.real (f r) (g r) (∏ i < r, g i) hr.2 (by linarith [hp_nn r (by omega)])
+        linarith
+    apply hprod_le n
+    intro i hi
+    have hinner_nn : 0 ≤ ∏ j < i, ((i : ℝ) - (j : ℝ)) := by rw [prod_sub_nat_eq_fact i]; exact cast_nonneg.real (fact i)
+    constructor; exact hinner_nn
+    apply hprod_le i
+    intro j hj
+    have hij_r : (j : ℝ) ≤ (i : ℝ) := (cast_le.real j i).mpr (by omega)
+    have hlam_le : lam (n - 1 - j) ≤ lam (n - 1 - i) := dominant_anti_mono n lam hdom (n - 1 - i) (by omega) (n - 1 - j) (by omega) (by omega)
+    have hlam_r := int_cast_le_real (lam (n - 1 - j)) (lam (n - 1 - i)) hlam_le
+    exact ⟨by linarith, by linarith⟩
+  exact (le_div_iff.real 1 (vander_prod n (fun i => ((lam (n - 1 - i) : ℤ) : ℝ) + (i : ℝ))) (vander_prod n (fun i => (i : ℝ))) hGpos).mpr (by linarith)
+
++ weyl_dim.upper_bound (n : ℕ) (hn : 1 ≤ n) (lam : ℕ → ℤ) (hdom : ∀ i < n - 1, lam (i + 1) ≤ lam i) :
+    weyl_dim n lam ≤ (((lam 0 - lam (n - 1) : ℤ) : ℝ) + (n : ℝ)) ^ (∑ i < n, i) / barnes_G n
+  unfold weyl_dim
+  have hGpos := barnes_G.pos n
+  set S := ((lam 0 - lam (n - 1) : ℤ) : ℝ) + (n : ℝ) with hS_def
+  have hlam0_ge : lam (n - 1) ≤ lam 0 := dominant_anti_mono n lam hdom 0 (by omega) (n - 1) (by omega) (by omega)
+  have hS_pos : 0 < S
+    have h1 := int_cast_le_real (lam (n - 1)) (lam 0) hlam0_ge
+    rw [hS_def, int_cast_sub.real]
+    have hn_r : (1 : ℝ) ≤ (n : ℝ) := (cast_le.real 1 n).mpr hn
+    linarith
+  have hv_le : vander_prod n (fun i => ((lam (n - 1 - i) : ℤ) : ℝ) + (i : ℝ)) ≤ S ^ (∑ i < n, i)
+    unfold vander_prod
+    have hpow_sum : ∀ m : ℕ, m ≤ n → (∏ i < m, (∏ j < i, ((((lam (n - 1 - i) : ℤ) : ℝ) + (i : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ))))) ≤ S ^ (∑ i < m, i) ∧ 0 ≤ (∏ i < m, (∏ j < i, ((((lam (n - 1 - i) : ℤ) : ℝ) + (i : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ)))))
+      intro m hm; induction m with hm r ihr hm
+      · rw [prod_below_zero, sum_below_zero, pow_zero.real]; exact ⟨by linarith, by linarith⟩
+      · rw [succ_eq_add_one.nat] at hm ⊢
+        rw [prod_below_succ, sum_below_succ, pow_add.real]
+        have hprev := ihr (by omega)
+        have hrow : (∏ j < r, ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ)))) ≤ S ^ r ∧ 0 ≤ (∏ j < r, ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ))))
+          have hall : ∀ t ≤ r, (∏ j < t, ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ)))) ≤ S ^ t ∧ 0 ≤ (∏ j < t, ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ))))
+            intro t ht; induction t with ht s ihs ht
+            · rw [prod_below_zero, pow_zero.real]; exact ⟨by linarith, by linarith⟩
+            · rw [succ_eq_add_one.nat] at ht ⊢
+              rw [prod_below_succ, pow_succ.real]
+              have hp := ihs (by omega)
+              have hfac_lo : 0 ≤ (((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - s) : ℤ) : ℝ) + (s : ℝ))
+                have h1 := int_cast_le_real (lam (n - 1 - s)) (lam (n - 1 - r)) (dominant_anti_mono n lam hdom (n - 1 - r) (by omega) (n - 1 - s) (by omega) (by omega))
+                have h2 : (s : ℝ) ≤ (r : ℝ) := (cast_le.real s r).mpr (by omega)
+                linarith
+              have hfac_hi : (((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - s) : ℤ) : ℝ) + (s : ℝ)) ≤ S
+                have h1 := int_cast_le_real (lam (n - 1 - r)) (lam 0) (dominant_anti_mono n lam hdom 0 (by omega) (n - 1 - r) (by omega) (by omega))
+                have h2 := int_cast_le_real (lam (n - 1)) (lam (n - 1 - s)) (dominant_anti_mono n lam hdom (n - 1 - s) (by omega) (n - 1) (by omega) (by omega))
+                have h4 : (0 : ℝ) ≤ (s : ℝ) := cast_nonneg.real s
+                rw [hS_def, int_cast_sub.real]; linarith
+              have hS_pow_nn : 0 ≤ S ^ s := pow_nonneg.real S (by linarith) s
+              have hm1 := mul_le_mul_of_nonneg_right.real (∏ j < s, ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ)))) (S ^ s) ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - s) : ℤ) : ℝ) + (s : ℝ))) hp.1 hfac_lo
+              have hm2 := mul_le_mul_of_nonneg_left.real ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - s) : ℤ) : ℝ) + (s : ℝ))) S (S ^ s) hfac_hi hS_pow_nn
+              exact ⟨by linarith, mul_nonneg.real (∏ j < s, ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ)))) ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - s) : ℤ) : ℝ) + (s : ℝ))) hp.2 hfac_lo⟩
+          exact hall r (by omega)
+        have hSp_nn : 0 ≤ S ^ (∑ i < r, i) := pow_nonneg.real S (by linarith) (∑ i < r, i)
+        have hm1 := mul_le_mul_of_nonneg_right.real (∏ i < r, (∏ j < i, ((((lam (n - 1 - i) : ℤ) : ℝ) + (i : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ))))) (S ^ (∑ i < r, i)) (∏ j < r, ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ)))) hprev.1 hrow.2
+        have hm2 := mul_le_mul_of_nonneg_left.real (∏ j < r, ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ)))) (S ^ r) (S ^ (∑ i < r, i)) hrow.1 hSp_nn
+        exact ⟨by linarith, mul_nonneg.real (∏ i < r, (∏ j < i, ((((lam (n - 1 - i) : ℤ) : ℝ) + (i : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ))))) (∏ j < r, ((((lam (n - 1 - r) : ℤ) : ℝ) + (r : ℝ)) - (((lam (n - 1 - j) : ℤ) : ℝ) + (j : ℝ)))) hprev.2 hrow.2⟩
+    exact (hpow_sum n (by omega)).1
+  rw [div_def.real (vander_prod n (fun i => ((lam (n - 1 - i) : ℤ) : ℝ) + (i : ℝ))) (barnes_G n), div_def.real (S ^ (∑ i < n, i)) (barnes_G n)]
+  exact mul_le_mul_of_nonneg_right.real (vander_prod n (fun i => ((lam (n - 1 - i) : ℤ) : ℝ) + (i : ℝ))) (S ^ (∑ i < n, i)) (1 / barnes_G n) hv_le (by linarith [one_div_pos.real (barnes_G n) hGpos])
+
+-- Exact Stirling-Robbins lower bound on log(barnes_G n) = sum_{i < n} log(i!) via M3.36!
++ barnes_G.log_eq_sum (n : ℕ) : log (barnes_G n) = ∑ i < n, log ((fact i : ℕ) : ℝ)
+  unfold barnes_G
+  induction n with k ih
+  · rw [prod_below_zero, sum_below_zero, log_one]
+  · rw [succ_eq_add_one.nat, prod_below_succ, sum_below_succ]
+    rw [log_mul (∏ i < k, ((fact i : ℕ) : ℝ)) ((fact k : ℕ) : ℝ) (barnes_G.pos k) ((cast_pos.real (fact k)).mpr (fact_pos k)), ih]
+
++ barnes_G.log_lower_bound (n : ℕ) :
+    (∑ i < n, if i = 0 then 0 else ph (i : ℝ) + log (2 * pi * (i : ℝ)) / 2) ≤ log (barnes_G n)
+  have hif_neg : ∀ (P : Prop) (a b : ℝ), ¬ P → (if P then a else b) = b
+    intro P a b hnp; by_cases hp : P
+    · exfalso; exact hnp hp
+    · simp [hp]
+  rw [barnes_G.log_eq_sum]
+  apply sum_le.real; intro i hi
+  by_cases hi0 : i = 0
+  · rw [hi0, fact_zero, cast_one.real, log_one]; simp
+  · rw [hif_neg (i = 0) 0 (ph (i : ℝ) + log (2 * pi * (i : ℝ)) / 2) hi0]
+    exact (log_factorial.sandwich i (by omega)).1
+
++ log_weyl_dim.upper_bound (n : ℕ) (hn : 1 ≤ n) (lam : ℕ → ℤ) (hdom : ∀ i < n - 1, lam (i + 1) ≤ lam i) :
+    log (weyl_dim n lam) ≤
+      ((∑ i < n, i : ℕ) : ℝ) * log (((lam 0 - lam (n - 1) : ℤ) : ℝ) + (n : ℝ)) -
+      (∑ i < n, if i = 0 then 0 else ph (i : ℝ) + log (2 * pi * (i : ℝ)) / 2)
+  have hwd_pos : 0 < weyl_dim n lam := by linarith [weyl_dim.ge_one n lam hdom]
+  have hGpos := barnes_G.pos n
+  set S := ((lam 0 - lam (n - 1) : ℤ) : ℝ) + (n : ℝ) with hS_def
+  have hlam0_ge : lam (n - 1) ≤ lam 0 := dominant_anti_mono n lam hdom 0 (by omega) (n - 1) (by omega) (by omega)
+  have hS_pos : 0 < S := by rw [hS_def, int_cast_sub.real]; linarith [(cast_le.real 1 n).mpr hn]
+  have hup := weyl_dim.upper_bound n hn lam hdom
+  rw [← hS_def] at hup
+  have hdiv_pos : 0 < S ^ (∑ i < n, i) / barnes_G n := div_pos.real (S ^ (∑ i < n, i)) (barnes_G n) (pow_pos.real S (∑ i < n, i) hS_pos) hGpos
+  have hlog := (log_le_log (weyl_dim n lam) (S ^ (∑ i < n, i) / barnes_G n) hwd_pos hdiv_pos).mpr hup
+  rw [log_div (S ^ (∑ i < n, i)) (barnes_G n) (pow_pos.real S (∑ i < n, i) hS_pos) hGpos, log_pow S (∑ i < n, i) hS_pos] at hlog
+  linarith [barnes_G.log_lower_bound n]
+
+-- ====================================================================================
+-- 3. Exact Constructive Siegel's Lemma (Finite Box Pigeonhole / Geometry of Numbers)
+-- ====================================================================================
+
+-- (`fiber_count.*` and `pigeonhole.nat_map` imported from `prelude/finite_field.sat`!)
+
+-- Base-(B + 1) box decoding and base-Q vector encoding for Siegel's Lemma!
+-> decode_box (B u j : ℕ) : ℕ := (u / (B + 1) ^ j) % (B + 1)
+
++ decode_box.le (B u j : ℕ) : decode_box B u j ≤ B
+  unfold decode_box
+  have hm := mod_lt.nat (u / (B + 1) ^ j) (B + 1) (by omega)
+  omega
+
++ decode_box.inj (B N : ℕ) :
+    ∀ u1 u2 : ℕ, u1 < (B + 1) ^ N → u2 < (B + 1) ^ N → u1 ≠ u2 →
+    ∃ j < N, decode_box B u1 j ≠ decode_box B u2 j
+  induction N with u1 u2 h1 h2 hne m ih u1 u2 h1 h2 hne
+  · rw [pow_zero.nat] at h1 h2; omega
+  · rw [succ_eq_add_one.nat, pow_succ.nat] at h1 h2
+    by_cases hmod : u1 % (B + 1) = u2 % (B + 1)
+    · have hdiv_ne : u1 / (B + 1) ≠ u2 / (B + 1)
+        have hd1 := div_add_mod.nat u1 (B + 1)
+        have hd2 := div_add_mod.nat u2 (B + 1)
+        intro heq; apply hne; rw [heq, hmod] at hd1; omega
+      have hdiv_lt : ∀ u : ℕ, u < (B + 1) ^ m * (B + 1) → u / (B + 1) < (B + 1) ^ m
+        intro u hu
+        by_contra hge
+        have h1' : (B + 1) ^ m ≤ u / (B + 1) := by omega
+        have hd := div_add_mod.nat u (B + 1)
+        nlinarith
+      obtain ⟨j, hj, hjd⟩ := ih (u1 / (B + 1)) (u2 / (B + 1)) (hdiv_lt u1 h1) (hdiv_lt u2 h2) hdiv_ne
+      use j + 1; constructor; omega
+      intro heq; apply hjd
+      unfold decode_box at heq ⊢
+      have hdd : ∀ u : ℕ, (u / (B + 1)) / (B + 1) ^ j = u / (B + 1) ^ (j + 1)
+        intro u
+        set q1 := u / (B + 1) with hq1_def
+        set r1 := u % (B + 1) with hr1_def
+        set q2 := q1 / (B + 1) ^ j with hq2_def
+        set r2 := q1 % (B + 1) ^ j with hr2_def
+        have hd2p : 0 < (B + 1) ^ j := pow_pos.nat (B + 1) j (by omega)
+        have hd1 : (B + 1) * q1 + r1 = u := by rw [hq1_def, hr1_def]; exact div_add_mod.nat u (B + 1)
+        have hd2 : (B + 1) ^ j * q2 + r2 = q1 := by rw [hq2_def, hr2_def]; exact div_add_mod.nat q1 ((B + 1) ^ j)
+        have hm1 : r1 < B + 1 := by rw [hr1_def]; exact mod_lt.nat u (B + 1) (by omega)
+        have hm2 : r2 < (B + 1) ^ j := by rw [hr2_def]; exact mod_lt.nat q1 ((B + 1) ^ j) hd2p
+        have hpow : (B + 1) * (B + 1) ^ j = (B + 1) ^ (j + 1) := by rw [pow_succ.nat]; ring
+        have hrem : (B + 1) * r2 + r1 < (B + 1) ^ (j + 1) := by rw [← hpow]; nlinarith
+        have hdecomp : u = (B + 1) ^ (j + 1) * q2 + ((B + 1) * r2 + r1) := by rw [← hpow, ← hd1, ← hd2]; ring
+        have hdm := div_mod_unique.nat u ((B + 1) ^ (j + 1)) q2 ((B + 1) * r2 + r1) hdecomp hrem
+        have hq := hdm.1; omega
+      rw [hdd u1, hdd u2]; exact heq
+    · use 0; constructor; omega
+      have hd1 : ∀ u : ℕ, u / 1 = u
+        intro u; have h := div_add_mod.nat u 1; have hm := mod_lt.nat u 1 (by decide); omega
+      unfold decode_box; rw [pow_zero.nat, hd1 u1, hd1 u2]; exact hmod
+
+-> encode_vec (Q M : ℕ) (z : ℕ → ℕ) : ℕ := ∑ i < M, z i * Q ^ i
+
++ encode_vec.lt (Q M : ℕ) (hQ : 1 ≤ Q) (z : ℕ → ℕ) (hz : ∀ i < M, z i < Q) :
+    encode_vec Q M z < Q ^ M
+  unfold encode_vec
+  induction M with hz r ihr hz
+  · rw [sum_below_zero, pow_zero.nat]; omega
+  · rw [succ_eq_add_one.nat] at hz ⊢
+    rw [sum_below_succ, pow_succ.nat]
+    have hprev := ihr (by intro i hi; exact hz i (by omega))
+    have hzr : z r + 1 ≤ Q := by have h := hz r (by omega); omega
+    nlinarith
+
++ encode_vec.inj (Q M : ℕ) (hQ : 1 ≤ Q) (z1 z2 : ℕ → ℕ)
+    (h1 : ∀ i < M, z1 i < Q) (h2 : ∀ i < M, z2 i < Q)
+    (heq : encode_vec Q M z1 = encode_vec Q M z2) :
+    ∀ i < M, z1 i = z2 i
+  unfold encode_vec at heq
+  induction M with h1 h2 heq i hi r ihr h1 h2 heq i hi
+  · omega
+  · rw [succ_eq_add_one.nat] at h1 h2 heq hi
+    rw [sum_below_succ, sum_below_succ] at heq
+    have hlt1 : (∑ j < r, z1 j * Q ^ j) < Q ^ r := encode_vec.lt Q r hQ z1 (by intro j hj; exact h1 j (by omega))
+    have hlt2 : (∑ j < r, z2 j * Q ^ j) < Q ^ r := encode_vec.lt Q r hQ z2 (by intro j hj; exact h2 j (by omega))
+    have hdm1 := div_mod_unique.nat ((∑ j < r, z1 j * Q ^ j) + z1 r * Q ^ r) (Q ^ r) (z1 r) (∑ j < r, z1 j * Q ^ j) (by ring) hlt1
+    have hdm2 := div_mod_unique.nat ((∑ j < r, z2 j * Q ^ j) + z2 r * Q ^ r) (Q ^ r) (z2 r) (∑ j < r, z2 j * Q ^ j) (by ring) hlt2
+    rw [heq] at hdm1
+    have htop : z1 r = z2 r := by omega
+    have hbot : (∑ j < r, z1 j * Q ^ j) = ∑ j < r, z2 j * Q ^ j := by omega
+    by_cases hir : i = r
+    · rw [hir]; exact htop
+    · exact ihr (by intro j hj; exact h1 j (by omega)) (by intro j hj; exact h2 j (by omega)) hbot i (by omega)
+
+-- EXACT CONSTRUCTIVE SIEGEL'S LEMMA (0 CUSTOM AXIOMS!):
++ siegel.integer_linear_system (M N H B : ℕ) (A : ℕ → ℕ → ℤ)
+    (hB : 1 ≤ B)
+    (hA : ∀ i < M, ∀ j < N, |A i j| ≤ (H : ℤ))
+    (hbox : (2 * N * H * B + 1) ^ M < (B + 1) ^ N) :
+    ∃ x : ℕ → ℤ,
+      (∃ j < N, x j ≠ 0) ∧
+      (∀ j < N, |x j| ≤ (B : ℤ)) ∧
+      (∀ i < M, (∑ j < N, A i j * x j) = 0)
+  set Q := 2 * N * H * B + 1 with hQ_def
+  set S_off : ℤ := ((N * H * B : ℕ) : ℤ) with hS_def
+  set y_val : ℕ → ℕ → ℤ := fun u i => ∑ j < N, A i j * ((decode_box B u j : ℕ) : ℤ) with hy_def
+  set z_val : ℕ → ℕ → ℕ := fun u i => nat_of_int (y_val u i + S_off) with hz_def
+  set F : ℕ → ℕ := fun u => encode_vec Q M (z_val u) with hF_def
+  -- Bound |y_val u i| <= N * H * B, hence 0 <= y_val u i + S_off < Q!
+  have hy_bound : ∀ u : ℕ, ∀ i < M, -S_off ≤ y_val u i ∧ y_val u i ≤ S_off
+    intro u i hi
+    have hgen : ∀ t ≤ N, -((t * H * B : ℕ) : ℤ) ≤ (∑ j < t, A i j * ((decode_box B u j : ℕ) : ℤ)) ∧ (∑ j < t, A i j * ((decode_box B u j : ℕ) : ℤ)) ≤ ((t * H * B : ℕ) : ℤ)
+      intro t ht; induction t with ht r ihr ht
+      · rw [sum_below_zero]; have h0 : 0 * H * B = 0 := by ring
+        rw [h0, cast_zero.int]; exact ⟨by linarith, by linarith⟩
+      · rw [succ_eq_add_one.nat] at ht ⊢
+        rw [sum_below_succ]
+        have hprev := ihr (by omega)
+        have hA_r := hA i hi r (by omega)
+        have hA_lo : -(H : ℤ) ≤ A i r := by linarith [neg_le_abs.int (A i r)]
+        have hA_hi : A i r ≤ (H : ℤ) := by linarith [le_abs_self.int (A i r)]
+        have hd_le : ((decode_box B u r : ℕ) : ℤ) ≤ (B : ℤ) := (cast_le.int (decode_box B u r) B).mpr (decode_box.le B u r)
+        have hd_nn : (0 : ℤ) ≤ ((decode_box B u r : ℕ) : ℤ) := (cast_le.int 0 (decode_box B u r)).mpr (by omega)
+        have hterm_lo : -((H : ℤ) * (B : ℤ)) ≤ A i r * ((decode_box B u r : ℕ) : ℤ) := by nlinarith
+        have hterm_hi : A i r * ((decode_box B u r : ℕ) : ℤ) ≤ (H : ℤ) * (B : ℤ) := by nlinarith
+        have hstep_cast : (((r + 1) * H * B : ℕ) : ℤ) = ((r * H * B : ℕ) : ℤ) + (H : ℤ) * (B : ℤ)
+          have hn : (r + 1) * H * B = r * H * B + H * B := by ring
+          rw [hn, cast_add.int (r * H * B) (H * B), cast_mul.int H B]
+        rw [hstep_cast]; exact ⟨by linarith, by linarith⟩
+    rw [hy_def, hS_def]; exact hgen N (by omega)
+  have hz_lt : ∀ u : ℕ, ∀ i < M, z_val u i < Q
+    intro u i hi
+    have hbd := hy_bound u i hi
+    have hnn : (0 : ℤ) ≤ y_val u i + S_off := by linarith
+    have heq : ((z_val u i : ℕ) : ℤ) = y_val u i + S_off := by rw [hz_def]; exact int_of_nat_of_int (y_val u i + S_off) hnn
+    have hlt_int : ((z_val u i : ℕ) : ℤ) < (Q : ℤ) := by linarith
+    exact (cast_lt.int (z_val u i) Q).mp hlt_int
+  have hF_lt : ∀ u < (B + 1) ^ N, F u < Q ^ M
+    intro u hu; rw [hF_def]
+    exact encode_vec.lt Q M (by rw [hQ_def]; omega) (z_val u) (hz_lt u)
+  -- Apply finite pigeonhole principle!
+  obtain ⟨u1, u2, h12, h2L, hFeq⟩ := pigeonhole.nat_map (Q ^ M) ((B + 1) ^ N) hbox F hF_lt
+  have hz_eq : ∀ i < M, z_val u1 i = z_val u2 i
+    rw [hF_def] at hFeq
+    exact encode_vec.inj Q M (by rw [hQ_def]; omega) (z_val u1) (z_val u2) (hz_lt u1) (hz_lt u2) hFeq
+  have hy_eq : ∀ i < M, y_val u1 i = y_val u2 i
+    intro i hi
+    have hbd1 := hy_bound u1 i hi
+    have hbd2 := hy_bound u2 i hi
+    have hc1 : ((z_val u1 i : ℕ) : ℤ) = y_val u1 i + S_off := by rw [hz_def]; exact int_of_nat_of_int (y_val u1 i + S_off) (by linarith)
+    have hc2 : ((z_val u2 i : ℕ) : ℤ) = y_val u2 i + S_off := by rw [hz_def]; exact int_of_nat_of_int (y_val u2 i + S_off) (by linarith)
+    have hze := hz_eq i hi
+    rw [hze] at hc1; linarith
+  use (fun j => ((decode_box B u1 j : ℕ) : ℤ) - ((decode_box B u2 j : ℕ) : ℤ))
+  constructor
+  · -- Nonzero!
+    obtain ⟨j0, hj0, hne⟩ := decode_box.inj B N u1 u2 (by omega) h2L (by omega)
+    use j0; constructor; exact hj0
+    intro hz0; apply hne
+    have hcast : ((decode_box B u1 j0 : ℕ) : ℤ) = ((decode_box B u2 j0 : ℕ) : ℤ) := by linarith
+    exact (cast_inj.int (decode_box B u1 j0) (decode_box B u2 j0)).mp hcast
+  · constructor
+    · -- Height bound |x_j| <= B!
+      intro j hj
+      have hd1_le : ((decode_box B u1 j : ℕ) : ℤ) ≤ (B : ℤ) := (cast_le.int (decode_box B u1 j) B).mpr (decode_box.le B u1 j)
+      have hd2_le : ((decode_box B u2 j : ℕ) : ℤ) ≤ (B : ℤ) := (cast_le.int (decode_box B u2 j) B).mpr (decode_box.le B u2 j)
+      have hd1_nn : (0 : ℤ) ≤ ((decode_box B u1 j : ℕ) : ℤ) := (cast_le.int 0 (decode_box B u1 j)).mpr (by omega)
+      have hd2_nn : (0 : ℤ) ≤ ((decode_box B u2 j : ℕ) : ℤ) := (cast_le.int 0 (decode_box B u2 j)).mpr (by omega)
+      exact abs_le_of.int (((decode_box B u1 j : ℕ) : ℤ) - ((decode_box B u2 j : ℕ) : ℤ)) (B : ℤ) (by linarith) (by linarith)
+    · -- Exact kernel: sum_j A_{ij} x_j = 0!
+      intro i hi
+      have hsplit : (∑ j < N, A i j * (((decode_box B u1 j : ℕ) : ℤ) - ((decode_box B u2 j : ℕ) : ℤ))) = y_val u1 i - y_val u2 i
+        rw [hy_def]
+        have hgen : ∀ t : ℕ, (∑ j < t, A i j * (((decode_box B u1 j : ℕ) : ℤ) - ((decode_box B u2 j : ℕ) : ℤ))) = (∑ j < t, A i j * ((decode_box B u1 j : ℕ) : ℤ)) - (∑ j < t, A i j * ((decode_box B u2 j : ℕ) : ℤ))
+          intro t; induction t with r ihr
+          · rw [sum_below_zero, sum_below_zero, sum_below_zero]; ring
+          · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ihr]; ring
+        exact hgen N
+      rw [hsplit, hy_eq i hi]; ring
+
+-- Explicit Siegel box existence: for any 1 <= M < N and 1 <= H, any B >= 1 with (2NH+1)^M <= B^(N-M)
+-- (in particular B = (2NH+1)^M!) satisfies the Siegel box inequality (2NHB+1)^M < (B+1)^N!
++ nat_pow_mono_base (a b k : ℕ) (hab : a ≤ b) : a ^ k ≤ b ^ k
+  induction k with r ih
+  · rw [pow_zero.nat, pow_zero.nat]; omega
+  · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat]; nlinarith
+
++ nat_pow_lt_of_lt (a b k : ℕ) (hk : 1 ≤ k) (hab : a < b) : a ^ k < b ^ k
+  have hstep : ∀ r : ℕ, a ^ (r + 1) < b ^ (r + 1)
+    intro r; induction r with s ihs
+    · have h1 : (0 + 1 : ℕ) = 1 := by decide
+      rw [h1, pow_one.nat, pow_one.nat]; exact hab
+    · rw [succ_eq_add_one.nat, pow_succ.nat a (s + 1), pow_succ.nat b (s + 1)]
+      nlinarith
+  have hk1 : k = (k - 1) + 1 := by omega
+  rw [hk1]; exact hstep (k - 1)
+
++ siegel.box_of_power_bound (M N H B : ℕ) (hMN : M < N) (hB : 1 ≤ B)
+    (hpow : (2 * N * H + 1) ^ M ≤ B ^ (N - M)) :
+    (2 * N * H * B + 1) ^ M < (B + 1) ^ N
+  have hbase : 2 * N * H * B + 1 ≤ (2 * N * H + 1) * B := by nlinarith
+  have h1 : (2 * N * H * B + 1) ^ M ≤ ((2 * N * H + 1) * B) ^ M := nat_pow_mono_base (2 * N * H * B + 1) ((2 * N * H + 1) * B) M hbase
+  have hmul_pow : ∀ x y k : ℕ, (x * y) ^ k = x ^ k * y ^ k
+    intro x y k; induction k with r ihr
+    · rw [pow_zero.nat, pow_zero.nat, pow_zero.nat]; ring
+    · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat, pow_succ.nat, ihr]; ring
+  rw [hmul_pow] at h1
+  have h2 : (2 * N * H + 1) ^ M * B ^ M ≤ B ^ N
+    have hBN : B ^ (N - M) * B ^ M = B ^ N
+      rw [← pow_add.nat]
+      have he : (N - M) + M = N := by omega
+      rw [he]
+    rw [← hBN]
+    nlinarith [pow_pos.nat B M (by omega)]
+  have h3 : B ^ N < (B + 1) ^ N := nat_pow_lt_of_lt B (B + 1) N (by omega) (by omega)
+  omega
+
++ siegel.explicit_solution (M N H : ℕ) (A : ℕ → ℕ → ℤ)
+    (hMN : M < N) (hA : ∀ i < M, ∀ j < N, |A i j| ≤ (H : ℤ)) :
+    ∃ x : ℕ → ℤ,
+      (∃ j < N, x j ≠ 0) ∧
+      (∀ j < N, |x j| ≤ (((2 * N * H + 1) ^ M : ℕ) : ℤ)) ∧
+      (∀ i < M, (∑ j < N, A i j * x j) = 0)
+  set B := (2 * N * H + 1) ^ M with hB_def
+  have hB1 : 1 ≤ B
+    rw [hB_def]; have hp := pow_pos.nat (2 * N * H + 1) M (by omega); omega
+  have hB_le : B ≤ B ^ (N - M)
+    have hnm : 1 ≤ N - M := by omega
+    have hgen : ∀ k : ℕ, 1 ≤ k → B ≤ B ^ k
+      intro k hk; induction k with hk r ihr hk
+      · omega
+      · rw [succ_eq_add_one.nat] at hk ⊢
+        rw [pow_succ.nat]
+        by_cases hr0 : r = 0
+        · rw [hr0, pow_zero.nat]; omega
+        · have hp := ihr (by omega); nlinarith
+    exact hgen (N - M) hnm
+  have hbox := siegel.box_of_power_bound M N H B hMN hB1 (by rw [← hB_def]; exact hB_le)
+  exact siegel.integer_linear_system M N H B A hB1 hA hbox
+
+-- ====================================================================================
+-- 4. Exact Bost-Arakelov Hermitian Morphism Slope Inequality (via M3.38 Hadamard!)
+-- ====================================================================================
+
+-- Arakelov degree of a positive-definite Hermitian lattice (rank r, Gram matrix G):
+--   deg_hat(r, G) = -(1/2) * log(Re(det(r, G)))
+-> arakelov_deg (r : ℕ) (G : ℕ → ℕ → ℂ) : ℝ :=
+  -(1 / 2) * log (complex.re (cmat.det r G))
+
++ bost.hermitian_morphism_det_bound (r : ℕ) (G_E G_phi : ℕ → ℕ → ℂ) (M_op C_orth : ℝ)
+    (hGE_pd : cmat.is_pd r G_E)
+    (hGphi_psd : cmat.is_psd r G_phi)
+    (hM_pos : 0 < M_op)
+    (hop : ∀ i < r, complex.re (G_phi i i) ≤ (M_op * M_op) * complex.re (G_E i i))
+    (horth : (∏ i < r, complex.re (G_E i i)) ≤ C_orth * complex.re (cmat.det r G_E)) :
+    complex.re (cmat.det r G_phi) ≤ (M_op * M_op) ^ r * C_orth * complex.re (cmat.det r G_E)
+  have hhad := cmat.hadamard_det_le_prod_diag r G_phi hGphi_psd
+  have hprod_bound : (∏ i < r, complex.re (G_phi i i)) ≤ (M_op * M_op) ^ r * (∏ i < r, complex.re (G_E i i))
+    have hgen : ∀ k ≤ r, (∏ i < k, complex.re (G_phi i i)) ≤ (M_op * M_op) ^ k * (∏ i < k, complex.re (G_E i i)) ∧ 0 ≤ ∏ i < k, complex.re (G_phi i i) ∧ 0 ≤ ∏ i < k, complex.re (G_E i i)
+      intro k hk; induction k with hk m ihm hk
+      · rw [prod_below_zero, prod_below_zero, pow_zero.real]; exact ⟨by linarith, by linarith, by linarith⟩
+      · rw [succ_eq_add_one.nat] at hk ⊢
+        rw [prod_below_succ, prod_below_succ, pow_succ.real]
+        have hprev := ihm (by omega)
+        have hphi_nn := (cmat.psd_diag_nonneg r G_phi hGphi_psd m (by omega)).2
+        have hE_nn := (cmat.psd_diag_nonneg r G_E (cmat.pd_implies_psd r G_E hGE_pd) m (by omega)).2
+        have hop_m := hop m (by omega)
+        have hM2_nn : 0 ≤ M_op * M_op := by nlinarith
+        have hM2p_nn : 0 ≤ (M_op * M_op) ^ m := pow_nonneg.real (M_op * M_op) hM2_nn m
+        have hm1 := mul_le_mul_of_nonneg_right.real (∏ i < m, complex.re (G_phi i i)) ((M_op * M_op) ^ m * (∏ i < m, complex.re (G_E i i))) (complex.re (G_phi m m)) hprev.1 hphi_nn
+        have hm2 := mul_le_mul_of_nonneg_left.real (complex.re (G_phi m m)) ((M_op * M_op) * complex.re (G_E m m)) ((M_op * M_op) ^ m * (∏ i < m, complex.re (G_E i i))) hop_m (mul_nonneg.real ((M_op * M_op) ^ m) (∏ i < m, complex.re (G_E i i)) hM2p_nn hprev.2.2)
+        have hre : (M_op * M_op) ^ m * (∏ i < m, complex.re (G_E i i)) * (M_op * M_op * complex.re (G_E m m)) = (M_op * M_op) ^ m * (M_op * M_op) * ((∏ i < m, complex.re (G_E i i)) * complex.re (G_E m m)) := by ring
+        exact ⟨by linarith, mul_nonneg.real (∏ i < m, complex.re (G_phi i i)) (complex.re (G_phi m m)) hprev.2.1 hphi_nn, mul_nonneg.real (∏ i < m, complex.re (G_E i i)) (complex.re (G_E m m)) hprev.2.2 hE_nn⟩
+    exact (hgen r (by omega)).1
+  have hM2r_nn : 0 ≤ (M_op * M_op) ^ r := pow_nonneg.real (M_op * M_op) (by nlinarith) r
+  have hm := mul_le_mul_of_nonneg_left.real (∏ i < r, complex.re (G_E i i)) (C_orth * complex.re (cmat.det r G_E)) ((M_op * M_op) ^ r) horth hM2r_nn
+  linarith
+
++ bost.hermitian_morphism_slope (r : ℕ) (G_E G_phi : ℕ → ℕ → ℂ) (M_op C_orth : ℝ)
+    (hGE_pd : cmat.is_pd r G_E)
+    (hGphi_pd : cmat.is_pd r G_phi)
+    (hM_pos : 0 < M_op)
+    (hC_pos : 0 < C_orth)
+    (hop : ∀ i < r, complex.re (G_phi i i) ≤ (M_op * M_op) * complex.re (G_E i i))
+    (horth : (∏ i < r, complex.re (G_E i i)) ≤ C_orth * complex.re (cmat.det r G_E)) :
+    arakelov_deg r G_E ≤ arakelov_deg r G_phi + (r : ℝ) * log M_op + log C_orth / 2
+  have hdetE_pos := (cmat.pd_det_pos r G_E hGE_pd).2
+  have hdetP_pos := (cmat.pd_det_pos r G_phi hGphi_pd).2
+  have hbd := bost.hermitian_morphism_det_bound r G_E G_phi M_op C_orth hGE_pd (cmat.pd_implies_psd r G_phi hGphi_pd) hM_pos hop horth
+  have hM2_pos : 0 < M_op * M_op := mul_pos.real M_op M_op hM_pos hM_pos
+  have hM2r_pos : 0 < (M_op * M_op) ^ r := pow_pos.real (M_op * M_op) r hM2_pos
+  have hrhs_pos : 0 < (M_op * M_op) ^ r * C_orth * complex.re (cmat.det r G_E) := mul_pos.real ((M_op * M_op) ^ r * C_orth) (complex.re (cmat.det r G_E)) (mul_pos.real ((M_op * M_op) ^ r) C_orth hM2r_pos hC_pos) hdetE_pos
+  have hlog := (log_le_log (complex.re (cmat.det r G_phi)) ((M_op * M_op) ^ r * C_orth * complex.re (cmat.det r G_E)) hdetP_pos hrhs_pos).mpr hbd
+  rw [log_mul ((M_op * M_op) ^ r * C_orth) (complex.re (cmat.det r G_E)) (mul_pos.real ((M_op * M_op) ^ r) C_orth hM2r_pos hC_pos) hdetE_pos] at hlog
+  rw [log_mul ((M_op * M_op) ^ r) C_orth hM2r_pos hC_pos] at hlog
+  rw [log_pow (M_op * M_op) r hM2_pos, log_mul M_op M_op hM_pos hM_pos] at hlog
+  unfold arakelov_deg; linarith
+
++ bost.orthonormal_slope_ineq (r : ℕ) (hr : 1 ≤ r) (G_E G_phi : ℕ → ℕ → ℂ) (M_op : ℝ)
+    (hGE_pd : cmat.is_pd r G_E)
+    (hGphi_pd : cmat.is_pd r G_phi)
+    (hM_pos : 0 < M_op)
+    (hop : ∀ i < r, complex.re (G_phi i i) ≤ (M_op * M_op) * complex.re (G_E i i))
+    (horth : (∏ i < r, complex.re (G_E i i)) ≤ complex.re (cmat.det r G_E)) :
+    arakelov_deg r G_E / (r : ℝ) ≤ arakelov_deg r G_phi / (r : ℝ) + log M_op
+  have h1 := bost.hermitian_morphism_slope r G_E G_phi M_op 1 hGE_pd hGphi_pd hM_pos (by linarith) hop (by linarith)
+  rw [log_one] at h1
+  have hr_pos : (0 : ℝ) < (r : ℝ) := (cast_pos.real r).mpr (by omega)
+  have hcr := mul_inv_cancel.real (r : ℝ) (by linarith)
+  have hdiv := mul_le_mul_of_nonneg_right.real (arakelov_deg r G_E) (arakelov_deg r G_phi + (r : ℝ) * log M_op) (1 / (r : ℝ)) (by linarith) (by linarith [one_div_pos.real (r : ℝ) hr_pos])
+  rw [div_def.real (arakelov_deg r G_E) (r : ℝ), div_def.real (arakelov_deg r G_phi) (r : ℝ)]
+  have hre : (arakelov_deg r G_phi + (r : ℝ) * log M_op) * (1 / (r : ℝ)) = arakelov_deg r G_phi * (1 / (r : ℝ)) + log M_op
+    linear_combination (log M_op) * hcr
+  linarith

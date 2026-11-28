@@ -1,0 +1,684 @@
+-- Milestone 3.81a (Part 4): Epstein Lattice Decomposition & Kronecker's First Limit Formula
+--                           (`Lib/CM/KroneckerLimit/LogTheta.lean`)
+--
+-- Proved unconditionally on Satori's untouched HOL kernel (ZERO custom axioms).
+
+import modular.epstein_defect_eta
+
+-- ====================================================================================
+-- 1. Elementary `rpow`, Symmetric Box Sum, & Real `zeta_em2` Helpers
+-- ====================================================================================
+
++ sernau.sym_sum_expand (f : ℤ → ℝ) (R : ℕ) :
+    (∑ ix < 2 * R + 1, f ((ix : ℤ) - (R : ℤ))) =
+      f 0 + ∑ j < R, (f (-((j + 1 : ℕ) : ℤ)) + f ((j + 1 : ℕ) : ℤ))
+  induction R with u ihu
+  · have h1 : 2 * 0 + 1 = 0 + 1 := by rfl
+    rw [h1, sum_below_succ 0, sum_below_zero, sum_below_zero]
+    have h0 : ((0 : ℕ) : ℤ) - ((0 : ℕ) : ℤ) = 0 := by ring
+    rw [h0]; ring
+  · rw [succ_eq_add_one.nat, sernau.sym_sum_step f u, ihu, sum_below_succ u]; ring
+
++ sernau.sym_sum_neg_eq (f : ℤ → ℝ) (R : ℕ) :
+    (∑ ix < 2 * R + 1, f (-((ix : ℤ) - (R : ℤ)))) = ∑ ix < 2 * R + 1, f ((ix : ℤ) - (R : ℤ))
+  have h1 := sernau.sym_sum_expand (fun m => f (-m)) R
+  have h2 := sernau.sym_sum_expand f R
+  have h1' : (∑ ix < 2 * R + 1, f (-((ix : ℤ) - (R : ℤ)))) =
+      f (-0) + ∑ j < R, (f (-(-((j + 1 : ℕ) : ℤ))) + f (-((j + 1 : ℕ) : ℤ)))
+    exact h1
+  have h0 : -(0 : ℤ) = 0 := by ring
+  rw [h0] at h1'
+  have hsum : (∑ j < R, (f (-(-((j + 1 : ℕ) : ℤ))) + f (-((j + 1 : ℕ) : ℤ)))) =
+      ∑ j < R, (f (-((j + 1 : ℕ) : ℤ)) + f ((j + 1 : ℕ) : ℤ))
+    apply sum_congr.real; intro j _
+    have hnn : -(-((j + 1 : ℕ) : ℤ)) = ((j + 1 : ℕ) : ℤ) := by ring
+    rw [hnn]; ring
+  rw [hsum] at h1'; linarith
+
++ sernau.zeta_em2_real_dseries (sigma : ℝ) (hsigma : 1 < sigma) :
+    tends_to (fun R : ℕ => ∑ m < R, rpow ((m + 1 : ℕ) : ℝ) (-sigma)) (complex.re (zeta_em2 (complex.of_real sigma)))
+  have hz := zeta_em2.eq_dseries_limit_re_gt_one (complex.of_real sigma) (by unfold complex.of_real; simp [hsigma])
+  have hre_csum : ∀ R : ℕ, complex.re (csum R (fun m => cpow_real ((m + 1 : ℕ) : ℝ) (complex.neg (complex.of_real sigma)))) =
+      ∑ m < R, rpow ((m + 1 : ℕ) : ℝ) (-sigma)
+    intro R; induction R with u ihu
+    · rw [csum.zero, sum_below_zero]; simp
+    · rw [succ_eq_add_one.nat, csum.succ, sum_below_succ u, complex.add_re, ihu]
+      unfold cpow_real rpow; rw [complex.exp_re]
+      have hre : complex.re (complex.smul (log ((u + 1 : ℕ) : ℝ)) (complex.neg (complex.of_real sigma))) = (-sigma) * log ((u + 1 : ℕ) : ℝ) := by simp; ring
+      have him : complex.im (complex.smul (log ((u + 1 : ℕ) : ℝ)) (complex.neg (complex.of_real sigma))) = 0 := by simp
+      rw [hre, him, cos_zero]; ring
+  unfold ctends_to at hz; unfold tends_to; intro e he
+  obtain ⟨N0, hN0⟩ := hz e he; use N0; intro R hR
+  have h1 := complex.re_abs_le (complex.sub (csum R (fun m => cpow_real ((m + 1 : ℕ) : ℝ) (complex.neg (complex.of_real sigma)))) (zeta_em2 (complex.of_real sigma)))
+  rw [complex.sub_re, hre_csum R] at h1
+  linarith [hN0 R hR]
+
++ sernau.zeta_em2_real_at_two_right (e : ℝ) (he : 0 < e) :
+    ∃ d : ℝ, 0 < d ∧ ∀ h : ℝ, 0 < h → h < d →
+      |complex.re (zeta_em2 (complex.of_real (2 + 2 * h))) - pi * pi / 6| < e
+  have hbas := sernau.basel_and_poisson_row.1
+  unfold tends_to at hbas
+  obtain ⟨N0, hN0⟩ := hbas (e / 4) (by linarith)
+  have hS0 := hN0 N0 (by omega)
+  have hS0_le : (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) ≤ pi * pi / 6
+    have hsh : tends_to (fun k : ℕ => (∑ n < N0 + k, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))) (pi * pi / 6 - ∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))
+      unfold tends_to; intro eps heps; obtain ⟨M0, hM0⟩ := hbas eps heps; use M0; intro k hk
+      have hr : ((∑ n < N0 + k, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))) - (pi * pi / 6 - ∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) = (∑ n < N0 + k, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) - pi * pi / 6 := by ring
+      rw [hr]; exact hM0 (N0 + k) (by omega)
+    have hnn : ∀ k : ℕ, 0 ≤ (∑ n < N0 + k, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))
+      intro k; induction k with u ihu
+      · have h0 : N0 + 0 = N0 := (by omega); rw [h0]; linarith
+      · rw [succ_eq_add_one.nat]; have h1 : N0 + (u + 1) = (N0 + u) + 1 := (by omega); rw [h1, sum_below_succ (N0 + u)]
+        have hp : 0 ≤ 1 / (((N0 + u + 1 : ℕ) : ℝ) ^ 2) := div_nonneg.real 1 _ (by decide) (by have hc := (cast_pos.real (N0 + u + 1)).mpr (by omega); have hs : (((N0 + u + 1 : ℕ) : ℝ) ^ 2) = ((N0 + u + 1 : ℕ) : ℝ) * ((N0 + u + 1 : ℕ) : ℝ) := (by ring); nlinarith)
+        linarith
+    linarith [tends_to.ge_of_ge _ _ 0 hsh hnn]
+  have htail_bas : pi * pi / 6 - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) < e / 4
+    linarith [neg_le_abs.real ((∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) - pi * pi / 6)]
+  set L0 := 2 * ((N0 + 1 : ℕ) : ℝ) * (log ((N0 + 1 : ℕ) : ℝ) + 1) with hL0_def
+  have hL0_pos : 0 < L0
+    rw [hL0_def]
+    have hN1 : (1 : ℝ) ≤ ((N0 + 1 : ℕ) : ℝ) := (cast_le.real 1 (N0 + 1)).mpr (by omega)
+    have hln : 0 ≤ log ((N0 + 1 : ℕ) : ℝ) := by have hl := (log_le_log 1 ((N0 + 1 : ℕ) : ℝ) (by decide) (by linarith)).mpr hN1; rw [log_one] at hl; exact hl
+    nlinarith
+  use e / (4 * L0); constructor; exact div_pos.real e (4 * L0) he (by linarith)
+  intro h hh_pos hh_lt
+  have hz_lim := sernau.zeta_em2_real_dseries (2 + 2 * h) (by linarith)
+  have hterm_le : ∀ n : ℕ, 0 ≤ rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h)) ∧ rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h)) ≤ 1 / (((n + 1 : ℕ) : ℝ) ^ 2)
+    intro n
+    have hn_ge1 : (1 : ℝ) ≤ ((n + 1 : ℕ) : ℝ) := (cast_le.real 1 (n + 1)).mpr (by omega)
+    have hln_nn : 0 ≤ log ((n + 1 : ℕ) : ℝ) := by have hl := (log_le_log 1 ((n + 1 : ℕ) : ℝ) (by decide) (by linarith)).mpr hn_ge1; rw [log_one] at hl; exact hl
+    have hsq_pos : 0 < ((n + 1 : ℕ) : ℝ) ^ 2 := by have hs : ((n + 1 : ℕ) : ℝ) ^ 2 = ((n + 1 : ℕ) : ℝ) * ((n + 1 : ℕ) : ℝ) := (by ring); nlinarith
+    have hinv_eq : 1 / (((n + 1 : ℕ) : ℝ) ^ 2) = rpow ((n + 1 : ℕ) : ℝ) (-2)
+      rw [← sernau.rpow_neg_one_eq (((n + 1 : ℕ) : ℝ) ^ 2) hsq_pos]; unfold rpow
+      have hls : log (((n + 1 : ℕ) : ℝ) ^ 2) = 2 * log ((n + 1 : ℕ) : ℝ) := by have hs : ((n + 1 : ℕ) : ℝ) ^ 2 = ((n + 1 : ℕ) : ℝ) * ((n + 1 : ℕ) : ℝ) := (by ring); rw [hs, log_mul ((n + 1 : ℕ) : ℝ) ((n + 1 : ℕ) : ℝ) (by linarith) (by linarith)]; ring
+      rw [hls]; apply le_antisymm.real
+      · exact (exp_le_exp _ _).mpr (by linarith)
+      · exact (exp_le_exp _ _).mpr (by linarith)
+    constructor; (unfold rpow; exact exp_nonneg _)
+    rw [hinv_eq]; unfold rpow; exact (exp_le_exp _ _).mpr (by nlinarith)
+  have htail_h : 0 ≤ complex.re (zeta_em2 (complex.of_real (2 + 2 * h))) - (∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) ∧
+      complex.re (zeta_em2 (complex.of_real (2 + 2 * h))) - (∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) ≤
+      pi * pi / 6 - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))
+    have hsh_h : tends_to (fun k : ℕ => (∑ n < N0 + k, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - (∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h)))) (complex.re (zeta_em2 (complex.of_real (2 + 2 * h))) - (∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))))
+      unfold tends_to at hz_lim ⊢; intro eps heps; obtain ⟨M0, hM0⟩ := hz_lim eps heps; use M0; intro k hk
+      have hr : ((∑ n < N0 + k, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - (∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h)))) - (complex.re (zeta_em2 (complex.of_real (2 + 2 * h))) - (∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h)))) = (∑ n < N0 + k, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - complex.re (zeta_em2 (complex.of_real (2 + 2 * h))) := by ring
+      rw [hr]; exact hM0 (N0 + k) (by omega)
+    have hsh_b : tends_to (fun k : ℕ => (∑ n < N0 + k, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))) (pi * pi / 6 - ∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))
+      unfold tends_to; intro eps heps; obtain ⟨M0, hM0⟩ := hbas eps heps; use M0; intro k hk
+      have hr : ((∑ n < N0 + k, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))) - (pi * pi / 6 - ∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) = (∑ n < N0 + k, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) - pi * pi / 6 := by ring
+      rw [hr]; exact hM0 (N0 + k) (by omega)
+    have hcmp : ∀ k : ℕ, 0 ≤ (∑ n < N0 + k, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - (∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) ∧
+        (∑ n < N0 + k, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - (∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) ≤
+        (∑ n < N0 + k, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))
+      intro k; induction k with u ihu
+      · have h0 : N0 + 0 = N0 := (by omega); rw [h0]; exact ⟨by linarith, by linarith⟩
+      · rw [succ_eq_add_one.nat]; have h1 : N0 + (u + 1) = (N0 + u) + 1 := (by omega); rw [h1, sum_below_succ (N0 + u), sum_below_succ (N0 + u)]
+        exact ⟨by linarith [(hterm_le (N0 + u)).1], by linarith [(hterm_le (N0 + u)).2]⟩
+    constructor
+    · exact tends_to.ge_of_ge _ _ 0 hsh_h (by intro k; exact (hcmp k).1)
+    · have hsub := tends_to.sub _ _ _ _ hsh_b hsh_h
+      have hge := tends_to.ge_of_ge _ _ 0 hsub (by intro k; linarith [(hcmp k).2])
+      linarith
+  have hfin_diff : |(∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))| ≤ (N0 : ℝ) * (2 * h * (log ((N0 + 1 : ℕ) : ℝ) + 1))
+    have hrec : ∀ K : ℕ, K ≤ N0 → |(∑ n < K, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - (∑ n < K, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))| ≤ (K : ℝ) * (2 * h * (log ((N0 + 1 : ℕ) : ℝ) + 1))
+      intro K; induction K with _ u ihu hKN
+      · rw [sum_below_zero, sum_below_zero, cast_zero.real]; have h0 : (0 : ℝ) - 0 = 0 := (by ring); rw [h0, abs_of_nonneg.real 0 (by decide)]; linarith
+      · rw [succ_eq_add_one.nat] at hKN ⊢; rw [sum_below_succ u, sum_below_succ u]
+        have huc : ((u + 1 : ℕ) : ℝ) = (u : ℝ) + 1 := by rw [cast_add.real, cast_one.real]
+        have hu1 : (1 : ℝ) ≤ ((u + 1 : ℕ) : ℝ) := (cast_le.real 1 (u + 1)).mpr (by omega)
+        have huN : ((u + 1 : ℕ) : ℝ) ≤ ((N0 + 1 : ℕ) : ℝ) := (cast_le.real (u + 1) (N0 + 1)).mpr (by omega)
+        have hlu_nn : 0 ≤ log ((u + 1 : ℕ) : ℝ) := by have hl := (log_le_log 1 ((u + 1 : ℕ) : ℝ) (by decide) (by linarith)).mpr hu1; rw [log_one] at hl; exact hl
+        have hlu_le : log ((u + 1 : ℕ) : ℝ) ≤ log ((N0 + 1 : ℕ) : ℝ) := (log_le_log ((u + 1 : ℕ) : ℝ) ((N0 + 1 : ℕ) : ℝ) (by linarith) (by linarith)).mpr huN
+        have hsq_pos : 0 < ((u + 1 : ℕ) : ℝ) ^ 2 := by have hs : ((u + 1 : ℕ) : ℝ) ^ 2 = ((u + 1 : ℕ) : ℝ) * ((u + 1 : ℕ) : ℝ) := (by ring); nlinarith
+        have hinv_eq : 1 / (((u + 1 : ℕ) : ℝ) ^ 2) = exp ((-2) * log ((u + 1 : ℕ) : ℝ))
+          rw [← sernau.rpow_neg_one_eq (((u + 1 : ℕ) : ℝ) ^ 2) hsq_pos]; unfold rpow
+          have hls : log (((u + 1 : ℕ) : ℝ) ^ 2) = 2 * log ((u + 1 : ℕ) : ℝ) := by have hs : ((u + 1 : ℕ) : ℝ) ^ 2 = ((u + 1 : ℕ) : ℝ) * ((u + 1 : ℕ) : ℝ) := (by ring); rw [hs, log_mul ((u + 1 : ℕ) : ℝ) ((u + 1 : ℕ) : ℝ) (by linarith) (by linarith)]; ring
+          rw [hls]; apply le_antisymm.real
+          · exact (exp_le_exp _ _).mpr (by linarith)
+          · exact (exp_le_exp _ _).mpr (by linarith)
+        have hstep_bd : |rpow ((u + 1 : ℕ) : ℝ) (-(2 + 2 * h)) - 1 / (((u + 1 : ℕ) : ℝ) ^ 2)| ≤ 2 * h * (log ((N0 + 1 : ℕ) : ℝ) + 1)
+          rw [hinv_eq]; unfold rpow
+          have he := sernau.exp_sub_abs_le (-(2 + 2 * h) * log ((u + 1 : ℕ) : ℝ)) ((-2) * log ((u + 1 : ℕ) : ℝ))
+          have hm1 : exp (-(2 + 2 * h) * log ((u + 1 : ℕ) : ℝ)) ≤ 1 := by rw [← exp_zero]; exact (exp_le_exp _ 0).mpr (by nlinarith)
+          have hm2 : exp ((-2) * log ((u + 1 : ℕ) : ℝ)) ≤ 1 := by rw [← exp_zero]; exact (exp_le_exp _ 0).mpr (by nlinarith)
+          have hle_e : exp (-(2 + 2 * h) * log ((u + 1 : ℕ) : ℝ)) ≤ exp ((-2) * log ((u + 1 : ℕ) : ℝ)) := (exp_le_exp _ _).mpr (by nlinarith)
+          have hmax : max (exp (-(2 + 2 * h) * log ((u + 1 : ℕ) : ℝ))) (exp ((-2) * log ((u + 1 : ℕ) : ℝ))) ≤ 1 := by rw [max_eq_right.real _ _ hle_e]; exact hm2
+          have hsub_eq : -(2 + 2 * h) * log ((u + 1 : ℕ) : ℝ) - (-2) * log ((u + 1 : ℕ) : ℝ) = -(2 * h * log ((u + 1 : ℕ) : ℝ)) := by ring
+          rw [hsub_eq, abs_neg_eq, abs_of_nonneg.real (2 * h * log ((u + 1 : ℕ) : ℝ)) (by nlinarith)] at he
+          have hm_max := mul_le_mul_of_nonneg_right.real _ 1 (2 * h * log ((u + 1 : ℕ) : ℝ)) hmax (by nlinarith)
+          nlinarith
+        have hre : ((∑ n < u, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) + rpow ((u + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - ((∑ n < u, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)) + 1 / (((u + 1 : ℕ) : ℝ) ^ 2)) =
+            ((∑ n < u, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - (∑ n < u, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))) + (rpow ((u + 1 : ℕ) : ℝ) (-(2 + 2 * h)) - 1 / (((u + 1 : ℕ) : ℝ) ^ 2)) := by ring
+        rw [hre]; have hi := ihu (by omega)
+        have hring : ((u + 1 : ℕ) : ℝ) * (2 * h * (log ((N0 + 1 : ℕ) : ℝ) + 1)) = (u : ℝ) * (2 * h * (log ((N0 + 1 : ℕ) : ℝ) + 1)) + 2 * h * (log ((N0 + 1 : ℕ) : ℝ) + 1) := by rw [huc]; ring
+        linarith [abs_add_le ((∑ n < u, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - (∑ n < u, 1 / (((n + 1 : ℕ) : ℝ) ^ 2))) (rpow ((u + 1 : ℕ) : ℝ) (-(2 + 2 * h)) - 1 / (((u + 1 : ℕ) : ℝ) ^ 2))]
+    exact hrec N0 (by omega)
+  have hfin_lt : (N0 : ℝ) * (2 * h * (log ((N0 + 1 : ℕ) : ℝ) + 1)) < e / 4
+    have hL_le : (N0 : ℝ) * (2 * (log ((N0 + 1 : ℕ) : ℝ) + 1)) ≤ L0
+      rw [hL0_def, cast_add.real, cast_one.real]
+      have hln : 0 ≤ log ((N0 + 1 : ℕ) : ℝ) := by have hl := (log_le_log 1 ((N0 + 1 : ℕ) : ℝ) (by decide) (by linarith [(cast_le.real 1 (N0 + 1)).mpr (by omega)])).mpr ((cast_le.real 1 (N0 + 1)).mpr (by omega)); rw [log_one] at hl; exact hl
+      nlinarith
+    have h4L := (lt_div_iff.real h e (4 * L0) (by linarith)).mp hh_lt
+    have hr : (N0 : ℝ) * (2 * h * (log ((N0 + 1 : ℕ) : ℝ) + 1)) = h * ((N0 : ℝ) * (2 * (log ((N0 + 1 : ℕ) : ℝ) + 1))) := by ring
+    nlinarith
+  exact abs_lt_of.real _ e (by linarith [neg_le_abs.real ((∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)))]) (by linarith [le_abs_self.real ((∑ n < N0, rpow ((n + 1 : ℕ) : ℝ) (-(2 + 2 * h))) - (∑ n < N0, 1 / (((n + 1 : ℕ) : ℝ) ^ 2)))])
+
+-- ====================================================================================
+-- 2. Exact Decomposition of `sernau.epstein_lat tau k s` for `1 < s <= 2`
+-- ====================================================================================
+
++ sernau.epstein_lat_decomp (tau : ℂ) (k s : ℝ) (htau : 0 < complex.im tau) (hk : 0 < k) (hs1 : 1 < s) (hs2 : s ≤ 2) :
+    sernau.epstein_lat tau k s =
+      2 * (s - 1) * rpow (k * complex.im tau) s * complex.re (zeta_em2 (complex.of_real (2 * s))) +
+      rpow k s * rpow (complex.im tau) (1 - s) * sernau.row_int_val s * ((2 * s - 1 - 1) * complex.re (zeta_em2 (complex.of_real (2 * s - 1)))) +
+      2 * (s - 1) * rpow (k * complex.im tau) s * sernau.row_defect_total tau s
+  have hbc := sernau.row_defect_bound_and_cont tau htau
+  set x := complex.re tau with hx_def
+  set y := complex.im tau with hy_def
+  have hky_pos : 0 < k * y := mul_pos.real k y hk htau
+  -- Basic `rpow` identities:
+  have hrpow_div : ∀ A : ℝ, 0 < A → rpow (A / (k * y)) (-s) = rpow (k * y) s * rpow A (-s)
+    intro A hA; unfold rpow; rw [← exp_add, log_div A (k * y) hA hky_pos]; have hr : (-s) * (log A - log (k * y)) = s * log (k * y) + (-s) * log A := (by ring); rw [hr]
+  have hrpow_mul : ∀ a b t : ℝ, 0 < a → 0 < b → rpow (a * b) t = rpow a t * rpow b t
+    intro a b t ha hb; unfold rpow; rw [← exp_add, log_mul a b ha hb]; have hr : t * (log a + log b) = t * log a + t * log b := (by ring); rw [hr]
+  have hrpow_add : ∀ a p q : ℝ, 0 < a → rpow a p * rpow a q = rpow a (p + q)
+    intro a p q _; unfold rpow; rw [← exp_add]; have hr : p * log a + q * log a = (p + q) * log a := (by ring); rw [hr]
+  have hrpow_sq : ∀ a : ℝ, 0 < a → rpow (a * a) (-s) = rpow a (-(2 * s))
+    intro a ha; unfold rpow; rw [log_mul a a ha ha]; have hr : (-s) * (log a + log a) = (-(2 * s)) * log a := (by ring); rw [hr]
+  -- Pointwise norm identity on lattice points:
+  have hnorm_lat : ∀ m n : ℤ, complex.norm_sq (complex.add (c_of_int m) (complex.mul (c_of_int n) tau)) =
+      ((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2
+    intro m n; unfold complex.norm_sq c_of_int complex.of_real; rw [hx_def, hy_def]; simp; ring
+  -- Row integral + defect split for every `n >= 1`, `R : ℕ`:
+  have hrow_split : ∀ (n : ℕ) (R : ℕ), 1 ≤ n →
+      (∑ ix < 2 * R + 1, rpow (((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) =
+      (∑ ix < 2 * R + 1, sernau.row_defect_term tau n ((ix : ℤ) - (R : ℤ)) s) +
+      rint (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)) ((R : ℝ) + 1)
+    intro n R hn
+    have hny_pos : 0 < (n : ℝ) * y := mul_pos.real (n : ℝ) y ((cast_pos.real n).mpr (by omega)) htau
+    have hcont_u : ∀ a b : ℝ, ∀ t, a ≤ t → t ≤ b → continuous_at (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) t
+      intro a b t _ _
+      have hp : 0 < (t + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2 := by have hs1' : (t + (n : ℝ) * x) ^ 2 = (t + (n : ℝ) * x) * (t + (n : ℝ) * x) := (by ring); have hs2' : ((n : ℝ) * y) ^ 2 = ((n : ℝ) * y) * ((n : ℝ) * y) := (by ring); nlinarith
+      have hcl := continuous_at.comp log (fun u => (u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) t (sernau.log_cont_and_deriv _ hp).1 (by continuity)
+      unfold rpow; continuity
+    have htm : ∀ m : ℤ, sernau.row_defect_term tau n m s =
+        rpow (((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s) -
+        rint (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) (m : ℝ) ((m : ℝ) + 1)
+      intro m
+      obtain ⟨I2, hI2⟩ := darboux.continuous (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) (m : ℝ) ((m : ℝ) + 1) (by linarith) (hcont_u _ _)
+      have hsh := darboux.subst_shift (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) (m : ℝ) 0 1 I2 (by have h0 : (0 : ℝ) + (m : ℝ) = (m : ℝ) := (by ring); have h1 : (1 : ℝ) + (m : ℝ) = (m : ℝ) + 1 := (by ring); rw [h0, h1]; exact hI2)
+      have hc1 := darboux.const 0 1 (rpow (((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) (by decide)
+      have hsub := darboux.sub _ _ 0 1 _ I2 hc1 hsh
+      rw [rint.eq_of_has_integral _ (m : ℝ) ((m : ℝ) + 1) I2 hI2]
+      have hval_c : rpow (((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s) * (1 - 0) - I2 = rpow (((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s) - I2 := by ring
+      rw [hval_c] at hsub; unfold sernau.row_defect_term; rw [← hx_def, ← hy_def]
+      apply rint.eq_of_has_integral; apply darboux.congr _ _ 0 1 _ hsub
+      intro t _ _; have hord : t + (m : ℝ) + (n : ℝ) * x = (m : ℝ) + t + (n : ℝ) * x := (by ring); rw [hord]
+    have htel : ∀ K : ℕ, (∑ ix < K, rint (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) ((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ)) (((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ)) + 1)) =
+        rint (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)) (-(R : ℝ) + (K : ℝ))
+      intro K; induction K with u ihu
+      · rw [sum_below_zero, cast_zero.real]; have h0 : -(R : ℝ) + 0 = -(R : ℝ) := (by ring); rw [h0]
+        exact (rint.eq_of_has_integral (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)) (-(R : ℝ)) 0 (darboux.point (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)))).symm
+      · rw [succ_eq_add_one.nat, sum_below_succ u, ihu, cast_add.real, cast_one.real]
+        have ha_eq : (((u : ℤ) - (R : ℤ) : ℤ) : ℝ) = -(R : ℝ) + (u : ℝ) := by ring
+        have hb_eq : -(R : ℝ) + ((u : ℝ) + 1) = (-(R : ℝ) + (u : ℝ)) + 1 := by ring
+        rw [ha_eq, hb_eq]
+        obtain ⟨I1, hI1⟩ := darboux.continuous (fun u0 => rpow ((u0 + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)) (-(R : ℝ) + (u : ℝ)) (by linarith [cast_nonneg.real u]) (hcont_u _ _)
+        obtain ⟨I2, hI2⟩ := darboux.continuous (fun u0 => rpow ((u0 + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) (-(R : ℝ) + (u : ℝ)) ((-(R : ℝ) + (u : ℝ)) + 1) (by linarith) (hcont_u _ _)
+        have hI12 := darboux.adjacent _ (-(R : ℝ)) (-(R : ℝ) + (u : ℝ)) ((-(R : ℝ) + (u : ℝ)) + 1) I1 I2 hI1 hI2
+        rw [rint.eq_of_has_integral _ _ _ I1 hI1, rint.eq_of_has_integral _ _ _ I2 hI2, rint.eq_of_has_integral _ _ _ (I1 + I2) hI12]
+    have hsp : ∀ K : ℕ, (∑ ix < K, sernau.row_defect_term tau n ((ix : ℤ) - (R : ℤ)) s) =
+        (∑ ix < K, rpow (((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) -
+        (∑ ix < K, rint (fun u => rpow ((u + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s)) ((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ)) (((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ)) + 1))
+      intro K; induction K with u ihu; (rw [sum_below_zero, sum_below_zero, sum_below_zero]; ring)
+      rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, sum_below_succ u, ihu, htm ((u : ℤ) - (R : ℤ))]; ring
+    have hsR := hsp (2 * R + 1); rw [htel (2 * R + 1)] at hsR
+    have htop : -(R : ℝ) + ((2 * R + 1 : ℕ) : ℝ) = (R : ℝ) + 1 := by rw [cast_add.real, cast_mul.real, cast_one.real]; simp; ring
+    rw [htop] at hsR; linarith
+  -- Exact box identity for every `R : ℕ`:
+  have hbox_id : ∀ R : ℕ, sernau.epstein_lat_box tau k s R =
+      rpow (k * y) s * (
+        2 * (∑ m < R, rpow ((m + 1 : ℕ) : ℝ) (-(2 * s))) +
+        2 * (∑ j < R, rint (fun u => rpow ((u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)) ((R : ℝ) + 1)) +
+        2 * (∑ j < R, ∑ ix < 2 * R + 1, sernau.row_defect_term tau (j + 1) ((ix : ℤ) - (R : ℤ)) s))
+    intro R
+    set g : ℤ → ℤ → ℝ := fun m n => if m = 0 ∧ n = 0 then 0 else rpow (((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2) (-s) with hg_def
+    have hg_sym : ∀ m n : ℤ, g (-m) (-n) = g m n
+      intro m n; rw [hg_def]
+      by_cases h0 : m = 0 ∧ n = 0
+      · have h0n : -m = 0 ∧ -n = 0 := ⟨by omega, by omega⟩; rw [if_pos h0n, if_pos h0]
+      · have h0n : ¬ (-m = 0 ∧ -n = 0) := by intro h; exact h0 ⟨by omega, by omega⟩
+        rw [if_neg h0n, if_neg h0]; have hsq : (((-m : ℤ) : ℝ) + ((-n : ℤ) : ℝ) * x) ^ 2 + (((-n : ℤ) : ℝ) * y) ^ 2 = ((m : ℝ) + (n : ℝ) * x) ^ 2 + ((n : ℝ) * y) ^ 2 := (by ring); rw [hsq]
+    have hscale_box : sernau.epstein_lat_box tau k s R = rpow (k * y) s * (∑ iy < 2 * R + 1, ∑ ix < 2 * R + 1, g ((ix : ℤ) - (R : ℤ)) ((iy : ℤ) - (R : ℤ)))
+      unfold sernau.epstein_lat_box; rw [← hy_def]
+      have hswap : ∀ M K : ℕ, ∀ F : ℕ → ℕ → ℝ, (∑ ix < M, ∑ iy < K, F ix iy) = ∑ iy < K, ∑ ix < M, F ix iy
+        intro M K F; induction M with u ihu
+        · rw [sum_below_zero]; symm; induction K with v ihv; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat, sum_below_succ v, sum_below_zero, ihv]; ring)
+        · rw [succ_eq_add_one.nat, sum_below_succ u, ihu]
+          have hadd : ∀ J : ℕ, (∑ iy < J, ∑ ix < u, F ix iy) + (∑ iy < J, F u iy) = ∑ iy < J, ∑ ix < u + 1, F ix iy
+            intro J; induction J with v ihv; (rw [sum_below_zero, sum_below_zero, sum_below_zero]; ring)
+            rw [succ_eq_add_one.nat, sum_below_succ v, sum_below_succ v, sum_below_succ v, sum_below_succ u]; linarith
+          exact hadd K
+      rw [hswap (2 * R + 1) (2 * R + 1)]
+      have hpull : ∀ (M : ℕ) (c : ℝ) (F : ℕ → ℝ), (∑ u < M, c * F u) = c * (∑ u < M, F u) := by intro M c F; induction M with u ihu; (rw [sum_below_zero, sum_below_zero]; ring); (rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, ihu]; ring)
+      rw [← hpull (2 * R + 1) (rpow (k * y) s)]; apply sum_congr.real; intro iy _
+      rw [← hpull (2 * R + 1) (rpow (k * y) s)]; apply sum_congr.real; intro ix _
+      rw [hg_def, hnorm_lat ((ix : ℤ) - (R : ℤ)) ((iy : ℤ) - (R : ℤ))]
+      by_cases h0 : ix = R ∧ iy = R
+      · have h0z : (ix : ℤ) - (R : ℤ) = 0 ∧ (iy : ℤ) - (R : ℤ) = 0 := ⟨by rw [h0.1]; ring, by rw [h0.2]; ring⟩
+        rw [if_pos h0, if_pos h0z]; ring
+      · have h0z : ¬ ((ix : ℤ) - (R : ℤ) = 0 ∧ (iy : ℤ) - (R : ℤ) = 0)
+          intro ⟨ex, ey⟩; apply h0
+          have hni : ∀ a b : ℕ, (a : ℤ) - (b : ℤ) = 0 → a = b
+            intro a b hab; by_contra hne; by_cases hlt : a < b
+            · have h := (cast_lt.int a b).mpr hlt; omega
+            · have h := (cast_lt.int b a).mpr (by omega); omega
+          exact ⟨hni ix R ex, hni iy R ey⟩
+        rw [if_neg h0, if_neg h0z]
+        have hnz_r : ∀ z : ℤ, z ≠ 0 → (z : ℝ) ≠ 0
+          intro z hzn hr0; apply hzn; by_cases hlt : z < 0
+          · have h1 : z + 1 ≤ 0 := by omega
+            have h2 := (int_cast_le.real (z + 1) 0).mpr h1
+            rw [int_cast_add.real, int_cast_one.real, int_cast_zero.real] at h2; linarith
+          · have h1 : 1 ≤ z := by omega
+            have h2 := (int_cast_le.real 1 z).mpr h1
+            rw [int_cast_one.real] at h2; linarith
+        have hAp : 0 < ((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ) + ((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) * x) ^ 2 + (((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) * y) ^ 2
+          by_cases hny : (iy : ℤ) - (R : ℤ) = 0
+          · have hmx : (ix : ℤ) - (R : ℤ) ≠ 0 := by intro hx0; exact h0z ⟨hx0, hny⟩
+            have hmr := hnz_r ((ix : ℤ) - (R : ℤ)) hmx
+            rw [hny, int_cast_zero.real]
+            have hsq : ((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ) + 0 * x) ^ 2 + (0 * y) ^ 2 = ((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ)) * ((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ)) := by ring
+            rw [hsq]; by_cases hp : 0 < ((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ)); nlinarith; nlinarith
+          · have hnr := hnz_r ((iy : ℤ) - (R : ℤ)) hny
+            have hs1' : ((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ) + ((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) * x) ^ 2 = ((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ) + ((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) * x) * ((((ix : ℤ) - (R : ℤ) : ℤ) : ℝ) + ((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) * x) := by ring
+            have hs2' : (((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) * y) ^ 2 = (((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) * y) * (((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) * y) := by ring
+            have hzy_nz : 0 < ((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) * y ∨ 0 < -(((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) * y)
+              by_cases hp : 0 < ((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ))
+              · left; exact mul_pos.real _ y hp htau
+              · right; have hneg : 0 < -((((iy : ℤ) - (R : ℤ) : ℤ) : ℝ)) := by linarith
+                have hm := mul_pos.real _ y hneg htau; linarith
+            obtain h1 | h2 := hzy_nz <;> nlinarith
+        exact hrpow_div _ hAp
+    rw [hscale_box]
+    set F_row : ℤ → ℝ := fun n => ∑ ix < 2 * R + 1, g ((ix : ℤ) - (R : ℤ)) n with hFrow_def
+    have hFrow_even : ∀ n : ℤ, F_row (-n) = F_row n
+      intro n; rw [hFrow_def]
+      have hneg_eq : (∑ ix < 2 * R + 1, g (-((ix : ℤ) - (R : ℤ))) (-n)) = ∑ ix < 2 * R + 1, g ((ix : ℤ) - (R : ℤ)) (-n) := sernau.sym_sum_neg_eq (fun m => g m (-n)) R
+      rw [← hneg_eq]; exact sum_congr.real _ _ (2 * R + 1) (by intro ix _; exact hg_sym ((ix : ℤ) - (R : ℤ)) n)
+    have hFrow_0 : F_row 0 = 2 * (∑ m < R, rpow ((m + 1 : ℕ) : ℝ) (-(2 * s)))
+      rw [hFrow_def]
+      have hexp0 : (∑ ix < 2 * R + 1, g ((ix : ℤ) - (R : ℤ)) 0) = g 0 0 + ∑ j < R, (g (-((j + 1 : ℕ) : ℤ)) 0 + g ((j + 1 : ℕ) : ℤ) 0) := sernau.sym_sum_expand (fun m => g m 0) R
+      rw [hexp0]
+      have h00_p : (0 : ℤ) = 0 ∧ (0 : ℤ) = 0 := ⟨by rfl, by rfl⟩
+      have hg00 : g 0 0 = 0 := by rw [hg_def, if_pos h00_p]
+      rw [hg00]
+      have hterm0 : ∀ j < R, g (-((j + 1 : ℕ) : ℤ)) 0 + g ((j + 1 : ℕ) : ℤ) 0 = 2 * rpow ((j + 1 : ℕ) : ℝ) (-(2 * s))
+        intro j _
+        have hnz : ¬ (((j + 1 : ℕ) : ℤ) = 0 ∧ (0 : ℤ) = 0) := by intro h; have hc : (1 : ℤ) ≤ ((j + 1 : ℕ) : ℤ) := (cast_le.int 1 (j + 1)).mpr (by omega); omega
+        have heq1 : g (-((j + 1 : ℕ) : ℤ)) 0 = g ((j + 1 : ℕ) : ℤ) 0 := by have hz : -(0 : ℤ) = 0 := (by ring); have hs := hg_sym ((j + 1 : ℕ) : ℤ) 0; rw [hz] at hs; exact hs
+        rw [heq1, hg_def, if_neg hnz, int_cast_zero.real]
+        have hj_pos : 0 < ((j + 1 : ℕ) : ℝ) := (cast_pos.real (j + 1)).mpr (by omega)
+        have hsq : (((j + 1 : ℕ) : ℝ) + 0 * x) ^ 2 + (0 * y) ^ 2 = ((j + 1 : ℕ) : ℝ) * ((j + 1 : ℕ) : ℝ) := by ring
+        rw [hsq, hrpow_sq ((j + 1 : ℕ) : ℝ) hj_pos]; ring
+      rw [sum_congr.real _ _ R hterm0]
+      have h2s : ∀ K : ℕ, (∑ j < K, 2 * rpow ((j + 1 : ℕ) : ℝ) (-(2 * s))) = 2 * (∑ j < K, rpow ((j + 1 : ℕ) : ℝ) (-(2 * s))) := by intro K; induction K with u ihu; (rw [sum_below_zero, sum_below_zero]; ring); (rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, ihu]; ring)
+      rw [h2s R]; ring
+    have hFrow_pos : ∀ j < R, F_row ((j + 1 : ℕ) : ℤ) =
+        (∑ ix < 2 * R + 1, sernau.row_defect_term tau (j + 1) ((ix : ℤ) - (R : ℤ)) s) +
+        rint (fun u => rpow ((u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)) ((R : ℝ) + 1)
+      intro j _
+      rw [hFrow_def, ← hrow_split (j + 1) R (by omega)]
+      apply sum_congr.real; intro ix _; rw [hg_def]
+      have hnz : ¬ ((ix : ℤ) - (R : ℤ) = 0 ∧ ((j + 1 : ℕ) : ℤ) = 0) := by intro h; have hc : (1 : ℤ) ≤ ((j + 1 : ℕ) : ℤ) := (cast_le.int 1 (j + 1)).mpr (by omega); omega
+      rw [if_neg hnz]
+    have hsum_iy : (∑ iy < 2 * R + 1, ∑ ix < 2 * R + 1, g ((ix : ℤ) - (R : ℤ)) ((iy : ℤ) - (R : ℤ))) =
+        F_row 0 + ∑ j < R, (F_row (-((j + 1 : ℕ) : ℤ)) + F_row ((j + 1 : ℕ) : ℤ))
+      have hfold : (∑ iy < 2 * R + 1, ∑ ix < 2 * R + 1, g ((ix : ℤ) - (R : ℤ)) ((iy : ℤ) - (R : ℤ))) = ∑ iy < 2 * R + 1, F_row ((iy : ℤ) - (R : ℤ)) := sum_congr.real _ _ (2 * R + 1) (by intro iy _; rw [hFrow_def])
+      rw [hfold]; exact sernau.sym_sum_expand F_row R
+    rw [hsum_iy, hFrow_0]
+    have hsum_pos : (∑ j < R, (F_row (-((j + 1 : ℕ) : ℤ)) + F_row ((j + 1 : ℕ) : ℤ))) =
+        2 * (∑ j < R, rint (fun u => rpow ((u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)) ((R : ℝ) + 1)) +
+        2 * (∑ j < R, ∑ ix < 2 * R + 1, sernau.row_defect_term tau (j + 1) ((ix : ℤ) - (R : ℤ)) s)
+      have hrec : ∀ K : ℕ, K ≤ R → (∑ j < K, (F_row (-((j + 1 : ℕ) : ℤ)) + F_row ((j + 1 : ℕ) : ℤ))) =
+          2 * (∑ j < K, rint (fun u => rpow ((u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)) ((R : ℝ) + 1)) +
+          2 * (∑ j < K, ∑ ix < 2 * R + 1, sernau.row_defect_term tau (j + 1) ((ix : ℤ) - (R : ℤ)) s)
+        intro K; induction K with _ u ihu hKR
+        · rw [sum_below_zero, sum_below_zero, sum_below_zero]; ring
+        · rw [succ_eq_add_one.nat] at hKR ⊢; rw [sum_below_succ u, sum_below_succ u, sum_below_succ u, ihu (by omega), hFrow_even ((u + 1 : ℕ) : ℤ), hFrow_pos u (by omega)]; ring
+      exact hrec R (by omega)
+    rw [hsum_pos]; ring
+  -- Dominated convergence for the row-integral sum `∑ j < R, I(j, R)` as `R -> infty`:
+  set I_row : ℕ → ℕ → ℝ := fun j R => rint (fun u => rpow ((u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)) ((R : ℝ) + 1) with hIrow_def
+  set L_row : ℕ → ℝ := fun j => rpow (((j + 1 : ℕ) : ℝ) * y) (1 - 2 * s) * sernau.row_int_val s with hLrow_def
+  have hI_lim : ∀ j : ℕ, tends_to (fun R => I_row j R) (L_row j)
+    intro j; rw [hIrow_def, hLrow_def]
+    exact sernau.row_int_shift_lim (((j + 1 : ℕ) : ℝ) * x) (((j + 1 : ℕ) : ℝ) * y) s (mul_pos.real _ y ((cast_pos.real (j + 1)).mpr (by omega)) htau) (by linarith)
+  have hI_bds : ∀ j R : ℕ, 0 ≤ I_row j R ∧ I_row j R ≤ L_row j
+    intro j R
+    have hjy_pos : 0 < ((j + 1 : ℕ) : ℝ) * y := mul_pos.real _ y ((cast_pos.real (j + 1)).mpr (by omega)) htau
+    have hcont_u : ∀ a b : ℝ, ∀ t, a ≤ t → t ≤ b → continuous_at (fun u => rpow ((u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) (-s)) t
+      intro a b t _ _
+      have hp : 0 < (t + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2 := by have hs1' : (t + ((j + 1 : ℕ) : ℝ) * x) ^ 2 = (t + ((j + 1 : ℕ) : ℝ) * x) * (t + ((j + 1 : ℕ) : ℝ) * x) := (by ring); have hs2' : (((j + 1 : ℕ) : ℝ) * y) ^ 2 = (((j + 1 : ℕ) : ℝ) * y) * (((j + 1 : ℕ) : ℝ) * y) := (by ring); nlinarith
+      have hcl := continuous_at.comp log (fun u => (u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) t (sernau.log_cont_and_deriv _ hp).1 (by continuity)
+      unfold rpow; continuity
+    have hmono : ∀ M1 M2 : ℕ, M1 ≤ M2 → I_row j M1 ≤ I_row j M2
+      intro M1 M2 h12; rw [hIrow_def]
+      have hle_m : (M1 : ℝ) ≤ (M2 : ℝ) := (cast_le.real M1 M2).mpr h12
+      obtain ⟨IL, hIL⟩ := darboux.continuous (fun u => rpow ((u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) (-s)) (-(M2 : ℝ)) (-(M1 : ℝ)) (by linarith) (hcont_u _ _)
+      obtain ⟨IM, hIM⟩ := darboux.continuous (fun u => rpow ((u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) (-s)) (-(M1 : ℝ)) ((M1 : ℝ) + 1) (by linarith [cast_nonneg.real M1]) (hcont_u _ _)
+      obtain ⟨IR, hIR⟩ := darboux.continuous (fun u => rpow ((u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) (-s)) ((M1 : ℝ) + 1) ((M2 : ℝ) + 1) (by linarith) (hcont_u _ _)
+      have hLM := darboux.adjacent _ (-(M2 : ℝ)) (-(M1 : ℝ)) ((M1 : ℝ) + 1) IL IM hIL hIM
+      have hLMR := darboux.adjacent _ (-(M2 : ℝ)) ((M1 : ℝ) + 1) ((M2 : ℝ) + 1) (IL + IM) IR hLM hIR
+      rw [rint.eq_of_has_integral _ (-(M1 : ℝ)) ((M1 : ℝ) + 1) IM hIM, rint.eq_of_has_integral _ (-(M2 : ℝ)) ((M2 : ℝ) + 1) (IL + IM + IR) hLMR]
+      have hnnL := darboux.nonneg _ (-(M2 : ℝ)) (-(M1 : ℝ)) IL hIL (by intro u _ _; unfold rpow; exact exp_nonneg _)
+      have hnnR := darboux.nonneg _ ((M1 : ℝ) + 1) ((M2 : ℝ) + 1) IR hIR (by intro u _ _; unfold rpow; exact exp_nonneg _)
+      linarith
+    constructor
+    · rw [hIrow_def]
+      obtain ⟨IR, hIR⟩ := darboux.continuous (fun u => rpow ((u + ((j + 1 : ℕ) : ℝ) * x) ^ 2 + (((j + 1 : ℕ) : ℝ) * y) ^ 2) (-s)) (-(R : ℝ)) ((R : ℝ) + 1) (by linarith [cast_nonneg.real R]) (hcont_u _ _)
+      rw [rint.eq_of_has_integral _ _ _ IR hIR]
+      exact darboux.nonneg _ _ _ IR hIR (by intro u _ _; unfold rpow; exact exp_nonneg _)
+    · have hsh : tends_to (fun k => I_row j (R + k) - I_row j R) (L_row j - I_row j R)
+        have hl := hI_lim j; unfold tends_to at hl ⊢; intro e he; obtain ⟨M0, hM0⟩ := hl e he; use M0; intro k hk
+        have hr : (I_row j (R + k) - I_row j R) - (L_row j - I_row j R) = I_row j (R + k) - L_row j := by ring
+        rw [hr]; exact hM0 (R + k) (by omega)
+      linarith [tends_to.ge_of_ge _ _ 0 hsh (by intro k; linarith [hmono R (R + k) (by omega)])]
+  have hL_sum_lim : tends_to (fun R => ∑ j < R, L_row j) (rpow y (1 - 2 * s) * sernau.row_int_val s * complex.re (zeta_em2 (complex.of_real (2 * s - 1))))
+    have hz1 := sernau.zeta_em2_real_dseries (2 * s - 1) (by linarith)
+    have hsc := tends_to.mul (fun _ => rpow y (1 - 2 * s) * sernau.row_int_val s) _ (rpow y (1 - 2 * s) * sernau.row_int_val s) (complex.re (zeta_em2 (complex.of_real (2 * s - 1)))) (tends_to.const (rpow y (1 - 2 * s) * sernau.row_int_val s)) hz1
+    have hfe : (fun R => (rpow y (1 - 2 * s) * sernau.row_int_val s) * (∑ j < R, rpow ((j + 1 : ℕ) : ℝ) (-(2 * s - 1)))) = (fun R => ∑ j < R, L_row j)
+      funext R; induction R with u ihu; (rw [sum_below_zero, sum_below_zero]; ring)
+      rw [succ_eq_add_one.nat, sum_below_succ u, sum_below_succ u, ← ihu, hLrow_def, hrpow_mul ((u + 1 : ℕ) : ℝ) y (1 - 2 * s) ((cast_pos.real (u + 1)).mpr (by omega)) htau]
+      have hex : 1 - 2 * s = -(2 * s - 1) := by ring
+      rw [hex]; ring
+    rw [hfe] at hsc; exact hsc
+  have hI_diag_lim : tends_to (fun R => ∑ j < R, I_row j R) (rpow y (1 - 2 * s) * sernau.row_int_val s * complex.re (zeta_em2 (complex.of_real (2 * s - 1))))
+    set Ltot := rpow y (1 - 2 * s) * sernau.row_int_val s * complex.re (zeta_em2 (complex.of_real (2 * s - 1))) with hLtot_def
+    have hL_le : ∀ N : ℕ, (∑ j < N, L_row j) ≤ Ltot
+      intro N
+      have hsh : tends_to (fun k => (∑ j < N + k, L_row j) - (∑ j < N, L_row j)) (Ltot - ∑ j < N, L_row j)
+        unfold tends_to at hL_sum_lim ⊢; intro e he; obtain ⟨M0, hM0⟩ := hL_sum_lim e he; use M0; intro k hk
+        have hr : ((∑ j < N + k, L_row j) - (∑ j < N, L_row j)) - (Ltot - ∑ j < N, L_row j) = (∑ j < N + k, L_row j) - Ltot := by ring
+        rw [hr]; exact hM0 (N + k) (by omega)
+      have hnn : ∀ k : ℕ, 0 ≤ (∑ j < N + k, L_row j) - (∑ j < N, L_row j)
+        intro k; induction k with u ihu; (have h0 : N + 0 = N := (by omega); rw [h0]; linarith)
+        rw [succ_eq_add_one.nat]; have h1 : N + (u + 1) = (N + u) + 1 := (by omega); rw [h1, sum_below_succ (N + u)]
+        linarith [(hI_bds (N + u) 0).1, (hI_bds (N + u) 0).2]
+      linarith [tends_to.ge_of_ge _ _ 0 hsh hnn]
+    unfold tends_to at hL_sum_lim ⊢; intro e he
+    obtain ⟨J0, hJ0⟩ := hL_sum_lim (e / 2) (by linarith)
+    have hJ0_lt : Ltot - (∑ j < J0, L_row j) < e / 2 := by have h := hJ0 J0 (by omega); linarith [neg_le_abs.real ((∑ j < J0, L_row j) - Ltot)]
+    have hfin_lim : ∀ K : ℕ, tends_to (fun R => ∑ j < K, I_row j R) (∑ j < K, L_row j)
+      intro K; induction K with u ihu
+      · rw [sum_below_zero]; unfold tends_to; intro eps heps; use 0; intro R _; rw [sum_below_zero]; have h0 : (0 : ℝ) - 0 = 0 := (by ring); rw [h0, abs_of_nonneg.real 0 (by decide)]; exact heps
+      · rw [succ_eq_add_one.nat, sum_below_succ u]
+        have ha := tends_to.add _ _ _ _ ihu (hI_lim u)
+        unfold tends_to at ha ⊢; intro eps heps; obtain ⟨M0, hM0⟩ := ha eps heps; use M0; intro R hR
+        rw [sum_below_succ u]; exact hM0 R hR
+    have hfl := hfin_lim J0; unfold tends_to at hfl
+    obtain ⟨R0, hR0⟩ := hfl (e / 2) (by linarith)
+    use J0 + R0; intro R hR
+    have h1 : (∑ j < J0, I_row j R) ≤ ∑ j < R, I_row j R
+      have hrec : ∀ k : ℕ, (∑ j < J0, I_row j R) ≤ ∑ j < J0 + k, I_row j R
+        intro k; induction k with u ihu; (have h0 : J0 + 0 = J0 := (by omega); rw [h0]; linarith)
+        rw [succ_eq_add_one.nat]; have h1' : J0 + (u + 1) = (J0 + u) + 1 := (by omega); rw [h1', sum_below_succ (J0 + u)]
+        linarith [(hI_bds (J0 + u) R).1]
+      have hsp : J0 + (R - J0) = R := by omega
+      have hres := hrec (R - J0); rw [hsp] at hres; exact hres
+    have h2 : (∑ j < R, I_row j R) ≤ ∑ j < R, L_row j := sum_le.real _ _ R (by intro j _; exact (hI_bds j R).2)
+    have h3 : (∑ j < R, L_row j) ≤ Ltot := hL_le R
+    have h4 := hR0 R (by omega)
+    exact abs_lt_of.real _ e (by linarith [neg_le_abs.real ((∑ j < J0, I_row j R) - (∑ j < J0, L_row j))]) (by linarith)
+  -- Combine all three limits and multiply by `(s - 1)`!
+  have hlim_z2 := sernau.zeta_em2_real_dseries (2 * s) (by linarith)
+  have hlim_def := (hbc.2.1 s (by linarith) hs2).2.2
+  have hlim_sum1 := tends_to.add _ _ _ _ (tends_to.mul (fun _ => (2 : ℝ)) _ 2 _ (tends_to.const 2) hlim_z2) (tends_to.mul (fun _ => (2 : ℝ)) _ 2 _ (tends_to.const 2) hI_diag_lim)
+  have hlim_sum2 := tends_to.add _ _ _ _ hlim_sum1 (tends_to.mul (fun _ => (2 : ℝ)) _ 2 _ (tends_to.const 2) hlim_def)
+  have hlim_all := tends_to.mul (fun _ => rpow (k * y) s) _ (rpow (k * y) s) _ (tends_to.const (rpow (k * y) s)) hlim_sum2
+  have hfe_box : (fun R => rpow (k * y) s * ((2 * (∑ m < R, rpow ((m + 1 : ℕ) : ℝ) (-(2 * s))) + 2 * (∑ j < R, I_row j R)) + 2 * (∑ j < R, ∑ ix < 2 * R + 1, sernau.row_defect_term tau (j + 1) ((ix : ℤ) - (R : ℤ)) s))) = sernau.epstein_lat_box tau k s
+    funext R; rw [hbox_id R, hIrow_def]
+  rw [hfe_box] at hlim_all
+  unfold sernau.epstein_lat; rw [rlim.eq_of_tends_to _ _ hlim_all]
+  have hmid_pow : rpow (k * y) s * rpow y (1 - 2 * s) = rpow k s * rpow y (1 - s)
+    rw [hrpow_mul k y s hk htau]
+    have ha : (rpow k s * rpow y s) * rpow y (1 - 2 * s) = rpow k s * (rpow y s * rpow y (1 - 2 * s)) := by ring
+    rw [ha, hrpow_add y s (1 - 2 * s) htau]; have he : s + (1 - 2 * s) = 1 - s := (by ring); rw [he]
+  linear_combination (2 * (s - 1) * sernau.row_int_val s * complex.re (zeta_em2 (complex.of_real (2 * s - 1)))) * hmid_pow
+
+-- ====================================================================================
+-- 3. Kronecker's First Limit Formula (Value & Right-Derivative at `s = 1+`)
+-- ====================================================================================
+
++ sernau.kronecker_first_limit (tau : ℂ) (k γ : ℝ) (htau : 0 < complex.im tau) (hk : 0 < k)
+    (hzeta_val : ∀ e, 0 < e → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |h * complex.re (zeta_em2 (complex.of_real (1 + h))) - 1| < e)
+    (hzeta_slope : ∀ e, 0 < e → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |(h * complex.re (zeta_em2 (complex.of_real (1 + h))) - 1) / h - γ| < e) :
+    (∀ e, 0 < e → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |sernau.epstein_lat tau k (1 + h) - pi * k| < e) ∧
+    (∀ e, 0 < e → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d →
+      |(sernau.epstein_lat tau k (1 + h) - pi * k) / h -
+       pi * k * (2 * γ + log (k * pi * pi / complex.im tau) - log (complex.abs (sernau.modular_disc tau)) / 6)| < e)
+  have hmd := sernau.modular_disc_ne_zero_and_log tau htau
+  have hbc := sernau.row_defect_bound_and_cont tau htau
+  have hri := sernau.row_int_at_one_and_slope
+  have hdef1 := sernau.row_defect_total_at_one tau htau
+  have hdecomp_h : ∀ h : ℝ, 0 < h → h ≤ 1 →
+      sernau.epstein_lat tau k (1 + h) =
+        2 * ((1 + h) - 1) * rpow (k * complex.im tau) (1 + h) * complex.re (zeta_em2 (complex.of_real (2 * (1 + h)))) +
+        rpow k (1 + h) * rpow (complex.im tau) (1 - (1 + h)) * sernau.row_int_val (1 + h) * ((2 * (1 + h) - 1 - 1) * complex.re (zeta_em2 (complex.of_real (2 * (1 + h) - 1)))) +
+        2 * ((1 + h) - 1) * rpow (k * complex.im tau) (1 + h) * sernau.row_defect_total tau (1 + h)
+    intro h hh_pos hh_le1; exact sernau.epstein_lat_decomp tau k (1 + h) htau hk (by linarith) (by linarith)
+  set y := complex.im tau with hy_def
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  have hky_pos : 0 < k * y := mul_pos.real k y hk htau
+  -- Elementary `exp (h * c)` linear-approximation bound: for `|h * c| <= 1/2`, `|exp (h * c) - 1 - h * c| <= 2 * (h * c)^2`!
+  have hexp_quad : ∀ u : ℝ, |u| ≤ 1 / 2 → |exp u - 1 - u| ≤ 2 * u * u
+    intro u hu
+    have hlo : 0 ≤ exp u - 1 - u := by linarith [exp_ge_one_add u]
+    have h1mu : 1 - u ≤ exp (-u) := by linarith [exp_ge_one_add (-u)]
+    have hmul := mul_le_mul_of_nonneg_left.real (1 - u) (exp (-u)) (exp u) h1mu (exp_nonneg u)
+    have he1 : exp u * exp (-u) = 1 := by rw [← exp_add]; have h0 : u + -u = 0 := (by ring); rw [h0, exp_zero]
+    rw [he1] at hmul
+    have hu_le : u ≤ 1 / 2 := by linarith [le_abs_self.real u]
+    have hlo_u : -1 / 2 ≤ u := by linarith [neg_le_abs.real u]
+    have hhi : exp u - 1 - u ≤ 2 * u * u := by nlinarith
+    exact abs_le_of.real _ _ (by nlinarith) hhi
+  have hexp_slope : ∀ c : ℝ, ∀ e : ℝ, 0 < e → ∃ d : ℝ, 0 < d ∧ ∀ h : ℝ, 0 < h → h < d → |(exp (h * c) - 1) / h - c| < e
+    intro c e he
+    set M := 2 * c * c + 1 with hM_def
+    have hM_pos : 0 < M := by rw [hM_def]; nlinarith
+    use min (1 / (2 * (|c| + 1))) (e / M)
+    constructor
+    · exact lt_min.real _ _ 0 (div_pos.real 1 (2 * (|c| + 1)) (by decide) (by linarith [abs_nonneg.real c])) (div_pos.real e M he hM_pos)
+    · intro h hh_pos hh_lt
+      have hlt1 : h < 1 / (2 * (|c| + 1)) := by linarith [min_le_left.real (1 / (2 * (|c| + 1))) (e / M)]
+      have hlt2 : h < e / M := by linarith [min_le_right.real (1 / (2 * (|c| + 1))) (e / M)]
+      have huc : |h * c| ≤ 1 / 2
+        rw [abs_mul.real, abs_of_pos.real h hh_pos]
+        have h1 := (lt_div_iff.real h 1 (2 * (|c| + 1)) (by linarith [abs_nonneg.real c])).mp hlt1
+        nlinarith [abs_nonneg.real c]
+      have hq := hexp_quad (h * c) huc
+      have hdiff : (exp (h * c) - 1) / h - c = (exp (h * c) - 1 - h * c) / h := by field_simp
+      rw [hdiff, div_def.real (exp (h * c) - 1 - h * c) h, abs_mul.real, abs_of_pos.real (1 / h) (one_div_pos.real h hh_pos)]
+      have hm := mul_le_mul_of_nonneg_right.real _ (2 * (h * c) * (h * c)) (1 / h) hq (by linarith [one_div_pos.real h hh_pos])
+      have hsimp : 2 * (h * c) * (h * c) * (1 / h) = (2 * c * c) * h := by field_simp
+      have hlt_e : h * M < e := (lt_div_iff.real h e M hM_pos).mp hlt2
+      have hcc_le : (2 * c * c) * h ≤ h * M := by rw [hM_def]; have hr : h * (2 * c * c + 1) - (2 * c * c) * h = h := (by ring); linarith
+      linarith
+  have hexp_cont : ∀ c : ℝ, ∀ e : ℝ, 0 < e → ∃ d : ℝ, 0 < d ∧ ∀ h : ℝ, 0 < h → h < d → |exp (h * c) - 1| < e
+    intro c e he; obtain ⟨d1, hd1, hs1⟩ := hexp_slope c 1 (by decide)
+    use min d1 (e / (|c| + 2)); constructor
+    · exact lt_min.real _ _ 0 hd1 (div_pos.real e (|c| + 2) he (by linarith [abs_nonneg.real c]))
+    · intro h hh_pos hh_lt
+      have hlt1 : h < d1 := by linarith [min_le_left.real d1 (e / (|c| + 2))]
+      have hlt2 : h < e / (|c| + 2) := by linarith [min_le_right.real d1 (e / (|c| + 2))]
+      have h1 := hs1 h hh_pos hlt1
+      have h2 : |(exp (h * c) - 1) / h| ≤ |c| + 1 := by linarith [le_abs_self.real ((exp (h * c) - 1) / h - c), neg_le_abs.real ((exp (h * c) - 1) / h - c), le_abs_self.real c, neg_le_abs.real c, abs_le_of.real ((exp (h * c) - 1) / h) (|c| + 1) (by linarith [neg_le_abs.real ((exp (h * c) - 1) / h - c), neg_le_abs.real c]) (by linarith [le_abs_self.real ((exp (h * c) - 1) / h - c), le_abs_self.real c])]
+      have hdiv_abs : |exp (h * c) - 1| = h * |(exp (h * c) - 1) / h|
+        rw [div_def.real (exp (h * c) - 1) h, abs_mul.real, abs_of_pos.real (1 / h) (one_div_pos.real h hh_pos)]; field_simp
+      have hlt_e : h * (|c| + 2) < e := (lt_div_iff.real h e (|c| + 2) (by linarith [abs_nonneg.real c])).mp hlt2
+      nlinarith
+  -- Right-limit algebra helper (product of two right-limits at `0+`):
+  have hprod_lim : ∀ (f g : ℝ → ℝ) (A B : ℝ),
+      (∀ e, 0 < e → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |f h - A| < e) →
+      (∀ e, 0 < e → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |g h - B| < e) →
+      (∀ e, 0 < e → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |f h * g h - A * B| < e)
+    intro f g A B hf hg e he
+    obtain ⟨d1, hd1, hf1⟩ := hf (e / (2 * (|B| + 1))) (div_pos.real e (2 * (|B| + 1)) he (by linarith [abs_nonneg.real B]))
+    obtain ⟨d2, hd2, hf2⟩ := hf 1 (by decide)
+    obtain ⟨d3, hd3, hg1⟩ := hg (e / (2 * (|A| + 1))) (div_pos.real e (2 * (|A| + 1)) he (by linarith [abs_nonneg.real A]))
+    use min d1 (min d2 d3); constructor
+    · exact lt_min.real _ _ 0 hd1 (lt_min.real _ _ 0 hd2 hd3)
+    · intro h hh_pos hh_lt
+      have hd1_lt : h < d1 := by linarith [min_le_left.real d1 (min d2 d3)]
+      have hd2_lt : h < d2 := by linarith [min_le_right.real d1 (min d2 d3), min_le_left.real d2 d3]
+      have hd3_lt : h < d3 := by linarith [min_le_right.real d1 (min d2 d3), min_le_right.real d2 d3]
+      have ha1 := hf1 h hh_pos hd1_lt; have ha2 := hf2 h hh_pos hd2_lt; have hb1 := hg1 h hh_pos hd3_lt
+      have hf_bd : |f h| ≤ |A| + 1 := abs_le_of.real (f h) (|A| + 1) (by linarith [neg_le_abs.real (f h - A), neg_le_abs.real A]) (by linarith [le_abs_self.real (f h - A), le_abs_self.real A])
+      have hre : f h * g h - A * B = f h * (g h - B) + (f h - A) * B := by ring
+      rw [hre]
+      have ht1 : |f h * (g h - B)| < e / 2
+        rw [abs_mul.real]
+        have hm := mul_le_mul_of_nonneg_right.real (|f h|) (|A| + 1) (|g h - B|) hf_bd (abs_nonneg.real (g h - B))
+        have hlt := (lt_div_iff.real (|g h - B|) e (2 * (|A| + 1)) (by linarith [abs_nonneg.real A])).mp hb1
+        nlinarith
+      have ht2 : |(f h - A) * B| < e / 2
+        rw [abs_mul.real]
+        have hm := mul_le_mul_of_nonneg_left.real (|B|) (|B| + 1) (|f h - A|) (by linarith) (abs_nonneg.real (f h - A))
+        have hlt := (lt_div_iff.real (|f h - A|) e (2 * (|B| + 1)) (by linarith [abs_nonneg.real B])).mp ha1
+        nlinarith
+      linarith [abs_add_le (f h * (g h - B)) ((f h - A) * B)]
+  -- Target slope constant:
+  set S_tot := pi * k * (2 * γ + log (k * pi * pi / y) - log (complex.abs (sernau.modular_disc tau)) / 6) with hStot_def
+  have hS_alg : S_tot =
+      2 * (k * y) * (pi * pi / 6) +
+      (k * (log k - log y) * (pi * 1) + k * (-2 * pi * log 2) * 1 + (k * pi) * (2 * γ)) +
+      2 * (k * y) * (-(2 * pi / y) * log (complex.abs (sernau.eta_prod tau)))
+    rw [hStot_def, hmd.2.2.2.2.2.2.2.2.2.2.1, hmd.2.2.2.2.2.2.2.2.1]
+    rw [log_div (k * pi * pi) y (by nlinarith) htau, log_mul (k * pi) pi (by nlinarith) hpi_pos, log_mul k pi hk hpi_pos, log_mul 2 pi (by decide) hpi_pos]
+    field_simp
+  -- Prove the slope limit first!
+  have hslope : ∀ e, 0 < e → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |(sernau.epstein_lat tau k (1 + h) - pi * k) / h - S_tot| < e
+    intro e he
+    -- Define the 3 pieces of `(epstein_lat tau k (1 + h) - pi * k) / h` on `0 < h <= 1`:
+    set f1 : ℝ → ℝ := fun h => 2 * (k * y * exp (h * log (k * y))) * complex.re (zeta_em2 (complex.of_real (2 + 2 * h))) with hf1_def
+    set A_fn : ℝ → ℝ := fun h => k * exp (h * (log k - log y)) with hA_def
+    set B_fn : ℝ → ℝ := fun h => sernau.row_int_val (1 + h) with hB_def
+    set C_fn : ℝ → ℝ := fun h => (2 * h) * complex.re (zeta_em2 (complex.of_real (1 + 2 * h))) with hC_def
+    set f2 : ℝ → ℝ := fun h => ((A_fn h - k) / h) * (B_fn h * C_fn h) + k * ((B_fn h - pi) / h) * C_fn h + (k * pi) * ((C_fn h - 1) / h) with hf2_def
+    set f3 : ℝ → ℝ := fun h => 2 * (k * y * exp (h * log (k * y))) * sernau.row_defect_total tau (1 + h) with hf3_def
+    -- Exact identity on `0 < h <= 1`:
+    have hquot_eq : ∀ h : ℝ, 0 < h → h ≤ 1 → (sernau.epstein_lat tau k (1 + h) - pi * k) / h = f1 h + f2 h + f3 h
+      intro h hh_pos hh_le1
+      have hdec := hdecomp_h h hh_pos hh_le1
+      have hky_pow : rpow (k * y) (1 + h) = k * y * exp (h * log (k * y))
+        unfold rpow; have hr : (1 + h) * log (k * y) = log (k * y) + h * log (k * y) := (by ring); rw [hr, exp_add, exp_log (k * y) hky_pos]
+      have hA_pow : rpow k (1 + h) * rpow y (1 - (1 + h)) = A_fn h
+        rw [hA_def]; unfold rpow; rw [← exp_add]
+        have hr : (1 + h) * log k + (1 - (1 + h)) * log y = log k + h * (log k - log y) := by ring
+        rw [hr, exp_add, exp_log k hk]
+      have h2s : 2 * (1 + h) = 2 + 2 * h := by ring
+      have h2s11 : 2 * (1 + h) - 1 - 1 = 2 * h := by ring
+      have h2s1 : 2 * (1 + h) - 1 = 1 + 2 * h := by ring
+      have h1h : (1 + h) - 1 = h := by ring
+      rw [hdec, hky_pow, hA_pow, h2s11, h2s1, h2s, h1h, hf1_def, hf2_def, hf3_def, hB_def, hC_def]; field_simp
+    -- Right-limits of f1, f2, f3:
+    have hky_lim : ∀ eps, 0 < eps → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |2 * (k * y * exp (h * log (k * y))) - 2 * (k * y)| < eps
+      intro eps heps; obtain ⟨d, hd, h1⟩ := hexp_cont (log (k * y)) (eps / (2 * k * y)) (div_pos.real eps (2 * k * y) heps (by nlinarith))
+      use d; constructor; exact hd; intro h hh_pos hh_lt
+      have hr : 2 * (k * y * exp (h * log (k * y))) - 2 * (k * y) = (2 * k * y) * (exp (h * log (k * y)) - 1) := by ring
+      rw [hr, abs_mul.real, abs_of_pos.real (2 * k * y) (by nlinarith)]
+      have hlt := (lt_div_iff.real _ eps (2 * k * y) (by nlinarith)).mp (h1 h hh_pos hh_lt); nlinarith
+    have hf1_lim : ∀ eps, 0 < eps → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |f1 h - 2 * (k * y) * (pi * pi / 6)| < eps
+      intro eps heps; rw [hf1_def]; exact hprod_lim (fun h => 2 * (k * y * exp (h * log (k * y)))) (fun h => complex.re (zeta_em2 (complex.of_real (2 + 2 * h)))) (2 * (k * y)) (pi * pi / 6) hky_lim sernau.zeta_em2_real_at_two_right eps heps
+    have hf3_lim : ∀ eps, 0 < eps → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |f3 h - 2 * (k * y) * (-(2 * pi / y) * log (complex.abs (sernau.eta_prod tau)))| < eps
+      intro eps heps; rw [hf3_def]
+      have hdt : ∀ eps', 0 < eps' → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |sernau.row_defect_total tau (1 + h) - (-(2 * pi / y) * log (complex.abs (sernau.eta_prod tau)))| < eps' := by rw [← hdef1]; exact hbc.2.2
+      exact hprod_lim (fun h => 2 * (k * y * exp (h * log (k * y)))) (fun h => sernau.row_defect_total tau (1 + h)) (2 * (k * y)) (-(2 * pi / y) * log (complex.abs (sernau.eta_prod tau))) hky_lim hdt eps heps
+    have hAsl : ∀ eps, 0 < eps → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |(A_fn h - k) / h - k * (log k - log y)| < eps
+      intro eps heps; obtain ⟨d, hd, h1⟩ := hexp_slope (log k - log y) (eps / k) (div_pos.real eps k heps hk)
+      use d; constructor; exact hd; intro h hh_pos hh_lt
+      have hr : (A_fn h - k) / h - k * (log k - log y) = k * ((exp (h * (log k - log y)) - 1) / h - (log k - log y)) := by rw [hA_def]; field_simp
+      rw [hr, abs_mul.real, abs_of_pos.real k hk]
+      have hlt := (lt_div_iff.real _ eps k hk).mp (h1 h hh_pos hh_lt); nlinarith
+    have hBval : ∀ eps, 0 < eps → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |B_fn h - pi| < eps
+      intro eps heps; obtain ⟨d1, hd1, h1⟩ := hri.2.2 1 (by decide)
+      have hlog2_nn : 0 ≤ log 2 := by have hl := (log_le_log 1 2 (by decide) (by decide)).mpr (by decide); rw [log_one] at hl; exact hl
+      set M := 2 * pi * log 2 + 2 with hM_def
+      have hM_pos : 0 < M := by rw [hM_def]; nlinarith
+      use min d1 (eps / M); constructor
+      · exact lt_min.real _ _ 0 hd1 (div_pos.real eps M heps hM_pos)
+      · intro h hh_pos hh_lt
+        have hlt1 : h < d1 := by linarith [min_le_left.real d1 (eps / M)]
+        have hlt2 : h < eps / M := by linarith [min_le_right.real d1 (eps / M)]
+        have ha := h1 h hh_pos hlt1
+        have hbd : |(B_fn h - pi) / h| ≤ 2 * pi * log 2 + 1
+          rw [hB_def]
+          have hlo := neg_le_abs.real ((sernau.row_int_val (1 + h) - pi) / h - -2 * pi * log 2)
+          have hhi := le_abs_self.real ((sernau.row_int_val (1 + h) - pi) / h - -2 * pi * log 2)
+          have h2nn : 0 ≤ 2 * pi * log 2 := by nlinarith
+          exact abs_le_of.real _ _ (by linarith) (by linarith)
+        have heq_a : |B_fn h - pi| = h * |(B_fn h - pi) / h| := by rw [div_def.real (B_fn h - pi) h, abs_mul.real, abs_of_pos.real (1 / h) (one_div_pos.real h hh_pos)]; field_simp
+        have hlt_e : h * M < eps := (lt_div_iff.real h eps M hM_pos).mp hlt2
+        have hm := mul_le_mul_of_nonneg_left.real (|(B_fn h - pi) / h|) M h (by rw [hM_def]; linarith) (by linarith)
+        linarith
+    have hCval : ∀ eps, 0 < eps → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |C_fn h - 1| < eps
+      intro eps heps; obtain ⟨d, hd, h1⟩ := hzeta_val eps heps
+      use d / 2; constructor; linarith; intro h hh_pos hh_lt; rw [hC_def]; exact h1 (2 * h) (by linarith) (by linarith)
+    have hCsl : ∀ eps, 0 < eps → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |(C_fn h - 1) / h - 2 * γ| < eps
+      intro eps heps; obtain ⟨d, hd, h1⟩ := hzeta_slope (eps / 2) (by linarith)
+      use d / 2; constructor; linarith; intro h hh_pos hh_lt
+      have hr : (C_fn h - 1) / h - 2 * γ = 2 * (((2 * h) * complex.re (zeta_em2 (complex.of_real (1 + 2 * h))) - 1) / (2 * h) - γ) := by rw [hC_def]; field_simp
+      rw [hr, abs_mul.real, abs_of_pos.real 2 (by decide)]; linarith [h1 (2 * h) (by linarith) (by linarith)]
+    have hBC_lim := hprod_lim B_fn C_fn pi 1 hBval hCval
+    have hf2_a := hprod_lim (fun h => (A_fn h - k) / h) (fun h => B_fn h * C_fn h) (k * (log k - log y)) (pi * 1) hAsl hBC_lim
+    have hf2_b_pre : ∀ eps, 0 < eps → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |k * ((B_fn h - pi) / h) - k * (-2 * pi * log 2)| < eps
+      intro eps heps; obtain ⟨d, hd, h1⟩ := hri.2.2 (eps / k) (div_pos.real eps k heps hk)
+      use d; constructor; exact hd; intro h hh_pos hh_lt
+      have hr : k * ((B_fn h - pi) / h) - k * (-2 * pi * log 2) = k * ((sernau.row_int_val (1 + h) - pi) / h - -2 * pi * log 2) := by rw [hB_def]; ring
+      rw [hr, abs_mul.real, abs_of_pos.real k hk]; have hlt := (lt_div_iff.real _ eps k hk).mp (h1 h hh_pos hh_lt); nlinarith
+    have hf2_b := hprod_lim (fun h => k * ((B_fn h - pi) / h)) C_fn (k * (-2 * pi * log 2)) 1 hf2_b_pre hCval
+    have hf2_c : ∀ eps, 0 < eps → ∃ d, 0 < d ∧ ∀ h, 0 < h → h < d → |(k * pi) * ((C_fn h - 1) / h) - (k * pi) * (2 * γ)| < eps
+      intro eps heps; obtain ⟨d, hd, h1⟩ := hCsl (eps / (k * pi)) (div_pos.real eps (k * pi) heps (by nlinarith))
+      use d; constructor; exact hd; intro h hh_pos hh_lt
+      have hr : (k * pi) * ((C_fn h - 1) / h) - (k * pi) * (2 * γ) = (k * pi) * ((C_fn h - 1) / h - 2 * γ) := by ring
+      rw [hr, abs_mul.real, abs_of_pos.real (k * pi) (by nlinarith)]; have hlt := (lt_div_iff.real _ eps (k * pi) (by nlinarith)).mp (h1 h hh_pos hh_lt); nlinarith
+    obtain ⟨d1, hd1, h1⟩ := hf1_lim (e / 5) (by linarith)
+    obtain ⟨d2, hd2, h2⟩ := hf2_a (e / 5) (by linarith)
+    obtain ⟨d3, hd3, h3⟩ := hf2_b (e / 5) (by linarith)
+    obtain ⟨d4, hd4, h4⟩ := hf2_c (e / 5) (by linarith)
+    obtain ⟨d5, hd5, h5⟩ := hf3_lim (e / 5) (by linarith)
+    set d_all := min 1 (min d1 (min d2 (min d3 (min d4 d5)))) with hdall_def
+    have hdall_pos : 0 < d_all := by rw [hdall_def]; exact lt_min.real _ _ 0 (by decide) (lt_min.real _ _ 0 hd1 (lt_min.real _ _ 0 hd2 (lt_min.real _ _ 0 hd3 (lt_min.real _ _ 0 hd4 hd5))))
+    use d_all; constructor; exact hdall_pos
+    intro h hh_pos hh_lt
+    have hle0 := min_le_left.real 1 (min d1 (min d2 (min d3 (min d4 d5))))
+    have hle0' := min_le_right.real 1 (min d1 (min d2 (min d3 (min d4 d5))))
+    have hle1 := min_le_left.real d1 (min d2 (min d3 (min d4 d5)))
+    have hle1' := min_le_right.real d1 (min d2 (min d3 (min d4 d5)))
+    have hle2 := min_le_left.real d2 (min d3 (min d4 d5))
+    have hle2' := min_le_right.real d2 (min d3 (min d4 d5))
+    have hle3 := min_le_left.real d3 (min d4 d5)
+    have hle3' := min_le_right.real d3 (min d4 d5)
+    have hle4 := min_le_left.real d4 d5
+    have hle5 := min_le_right.real d4 d5
+    rw [← hdall_def] at hle0 hle0'
+    rw [hquot_eq h hh_pos (by linarith), hS_alg, hf2_def]
+    have ha1 := h1 h hh_pos (by linarith); have ha2 := h2 h hh_pos (by linarith)
+    have ha3 := h3 h hh_pos (by linarith); have ha4 := h4 h hh_pos (by linarith); have ha5 := h5 h hh_pos (by linarith)
+    exact abs_lt_of.real _ e (by linarith [neg_le_abs.real (f1 h - 2 * (k * y) * (pi * pi / 6)), neg_le_abs.real (((A_fn h - k) / h) * (B_fn h * C_fn h) - k * (log k - log y) * (pi * 1)), neg_le_abs.real (k * ((B_fn h - pi) / h) * C_fn h - k * (-2 * pi * log 2) * 1), neg_le_abs.real ((k * pi) * ((C_fn h - 1) / h) - (k * pi) * (2 * γ)), neg_le_abs.real (f3 h - 2 * (k * y) * (-(2 * pi / y) * log (complex.abs (sernau.eta_prod tau))))]) (by linarith [le_abs_self.real (f1 h - 2 * (k * y) * (pi * pi / 6)), le_abs_self.real (((A_fn h - k) / h) * (B_fn h * C_fn h) - k * (log k - log y) * (pi * 1)), le_abs_self.real (k * ((B_fn h - pi) / h) * C_fn h - k * (-2 * pi * log 2) * 1), le_abs_self.real ((k * pi) * ((C_fn h - 1) / h) - (k * pi) * (2 * γ)), le_abs_self.real (f3 h - 2 * (k * y) * (-(2 * pi / y) * log (complex.abs (sernau.eta_prod tau))))])
+  constructor
+  · intro e he; obtain ⟨d1, hd1, h1⟩ := hslope 1 (by decide)
+    set M := |S_tot| + 2 with hM_def
+    have hM_pos : 0 < M := by rw [hM_def]; linarith [abs_nonneg.real S_tot]
+    use min d1 (e / M); constructor
+    · exact lt_min.real _ _ 0 hd1 (div_pos.real e M he hM_pos)
+    · intro h hh_pos hh_lt
+      have hlt1 : h < d1 := by linarith [min_le_left.real d1 (e / M)]
+      have hlt2 : h < e / M := by linarith [min_le_right.real d1 (e / M)]
+      have ha := h1 h hh_pos hlt1
+      have hbd : |(sernau.epstein_lat tau k (1 + h) - pi * k) / h| ≤ |S_tot| + 1 := abs_le_of.real _ _ (by linarith [neg_le_abs.real ((sernau.epstein_lat tau k (1 + h) - pi * k) / h - S_tot), neg_le_abs.real S_tot]) (by linarith [le_abs_self.real ((sernau.epstein_lat tau k (1 + h) - pi * k) / h - S_tot), le_abs_self.real S_tot])
+      have heq_a : |sernau.epstein_lat tau k (1 + h) - pi * k| = h * |(sernau.epstein_lat tau k (1 + h) - pi * k) / h| := by rw [div_def.real (sernau.epstein_lat tau k (1 + h) - pi * k) h, abs_mul.real, abs_of_pos.real (1 / h) (one_div_pos.real h hh_pos)]; field_simp
+      have hlt_e : h * M < e := (lt_div_iff.real h e M hM_pos).mp hlt2
+      have hm := mul_le_mul_of_nonneg_left.real (|(sernau.epstein_lat tau k (1 + h) - pi * k) / h|) M h (by rw [hM_def]; linarith) (by linarith)
+      linarith
+  · exact hslope

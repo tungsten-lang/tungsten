@@ -1,0 +1,664 @@
+-- Milestone 3.53: Concrete CM Types on (Z/lZ)^* (`StatementCM.lean` / `dirichlet.w`),
+--                 General Definite & Indefinite Unitary Groups U(H) (`unitary_theta.w`),
+--                 CM Q(i) Dedekind/Theta Local Euler-Factor Splitting zeta_p(s) * L_p(s, chi_4),
+--                 and Fricke / Atkin-Lehner Involution W_N : M_k(Gamma_0(N)) -> M_k(Gamma_0(N))!
+--
+-- Aligned with `tungsten/core/algebra/dirichlet.w` (`CMType`), `unitary_theta.w` (`HermitianForm`,
+-- `UnitaryGroup`, `ThetaKernel`), and `hecke.w`, advancing the concrete unconditional 0-axiom
+-- sub-engines of Pillar 1 (`lit_cm`) and Pillar 3 (`theta_local_inputs` / `U(H)` / `Gamma_0(N)`)
+-- on Satori's untouched HOL kernel (ZERO custom axioms!).
+
+import determinant
+import gaussian_int
+import algebra.polynomial_fermat
+import modular.gamma0_hecke
+
+-- ====================================================================================
+-- 1. Concrete CM Types on (Z/lZ)^* (`Formalism/StatementCM.lean` & `dirichlet.w` `CMType`)
+-- ====================================================================================
+
+-> cm_zmod.is_valid (l : ℕ) (phi : ℕ → Prop) : Prop :=
+  ¬ phi 0 ∧
+  (∀ g : ℕ, l ≤ g → ¬ phi g) ∧
+  (∀ g : ℕ, 1 ≤ g → g < l → (phi g ↔ ¬ phi (l - g)))
+
+-> cm_zmod.canonical (l g : ℕ) : Prop :=
+  1 ≤ g ∧ g ≤ (l - 1) / 2
+
+-> cm_zmod.dual (l : ℕ) (phi : ℕ → Prop) (g : ℕ) : Prop :=
+  g = 1 ∨ (1 ≤ g ∧ g < l ∧ phi (l - g) ∧ g ≠ l - 1)
+
+-> cm_zmod.counts (l : ℕ) (phi : ℕ → Prop) (g : ℕ) : Prop :=
+  1 ≤ g ∧ g < l ∧ ¬ phi g ∧ g ≠ l - 1
+
++ cm_zmod.canonical_valid (l : ℕ) (hl : 3 ≤ l) (hodd : l % 2 = 1) :
+    cm_zmod.is_valid l (cm_zmod.canonical l) ∧ cm_zmod.canonical l 1
+  have h2m : 2 * ((l - 1) / 2) = l - 1 := (odd_prime_ge_three l (by omega) hodd).2
+  constructor
+  · unfold cm_zmod.is_valid cm_zmod.canonical
+    constructor
+    · intro g hg hphi; omega
+    · intro g hg1 hgl; constructor
+      · intro hg_le hlg; omega
+      · intro hn; constructor; exact hg1; by_contra hgt; exact hn ⟨by omega, by omega⟩
+  · unfold cm_zmod.canonical; omega
+
+-- THEOREM 1A: Concrete Dual CM-Type Validity & Involution on (Z/lZ)^* (0 CUSTOM AXIOMS!)
++ cm_zmod.dual_valid_and_involutive (l : ℕ) (hl : 3 ≤ l) (hodd : l % 2 = 1)
+    (phi : ℕ → Prop) (hcm : cm_zmod.is_valid l phi) (h1 : phi 1) :
+    cm_zmod.is_valid l (cm_zmod.dual l phi) ∧
+    cm_zmod.dual l phi 1 ∧
+    (∀ g : ℕ, cm_zmod.dual l (cm_zmod.dual l phi) g ↔ phi g)
+  have hnl1 : ¬ phi (l - 1) := (hcm.2.2 1 (by omega) (by omega)).mp h1
+  have hd_val : cm_zmod.is_valid l (cm_zmod.dual l phi)
+    unfold cm_zmod.is_valid cm_zmod.dual
+    constructor
+    · intro g hge hg; omega
+    · intro g hg1 hgl
+      have hsub : l - (l - g) = g := by omega
+      have hpart := hcm.2.2 g hg1 hgl
+      have hpart_neg := hcm.2.2 (l - g) (by omega) (by omega)
+      rw [hsub] at hpart_neg
+      constructor
+      · intro hdg hdlg
+        obtain hg_eq1 | hg_rest := hdg
+        · obtain hlg1 | hlg_rest := hdlg
+          · omega
+          · omega
+        · obtain hlg1 | hlg_rest := hdlg
+          · omega
+          · rw [hsub] at hlg_rest
+            exact (hpart.mp hlg_rest.2.2.1) hg_rest.2.2.1
+      · intro hnd
+        by_cases hg_eq1 : g = 1
+        · left; exact hg_eq1
+        · right
+          have hne_l1 : g ≠ l - 1
+            intro heq; apply hnd; left; omega
+          have hn_phi_g : ¬ phi g
+            intro hpg; apply hnd; right
+            rw [hsub]; exact ⟨by omega, by omega, hpg, by omega⟩
+          exact ⟨hg1, hgl, hpart_neg.mpr hn_phi_g, hne_l1⟩
+  constructor; exact hd_val
+  constructor; unfold cm_zmod.dual; trivial
+  intro g
+  by_cases hg0 : g = 0
+  · rw [hg0]; constructor
+    · intro hd; exfalso; unfold cm_zmod.dual at hd; exact hd
+    · intro hp0; exfalso; exact hcm.1 hp0
+  · by_cases hgl : l ≤ g
+    · constructor
+      · intro hd; exfalso; unfold cm_zmod.dual at hd; omega
+      · intro hpg; exfalso; exact hcm.2.1 g hgl hpg
+    · by_cases hg1 : g = 1
+      · rw [hg1]; constructor
+        · intro h_in; exact h1
+        · intro h_in; unfold cm_zmod.dual; trivial
+      · by_cases hgl1 : g = l - 1
+        · rw [hgl1]; constructor
+          · intro hd; exfalso; unfold cm_zmod.dual at hd; omega
+          · intro hp; exfalso; exact hnl1 hp
+        · have hsub : l - (l - g) = g := by omega
+          unfold cm_zmod.dual
+          constructor
+          · intro hd
+            obtain h | h := hd
+            · omega
+            · obtain h_in1 | h_in2 := h.2.2.1
+              · omega
+              · rw [hsub] at h_in2; exact h_in2.2.2.1
+          · intro hpg
+            right
+            constructor; omega
+            constructor; omega
+            constructor
+            · right; rw [hsub]; exact ⟨by omega, by omega, hpg, by omega⟩
+            · omega
+
+-- THEOREM 1B: Exact Cardinality |(Z/lZ)^* ∩ Phi| = (l - 1) / 2 and |counts(Phi)| = (l - 3) / 2!
++ cm_zmod.exact_card_and_counts (l : ℕ) (hl : 3 ≤ l) (hodd : l % 2 = 1)
+    (phi : ℕ → Prop) (hcm : cm_zmod.is_valid l phi) (h1 : phi 1) :
+    (∑ g < l, if phi g then (1 : ℕ) else 0) = (l - 1) / 2 ∧
+    (∑ g < l, if cm_zmod.counts l phi g then (1 : ℕ) else 0) = (l - 3) / 2
+  set m := (l - 1) / 2 with hm_def
+  have h2m : 2 * m = l - 1 := by rw [hm_def]; exact (odd_prime_ge_three l (by omega) hodd).2
+  have hl3_div : (l - 3) / 2 = m - 1 :=
+    (div_mod_unique.nat (l - 3) 2 (m - 1) 0 (by omega) (by decide)).1.symm
+  -- Pair g with l - g for 1 <= g <= m: exactly one of {g, l - g} lies in Phi!
+  have hpair_sum : ∀ k : ℕ, k ≤ m →
+      (∑ i < k, ((if phi (i + 1) then (1 : ℕ) else 0) + (if phi (l - (i + 1)) then (1 : ℕ) else 0))) = k
+    intro k; induction k with hk r ihr hk
+    · rw [sum_below_zero]
+    · rw [succ_eq_add_one.nat] at hk ⊢; rw [sum_below_succ, ihr (by omega)]
+      have hiff := hcm.2.2 (r + 1) (by omega) (by omega)
+      by_cases hp : phi (r + 1)
+      · have hnp : ¬ phi (l - (r + 1)) := hiff.mp hp
+        rw [if_pos hp, if_neg hnp]; omega
+      · have hp2 : phi (l - (r + 1))
+          by_contra hnp2; exact hp (hiff.mpr hnp2)
+        rw [if_neg hp, if_pos hp2]; omega
+  -- Split sum_{g < l} f(g) = f(0) + sum_{i < m} f(i + 1) + sum_{i < m} f(l - 1 - i)!
+  have hsplit_nat : ∀ f : ℕ → ℕ,
+      (∑ g < l, f g) = f 0 + (∑ i < m, (f (i + 1) + f (l - (i + 1))))
+    intro f
+    have hl_eq : l = 1 + m + m := by omega
+    have hsh1 : ∀ (a b : ℕ), (∑ g < a + b, f g) = (∑ g < a, f g) + ∑ j < b, f (a + j)
+      intro a b; induction b with r ihr
+      · have ha0 : a + 0 = a := by omega
+        rw [ha0, sum_below_zero]; omega
+      · rw [succ_eq_add_one.nat]
+        have har : a + (r + 1) = (a + r) + 1 := by omega
+        rw [har, sum_below_succ, ihr, sum_below_succ]; omega
+    have hrev_nat : ∀ (k : ℕ) (h : ℕ → ℕ), (∑ j < k, h j) = ∑ i < k, h (k - 1 - i)
+      intro k; induction k with h r ihr h
+      · rw [sum_below_zero, sum_below_zero]
+      · rw [succ_eq_add_one.nat]
+        have hs : ∀ (b : ℕ) (u : ℕ → ℕ), (∑ i < 1 + b, u i) = u 0 + ∑ i < b, u (i + 1)
+          intro b u; induction b with s ihs
+          · have h10 : 1 + 0 = 0 + 1 := by omega
+            rw [h10, sum_below_succ, sum_below_zero, sum_below_zero]; omega
+          · rw [succ_eq_add_one.nat]
+            have hs1 : 1 + (s + 1) = (1 + s) + 1 := by omega
+            rw [hs1, sum_below_succ, ihs, sum_below_succ]
+            have h1s : 1 + s = s + 1 := by omega
+            rw [h1s]; omega
+        have h1r : r + 1 = 1 + r := by omega
+        have hstep := hs r (fun i => h (1 + r - 1 - i))
+        rw [sum_below_succ, h1r, hstep]
+        have h0 : 1 + r - 1 - 0 = r := by omega
+        have hcon : (∑ i < r, h (1 + r - 1 - (i + 1))) = ∑ i < r, h (r - 1 - i)
+          apply sum_congr.nat; intro i hi
+          have heq_idx : 1 + r - 1 - (i + 1) = r - 1 - i := by omega
+          rw [heq_idx]
+        rw [h0, hcon, ← ihr h]; omega
+    have hsplit0 := hsh1 (1 + m) m
+    rw [← hl_eq] at hsplit0
+    rw [hsplit0, hsh1 1 m]
+    have h1_0 : (1 : ℕ) = 0 + 1 := by omega
+    have hs1 : (∑ g < 1, f g) = f 0
+      rw [h1_0, sum_below_succ, sum_below_zero]; omega
+    have hm1 : (∑ j < m, f (1 + j)) = ∑ i < m, f (i + 1)
+      apply sum_congr.nat; intro i hi; have h1i : 1 + i = i + 1 := by omega; rw [h1i]
+    have hm2 : (∑ j < m, f (1 + m + j)) = ∑ i < m, f (l - (i + 1))
+      rw [hrev_nat m (fun j => f (1 + m + j))]
+      apply sum_congr.nat; intro i hi
+      have hidx : 1 + m + (m - 1 - i) = l - (i + 1) := by omega
+      rw [hidx]
+    have hsum_pair : ∀ k : ℕ, (∑ i < k, f (i + 1)) + (∑ i < k, f (l - (i + 1))) = ∑ i < k, (f (i + 1) + f (l - (i + 1)))
+      intro k; induction k with r ihr
+      · rw [sum_below_zero, sum_below_zero, sum_below_zero]; decide
+      · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ← ihr]; omega
+    rw [hs1, hm1, hm2, add_assoc.nat, hsum_pair m]
+  have hcard_phi : (∑ g < l, if phi g then (1 : ℕ) else 0) = m
+    rw [hsplit_nat (fun g => if phi g then (1 : ℕ) else 0), if_neg hcm.1, hpair_sum m (by omega)]; omega
+  constructor
+  · exact hcard_phi
+  · -- Partition {1, ..., l - 2} into Phi \ {0} (size m, since l - 1 not in Phi!) and counts(Phi)!
+    have hnl1 : ¬ phi (l - 1) := (hcm.2.2 1 (by omega) (by omega)).mp h1
+    have hpt_sum : ∀ g < l,
+        (if phi g then (1 : ℕ) else 0) + (if cm_zmod.counts l phi g then (1 : ℕ) else 0) =
+        if (1 ≤ g ∧ g < l - 1) then 1 else 0
+      intro g hgl
+      unfold cm_zmod.counts
+      by_cases hg0 : g = 0
+      · rw [hg0, if_neg hcm.1]
+        have hc0 : ¬ (1 ≤ 0 ∧ 0 < l ∧ ¬ phi 0 ∧ 0 ≠ l - 1) := by omega
+        have hr0 : ¬ (1 ≤ 0 ∧ 0 < l - 1) := by omega
+        rw [if_neg hc0, if_neg hr0]; decide
+      · by_cases hgl1 : g = l - 1
+        · rw [hgl1, if_neg hnl1]
+          have hcl1 : ¬ (1 ≤ l - 1 ∧ l - 1 < l ∧ ¬ phi (l - 1) ∧ l - 1 ≠ l - 1) := by omega
+          have hrl1 : ¬ (1 ≤ l - 1 ∧ l - 1 < l - 1) := by omega
+          rw [if_neg hcl1, if_neg hrl1]; decide
+        · have hr : 1 ≤ g ∧ g < l - 1 := by omega
+          rw [if_pos hr]
+          by_cases hpg : phi g
+          · have hnc : ¬ (1 ≤ g ∧ g < l ∧ ¬ phi g ∧ g ≠ l - 1) := by intro hc; exact hc.2.2.1 hpg
+            rw [if_pos hpg, if_neg hnc]; decide
+          · have hc : 1 ≤ g ∧ g < l ∧ ¬ phi g ∧ g ≠ l - 1 := ⟨by omega, hgl, hpg, hgl1⟩
+            rw [if_neg hpg, if_pos hc]; decide
+    have htot : (∑ g < l, ((if phi g then (1 : ℕ) else 0) + (if cm_zmod.counts l phi g then (1 : ℕ) else 0))) =
+        ∑ g < l, if (1 ≤ g ∧ g < l - 1) then (1 : ℕ) else 0
+      apply sum_congr.nat; intro g hg; exact hpt_sum g hg
+    rw [sum_add.nat, hcard_phi] at htot
+    have hmid_cnt : ∀ t : ℕ, 2 ≤ t → (∑ g < t, if (1 ≤ g ∧ g < t - 1) then (1 : ℕ) else 0) = t - 2
+      intro t; induction t with ht2 r ihr ht2
+      · omega
+      · rw [succ_eq_add_one.nat] at ht2 ⊢
+        have hr1 : r + 1 - 1 = r := by omega
+        rw [sum_below_succ, hr1]
+        have hnr : ¬ (1 ≤ r ∧ r < r) := by omega
+        rw [if_neg hnr]
+        by_cases hr_eq1 : r = 1
+        · rw [hr_eq1]
+          have h10 : (1 : ℕ) = 0 + 1 := by omega
+          rw [h10, sum_below_succ, sum_below_zero]; decide
+        · have hcon : (∑ g < r, if (1 ≤ g ∧ g < r) then (1 : ℕ) else 0) =
+              (∑ g < r, if (1 ≤ g ∧ g < r - 1) then (1 : ℕ) else 0) + 1
+            have hr_succ : r = (r - 1) + 1 := by omega
+            have h1 := sum_below_succ (r - 1) (fun g => if (1 ≤ g ∧ g < r) then (1 : ℕ) else 0)
+            have h2 := sum_below_succ (r - 1) (fun g => if (1 ≤ g ∧ g < r - 1) then (1 : ℕ) else 0)
+            rw [← hr_succ] at h1 h2
+            have hp1 : 1 ≤ r - 1 ∧ r - 1 < r := by omega
+            have hp2 : ¬ (1 ≤ r - 1 ∧ r - 1 < r - 1) := by omega
+            rw [if_pos hp1] at h1; rw [if_neg hp2] at h2
+            have hpre : (∑ g < r - 1, if (1 ≤ g ∧ g < r) then (1 : ℕ) else 0) =
+                ∑ g < r - 1, if (1 ≤ g ∧ g < r - 1) then (1 : ℕ) else 0
+              apply sum_congr.nat; intro g hg
+              by_cases hg1 : 1 ≤ g
+              · have a1 : 1 ≤ g ∧ g < r := ⟨hg1, by omega⟩
+                have a2 : 1 ≤ g ∧ g < r - 1 := ⟨hg1, hg⟩
+                rw [if_pos a1, if_pos a2]
+              · have a1 : ¬ (1 ≤ g ∧ g < r) := by intro h; exact hg1 h.1
+                have a2 : ¬ (1 ≤ g ∧ g < r - 1) := by intro h; exact hg1 h.1
+                rw [if_neg a1, if_neg a2]
+            omega
+          rw [hcon, ihr (by omega)]; omega
+    rw [hmid_cnt l (by omega)] at htot
+    omega
+
+-- ====================================================================================
+-- 2. General Definite & Indefinite Unitary Groups U(H) (`tungsten/core/algebra/unitary_theta.w`)
+-- ====================================================================================
+
+-- THEOREM 2A: For ANY matrix H with det(H) != 0 (definite U(n) OR indefinite U(p, q)!)
+-- and ANY U in U(H) (`U^* H U = H`), |det(U)|^2 = 1 and det(U) != 0!
++ unitary.det_norm_sq_eq_one_of_det_ne_zero (n : ℕ) (H U : ℕ → ℕ → ℂ)
+    (hdetH : cmat.det n H ≠ complex.zero) (hU : cmat.is_unitary n H U) :
+    complex.norm_sq (cmat.det n U) = 1 ∧ cmat.det n U ≠ complex.zero
+  unfold cmat.is_unitary at hU
+  have hcon : cmat.det n (cmat.mul n (cmat.mul n (cmat.adj U) H) U) = cmat.det n H
+    apply cmat.det_congr; intro i hi j hj; exact hU i hi j hj
+  rw [cmat.det_mul, cmat.det_mul, cmat.det_adj] at hcon
+  have hre : complex.mul (complex.mul (complex.conj (cmat.det n U)) (cmat.det n H)) (cmat.det n U) =
+      complex.mul (complex.mul (complex.conj (cmat.det n U)) (cmat.det n U)) (cmat.det n H) := by ring
+  rw [hre, complex.conj_mul_self_eq] at hcon
+  have hdiff : complex.mul (complex.of_real (complex.norm_sq (cmat.det n U) - 1)) (cmat.det n H) = complex.zero
+    have h1 : complex.mul (complex.of_real (complex.norm_sq (cmat.det n U) - 1)) (cmat.det n H) =
+        complex.sub (complex.mul (complex.of_real (complex.norm_sq (cmat.det n U))) (cmat.det n H)) (cmat.det n H) := by ring
+    rw [h1, hcon]; ring
+  have hns1 : complex.norm_sq (cmat.det n U) = 1
+    by_contra hne
+    have hof_ne : complex.of_real (complex.norm_sq (cmat.det n U) - 1) ≠ complex.zero
+      intro hz
+      have hr : complex.re (complex.of_real (complex.norm_sq (cmat.det n U) - 1)) = complex.re complex.zero := by rw [hz]
+      simp at hr; exact hne (by linarith)
+    exact complex.mul_ne_zero _ (cmat.det n H) hof_ne hdetH hdiff
+  constructor; exact hns1
+  intro hz; rw [hz] at hns1; unfold complex.norm_sq at hns1; simp at hns1
+
+-- ====================================================================================
+-- 3. CM Q(i) Dedekind/Theta Local Euler-Factor Splitting zeta_p(s) * L_p(s, chi_4)
+-- ====================================================================================
+
+-> chi4.val (n : ℕ) : ℂ :=
+  if n % 2 = 0 then complex.zero else (if n % 4 = 1 then complex.one else complex.neg complex.one)
+
++ chi4.mul (a b : ℕ) : chi4.val (a * b) = complex.mul (chi4.val a) (chi4.val b)
+  unfold chi4.val
+  have ha4 := div_add_mod.nat a 4
+  have ha_lt := mod_lt.nat a 4 (by decide)
+  have hb4 := div_add_mod.nat b 4
+  have hb_lt := mod_lt.nat b 4 (by decide)
+  by_cases ha2 : a % 2 = 0
+  · have hab2 : (a * b) % 2 = 0
+      set qa := a / 2 with hqa_def
+      have ha_ev : a = 2 * qa := by have h := div_add_mod.nat a 2; rw [← hqa_def] at h; omega
+      have hq : a * b = 2 * (qa * b) + 0 := by rw [ha_ev]; ring
+      exact (div_mod_unique.nat (a * b) 2 (qa * b) 0 hq (by decide)).2.symm
+    rw [if_pos hab2, if_pos ha2]; ring
+  · by_cases hb2 : b % 2 = 0
+    · have hab2 : (a * b) % 2 = 0
+        set qb := b / 2 with hqb_def
+        have hb_ev : b = 2 * qb := by have h := div_add_mod.nat b 2; rw [← hqb_def] at h; omega
+        have hq : a * b = 2 * (a * qb) + 0 := by rw [hb_ev]; ring
+        exact (div_mod_unique.nat (a * b) 2 (a * qb) 0 hq (by decide)).2.symm
+      rw [if_pos hab2, if_neg ha2, if_pos hb2]; ring
+    · have ha_odd : a % 4 = 1 ∨ a % 4 = 3
+        have h1 : a % 2 = 1 := by have h := mod_lt.nat a 2 (by decide); omega
+        have hd2 := div_add_mod.nat a 2
+        have hrem4 : (4 * (a / 4) + a % 4) % 2 = (a % 4) % 2
+          have hq : 4 * (a / 4) + a % 4 = 2 * (2 * (a / 4) + (a % 4) / 2) + (a % 4) % 2
+            have hr := div_add_mod.nat (a % 4) 2; omega
+          exact (div_mod_unique.nat _ 2 _ ((a % 4) % 2) hq (mod_lt.nat (a % 4) 2 (by decide))).2.symm
+        rw [ha4] at hrem4
+        by_cases hlt2 : a % 4 < 2
+        · by_cases heq0 : a % 4 = 0
+          · rw [heq0] at hrem4; have h02 : 0 % 2 = 0 := by decide; omega
+          · left; omega
+        · by_cases heq2 : a % 4 = 2
+          · rw [heq2] at hrem4; have h22 : 2 % 2 = 0 := by decide; omega
+          · right; omega
+      have hb_odd : b % 4 = 1 ∨ b % 4 = 3
+        have h1 : b % 2 = 1 := by have h := mod_lt.nat b 2 (by decide); omega
+        have hrem4 : (4 * (b / 4) + b % 4) % 2 = (b % 4) % 2
+          have hq : 4 * (b / 4) + b % 4 = 2 * (2 * (b / 4) + (b % 4) / 2) + (b % 4) % 2
+            have hr := div_add_mod.nat (b % 4) 2; omega
+          exact (div_mod_unique.nat _ 2 _ ((b % 4) % 2) hq (mod_lt.nat (b % 4) 2 (by decide))).2.symm
+        rw [hb4] at hrem4
+        by_cases hlt2 : b % 4 < 2
+        · by_cases heq0 : b % 4 = 0
+          · rw [heq0] at hrem4; have h02 : 0 % 2 = 0 := by decide; omega
+          · left; omega
+        · by_cases heq2 : b % 4 = 2
+          · rw [heq2] at hrem4; have h22 : 2 % 2 = 0 := by decide; omega
+          · right; omega
+      have hab_odd : (a * b) % 2 ≠ 0
+        intro hev
+        set qa := a / 2 with hqa
+        set qb := b / 2 with hqb
+        have h1 : a % 2 = 1 := by have h := mod_lt.nat a 2 (by decide); omega
+        have h2 : b % 2 = 1 := by have h := mod_lt.nat b 2 (by decide); omega
+        have hda := div_add_mod.nat a 2
+        have hdb := div_add_mod.nat b 2
+        have ea : a = 2 * qa + 1 := by rw [← hqa] at hda; omega
+        have eb : b = 2 * qb + 1 := by rw [← hqb] at hdb; omega
+        have hq : a * b = 2 * (2 * qa * qb + qa + qb) + 1 := by rw [ea, eb]; ring
+        have hm := (div_mod_unique.nat (a * b) 2 (2 * qa * qb + qa + qb) 1 hq (by decide)).2
+        omega
+      rw [if_neg hab_odd, if_neg ha2, if_neg hb2]
+      set qa4 := a / 4 with hqa4
+      set qb4 := b / 4 with hqb4
+      obtain ha1 | ha3 := ha_odd
+      · obtain hb1 | hb3 := hb_odd
+        · have hab1 : (a * b) % 4 = 1
+            have ea : a = 4 * qa4 + 1 := by omega
+            have eb : b = 4 * qb4 + 1 := by omega
+            have hq : a * b = 4 * (4 * qa4 * qb4 + qa4 + qb4) + 1 := by rw [ea, eb]; ring
+            exact (div_mod_unique.nat (a * b) 4 _ 1 hq (by decide)).2.symm
+          rw [if_pos hab1, if_pos ha1, if_pos hb1]; ring
+        · have hab3 : (a * b) % 4 ≠ 1
+            have ea : a = 4 * qa4 + 1 := by omega
+            have eb : b = 4 * qb4 + 3 := by omega
+            have hq : a * b = 4 * (4 * qa4 * qb4 + 3 * qa4 + qb4) + 3 := by rw [ea, eb]; ring
+            have hm := (div_mod_unique.nat (a * b) 4 _ 3 hq (by decide)).2
+            omega
+          have hb_n1 : b % 4 ≠ 1 := by omega
+          rw [if_neg hab3, if_pos ha1, if_neg hb_n1]; ring
+      · have ha_n1 : a % 4 ≠ 1 := by omega
+        obtain hb1 | hb3 := hb_odd
+        · have hab3 : (a * b) % 4 ≠ 1
+            have ea : a = 4 * qa4 + 3 := by omega
+            have eb : b = 4 * qb4 + 1 := by omega
+            have hq : a * b = 4 * (4 * qa4 * qb4 + qa4 + 3 * qb4) + 3 := by rw [ea, eb]; ring
+            have hm := (div_mod_unique.nat (a * b) 4 _ 3 hq (by decide)).2
+            omega
+          rw [if_neg hab3, if_neg ha_n1, if_pos hb1]; ring
+        · have hab1 : (a * b) % 4 = 1
+            have ea : a = 4 * qa4 + 3 := by omega
+            have eb : b = 4 * qb4 + 3 := by omega
+            have hq : a * b = 4 * (4 * qa4 * qb4 + 3 * qa4 + 3 * qb4 + 2) + 1 := by rw [ea, eb]; ring
+            exact (div_mod_unique.nat (a * b) 4 _ 1 hq (by decide)).2.symm
+          have hb_n1 : b % 4 ≠ 1 := by omega
+          rw [if_pos hab1, if_neg ha_n1, if_neg hb_n1]; ring
+
+-- THEOREM 3A: Exact Q(i) Dedekind/Theta Local Euler-Factor Trichotomy (Split / Inert / Ramified)!
++ cm_qi.local_euler_factor_identity (p : ℕ) (hprime : is_prime_nat p) (s : ℂ) :
+    (p = 2 →
+      gi.norm (GaussInt.mk 1 1) = 2 ∧
+      complex.mul (euler_factor complex.one (p : ℝ) s) (euler_factor (chi4.val p) (p : ℝ) s) =
+        euler_factor complex.one 2 s) ∧
+    (p % 4 = 1 →
+      (∃ a b : ℕ, a * a + b * b = p) ∧
+      complex.mul (euler_factor complex.one (p : ℝ) s) (euler_factor (chi4.val p) (p : ℝ) s) =
+        complex.mul (euler_factor complex.one (p : ℝ) s) (euler_factor complex.one (p : ℝ) s)) ∧
+    (p % 4 = 3 →
+      complex.mul (euler_factor complex.one (p : ℝ) s) (euler_factor (chi4.val p) (p : ℝ) s) =
+        complex.sub complex.one (cpow_real (p : ℝ) (complex.smul (0 - 2) s)))
+  constructor
+  · intro hp2; rw [hp2]
+    constructor
+    · unfold gi.norm; simp
+    · unfold chi4.val euler_factor; ring
+  · constructor
+    · intro hp1
+      constructor
+      · exact fermat.two_squares_of_prime_mod4 p hprime hp1
+      · have hp_odd : p % 2 ≠ 0
+          have hd4 := div_add_mod.nat p 4
+          have hq : p = 2 * (2 * (p / 4)) + 1 := by omega
+          have hm := (div_mod_unique.nat p 2 (2 * (p / 4)) 1 hq (by decide)).2
+          omega
+        unfold chi4.val; rw [if_neg hp_odd, if_pos hp1]
+    · intro hp3
+      have hp_odd : p % 2 ≠ 0
+        have hd4 := div_add_mod.nat p 4
+        have hq : p = 2 * (2 * (p / 4) + 1) + 1 := by omega
+        have hm := (div_mod_unique.nat p 2 (2 * (p / 4) + 1) 1 hq (by decide)).2
+        omega
+      have hp_n1 : p % 4 ≠ 1 := by omega
+      unfold chi4.val euler_factor; rw [if_neg hp_odd, if_neg hp_n1]
+      have hcpow_sq : complex.mul (cpow_real (p : ℝ) (complex.neg s)) (cpow_real (p : ℝ) (complex.neg s)) =
+          cpow_real (p : ℝ) (complex.smul (0 - 2) s)
+        unfold cpow_real; rw [← complex.exp_add]
+        have harg : complex.add (complex.smul (log (p : ℝ)) (complex.neg s)) (complex.smul (log (p : ℝ)) (complex.neg s)) = complex.smul (log (p : ℝ)) (complex.smul (0 - 2) s) := by ring
+        rw [harg]; ring
+      have hdiff_sq : complex.mul (complex.sub complex.one (complex.mul complex.one (cpow_real (p : ℝ) (complex.neg s)))) (complex.sub complex.one (complex.mul (complex.neg complex.one) (cpow_real (p : ℝ) (complex.neg s)))) = complex.sub complex.one (complex.mul (cpow_real (p : ℝ) (complex.neg s)) (cpow_real (p : ℝ) (complex.neg s))) := by ring
+      rw [hdiff_sq, hcpow_sq]; unfold cpow_real; trivial
+
+-- ====================================================================================
+-- 4. Fricke / Atkin-Lehner Involution W_N : M_k(Gamma_0(N)) -> M_k(Gamma_0(N)) (`hecke.w`)
+-- ====================================================================================
+
+-> uhp.fricke_pt (N : ℕ) (z : ℂ) : ℂ :=
+  complex.div (complex.neg complex.one) (complex.mul (complex.of_real (N : ℝ)) z)
+
+-> hecke.fricke_op (k N : ℕ) (f : ℂ → ℂ) (z : ℂ) : ℂ :=
+  complex.mul (cpow_nat (complex.inv (complex.mul (complex.of_real (sqrt (N : ℝ))) z)) k) (f (uhp.fricke_pt N z))
+
++ uhp.ne_zero_of_im_pos (z : ℂ) (hz : 0 < complex.im z) : z ≠ complex.zero
+  intro h0; have him : complex.im z = complex.im complex.zero := by rw [h0]
+  simp at him; linarith
+
++ uhp.fricke_im_pos (N : ℕ) (hN : 1 ≤ N) (z : ℂ) (hz : 0 < complex.im z) :
+    0 < complex.im (uhp.fricke_pt N z) ∧
+    complex.mul (uhp.fricke_pt N z) (complex.mul (complex.of_real (N : ℝ)) z) = complex.neg complex.one
+  have hN_pos : (0 : ℝ) < (N : ℝ) := (cast_pos.real N).mpr (by omega)
+  set w := complex.mul (complex.of_real (N : ℝ)) z with hw_def
+  have hw_im : 0 < complex.im w
+    rw [hw_def]; simp; exact mul_pos.real (N : ℝ) (complex.im z) hN_pos hz
+  have hw_ne := uhp.ne_zero_of_im_pos w hw_im
+  have hmul : complex.mul (uhp.fricke_pt N z) w = complex.neg complex.one
+    unfold uhp.fricke_pt complex.div; rw [← hw_def, complex.mul_assoc, complex.inv_mul_cancel w hw_ne, complex.mul_one]
+  have hns_pos : 0 < complex.norm_sq w := complex.norm_sq_pos w hw_ne
+  have hconj : complex.mul (uhp.fricke_pt N z) (complex.of_real (complex.norm_sq w)) = complex.mul (complex.neg complex.one) (complex.conj w)
+    rw [← complex.mul_conj w, ← complex.mul_assoc, hmul]
+  have him_eq : complex.im (complex.mul (uhp.fricke_pt N z) (complex.of_real (complex.norm_sq w))) =
+      complex.im (complex.mul (complex.neg complex.one) (complex.conj w)) := by rw [hconj]
+  simp at him_eq
+  have hfp_im : 0 < complex.im (uhp.fricke_pt N z)
+    by_contra hle
+    have hm := mul_le_mul_of_nonneg_right.real (complex.im (uhp.fricke_pt N z)) 0 (complex.norm_sq w) (by linarith) (by linarith)
+    linarith
+  exact ⟨hfp_im, hmul⟩
+
++ cpow_nat.mul_dist (a b : ℂ) (k : ℕ) :
+    cpow_nat (complex.mul a b) k = complex.mul (cpow_nat a k) (cpow_nat b k)
+  induction k with m ihm
+  · unfold cpow_nat; ring
+  · rw [succ_eq_add_one.nat]
+    have h1 : cpow_nat (complex.mul a b) (m + 1) = complex.mul (cpow_nat (complex.mul a b) m) (complex.mul a b) := by rfl
+    have h2 : cpow_nat a (m + 1) = complex.mul (cpow_nat a m) a := by rfl
+    have h3 : cpow_nat b (m + 1) = complex.mul (cpow_nat b m) b := by rfl
+    rw [h1, h2, h3, ihm]; ring
+
++ complex.inv_eq_of_mul_one (a b : ℂ) (ha : a ≠ complex.zero) (h : complex.mul a b = complex.one) :
+    complex.inv a = b
+  have h1 : complex.mul (complex.inv a) (complex.mul a b) = complex.mul (complex.inv a) complex.one := by rw [h]
+  rw [← complex.mul_assoc, complex.inv_mul_cancel a ha, complex.one_mul, complex.mul_one] at h1
+  exact h1.symm
+
+-- THEOREM 4A: Fricke Involution W_N(W_N(f))(z) = (-1)^k * f(z) on H!
++ hecke.fricke_involution (k N : ℕ) (hN : 1 ≤ N) (f : ℂ → ℂ) (z : ℂ) (hz : 0 < complex.im z) :
+    hecke.fricke_op k N (hecke.fricke_op k N f) z =
+      complex.mul (cpow_nat (complex.neg complex.one) k) (f z)
+  have hN_pos : (0 : ℝ) < (N : ℝ) := (cast_pos.real N).mpr (by omega)
+  have hsq_sp := sqrt_spec (N : ℝ) (by linarith)
+  have hsq_pos : 0 < sqrt (N : ℝ) := by nlinarith [hsq_sp.1, hsq_sp.2]
+  have hz_ne := uhp.ne_zero_of_im_pos z hz
+  have hfp := uhp.fricke_im_pos N hN z hz
+  have hfp2 := uhp.fricke_im_pos N hN (uhp.fricke_pt N z) hfp.1
+  have hNz_ne : complex.mul (complex.of_real (N : ℝ)) z ≠ complex.zero
+    apply complex.mul_ne_zero
+    · intro h0; linarith [complex.of_real_inj (N : ℝ) 0 (by rw [h0, ← complex.of_real_zero])]
+    · exact hz_ne
+  -- Step 1: fricke_pt N (fricke_pt N z) = z!
+  have hpt_inv : uhp.fricke_pt N (uhp.fricke_pt N z) = z
+    have hm1 := hfp.2
+    have hm2 := hfp2.2
+    have hre1 : complex.mul (uhp.fricke_pt N (uhp.fricke_pt N z)) (complex.mul (complex.of_real (N : ℝ)) (uhp.fricke_pt N z)) = complex.neg complex.one := hm2
+    have hmul_z : complex.mul (complex.mul (uhp.fricke_pt N (uhp.fricke_pt N z)) (complex.mul (complex.of_real (N : ℝ)) (uhp.fricke_pt N z))) z =
+        complex.mul (complex.neg complex.one) z := by rw [hre1]
+    have hassoc : complex.mul (complex.mul (uhp.fricke_pt N (uhp.fricke_pt N z)) (complex.mul (complex.of_real (N : ℝ)) (uhp.fricke_pt N z))) z =
+        complex.mul (uhp.fricke_pt N (uhp.fricke_pt N z)) (complex.mul (uhp.fricke_pt N z) (complex.mul (complex.of_real (N : ℝ)) z)) := by ring
+    rw [hassoc, hm1] at hmul_z
+    have hneg_cancel : complex.neg (complex.mul (uhp.fricke_pt N (uhp.fricke_pt N z)) (complex.neg complex.one)) =
+        complex.neg (complex.mul (complex.neg complex.one) z) := by rw [hmul_z]
+    have hL : complex.neg (complex.mul (uhp.fricke_pt N (uhp.fricke_pt N z)) (complex.neg complex.one)) = uhp.fricke_pt N (uhp.fricke_pt N z) := by ring
+    have hR : complex.neg (complex.mul (complex.neg complex.one) z) = z := by ring
+    rw [hL, hR] at hneg_cancel; exact hneg_cancel
+  -- Step 2: (sqrt N * z) * (sqrt N * fricke_pt N z) = -1!
+  set A := complex.mul (complex.of_real (sqrt (N : ℝ))) z with hA_def
+  set B := complex.mul (complex.of_real (sqrt (N : ℝ))) (uhp.fricke_pt N z) with hB_def
+  have hAB : complex.mul A B = complex.neg complex.one
+    have hsq_c : complex.mul (complex.of_real (sqrt (N : ℝ))) (complex.of_real (sqrt (N : ℝ))) = complex.of_real (N : ℝ)
+      rw [← complex.of_real_mul, hsq_sp.2]
+    have h1 : complex.mul A B = complex.mul (uhp.fricke_pt N z) (complex.mul (complex.mul (complex.of_real (sqrt (N : ℝ))) (complex.of_real (sqrt (N : ℝ)))) z)
+      rw [hA_def, hB_def]; ring
+    rw [h1, hsq_c, hfp.2]
+  have hA_ne : A ≠ complex.zero
+    rw [hA_def]; apply complex.mul_ne_zero
+    · intro h0; linarith [complex.of_real_inj (sqrt (N : ℝ)) 0 (by rw [h0, ← complex.of_real_zero])]
+    · exact hz_ne
+  have hB_ne : B ≠ complex.zero
+    rw [hB_def]; apply complex.mul_ne_zero
+    · intro h0; linarith [complex.of_real_inj (sqrt (N : ℝ)) 0 (by rw [h0, ← complex.of_real_zero])]
+    · exact uhp.ne_zero_of_im_pos (uhp.fricke_pt N z) hfp.1
+  have hinv_prod : complex.mul (complex.inv A) (complex.inv B) = complex.neg complex.one
+    have hprod1 : complex.mul (complex.mul A B) (complex.mul (complex.inv A) (complex.inv B)) = complex.one
+      have hre : complex.mul (complex.mul A B) (complex.mul (complex.inv A) (complex.inv B)) =
+          complex.mul (complex.mul A (complex.inv A)) (complex.mul B (complex.inv B)) := by ring
+      rw [hre, complex.mul_inv_cancel A hA_ne, complex.mul_inv_cancel B hB_ne, complex.mul_one]
+    rw [hAB] at hprod1
+    have hneg1 : complex.neg (complex.mul (complex.neg complex.one) (complex.mul (complex.inv A) (complex.inv B))) = complex.neg complex.one := by rw [hprod1]
+    have hL : complex.neg (complex.mul (complex.neg complex.one) (complex.mul (complex.inv A) (complex.inv B))) = complex.mul (complex.inv A) (complex.inv B) := by ring
+    rw [hL] at hneg1; exact hneg1
+  unfold hecke.fricke_op
+  rw [← hA_def, ← hB_def, hpt_inv, ← complex.mul_assoc, ← cpow_nat.mul_dist, hinv_prod]
+
+-- THEOREM 4B: Fricke Involution Preserves Weight-k Gamma_0(N) Modularity (`W_N : M_k(Gamma_0(N)) -> M_k(Gamma_0(N))`)!
++ hecke.fricke_slash_invariant (k N : ℕ) (hN : 1 ≤ N)
+    (f : ℂ → ℂ) (hf : gamma0.is_slash_invariant k N f) :
+    gamma0.is_slash_invariant k N (hecke.fricke_op k N f)
+  unfold gamma0.is_slash_invariant at hf
+  intro g hg_val ⟨q, hq⟩ z hz
+  have hN_pos : (0 : ℝ) < (N : ℝ) := (cast_pos.real N).mpr (by omega)
+  have hsq_sp := sqrt_spec (N : ℝ) (by linarith)
+  have hsq_pos : 0 < sqrt (N : ℝ) := by nlinarith [hsq_sp.1, hsq_sp.2]
+  have hz_ne := uhp.ne_zero_of_im_pos z hz
+  have hj_ne := uhp.j_ne_zero g z hz
+  have hgz_im := (uhp.im_mobius g z hz).2
+  have hgz_ne := uhp.ne_zero_of_im_pos (uhp.mobius g z) hgz_im
+  have hnum_ne : uhp.num g z ≠ complex.zero
+    intro h0; apply hgz_ne; unfold uhp.mobius complex.div; rw [h0, complex.zero_mul]
+  -- Conjugated matrix gt = W_N * g * W_N^{-1} = [[g.d, -q], [-N * g.b, g.a]] in Gamma_0(N)!
+  set gt := SL2Z.mk g.d (-q) (-(N : ℤ) * g.b) g.a with hgt_def
+  have hgt_valid : SL2Z.Valid gt
+    have hdet : g.a * g.d - g.b * g.c = 1 := by unfold SL2Z.Valid at hg_val; exact hg_val
+    rw [hgt_def]; unfold SL2Z.Valid; simp
+    linear_combination hdet + g.b * hq
+  have hgt_mem : gamma0.mem N gt
+    rw [hgt_def]; unfold gamma0.mem int_dvd; simp
+    exact ⟨-g.b, by ring⟩
+  set w := uhp.fricke_pt N z with hw_def
+  have hw_sp := uhp.fricke_im_pos N hN z hz
+  have hw_im : 0 < complex.im w := by rw [hw_def]; exact hw_sp.1
+  have hNr_eq : c_of_int (N : ℤ) = complex.of_real (N : ℝ) := by rfl
+  -- Key identity 1: uhp.j gt w * z = uhp.num g z!
+  have hj_gt_z : complex.mul (uhp.j gt w) z = uhp.num g z
+    have hNwz : complex.mul w (complex.mul (complex.of_real (N : ℝ)) z) = complex.neg complex.one := by rw [hw_def]; exact hw_sp.2
+    rw [hgt_def]; unfold uhp.j uhp.num; simp
+    have hcb : c_of_int (-(N : ℤ) * g.b) = complex.neg (complex.mul (complex.of_real (N : ℝ)) (c_of_int g.b))
+      have h1 : -(N : ℤ) * g.b = 0 - (N : ℤ) * g.b := by ring
+      rw [h1]; unfold c_of_int; rw [int_cast_sub.real, int_cast_zero.real, int_cast_mul.real]; ring
+    rw [hcb]
+    have hre : complex.mul (complex.add (complex.mul (complex.neg (complex.mul (complex.of_real (N : ℝ)) (c_of_int g.b))) w) (c_of_int g.a)) z =
+        complex.add (complex.mul (c_of_int g.a) z) (complex.mul (complex.neg (c_of_int g.b)) (complex.mul w (complex.mul (complex.of_real (N : ℝ)) z))) := by ring
+    rw [hre, hNwz]; ring
+  -- Key identity 2: uhp.mobius gt w = uhp.fricke_pt N (uhp.mobius g z)!
+  have hmob_gt : uhp.mobius gt w = uhp.fricke_pt N (uhp.mobius g z)
+    have hj_gt_ne := uhp.j_ne_zero gt w hw_im
+    -- Show uhp.num gt w * (N * z) = - uhp.j g z!
+    have hnum_gt_Nz : complex.mul (uhp.num gt w) (complex.mul (complex.of_real (N : ℝ)) z) = complex.neg (uhp.j g z)
+      have hNwz : complex.mul w (complex.mul (complex.of_real (N : ℝ)) z) = complex.neg complex.one := by rw [hw_def]; exact hw_sp.2
+      rw [hgt_def]; unfold uhp.num uhp.j; simp
+      have hcq : c_of_int (-q) = complex.neg (c_of_int q)
+        have h1 : -q = 0 - q := by ring
+        rw [h1]; unfold c_of_int; rw [int_cast_sub.real, int_cast_zero.real]; ring
+      have hgc : c_of_int g.c = complex.mul (complex.of_real (N : ℝ)) (c_of_int q)
+        rw [hq, c_of_int.mul, hNr_eq]
+      rw [hcq, hgc]
+      have hre : complex.mul (complex.add (complex.mul (c_of_int g.d) w) (complex.neg (c_of_int q))) (complex.mul (complex.of_real (N : ℝ)) z) =
+          complex.sub (complex.mul (c_of_int g.d) (complex.mul w (complex.mul (complex.of_real (N : ℝ)) z))) (complex.mul (complex.mul (complex.of_real (N : ℝ)) (c_of_int q)) z) := by ring
+      rw [hre, hNwz]; ring
+    -- Multiply uhp.mobius gt w by (uhp.j gt w * (N * z)) = N * uhp.num g z!
+    have hmob_mul : complex.mul (uhp.mobius gt w) (complex.mul (complex.of_real (N : ℝ)) (uhp.num g z)) = complex.neg (uhp.j g z)
+      have hden_eq : complex.mul (complex.of_real (N : ℝ)) (uhp.num g z) = complex.mul (uhp.j gt w) (complex.mul (complex.of_real (N : ℝ)) z)
+        rw [← hj_gt_z]; ring
+      rw [hden_eq]; unfold uhp.mobius complex.div
+      have hre : complex.mul (complex.mul (uhp.num gt w) (complex.inv (uhp.j gt w))) (complex.mul (uhp.j gt w) (complex.mul (complex.of_real (N : ℝ)) z)) =
+          complex.mul (complex.mul (uhp.j gt w) (complex.inv (uhp.j gt w))) (complex.mul (uhp.num gt w) (complex.mul (complex.of_real (N : ℝ)) z)) := by ring
+      rw [hre, complex.mul_inv_cancel _ hj_gt_ne, complex.one_mul, hnum_gt_Nz]
+    have hfp_gz := (uhp.fricke_im_pos N hN (uhp.mobius g z) hgz_im).2
+    have hgz_mul : complex.mul (uhp.mobius g z) (uhp.j g z) = uhp.num g z
+      unfold uhp.mobius complex.div; rw [complex.mul_assoc, complex.inv_mul_cancel _ hj_ne, complex.mul_one]
+    have hfp_mul : complex.mul (uhp.fricke_pt N (uhp.mobius g z)) (complex.mul (complex.of_real (N : ℝ)) (uhp.num g z)) = complex.neg (uhp.j g z)
+      rw [← hgz_mul]
+      have hre : complex.mul (uhp.fricke_pt N (uhp.mobius g z)) (complex.mul (complex.of_real (N : ℝ)) (complex.mul (uhp.mobius g z) (uhp.j g z))) =
+          complex.mul (complex.mul (uhp.fricke_pt N (uhp.mobius g z)) (complex.mul (complex.of_real (N : ℝ)) (uhp.mobius g z))) (uhp.j g z) := by ring
+      rw [hre, hfp_gz]; ring
+    have hNnum_ne : complex.mul (complex.of_real (N : ℝ)) (uhp.num g z) ≠ complex.zero
+      apply complex.mul_ne_zero
+      · intro h0; linarith [complex.of_real_inj (N : ℝ) 0 (by rw [h0, ← complex.of_real_zero])]
+      · exact hnum_ne
+    have hdiff : complex.mul (complex.sub (uhp.mobius gt w) (uhp.fricke_pt N (uhp.mobius g z))) (complex.mul (complex.of_real (N : ℝ)) (uhp.num g z)) = complex.zero
+      have hsub_dist : complex.mul (complex.sub (uhp.mobius gt w) (uhp.fricke_pt N (uhp.mobius g z))) (complex.mul (complex.of_real (N : ℝ)) (uhp.num g z)) = complex.sub (complex.mul (uhp.mobius gt w) (complex.mul (complex.of_real (N : ℝ)) (uhp.num g z))) (complex.mul (uhp.fricke_pt N (uhp.mobius g z)) (complex.mul (complex.of_real (N : ℝ)) (uhp.num g z))) := by ring
+      rw [hsub_dist, hmob_mul, hfp_mul]; ring
+    by_contra hne
+    have hsub_ne : complex.sub (uhp.mobius gt w) (uhp.fricke_pt N (uhp.mobius g z)) ≠ complex.zero
+      intro hz0; apply hne
+      have hre0 : complex.re (complex.sub (uhp.mobius gt w) (uhp.fricke_pt N (uhp.mobius g z))) = 0 := by rw [hz0]; simp
+      have him0 : complex.im (complex.sub (uhp.mobius gt w) (uhp.fricke_pt N (uhp.mobius g z))) = 0 := by rw [hz0]; simp
+      simp at hre0 him0
+      apply complex.ext
+      · linarith
+      · linarith
+    exact complex.mul_ne_zero _ _ hsub_ne hNnum_ne hdiff
+  -- Apply Gamma_0(N) invariance of f at (gt, w): f(gt * w) = j(gt, w)^k * f(w)!
+  have hmod_gt := hf gt hgt_mem w hw_im
+  unfold modular.slash at hmod_gt
+  have hj_gt_ne := uhp.j_ne_zero gt w hw_im
+  have hsq_ne : complex.of_real (sqrt (N : ℝ)) ≠ complex.zero
+    intro h0; linarith [complex.of_real_inj (sqrt (N : ℝ)) 0 (by rw [h0, ← complex.of_real_zero])]
+  -- Combine automorphy factors: inv(j(g, z)) * inv(sqrt N * (g * z)) = inv(sqrt N * num(g, z)) = inv(sqrt N * z) * inv(j(gt, w))!
+  have hinv_eq : complex.mul (complex.inv (uhp.j g z)) (complex.inv (complex.mul (complex.of_real (sqrt (N : ℝ))) (uhp.mobius g z))) =
+      complex.mul (complex.inv (complex.mul (complex.of_real (sqrt (N : ℝ))) z)) (complex.inv (uhp.j gt w))
+    set X := complex.mul (complex.of_real (sqrt (N : ℝ))) (uhp.num g z) with hX_def
+    have hX_ne : X ≠ complex.zero := by rw [hX_def]; exact complex.mul_ne_zero _ _ hsq_ne hnum_ne
+    have hL_one : complex.mul X (complex.mul (complex.inv (uhp.j g z)) (complex.inv (complex.mul (complex.of_real (sqrt (N : ℝ))) (uhp.mobius g z)))) = complex.one
+      have hsq_mob_ne : complex.mul (complex.of_real (sqrt (N : ℝ))) (uhp.mobius g z) ≠ complex.zero := complex.mul_ne_zero _ _ hsq_ne hgz_ne
+      have hgz_mul : complex.mul (uhp.mobius g z) (uhp.j g z) = uhp.num g z
+        unfold uhp.mobius complex.div; rw [complex.mul_assoc, complex.inv_mul_cancel _ hj_ne, complex.mul_one]
+      have hX2 : X = complex.mul (uhp.j g z) (complex.mul (complex.of_real (sqrt (N : ℝ))) (uhp.mobius g z)) := by rw [hX_def, ← hgz_mul]; ring
+      rw [hX2]
+      have hre : complex.mul (complex.mul (uhp.j g z) (complex.mul (complex.of_real (sqrt (N : ℝ))) (uhp.mobius g z))) (complex.mul (complex.inv (uhp.j g z)) (complex.inv (complex.mul (complex.of_real (sqrt (N : ℝ))) (uhp.mobius g z)))) = complex.mul (complex.mul (uhp.j g z) (complex.inv (uhp.j g z))) (complex.mul (complex.mul (complex.of_real (sqrt (N : ℝ))) (uhp.mobius g z)) (complex.inv (complex.mul (complex.of_real (sqrt (N : ℝ))) (uhp.mobius g z)))) := by ring
+      rw [hre, complex.mul_inv_cancel _ hj_ne, complex.mul_inv_cancel _ hsq_mob_ne, complex.mul_one]
+    have hR_one : complex.mul X (complex.mul (complex.inv (complex.mul (complex.of_real (sqrt (N : ℝ))) z)) (complex.inv (uhp.j gt w))) = complex.one
+      have hsq_z_ne : complex.mul (complex.of_real (sqrt (N : ℝ))) z ≠ complex.zero := complex.mul_ne_zero _ _ hsq_ne hz_ne
+      have hX3 : X = complex.mul (complex.mul (complex.of_real (sqrt (N : ℝ))) z) (uhp.j gt w) := by rw [hX_def, ← hj_gt_z]; ring
+      rw [hX3]
+      have hre : complex.mul (complex.mul (complex.mul (complex.of_real (sqrt (N : ℝ))) z) (uhp.j gt w)) (complex.mul (complex.inv (complex.mul (complex.of_real (sqrt (N : ℝ))) z)) (complex.inv (uhp.j gt w))) = complex.mul (complex.mul (complex.mul (complex.of_real (sqrt (N : ℝ))) z) (complex.inv (complex.mul (complex.of_real (sqrt (N : ℝ))) z))) (complex.mul (uhp.j gt w) (complex.inv (uhp.j gt w))) := by ring
+      rw [hre, complex.mul_inv_cancel _ hsq_z_ne, complex.mul_inv_cancel _ hj_gt_ne, complex.mul_one]
+    rw [← complex.inv_eq_of_mul_one X _ hX_ne hL_one, ← complex.inv_eq_of_mul_one X _ hX_ne hR_one]
+  unfold modular.slash hecke.fricke_op
+  rw [← complex.mul_assoc, ← cpow_nat.mul_dist, hinv_eq, cpow_nat.mul_dist, ← hmob_gt, complex.mul_assoc, hmod_gt, ← hw_def]

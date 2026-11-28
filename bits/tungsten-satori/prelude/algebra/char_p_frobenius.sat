@@ -1,0 +1,267 @@
+-- Characteristic-p Commutative Rings, Freshman's Dream, and Frobenius Null-Cone Vanishing (0 custom axioms)
+
+import padic.product_formula
+import analysis.classical_landau_osc
+
+-- SECTION 3: `ThetaProducts.lean` (`sum_pow_eq_zero_of_null`, `coeff_sum_frob_ne_zero_iff`, `exists_frame_rows_frob`, `theta_products_normal_form`)
+-> sernau.rnat (r0 r1 : α) (radd : α → α → α) : ℕ → α
+  | 0 => r0
+  | n + 1 => radd (sernau.rnat r0 r1 radd n) r1
+-> sernau.rpow_n (r1 : α) (rmul : α → α → α) (x : α) : ℕ → α
+  | 0 => r1
+  | n + 1 => rmul (sernau.rpow_n r1 rmul x n) x
+-> sernau.rsum (r0 : α) (radd : α → α → α) : ℕ → (ℕ → α) → α
+  | 0 => fun _ => r0
+  | n + 1 => fun f => radd (sernau.rsum r0 radd n f) (f n)
+
+-> sernau.is_char_p_ring (p : ℕ) (r0 r1 : α) (radd : α → α → α) (rneg : α → α) (rmul : α → α → α) : Prop :=
+  (∀ a b c : α, radd (radd a b) c = radd a (radd b c)) ∧ (∀ a b : α, radd a b = radd b a) ∧
+  (∀ a : α, radd a r0 = a) ∧ (∀ a : α, radd a (rneg a) = r0) ∧
+  (∀ a b c : α, rmul (rmul a b) c = rmul a (rmul b c)) ∧ (∀ a b : α, rmul a b = rmul b a) ∧
+  (∀ a : α, rmul a r1 = a) ∧ (∀ a b c : α, rmul a (radd b c) = radd (rmul a b) (rmul a c)) ∧
+  sernau.rnat r0 r1 radd p = r0
+
++ sernau.char_p_ring_basic (p : ℕ) (r0 r1 : α) (radd : α → α → α) (rneg : α → α) (rmul : α → α → α)
+    (hp : is_prime_nat p) (hR : sernau.is_char_p_ring p r0 r1 radd rneg rmul) :
+    ((∀ a : α, radd r0 a = a) ∧ (∀ a : α, rmul r1 a = a) ∧ (∀ a : α, rmul a r0 = r0) ∧ (∀ a : α, rmul r0 a = r0) ∧
+     (∀ a b c : α, rmul (radd a b) c = radd (rmul a c) (rmul b c)) ∧
+     (∀ m n : ℕ, sernau.rnat r0 r1 radd (m + n) = radd (sernau.rnat r0 r1 radd m) (sernau.rnat r0 r1 radd n)) ∧
+     (∀ n : ℕ, p ∣ n → sernau.rnat r0 r1 radd n = r0) ∧
+     (∀ x : α, ∀ u v : ℕ, sernau.rpow_n r1 rmul x (u + v) = rmul (sernau.rpow_n r1 rmul x u) (sernau.rpow_n r1 rmul x v)) ∧
+     (∀ x : α, ∀ u v : ℕ, sernau.rpow_n r1 rmul (sernau.rpow_n r1 rmul x u) v = sernau.rpow_n r1 rmul x (u * v)) ∧
+     (∀ x y : α, ∀ n : ℕ, sernau.rpow_n r1 rmul (rmul x y) n = rmul (sernau.rpow_n r1 rmul x n) (sernau.rpow_n r1 rmul y n)))
+  obtain ⟨hadd_assoc, hadd_comm, hadd_0, hadd_neg, hmul_assoc, hmul_comm, hmul_1, hdist_l, hp0⟩ := hR
+  have h0_add : ∀ a : α, radd r0 a = a := by intro a; rw [hadd_comm r0 a, hadd_0]
+  have h1_mul : ∀ a : α, rmul r1 a = a := by intro a; rw [hmul_comm r1 a, hmul_1]
+  have hmul_0 : ∀ a : α, rmul a r0 = r0
+    intro a; have hd := hdist_l a r0 r0; rw [hadd_0 r0] at hd
+    have hc : radd (radd (rmul a r0) (rmul a r0)) (rneg (rmul a r0)) = radd (rmul a r0) (rneg (rmul a r0)) := by rw [← hd]
+    rw [hadd_assoc, hadd_neg, hadd_0] at hc; exact hc
+  have h0_mul : ∀ a : α, rmul r0 a = r0 := by intro a; rw [hmul_comm r0 a, hmul_0]
+  have hdist_r : ∀ a b c : α, rmul (radd a b) c = radd (rmul a c) (rmul b c) := by intro a b c; rw [hmul_comm (radd a b) c, hdist_l, hmul_comm c a, hmul_comm c b]
+  have hrnat_add : ∀ m n : ℕ, sernau.rnat r0 r1 radd (m + n) = radd (sernau.rnat r0 r1 radd m) (sernau.rnat r0 r1 radd n)
+    intro m n; induction n with r ihr; (rw [add_zero.nat]; have h0 : sernau.rnat r0 r1 radd 0 = r0 := by rfl; rw [h0, hadd_0])
+    rw [succ_eq_add_one.nat, ← add_assoc.nat]; have hs1 : sernau.rnat r0 r1 radd (m + r + 1) = radd (sernau.rnat r0 r1 radd (m + r)) r1 := by rfl
+    have hs2 : sernau.rnat r0 r1 radd (r + 1) = radd (sernau.rnat r0 r1 radd r) r1 := by rfl
+    rw [hs1, hs2, ihr, hadd_assoc]
+  have hrnat_dvd : ∀ n : ℕ, p ∣ n → sernau.rnat r0 r1 radd n = r0
+    have hp_mul : ∀ u : ℕ, sernau.rnat r0 r1 radd (p * u) = r0
+      intro u; induction u with r ihr; (rw [mul_zero.nat]; rfl)
+      rw [succ_eq_add_one.nat]; have hm : p * (r + 1) = p * r + p := by ring
+      rw [hm, hrnat_add (p * r) p, ihr, hp0, hadd_0]
+    intro n hdv; obtain ⟨q, hq⟩ := (dvd.iff_exists p n (by linarith [hp.1])).mp hdv; rw [hq]; exact hp_mul q
+  have hpow_add : ∀ x : α, ∀ u v : ℕ, sernau.rpow_n r1 rmul x (u + v) = rmul (sernau.rpow_n r1 rmul x u) (sernau.rpow_n r1 rmul x v)
+    intro x u v; induction v with r ihr; (rw [add_zero.nat]; have h0 : sernau.rpow_n r1 rmul x 0 = r1 := by rfl; rw [h0, hmul_1])
+    rw [succ_eq_add_one.nat, ← add_assoc.nat]; have hs1 : sernau.rpow_n r1 rmul x (u + r + 1) = rmul (sernau.rpow_n r1 rmul x (u + r)) x := by rfl
+    have hs2 : sernau.rpow_n r1 rmul x (r + 1) = rmul (sernau.rpow_n r1 rmul x r) x := by rfl
+    rw [hs1, hs2, ihr, hmul_assoc]
+  have hpow_mul : ∀ x : α, ∀ u v : ℕ, sernau.rpow_n r1 rmul (sernau.rpow_n r1 rmul x u) v = sernau.rpow_n r1 rmul x (u * v)
+    intro x u v; induction v with r ihr; (rw [mul_zero.nat]; rfl)
+    rw [succ_eq_add_one.nat]; have hs : sernau.rpow_n r1 rmul (sernau.rpow_n r1 rmul x u) (r + 1) = rmul (sernau.rpow_n r1 rmul (sernau.rpow_n r1 rmul x u) r) (sernau.rpow_n r1 rmul x u) := by rfl
+    have hm : u * (r + 1) = u * r + u := by ring; rw [hs, ihr, hm, hpow_add]
+  have hmul_pow : ∀ x y : α, ∀ n : ℕ, sernau.rpow_n r1 rmul (rmul x y) n = rmul (sernau.rpow_n r1 rmul x n) (sernau.rpow_n r1 rmul y n)
+    intro x y n; induction n with r ihr; (have h0 : ∀ z : α, sernau.rpow_n r1 rmul z 0 = r1 := by (intro _; rfl); rw [h0, h0, h0, hmul_1])
+    rw [succ_eq_add_one.nat]; have hs : ∀ z : α, sernau.rpow_n r1 rmul z (r + 1) = rmul (sernau.rpow_n r1 rmul z r) z := by intro _; rfl
+    rw [hs, hs, hs, ihr, hmul_assoc (sernau.rpow_n r1 rmul x r), ← hmul_assoc (sernau.rpow_n r1 rmul y r) x y, hmul_comm (sernau.rpow_n r1 rmul y r) x, hmul_assoc x, ← hmul_assoc]
+  exact ⟨h0_add, h1_mul, hmul_0, h0_mul, hdist_r, hrnat_add, hrnat_dvd, hpow_add, hpow_mul, hmul_pow⟩
+
++ sernau.char_p_freshman_dream (p : ℕ) (r0 r1 : α) (radd : α → α → α) (rneg : α → α) (rmul : α → α → α)
+    (hp : is_prime_nat p) (hR : sernau.is_char_p_ring p r0 r1 radd rneg rmul) :
+    ((∀ (x y : α) (j : ℕ), sernau.rpow_n r1 rmul (radd x y) (p ^ j) = radd (sernau.rpow_n r1 rmul x (p ^ j)) (sernau.rpow_n r1 rmul y (p ^ j))) ∧
+     (∀ (M j : ℕ) (f : ℕ → α), sernau.rpow_n r1 rmul (sernau.rsum r0 radd M f) (p ^ j) = sernau.rsum r0 radd M (fun i => sernau.rpow_n r1 rmul (f i) (p ^ j))) ∧
+     (∀ (M : ℕ) (c : α) (f : ℕ → α), rmul c (sernau.rsum r0 radd M f) = sernau.rsum r0 radd M (fun i => rmul c (f i)) ∧ rmul (sernau.rsum r0 radd M f) c = sernau.rsum r0 radd M (fun i => rmul (f i) c)) ∧
+     (∀ (M : ℕ) (f g : ℕ → α), (∀ i < M, f i = g i) → sernau.rsum r0 radd M f = sernau.rsum r0 radd M g) ∧
+     (∀ (M N : ℕ) (F : ℕ → ℕ → α), sernau.rsum r0 radd M (fun i => sernau.rsum r0 radd N (fun j => F i j)) = sernau.rsum r0 radd N (fun j => sernau.rsum r0 radd M (fun i => F i j))))
+  have hb := sernau.char_p_ring_basic p r0 r1 radd rneg rmul hp hR
+  obtain ⟨hadd_assoc, hadd_comm, hadd_0, _, hmul_assoc, hmul_comm, hmul_1, hdist_l, _⟩ := hR
+  have hrsum_0 : ∀ f : ℕ → α, sernau.rsum r0 radd 0 f = r0 := by intro _; rfl
+  have hrsum_s : ∀ (m : ℕ) (f : ℕ → α), sernau.rsum r0 radd (m + 1) f = radd (sernau.rsum r0 radd m f) (f m) := by intro _ _; rfl
+  have hrsum_congr : ∀ (M : ℕ) (f g : ℕ → α), (∀ i < M, f i = g i) → sernau.rsum r0 radd M f = sernau.rsum r0 radd M g
+    intro M f g hfg; induction M with m ihm; rfl; (rw [succ_eq_add_one.nat, hrsum_s, hrsum_s, ihm (by intro i hi; exact hfg i (by omega)), hfg m (by omega)])
+  have hrsum_add : ∀ (M : ℕ) (f g : ℕ → α), sernau.rsum r0 radd M (fun i => radd (f i) (g i)) = radd (sernau.rsum r0 radd M f) (sernau.rsum r0 radd M g)
+    intro M f g; induction M with m ihm; (rw [hrsum_0, hrsum_0, hrsum_0, hadd_0])
+    rw [succ_eq_add_one.nat, hrsum_s, hrsum_s, hrsum_s, ihm, hadd_assoc (sernau.rsum r0 radd m f), ← hadd_assoc (sernau.rsum r0 radd m g) (f m) (g m), hadd_comm (sernau.rsum r0 radd m g) (f m), hadd_assoc (f m), ← hadd_assoc]
+  have hrsum_mul : ∀ (M : ℕ) (c : α) (f : ℕ → α), rmul c (sernau.rsum r0 radd M f) = sernau.rsum r0 radd M (fun i => rmul c (f i)) ∧ rmul (sernau.rsum r0 radd M f) c = sernau.rsum r0 radd M (fun i => rmul (f i) c)
+    intro M c f; induction M with m ihm; (rw [hrsum_0, hrsum_0, hrsum_0, hb.2.2.1, hb.2.2.2.1]; exact ⟨by rfl, by rfl⟩)
+    rw [succ_eq_add_one.nat, hrsum_s, hrsum_s, hrsum_s, hdist_l, hb.2.2.2.2.1, ihm.1, ihm.2]; exact ⟨by rfl, by rfl⟩
+  have hrsum_z : ∀ M : ℕ, sernau.rsum r0 radd M (fun _ => r0) = r0 := by intro M; induction M with m ihm; rfl; (rw [succ_eq_add_one.nat, hrsum_s, ihm, hadd_0])
+  have hrsum_swap : ∀ (M N : ℕ) (F : ℕ → ℕ → α), sernau.rsum r0 radd M (fun i => sernau.rsum r0 radd N (fun j => F i j)) = sernau.rsum r0 radd N (fun j => sernau.rsum r0 radd M (fun i => F i j))
+    intro M N F; induction M with m ihm; (rw [hrsum_0, hrsum_congr N (fun j => sernau.rsum r0 radd 0 (fun i => F i j)) (fun _ => r0) (by intro _ _; rfl), hrsum_z])
+    rw [succ_eq_add_one.nat, hrsum_s, ihm, ← hrsum_add]; exact hrsum_congr N _ _ (by intro j _; exact (hrsum_s m (fun i => F i j)).symm)
+  have hrsum_shift : ∀ (M : ℕ) (f : ℕ → α), sernau.rsum r0 radd (M + 1) f = radd (f 0) (sernau.rsum r0 radd M (fun k => f (k + 1)))
+    intro M f; induction M with m ihm; (rw [hrsum_s 0, hrsum_0, hrsum_0, hb.1, hadd_0]); (rw [succ_eq_add_one.nat, hrsum_s (m + 1), ihm, hrsum_s m, hadd_assoc])
+  have hbinom : ∀ (x y : α) (m : ℕ), sernau.rpow_n r1 rmul (radd x y) m =
+      sernau.rsum r0 radd (m + 1) (fun k => rmul (sernau.rnat r0 r1 radd (choose m k)) (rmul (sernau.rpow_n r1 rmul x k) (sernau.rpow_n r1 rmul y (m - k))))
+    intro x y m; induction m with n ihn
+    · rw [hrsum_s 0, hrsum_0, hb.1, choose_zero_zero]; have h1 : sernau.rnat r0 r1 radd 1 = r1 := by (have hs : sernau.rnat r0 r1 radd 1 = radd r0 r1 := by rfl; rw [hs, hb.1])
+      have hp0 : ∀ z : α, sernau.rpow_n r1 rmul z 0 = r1 := by intro _; rfl
+      have h00 : 0 - 0 = 0 := by omega
+      rw [h1, h00, hp0, hp0, hp0, hmul_1, hmul_1]
+    · rw [succ_eq_add_one.nat]
+      have hs_pow : sernau.rpow_n r1 rmul (radd x y) (n + 1) = radd (rmul (sernau.rpow_n r1 rmul (radd x y) n) x) (rmul (sernau.rpow_n r1 rmul (radd x y) n) y) := by have hs : sernau.rpow_n r1 rmul (radd x y) (n + 1) = rmul (sernau.rpow_n r1 rmul (radd x y) n) (radd x y) := by rfl; rw [hs, hdist_l]
+      rw [hs_pow, ihn, (hrsum_mul (n + 1) x _).2, (hrsum_mul (n + 1) y _).2]
+      set Tx : ℕ → α := fun k => rmul (rmul (sernau.rnat r0 r1 radd (choose n k)) (rmul (sernau.rpow_n r1 rmul x k) (sernau.rpow_n r1 rmul y (n - k)))) x with hTx
+      set Ty : ℕ → α := fun k => rmul (rmul (sernau.rnat r0 r1 radd (choose n k)) (rmul (sernau.rpow_n r1 rmul x k) (sernau.rpow_n r1 rmul y (n - k)))) y with hTy
+      rw [hrsum_s n Tx, hrsum_shift n Ty]
+      have hmid_con : ∀ k < n, radd (Tx k) (Ty (k + 1)) = rmul (sernau.rnat r0 r1 radd (choose (n + 1) (k + 1))) (rmul (sernau.rpow_n r1 rmul x (k + 1)) (sernau.rpow_n r1 rmul y (n + 1 - (k + 1))))
+        intro k hk; rw [hTx, hTy, choose_succ_succ, hb.2.2.2.2.2.1]; have hsub1 : n + 1 - (k + 1) = n - k := by omega; have hsub2 : n - k = (n - (k + 1)) + 1 := by omega
+        have hpx : sernau.rpow_n r1 rmul x (k + 1) = rmul (sernau.rpow_n r1 rmul x k) x := by rfl
+        have hpy : sernau.rpow_n r1 rmul y ((n - (k + 1)) + 1) = rmul (sernau.rpow_n r1 rmul y (n - (k + 1))) y := by rfl
+        rw [hsub1, hb.2.2.2.2.1 (sernau.rnat r0 r1 radd (choose n k)) (sernau.rnat r0 r1 radd (choose n (k + 1)))]
+        have ht1 : rmul (rmul (sernau.rnat r0 r1 radd (choose n k)) (rmul (sernau.rpow_n r1 rmul x k) (sernau.rpow_n r1 rmul y (n - k)))) x = rmul (sernau.rnat r0 r1 radd (choose n k)) (rmul (sernau.rpow_n r1 rmul x (k + 1)) (sernau.rpow_n r1 rmul y (n - k)))
+          rw [hpx, hmul_assoc (sernau.rnat r0 r1 radd (choose n k)), hmul_assoc (sernau.rpow_n r1 rmul x k) (sernau.rpow_n r1 rmul y (n - k)) x, hmul_comm (sernau.rpow_n r1 rmul y (n - k)) x, ← hmul_assoc (sernau.rpow_n r1 rmul x k) x]
+        have ht2 : rmul (rmul (sernau.rnat r0 r1 radd (choose n (k + 1))) (rmul (sernau.rpow_n r1 rmul x (k + 1)) (sernau.rpow_n r1 rmul y (n - (k + 1))))) y = rmul (sernau.rnat r0 r1 radd (choose n (k + 1))) (rmul (sernau.rpow_n r1 rmul x (k + 1)) (sernau.rpow_n r1 rmul y (n - k)))
+          rw [hsub2, hpy, hmul_assoc (sernau.rnat r0 r1 radd (choose n (k + 1))), hmul_assoc (sernau.rpow_n r1 rmul x (k + 1))]
+        rw [ht1, ht2]
+      set B_fn : ℕ → α := fun k => rmul (sernau.rnat r0 r1 radd (choose (n + 1) k)) (rmul (sernau.rpow_n r1 rmul x k) (sernau.rpow_n r1 rmul y (n + 1 - k))) with hB_def
+      have hB0 : Ty 0 = B_fn 0 := by rw [hTy, hB_def, choose_zero_right, choose_zero_right]; have hn0 : n - 0 = n := by omega; have hn10 : n + 1 - 0 = n + 1 := by omega; have hpy : sernau.rpow_n r1 rmul y (n + 1) = rmul (sernau.rpow_n r1 rmul y n) y := by rfl; rw [hn0, hn10, hpy, hmul_assoc (sernau.rnat r0 r1 radd 1), hmul_assoc (sernau.rpow_n r1 rmul x 0)]
+      have hBn1 : Tx n = B_fn (n + 1) := by rw [hTx, hB_def, choose_self n, choose_self (n + 1)]; have hnn : n - n = 0 := by omega; have hn11 : n + 1 - (n + 1) = 0 := by omega; have hpx : sernau.rpow_n r1 rmul x (n + 1) = rmul (sernau.rpow_n r1 rmul x n) x := by rfl; have hpy0 : sernau.rpow_n r1 rmul y 0 = r1 := by rfl; rw [hnn, hn11, hpy0, hpx, hmul_1, hmul_1, hmul_assoc]
+      have hmid_B : ∀ k < n, radd (Tx k) (Ty (k + 1)) = B_fn (k + 1) := by intro k hk; rw [hB_def]; exact hmid_con k hk
+      rw [hrsum_s (n + 1) B_fn, hrsum_shift n B_fn, ← hB0, ← hBn1, ← hrsum_congr n _ _ hmid_B, hrsum_add]
+      set STx := sernau.rsum r0 radd n Tx; set STy := sernau.rsum r0 radd n (fun k => Ty (k + 1))
+      rw [hadd_comm STx (Tx n), hadd_assoc (Tx n) STx (radd (Ty 0) STy), ← hadd_assoc STx (Ty 0) STy, hadd_comm STx (Ty 0), hadd_assoc (Ty 0) STx STy, hadd_comm (Tx n) (radd (Ty 0) (radd STx STy))]
+  have hfresh1 : ∀ x y : α, sernau.rpow_n r1 rmul (radd x y) p = radd (sernau.rpow_n r1 rmul x p) (sernau.rpow_n r1 rmul y p)
+    intro x y; rw [hbinom x y p]; have hp2 := hp.1; have hp_sp : p = (p - 1) + 1 := by omega
+    rw [hrsum_s p]
+    have hsh_p : sernau.rsum r0 radd p (fun k => rmul (sernau.rnat r0 r1 radd (choose p k)) (rmul (sernau.rpow_n r1 rmul x k) (sernau.rpow_n r1 rmul y (p - k)))) = radd (rmul (sernau.rnat r0 r1 radd (choose p 0)) (rmul (sernau.rpow_n r1 rmul x 0) (sernau.rpow_n r1 rmul y (p - 0)))) (sernau.rsum r0 radd (p - 1) (fun k => rmul (sernau.rnat r0 r1 radd (choose p (k + 1))) (rmul (sernau.rpow_n r1 rmul x (k + 1)) (sernau.rpow_n r1 rmul y (p - (k + 1))))))
+      have h := hrsum_shift (p - 1) (fun k => rmul (sernau.rnat r0 r1 radd (choose p k)) (rmul (sernau.rpow_n r1 rmul x k) (sernau.rpow_n r1 rmul y (p - k))))
+      rw [← hp_sp] at h; exact h
+    rw [hsh_p]
+    have hmid0 : sernau.rsum r0 radd (p - 1) (fun k => rmul (sernau.rnat r0 r1 radd (choose p (k + 1))) (rmul (sernau.rpow_n r1 rmul x (k + 1)) (sernau.rpow_n r1 rmul y (p - (k + 1))))) = r0
+      rw [hrsum_congr (p - 1) _ (fun _ => r0) (by intro k hk; rw [hb.2.2.2.2.2.2.1 (choose p (k + 1)) (prime.dvd_choose p (k + 1) hp (by omega) (by omega)), hb.2.2.2.1])]; exact hrsum_z (p - 1)
+    have h1_r : sernau.rnat r0 r1 radd 1 = r1 := by have hs : sernau.rnat r0 r1 radd 1 = radd r0 r1 := by rfl; rw [hs, hb.1]
+    have hp0_z : ∀ z : α, sernau.rpow_n r1 rmul z 0 = r1 := by intro _; rfl
+    have hp_z : p - 0 = p := by omega; have hpp : p - p = 0 := by omega
+    rw [hmid0, hadd_0, choose_zero_right, choose_self, h1_r, hp_z, hpp, hp0_z, hp0_z, hb.2.1, hb.2.1, hmul_1, hb.2.1, hadd_comm]
+  have hfresh_j : ∀ (x y : α) (j : ℕ), sernau.rpow_n r1 rmul (radd x y) (p ^ j) = radd (sernau.rpow_n r1 rmul x (p ^ j)) (sernau.rpow_n r1 rmul y (p ^ j))
+    intro x y j; induction j with r ihr; (rw [pow_zero.nat]; have h1 : ∀ z : α, sernau.rpow_n r1 rmul z 1 = z := by (intro z; have hs : sernau.rpow_n r1 rmul z 1 = rmul r1 z := by rfl; rw [hs, hb.2.1]); rw [h1, h1, h1])
+    rw [succ_eq_add_one.nat, pow_succ.nat, ← hb.2.2.2.2.2.2.2.2.1 _ (p ^ r) p, ihr, hfresh1, hb.2.2.2.2.2.2.2.2.1, hb.2.2.2.2.2.2.2.2.1]
+  have hfresh_sum : ∀ (M j : ℕ) (f : ℕ → α), sernau.rpow_n r1 rmul (sernau.rsum r0 radd M f) (p ^ j) = sernau.rsum r0 radd M (fun i => sernau.rpow_n r1 rmul (f i) (p ^ j))
+    intro M j f; induction M with m ihm
+    · rw [hrsum_0, hrsum_0]; have hp_pos := pow_pos.nat p j (by linarith [hp.1]); have hp1 : p ^ j = (p ^ j - 1) + 1 := by omega
+      rw [hp1]; have hs : sernau.rpow_n r1 rmul r0 ((p ^ j - 1) + 1) = rmul (sernau.rpow_n r1 rmul r0 (p ^ j - 1)) r0 := by rfl; rw [hs, hb.2.2.1]
+    · rw [succ_eq_add_one.nat, hrsum_s, hrsum_s, hfresh_j, ihm]
+  exact ⟨hfresh_j, hfresh_sum, hrsum_mul, hrsum_congr, hrsum_swap⟩
+
++ sernau.sum_pow_eq_zero_of_null (p J B e : ℕ) (rho : Prop) (r0 r1 : α) (radd : α → α → α) (rneg : α → α) (rmul : α → α → α) (t L : ℕ → α)
+    (hp : is_prime_nat p) (hR : sernau.is_char_p_ring p r0 r1 radd rneg rmul) (he : (e = 1 ∧ rho) ∨ e = 2)
+    (ht : ∀ i < J, radd (t i) (rneg (sernau.rpow_n r1 rmul (t i) (p ^ e))) = L i)
+    (ht0 : ∀ i < J, ∀ n : ℕ, B ≤ n → sernau.rpow_n r1 rmul (t i) (p ^ n) = r0)
+    (hq : ∀ j : ℕ, (j % 2 = 1 ∨ rho) → sernau.rsum r0 radd J (fun i => rmul (sernau.rpow_n r1 rmul (L i) (p ^ j)) (L i)) = r0) :
+    (sernau.rsum r0 radd J (fun i => sernau.rpow_n r1 rmul (t i) (p + 1)) = r0 ∧
+     sernau.rsum r0 radd J (fun i => sernau.rpow_n r1 rmul (t i) (p + p ^ e)) = r0)
+  have hb := sernau.char_p_ring_basic p r0 r1 radd rneg rmul hp hR; have hfr := sernau.char_p_freshman_dream p r0 r1 radd rneg rmul hp hR
+  obtain ⟨hadd_assoc, hadd_comm, hadd_0, hadd_neg, _, hmul_comm, _, _, _⟩ := hR
+  have he_ge1 : 1 ≤ e := by obtain h1 | h2 := he; (have h := h1.1; omega); omega
+  have ht_eq : ∀ i < J, t i = radd (L i) (sernau.rpow_n r1 rmul (t i) (p ^ e))
+    intro i hi
+    have h : radd (radd (t i) (rneg (sernau.rpow_n r1 rmul (t i) (p ^ e)))) (sernau.rpow_n r1 rmul (t i) (p ^ e)) = radd (L i) (sernau.rpow_n r1 rmul (t i) (p ^ e)) := by rw [ht i hi]
+    rw [hadd_assoc, hadd_comm (rneg (sernau.rpow_n r1 rmul (t i) (p ^ e))), hadd_neg, hadd_0] at h; exact h
+  have htel : ∀ i < J, ∀ K : ℕ, t i = radd (sernau.rsum r0 radd K (fun a => sernau.rpow_n r1 rmul (L i) (p ^ (e * a)))) (sernau.rpow_n r1 rmul (t i) (p ^ (e * K)))
+    intro i hi K; induction K with m ihm
+    · have h0 : sernau.rsum r0 radd 0 (fun a => sernau.rpow_n r1 rmul (L i) (p ^ (e * a))) = r0 := by rfl
+      have hm0 : e * 0 = 0 := by ring; have hp1 : sernau.rpow_n r1 rmul (t i) 1 = t i := by have hs : sernau.rpow_n r1 rmul (t i) 1 = rmul r1 (t i) := by rfl; rw [hs, hb.2.1]
+      rw [h0, hm0, pow_zero.nat, hp1, hb.1]
+    · rw [succ_eq_add_one.nat]; have hs : sernau.rsum r0 radd (m + 1) (fun a => sernau.rpow_n r1 rmul (L i) (p ^ (e * a))) = radd (sernau.rsum r0 radd m (fun a => sernau.rpow_n r1 rmul (L i) (p ^ (e * a)))) (sernau.rpow_n r1 rmul (L i) (p ^ (e * m))) := by rfl
+      have hstep_t : sernau.rpow_n r1 rmul (t i) (p ^ (e * m)) = radd (sernau.rpow_n r1 rmul (L i) (p ^ (e * m))) (sernau.rpow_n r1 rmul (t i) (p ^ (e * (m + 1))))
+        have h1 : sernau.rpow_n r1 rmul (t i) (p ^ (e * m)) = sernau.rpow_n r1 rmul (radd (L i) (sernau.rpow_n r1 rmul (t i) (p ^ e))) (p ^ (e * m)) := by rw [← ht_eq i hi]
+        rw [h1, hfr.1 _ _ (e * m), hb.2.2.2.2.2.2.2.2.1 (t i) (p ^ e) (p ^ (e * m)), ← pow_add.nat p e (e * m)]
+        have hm_s : e + e * m = e * (m + 1) := by ring
+        rw [hm_s]
+      rw [hs, hadd_assoc, ← hstep_t]; exact ihm
+  have ht_sum : ∀ i < J, t i = sernau.rsum r0 radd B (fun a => sernau.rpow_n r1 rmul (L i) (p ^ (e * a)))
+    intro i hi; rw [htel i hi B, ht0 i hi (e * B) (by have hm := mul_le_mul_of_nonneg_right.nat 1 e B he_ge1 (by omega); omega), hadd_0]
+  have hr0_pow : ∀ k : ℕ, 0 < k → sernau.rpow_n r1 rmul r0 k = r0 := by intro k hk; have hk1 : k = (k - 1) + 1 := by omega; rw [hk1]; have hs : sernau.rpow_n r1 rmul r0 ((k - 1) + 1) = rmul (sernau.rpow_n r1 rmul r0 (k - 1)) r0 := by rfl; rw [hs, hb.2.2.1]
+  have hpair_zero : ∀ u v : ℕ, ((u + v) % 2 = 1 ∨ rho) → sernau.rsum r0 radd J (fun i => rmul (sernau.rpow_n r1 rmul (L i) (p ^ u)) (sernau.rpow_n r1 rmul (L i) (p ^ v))) = r0
+    have hge : ∀ u v : ℕ, v ≤ u → ((u + v) % 2 = 1 ∨ rho) → sernau.rsum r0 radd J (fun i => rmul (sernau.rpow_n r1 rmul (L i) (p ^ u)) (sernau.rpow_n r1 rmul (L i) (p ^ v))) = r0
+      intro u v hvu huv; have hu_sp : u = (u - v) + v := by omega
+      have hpar : (u - v) % 2 = 1 ∨ rho := by obtain hod | hr := huv; (left; have h2v : u + v = (u - v) + 2 * v := by omega; rw [h2v, add_mul_mod.nat] at hod; exact hod); (right; exact hr)
+      rw [hfr.2.2.2.1 J _ (fun i => sernau.rpow_n r1 rmul (rmul (sernau.rpow_n r1 rmul (L i) (p ^ (u - v))) (L i)) (p ^ v)) (by intro i _; rw [hb.2.2.2.2.2.2.2.2.2, hb.2.2.2.2.2.2.2.2.1, ← pow_add.nat p (u - v) v, ← hu_sp]), ← hfr.2.1 J v, hq (u - v) hpar, hr0_pow (p ^ v) (pow_pos.nat p v (by linarith [hp.1]))]
+    intro u v huv; by_cases hvu : v ≤ u; exact hge u v hvu huv
+    rw [hfr.2.2.2.1 J _ (fun i => rmul (sernau.rpow_n r1 rmul (L i) (p ^ v)) (sernau.rpow_n r1 rmul (L i) (p ^ u))) (by intro i _; exact hmul_comm _ _)]
+    exact hge v u (by omega) (by have hc : v + u = u + v := by omega; rw [hc]; exact huv)
+  have hprod_van : ∀ s1 s2 : ℕ, (∀ a < B, ∀ b < B, ((e * a + s1 + (e * b + s2)) % 2 = 1 ∨ rho)) → sernau.rsum r0 radd J (fun i => sernau.rpow_n r1 rmul (t i) (p ^ s1 + p ^ s2)) = r0
+    intro s1 s2 hpar
+    have hcon_i : ∀ i < J, sernau.rpow_n r1 rmul (t i) (p ^ s1 + p ^ s2) = sernau.rsum r0 radd B (fun a => sernau.rsum r0 radd B (fun b => rmul (sernau.rpow_n r1 rmul (L i) (p ^ (e * a + s1))) (sernau.rpow_n r1 rmul (L i) (p ^ (e * b + s2)))))
+      intro i hi; rw [hb.2.2.2.2.2.2.2.1 (t i) (p ^ s1) (p ^ s2), ht_sum i hi, hfr.2.1 B s1, hfr.2.1 B s2, (hfr.2.2.1 B _ _).2]
+      apply hfr.2.2.2.1 B; intro a _; rw [(hfr.2.2.1 B _ _).1]; apply hfr.2.2.2.1 B; intro b _; rw [hb.2.2.2.2.2.2.2.2.1, hb.2.2.2.2.2.2.2.2.1, ← pow_add.nat, ← pow_add.nat]
+    have hz_B : ∀ M : ℕ, sernau.rsum r0 radd M (fun _ => r0) = r0 := by intro M; induction M with m ihm; rfl; (rw [succ_eq_add_one.nat]; have hs : sernau.rsum r0 radd (m + 1) (fun _ => r0) = radd (sernau.rsum r0 radd m (fun _ => r0)) r0 := by rfl; rw [hs, ihm, hadd_0])
+    rw [hfr.2.2.2.1 J _ _ hcon_i, hfr.2.2.2.2 J B, hfr.2.2.2.1 B _ (fun _ => r0) (by intro a ha; rw [hfr.2.2.2.2 J B, hfr.2.2.2.1 B _ (fun _ => r0) (by intro b hb; exact hpair_zero (e * a + s1) (e * b + s2) (hpar a ha b hb)), hz_B B]), hz_B B]
+  have hp1_e : p + 1 = p ^ 1 + p ^ 0 := by rw [pow_one.nat, pow_zero.nat]
+  have hp_pe : p + p ^ e = p ^ 1 + p ^ e := by rw [pow_one.nat]
+  rw [hp1_e, hp_pe]; constructor
+  · apply hprod_van 1 0; intro a _ b _; obtain h1 | h2 := he; (right; exact h1.2); (left; rw [h2]; have hre : 2 * a + 1 + (2 * b + 0) = 1 + 2 * (a + b) := by ring; rw [hre, add_mul_mod.nat]; decide)
+  · apply hprod_van 1 e; intro a _ b _; obtain h1 | h2 := he; (right; exact h1.2); (left; rw [h2]; have hre : 2 * a + 1 + (2 * b + 2) = 1 + 2 * (a + b + 1) := by ring; rw [hre, add_mul_mod.nat]; decide)
+
++ sernau.coeff_sum_frob_ne_zero_iff (p Phi_card J_card x : ℕ) (r_mat : ℕ → ℕ → ℕ) (d : ℕ → ℕ)
+    (hp : is_prime_nat p) (hx : x < Phi_card) (t_coeff : ℕ → (ℕ → ℕ) → ℕ)
+    (ht_frob_p : ∀ i < J_card, ∀ B : ℕ, (∑ v < Phi_card, d v) < p ^ (2 * B + 1) →
+      (t_coeff i d) % p = (∑ n < B, ∑ y < Phi_card, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)) then ((r_mat y i) ^ (p ^ (2 * n + 1))) else 0) % p) :
+    ((∑ i < J_card, t_coeff i d * r_mat x i) % p ≠ 0 ↔
+     ∃ (n y : ℕ), y < Phi_card ∧ (∑ i < J_card, ((r_mat y i) ^ (p ^ (2 * n + 1))) * r_mat x i) % p ≠ 0 ∧ (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)))
+  set D_tot := ∑ v < Phi_card, d v with hD_def; have hp2 : 2 ≤ p := hp.1
+  have hlt_s : ∀ k : ℕ, k < p ^ k := by intro k; induction k with m ihm; (rw [pow_zero.nat]; decide); (rw [succ_eq_add_one.nat, pow_succ.nat]; have hm1 := mul_le_mul_of_nonneg_right.nat (m + 1) (p ^ m) p (by omega) (by omega); have hm2 := mul_le_mul_of_nonneg_left.nat 2 p (m + 1) hp2 (by omega); omega)
+  have hlt_pow : D_tot < p ^ (2 * (D_tot + 1) + 1) := by have hle_p := le_of_dvd.nat (p ^ (2 * (D_tot + 1) + 1)) (p ^ D_tot) (pow_pos.nat p _ (by omega)) (pow_dvd_pow_of_le p D_tot (2 * (D_tot + 1) + 1) (by omega) (by omega)); have h := hlt_s D_tot; omega
+  set B := D_tot + 1
+  have hmod_sum : (∑ i < J_card, t_coeff i d * r_mat x i) % p =
+      (∑ n < B, ∑ y < Phi_card, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)) then (∑ i < J_card, ((r_mat y i) ^ (p ^ (2 * n + 1))) * r_mat x i) else 0) % p
+    have h1 : ∀ M : ℕ, M ≤ J_card → (∑ i < M, t_coeff i d * r_mat x i) % p =
+        (∑ i < M, (∑ n < B, ∑ y < Phi_card, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)) then ((r_mat y i) ^ (p ^ (2 * n + 1))) * r_mat x i else 0)) % p
+      intro M; induction M with _ m ihm hmJ; rfl
+      rw [succ_eq_add_one.nat] at hmJ ⊢; rw [sum_below_succ, sum_below_succ, add_mod.nat, ihm (by omega)]
+      have hmul_in : (∑ k < B, ∑ y < Phi_card, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * k + 1) else 0)) then ((r_mat y m) ^ (p ^ (2 * k + 1))) * r_mat x m else 0) =
+          (∑ k < B, ∑ y < Phi_card, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * k + 1) else 0)) then ((r_mat y m) ^ (p ^ (2 * k + 1))) else 0) * r_mat x m
+        rw [← sum_mul_const.nat]; apply sum_below.congr; intro k _; rw [← sum_mul_const.nat]; apply sum_below.congr; intro y _
+        by_cases hc : ∀ u < Phi_card, d u = (if u = y then p ^ (2 * k + 1) else 0); (rw [if_pos hc, if_pos hc]); (rw [if_neg hc, if_neg hc]; ring)
+      have htm_mod : (t_coeff m d * r_mat x m) % p =
+          ((∑ k < B, ∑ y < Phi_card, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * k + 1) else 0)) then ((r_mat y m) ^ (p ^ (2 * k + 1))) else 0) * r_mat x m) % p
+        rw [mul_mod.nat (t_coeff m d) (r_mat x m) p, ht_frob_p m (by omega) B hlt_pow, ← mul_mod.nat]
+      rw [hmul_in, ← add_mod.nat _ _ p, add_mod.nat _ (t_coeff m d * r_mat x m) p, htm_mod, ← add_mod.nat]
+    rw [h1 J_card (by omega)]
+    have hsw_nat : (∑ i < J_card, ∑ n < B, ∑ y < Phi_card, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)) then ((r_mat y i) ^ (p ^ (2 * n + 1))) * r_mat x i else 0) =
+        ∑ n < B, ∑ y < Phi_card, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)) then (∑ i < J_card, ((r_mat y i) ^ (p ^ (2 * n + 1))) * r_mat x i) else 0
+      rw [sum_swap.nat]; apply sum_below.congr; intro n _; rw [sum_swap.nat]; apply sum_below.congr; intro y _
+      by_cases hc : ∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0); (rw [if_pos hc]; apply sum_below.congr; intro i _; rw [if_pos hc])
+      rw [if_neg hc]
+      have hz_J : ∀ K : ℕ, (∑ i < K, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)) then ((r_mat y i) ^ (p ^ (2 * n + 1))) * r_mat x i else 0) = 0 := by intro K; induction K with m ihm; rw [sum_below_zero]; (rw [succ_eq_add_one.nat, sum_below_succ, ihm, if_neg hc]; omega)
+      exact hz_J J_card
+    rw [hsw_nat]
+  have huniq : ∀ n1 y1 n2 y2 : ℕ, y1 < Phi_card → y2 < Phi_card → (∀ u < Phi_card, d u = (if u = y1 then p ^ (2 * n1 + 1) else 0)) → (∀ u < Phi_card, d u = (if u = y2 then p ^ (2 * n2 + 1) else 0)) → n1 = n2 ∧ y1 = y2
+    intro n1 y1 n2 y2 hy1 hy2 h1 h2; have hd1 := h1 y1 hy1; rw [if_pos (by rfl)] at hd1; have hd2 := h2 y1 hy1; have hp_pos := pow_pos.nat p (2 * n1 + 1) (by omega)
+    have hy_eq : y1 = y2 := by by_contra hne; rw [if_neg hne] at hd2; omega
+    rw [hd1, hy_eq, if_pos (by rfl)] at hd2; obtain ⟨_, he_eq⟩ := sernau.prime_pow_unique p (2 * n1 + 1) p (2 * n2 + 1) hp hp (by omega) (by omega) hd2; exact ⟨by omega, hy_eq⟩
+  have hsing1 : ∀ (M idx : ℕ) (f : ℕ → ℕ), idx < M → (∀ k < M, k ≠ idx → f k = 0) → (∑ k < M, f k) = f idx
+    intro M idx f; induction M with _ _ m ihm hlt hz; omega
+    rw [succ_eq_add_one.nat] at hlt ⊢; rw [sum_below_succ]; by_cases him : idx < m; (rw [ihm him (by intro k hk hne; exact hz k (by omega) hne), hz m (by omega) (by omega)]; omega)
+    have he : m = idx := by omega
+    have hz0 : ∀ K : ℕ, K ≤ idx → (∑ k < K, f k) = 0 := by intro K; induction K with _ l ihl hl; rw [sum_below_zero]; (rw [succ_eq_add_one.nat] at hl ⊢; rw [sum_below_succ, ihl (by omega), hz l (by omega) (by omega)]; omega)
+    rw [he, hz0 idx (by omega)]; omega
+  rw [hmod_sum]; constructor
+  · intro hnz; by_contra hno
+    have hall0 : ∀ n < B, ∀ y < Phi_card, (if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)) then (∑ i < J_card, ((r_mat y i) ^ (p ^ (2 * n + 1))) * r_mat x i) else 0) % p = 0
+      intro n _ y hy; by_cases hc : ∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0); (rw [if_pos hc]; by_contra hnz_ny; exact hno ⟨n, y, hy, hnz_ny, hc⟩); (rw [if_neg hc, (div_mod_of_lt.nat 0 p (by omega)).2])
+    have hsum0 : ∀ M : ℕ, M ≤ B → (∑ n < M, ∑ y < Phi_card, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)) then (∑ i < J_card, ((r_mat y i) ^ (p ^ (2 * n + 1))) * r_mat x i) else 0) % p = 0
+      intro M; induction M with _ m ihm hmB; (rw [sum_below_zero, (div_mod_of_lt.nat 0 p (by omega)).2])
+      rw [succ_eq_add_one.nat] at hmB ⊢; rw [sum_below_succ, add_mod.nat, ihm (by omega)]
+      have hy0 : ∀ K : ℕ, K ≤ Phi_card → (∑ y < K, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * m + 1) else 0)) then (∑ i < J_card, ((r_mat y i) ^ (p ^ (2 * m + 1))) * r_mat x i) else 0) % p = 0
+        intro K; induction K with _ l ihl hl; (rw [sum_below_zero, (div_mod_of_lt.nat 0 p (by omega)).2]); (rw [succ_eq_add_one.nat] at hl ⊢; rw [sum_below_succ, add_mod.nat, ihl (by omega), hall0 m (by omega) l (by omega), zero_add.nat, (div_mod_of_lt.nat 0 p (by omega)).2])
+      rw [hy0 Phi_card (by omega), zero_add.nat, (div_mod_of_lt.nat 0 p (by omega)).2]
+    exact hnz (hsum0 B (by omega))
+  · intro ⟨n0, y0, hy0, hnz0, hd0⟩
+    have hn0_lt_B : n0 < B
+      have hdy0 := hd0 y0 hy0; rw [if_pos (by rfl)] at hdy0
+      have hle_sum : ∀ K : ℕ, y0 < K → d y0 ≤ ∑ v < K, d v
+        intro K; induction K with _ m ihm hlt; omega
+        rw [succ_eq_add_one.nat] at hlt ⊢; rw [sum_below_succ]
+        by_cases hym : y0 < m; (have h := ihm hym; omega); (have he : m = y0 := by omega; rw [he]; omega)
+      have hd_ge : d y0 ≤ D_tot := by rw [hD_def]; exact hle_sum Phi_card hy0
+      have hn_le := hlt_s (2 * n0 + 1); omega
+    have hz_other_n : ∀ n < B, n ≠ n0 → (∑ y < Phi_card, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)) then (∑ i < J_card, ((r_mat y i) ^ (p ^ (2 * n + 1))) * r_mat x i) else 0) = 0
+      intro n _ hnn
+      have hz_y : ∀ K : ℕ, K ≤ Phi_card → (∑ y < K, if (∀ u < Phi_card, d u = (if u = y then p ^ (2 * n + 1) else 0)) then (∑ i < J_card, ((r_mat y i) ^ (p ^ (2 * n + 1))) * r_mat x i) else 0) = 0
+        intro K; induction K with _ l ihl hl; rw [sum_below_zero]
+        rw [succ_eq_add_one.nat] at hl ⊢; rw [sum_below_succ, ihl (by omega), if_neg (by intro hdl; exact hnn (huniq n l n0 y0 (by omega) hy0 hdl hd0).1)]; omega
+      exact hz_y Phi_card (by omega)
+    rw [hsing1 B n0 _ hn0_lt_B hz_other_n]
+    rw [hsing1 Phi_card y0 _ hy0 (by intro y hy hny; rw [if_neg (by intro hdy; exact hny (huniq n0 y n0 y0 hy hy0 hdy hd0).2)]), if_pos hd0]; exact hnz0
+

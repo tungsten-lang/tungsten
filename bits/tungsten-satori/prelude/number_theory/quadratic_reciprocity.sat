@@ -1,0 +1,724 @@
+-- Milestone 3.48: Legendre Symbol, Euler's Criterion, Gauss's Lemma, 1st & 2nd Supplements,
+--                 & Gauss's Law of Quadratic Reciprocity (Eisenstein's Proof)!
+--
+-- Compressed using `prelude/finite_field.sat` (`fp.*`, `fin_prod.bij`, `fin_sum.bij`,
+-- `wilson.theorem`, `fp_poly.roots_le_deg`, `not_dvd_of_pos_lt`), polymorphic `if_pos`/`if_neg`,
+-- and Satori's upgraded `omega` (ZERO custom axioms!).
+
+import finite_field
+
++ odd_prime_ge_three (p : ℕ) (hp : 2 ≤ p) (hodd : p % 2 = 1) :
+    3 ≤ p ∧ 2 * ((p - 1) / 2) = p - 1
+  have hp3 : 3 ≤ p := by by_cases hp2 : p = 2; (rw [hp2] at hodd; omega); omega
+  have hd := (div_mod_unique.nat (p - 1) 2 (p / 2) 0 (by omega) (by decide)).1
+  exact ⟨hp3, by omega⟩
+
+-- Helper: if p >= 3 divides z in Z and -2 <= z <= 2, then z = 0!
++ int_dvd.eq_zero_of_abs_le_two (p : ℕ) (z : ℤ) (hp3 : 3 ≤ p)
+    (hlo : -2 ≤ z) (hhi : z ≤ 2) (hd : int_dvd p z) : z = 0
+  obtain ⟨q, hq⟩ := hd
+  by_cases hq0 : q = 0
+  · rw [hq0] at hq; linarith
+  · by_cases hqp : 0 < q
+    · have hge := mul_le_mul_of_nonneg_left.int 1 q (p : ℤ) (by omega) (by omega); linarith
+    · have hle := mul_le_mul_of_nonneg_left.int q (-1) (p : ℤ) (by omega) (by omega); nlinarith
+
+-- Helper: distinct primes do not divide each other!
++ distinct_primes_not_dvd (p q : ℕ) (hp_pr : is_prime_nat p) (hq_pr : is_prime_nat q) (hne : p ≠ q) :
+    ¬ (p ∣ q)
+  have hp : 2 ≤ p := hp_pr.1
+  have hq : 2 ≤ q := hq_pr.1
+  intro hd; obtain ⟨k, hk⟩ := (dvd.iff_exists p q (by omega)).mp hd
+  by_cases hk0 : k = 0
+  · rw [hk0] at hk; omega
+  · by_cases hk1 : k = 1
+    · rw [hk1] at hk; omega
+    · obtain ha | hb := hq_pr.2 p k ((dvd.iff_exists q (p * k) (by omega)).mpr ⟨1, by omega⟩)
+      · have h1 := le_of_dvd.nat p q (by omega) ha
+        have h2 := mul_le_mul_of_nonneg_left.nat 2 k p (by omega) (by omega); omega
+      · have h1 := le_of_dvd.nat k q (by omega) hb
+        have h2 := mul_le_mul_of_nonneg_right.nat 2 p k hp (by omega); omega
+
+-- ====================================================================================
+-- 1. Legendre Symbol, Euler's Criterion, & Multiplicativity (0 CUSTOM AXIOMS!)
+-- ====================================================================================
+
+-> is_qr (p a : ℕ) : Prop := ∃ x < p, (x * x) % p = a % p
+
+-> legendre_sym (p a : ℕ) : ℤ :=
+  if p ∣ a then 0 else if is_qr p a then 1 else -1
+
++ qr_count_ge_half (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    (p - 1) / 2 ≤ ∑ y < p, if (1 ≤ y ∧ is_qr p y) then (1 : ℕ) else 0
+  have hp : 2 ≤ p := hprime.1
+  have hodd_p := odd_prime_ge_three p hp hodd
+  set m := (p - 1) / 2 with hm_def
+  have h2m : 2 * m = p - 1 := hodd_p.2
+  set f : ℕ → ℕ := fun i => ((i + 1) * (i + 1)) % p with hf_def
+  have hf_lt : ∀ i < m, 1 ≤ f i ∧ f i < p
+    intro i hi; rw [hf_def]
+    have hlt := mod_lt.nat ((i + 1) * (i + 1)) p (by omega)
+    have hpos : 1 ≤ ((i + 1) * (i + 1)) % p
+      by_contra h0; have hd : p ∣ ((i + 1) * (i + 1)) := by unfold dvd; omega
+      obtain h1 | h2 := hprime.2 (i + 1) (i + 1) hd
+      · exact not_dvd_of_pos_lt p (i + 1) (by omega) (by omega) h1
+      · exact not_dvd_of_pos_lt p (i + 1) (by omega) (by omega) h2
+    exact ⟨hpos, hlt⟩
+  have hf_qr : ∀ i < m, is_qr p (f i) := by intro i hi; unfold is_qr; exact ⟨i + 1, by omega, by rw [hf_def, zmod.mod_mod]⟩
+  have hf_inj : ∀ i < m, ∀ j < m, f i = f j → i = j
+    intro i hi j hj heq; rw [hf_def] at heq
+    have hcases : ∀ a b : ℕ, 1 ≤ a → a ≤ m → 1 ≤ b → b ≤ m → b ≤ a → (a * a) % p = (b * b) % p → a = b
+      intro a b ha1 ham hb1 hbm hab hsq
+      have hdvd : p ∣ (a * a - b * b) := (mod_eq_iff_dvd_sub p (a * a) (b * b) (by omega) (by nlinarith)).mp hsq
+      have hfac : a * a - b * b = (a - b) * (a + b)
+        set d := a - b; have ha : a = d + b := by omega
+        have h1 : a * a = d * (a + b) + b * b := by rw [ha]; ring
+        omega
+      rw [hfac] at hdvd
+      obtain h1 | h2 := hprime.2 (a - b) (a + b) hdvd
+      · by_cases he : a = b
+        · exact he
+        · exfalso; exact not_dvd_of_pos_lt p (a - b) (by omega) (by omega) h1
+      · exfalso; exact not_dvd_of_pos_lt p (a + b) (by omega) (by omega) h2
+    by_cases hij : j ≤ i
+    · have h := hcases (i + 1) (j + 1) (by omega) (by omega) (by omega) (by omega) (by omega) heq; omega
+    · have h := hcases (j + 1) (i + 1) (by omega) (by omega) (by omega) (by omega) (by omega) heq.symm; omega
+  have hsum_m := fiber_count.sum_eq p m f (by intro i hi; exact (hf_lt i hi).2)
+  have hfib_le : ∀ y < p, fiber_count m f y ≤ if (1 ≤ y ∧ is_qr p y) then (1 : ℕ) else 0
+    intro y hy
+    by_cases hqr : 1 ≤ y ∧ is_qr p y
+    · rw [if_pos hqr]
+      by_contra hgt
+      obtain ⟨u1, u2, h12, h2m', hf1, hf2⟩ := fiber_count.exists_pair_of_ge_two m f y (by omega)
+      have heq := hf_inj u1 (by omega) u2 h2m' (by rw [hf1, hf2]); omega
+    · rw [if_neg hqr]; unfold fiber_count
+      have hz : ∀ t ≤ m, (∑ u < t, if f u = y then (1 : ℕ) else 0) = 0
+        intro t ht; induction t with ht r ihr ht
+        · rw [sum_below_zero]
+        · rw [succ_eq_add_one.nat] at ht ⊢; rw [sum_below_succ, ihr (by omega)]
+          have hne : f r ≠ y := by intro he; apply hqr; rw [← he]; exact ⟨(hf_lt r (by omega)).1, hf_qr r (by omega)⟩
+          rw [if_neg hne]; omega
+      rw [hz m (by omega)]; omega
+  have hle_tot : ∀ t ≤ p, (∑ y < t, fiber_count m f y) ≤ ∑ y < t, if (1 ≤ y ∧ is_qr p y) then (1 : ℕ) else 0
+    intro t ht; induction t with ht r ihr ht
+    · rw [sum_below_zero, sum_below_zero]; omega
+    · rw [succ_eq_add_one.nat] at ht ⊢; rw [sum_below_succ, sum_below_succ]
+      have h1 := ihr (by omega); have h2 := hfib_le r (by omega); omega
+  have hfin := hle_tot p (by omega); omega
+
+-- EULER'S CRITERION (0 CUSTOM AXIOMS!):
++ euler.criterion (p a : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) (hnd : ¬ (p ∣ a)) :
+    ((a ^ ((p - 1) / 2)) % p = 1 ↔ is_qr p a) ∧
+    ((a ^ ((p - 1) / 2)) % p = p - 1 ↔ ¬ is_qr p a) ∧
+    int_dvd p ((((a ^ ((p - 1) / 2) : ℕ) : ℤ) - legendre_sym p a))
+  have hp : 2 ≤ p := hprime.1
+  have hodd_p := odd_prime_ge_three p hp hodd
+  have hp3 : 3 ≤ p := hodd_p.1
+  set m := (p - 1) / 2 with hm_def
+  have h2m : 2 * m = p - 1 := hodd_p.2
+  have hpow_dichot : ∀ y : ℕ, ¬ (p ∣ y) → (y ^ m) % p = 1 ∨ (y ^ m) % p = p - 1
+    intro y hndy
+    have hflt := fp.pow_p_sub_one p y hprime hndy
+    have hsq : (y ^ m * y ^ m) % p = 1
+      rw [← pow_add.nat]; have ha : m + m = p - 1 := by omega; rw [ha]; exact hflt
+    set r := (y ^ m) % p with hr_def
+    have hr_lt : r < p := by rw [hr_def]; exact mod_lt.nat (y ^ m) p (by omega)
+    have hr_sq : (r * r) % p = 1 := by rw [hr_def, ← mul_mod.nat (y ^ m) (y ^ m) p]; exact hsq
+    have hr_pos : 1 ≤ r
+      by_contra h0; have hz : r = 0 := by omega
+      rw [hz, zero_mul.nat, (div_mod_of_lt.nat 0 p (by omega)).2] at hr_sq; omega
+    exact (fp.sq_eq_one_iff p r hprime hr_pos hr_lt).mp hr_sq
+  have hqr_imp : ∀ y : ℕ, ¬ (p ∣ y) → is_qr p y → (y ^ m) % p = 1
+    intro y hndy hqr; obtain ⟨x, hxp, hsq⟩ := hqr
+    have hnd_x : ¬ (p ∣ x)
+      intro hdx; apply hndy
+      have hdx2 := dvd.mul_right_nat p x x (by omega) hdx
+      unfold dvd at hdx2 ⊢; rw [← hsq]; exact hdx2
+    have hpow_mod : ∀ k : ℕ, ((x * x) ^ k) % p = (y ^ k) % p
+      intro k; induction k with r ihr
+      · rw [pow_zero.nat, pow_zero.nat]
+      · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat, mul_mod.nat ((x * x) ^ r) (x * x) p, mul_mod.nat (y ^ r) y p, ihr, hsq]
+    have hxx_pow : (x * x) ^ m = x ^ (p - 1)
+      have hgen : ∀ k : ℕ, (x * x) ^ k = x ^ (2 * k)
+        intro k; induction k with r ihr
+        · rw [pow_zero.nat]; have h0 : 2 * 0 = 0 := by decide; rw [h0, pow_zero.nat]
+        · rw [succ_eq_add_one.nat, pow_succ.nat, ihr]
+          have h2 : 2 * (r + 1) = (2 * r + 1) + 1 := by omega
+          rw [h2, pow_succ.nat, pow_succ.nat]; ring
+      rw [hgen m, h2m]
+    rw [← hpow_mod m, hxx_pow]; exact fp.pow_p_sub_one p x hprime hnd_x
+  set c : ℕ → ℤ := fun k => if k = m then 1 else if k = 0 then -1 else 0 with hc_def
+  have hlead : ¬ int_dvd p (c m)
+    have hmm : m = m := rfl
+    rw [hc_def, if_pos hmm]
+    intro hd; have hz := int_dvd.eq_zero_of_abs_le_two p 1 hp3 (by omega) (by omega) hd; omega
+  have hroots_le := fp_poly.roots_le_deg p hprime m c hlead
+  have heval_c : ∀ y : ℕ, zpoly.eval m c (y : ℤ) = ((y ^ m : ℕ) : ℤ) - 1
+    intro y; unfold zpoly.eval
+    rw [sum_below_succ m (fun k => c k * (y : ℤ) ^ k)]
+    have hmm : m = m := rfl
+    have htop : c m * (y : ℤ) ^ m = ((y ^ m : ℕ) : ℤ) := by rw [hc_def, if_pos hmm, cast_pow.int]; ring
+    have hbot : (∑ k < m, c k * (y : ℤ) ^ k) = -1
+      have hgen : ∀ t : ℕ, 1 ≤ t → t ≤ m → (∑ k < t, c k * (y : ℤ) ^ k) = -1
+        intro t ht htm; induction t with ht htm r ihr ht htm
+        · omega
+        · rw [succ_eq_add_one.nat] at ht htm ⊢; rw [sum_below_succ]
+          by_cases hr0 : r = 0
+          · have hne : 0 ≠ m := by omega; have h00 : (0 : ℕ) = 0 := rfl
+            rw [hr0, sum_below_zero, pow_zero.int, hc_def, if_neg hne, if_pos h00]; ring
+          · have hne1 : r ≠ m := by omega
+            rw [ihr (by omega) (by omega), hc_def, if_neg hne1, if_neg hr0]; ring
+      exact hgen m (by omega) (by omega)
+    rw [htop, hbot]; ring
+  have hqr_root : ∀ y < p, (1 ≤ y ∧ is_qr p y) → int_dvd p (zpoly.eval m c (y : ℤ))
+    intro y hyp hy; rw [heval_c y, ← cast_one.int]
+    have h1 := hqr_imp y (not_dvd_of_pos_lt p y (by omega) hyp) hy.2
+    exact int_dvd.of_nat_mod p (y ^ m) 1 (by omega) (by rw [h1, (div_mod_of_lt.nat 1 p (by omega)).2])
+  have hroot_imp_qr : ∀ y < p, int_dvd p (zpoly.eval m c (y : ℤ)) → is_qr p y
+    intro y hyp hroot; by_contra hnqr
+    have hnot : ¬ (1 ≤ y ∧ is_qr p y) := by intro h; exact hnqr h.2
+    have hcount_qr := qr_count_ge_half p hprime hodd
+    rw [← hm_def] at hcount_qr
+    have hgen : ∀ t ≤ p, (∑ z < t, if (1 ≤ z ∧ is_qr p z) then (1 : ℕ) else 0) + (if y < t then (1 : ℕ) else 0) ≤ ∑ z < t, if int_dvd p (zpoly.eval m c (z : ℤ)) then (1 : ℕ) else 0
+      intro t ht; induction t with ht r ihr ht
+      · rw [sum_below_zero, sum_below_zero]; have hnl : ¬ (y < 0) := by omega; rw [if_neg hnl]; omega
+      · rw [succ_eq_add_one.nat] at ht ⊢; rw [sum_below_succ, sum_below_succ]
+        have hprev := ihr (by omega)
+        by_cases hry : r = y
+        · rw [hry] at hprev ⊢
+          have hnl : ¬ (y < y) := by omega; have hlt : y < y + 1 := by omega
+          rw [if_neg hnl] at hprev
+          rw [if_pos hlt, if_neg hnot, if_pos hroot]; omega
+        · have hpoint : (if (1 ≤ r ∧ is_qr p r) then (1 : ℕ) else 0) ≤ if int_dvd p (zpoly.eval m c (r : ℤ)) then (1 : ℕ) else 0
+            by_cases hrq : 1 ≤ r ∧ is_qr p r
+            · rw [if_pos hrq, if_pos (hqr_root r (by omega) hrq)]; omega
+            · rw [if_neg hrq]; omega
+          by_cases hyl : y < r
+          · have hyl1 : y < r + 1 := by omega
+            rw [if_pos hyl] at hprev; rw [if_pos hyl1]; omega
+          · have hyl1 : ¬ (y < r + 1) := by omega
+            rw [if_neg hyl] at hprev; rw [if_neg hyl1]; omega
+    have htot := hgen p (by omega); rw [if_pos hyp] at htot; omega
+  have hiff1 : (a ^ m) % p = 1 ↔ is_qr p a
+    constructor
+    · intro h1
+      set am := a % p with ham_def
+      have ham_lt : am < p := by rw [ham_def]; exact mod_lt.nat a p (by omega)
+      have hpow_am : (am ^ m) % p = (a ^ m) % p
+        have hgen : ∀ k : ℕ, (am ^ k) % p = (a ^ k) % p
+          intro k; induction k with r ihr
+          · rw [pow_zero.nat, pow_zero.nat]
+          · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat, mul_mod.nat (am ^ r) am p, mul_mod.nat (a ^ r) a p, ihr, ham_def, zmod.mod_mod]
+        exact hgen m
+      have hroot_am : int_dvd p (zpoly.eval m c (am : ℤ))
+        rw [heval_c am, ← cast_one.int]
+        exact int_dvd.of_nat_mod p (am ^ m) 1 (by omega) (by rw [hpow_am, h1, (div_mod_of_lt.nat 1 p (by omega)).2])
+      obtain ⟨x, hxp, hsq⟩ := hroot_imp_qr am ham_lt hroot_am
+      rw [ham_def, zmod.mod_mod] at hsq
+      exact ⟨x, hxp, hsq⟩
+    · exact hqr_imp a hnd
+  have hiff2 : (a ^ m) % p = p - 1 ↔ ¬ is_qr p a
+    have hdich := hpow_dichot a hnd
+    constructor
+    · intro hpm1 hqr; have h1 := hiff1.mpr hqr; omega
+    · intro hnqr; obtain h1 | h2 := hdich; (exfalso; exact hnqr (hiff1.mp h1)); exact h2
+  constructor; exact hiff1
+  constructor; exact hiff2
+  by_cases hqr : is_qr p a
+  · have hleg : legendre_sym p a = 1 := by unfold legendre_sym; simp [hnd, hqr]
+    rw [hleg, ← cast_one.int]
+    exact int_dvd.of_nat_mod p (a ^ m) 1 (by omega) (by rw [hiff1.mpr hqr, (div_mod_of_lt.nat 1 p (by omega)).2])
+  · have hleg : legendre_sym p a = -1 := by unfold legendre_sym; simp [hnd, hqr]
+    rw [hleg]
+    obtain ⟨q, hq⟩ := int_dvd.of_nat_mod p (a ^ m) (p - 1) (by omega) (by rw [hiff2.mpr hqr, (div_mod_of_lt.nat (p - 1) p (by omega)).2])
+    use q + 1
+    have hp1 : (p - 1) + 1 = p := by omega
+    linarith
+
+-- Multiplicativity of the Legendre Symbol:
++ legendre_sym.mul (p a b : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    legendre_sym p (a * b) = legendre_sym p a * legendre_sym p b
+  have hp : 2 ≤ p := hprime.1
+  have hp3 : 3 ≤ p := (odd_prime_ge_three p hp hodd).1
+  by_cases hda : p ∣ a
+  · have hdab := dvd.mul_right_nat p a b (by omega) hda; unfold legendre_sym; simp [hdab, hda]
+  · by_cases hdb : p ∣ b
+    · have hdab := dvd.mul_left_nat p a b (by omega) hdb; unfold legendre_sym; simp [hdab, hdb]
+    · have hndab : ¬ (p ∣ (a * b)) := by intro hd; obtain h1 | h2 := hprime.2 a b hd; exact hda h1; exact hdb h2
+      obtain ⟨qa, hqa⟩ := ((euler.criterion p a hprime hodd hda).2).2
+      obtain ⟨qb, hqb⟩ := ((euler.criterion p b hprime hodd hdb).2).2
+      obtain ⟨qab, hqab⟩ := ((euler.criterion p (a * b) hprime hodd hndab).2).2
+      set m := (p - 1) / 2
+      have hmul_pow : (a * b) ^ m = a ^ m * b ^ m
+        have hgen : ∀ k : ℕ, (a * b) ^ k = a ^ k * b ^ k
+          intro k; induction k with r ihr
+          · rw [pow_zero.nat, pow_zero.nat, pow_zero.nat]; ring
+          · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat, pow_succ.nat, ihr]; ring
+        exact hgen m
+      rw [hmul_pow, cast_mul.int] at hqab
+      have hdiff_dvd : int_dvd p (legendre_sym p (a * b) - legendre_sym p a * legendre_sym p b) :=
+        ⟨((b ^ m : ℕ) : ℤ) * qa + legendre_sym p a * qb - qab,
+          by linear_combination ((b ^ m : ℕ) : ℤ) * hqa + legendre_sym p a * hqb - hqab⟩
+      have hbd : ∀ x : ℕ, ¬ (p ∣ x) → legendre_sym p x = 1 ∨ legendre_sym p x = -1 := by intro x hndx; unfold legendre_sym; by_cases hq : is_qr p x; (left; simp [hndx, hq]); (right; simp [hndx, hq])
+      have ha1 := hbd a hda; have hb1 := hbd b hdb; have hab1 := hbd (a * b) hndab
+      have hr : -2 ≤ legendre_sym p (a * b) - legendre_sym p a * legendre_sym p b ∧
+          legendre_sym p (a * b) - legendre_sym p a * legendre_sym p b ≤ 2
+        obtain ha_1 | ha_m := ha1
+        · obtain hb_1 | hb_m := hb1
+          · rw [ha_1, hb_1]; omega
+          · rw [ha_1, hb_m]; omega
+        · obtain hb_1 | hb_m := hb1
+          · rw [ha_m, hb_1]; omega
+          · rw [ha_m, hb_m]; omega
+      have hz := int_dvd.eq_zero_of_abs_le_two p _ hp3 hr.1 hr.2 hdiff_dvd
+      linarith
+
+-- ====================================================================================
+-- 2. Gauss's Lemma, 1st & 2nd Supplements, & Gauss's Law of Quadratic Reciprocity!
+-- ====================================================================================
+
+-> neg_one_pow (k : ℕ) : ℤ := if k % 2 = 0 then 1 else -1
+
++ neg_one_pow.add (a b : ℕ) : neg_one_pow (a + b) = neg_one_pow a * neg_one_pow b
+  unfold neg_one_pow
+  by_cases ha : a % 2 = 0
+  · by_cases hb : b % 2 = 0
+    · have hab : (a + b) % 2 = 0 := (div_mod_unique.nat (a + b) 2 (a / 2 + b / 2) 0 (by omega) (by decide)).2.symm
+      simp [ha, hb, hab]
+    · have hab : (a + b) % 2 ≠ 0
+        have hm := (div_mod_unique.nat (a + b) 2 (a / 2 + b / 2) 1 (by omega) (by decide)).2.symm; omega
+      simp [ha, hb, hab]
+  · by_cases hb : b % 2 = 0
+    · have hab : (a + b) % 2 ≠ 0
+        have hm := (div_mod_unique.nat (a + b) 2 (a / 2 + b / 2) 1 (by omega) (by decide)).2.symm; omega
+      simp [ha, hb, hab]
+    · have hab : (a + b) % 2 = 0 := (div_mod_unique.nat (a + b) 2 (a / 2 + b / 2 + 1) 0 (by omega) (by decide)).2.symm
+      simp [ha, hb, hab]
+
++ neg_one_pow.of_mod_eq (a b : ℕ) (h : a % 2 = b % 2) : neg_one_pow a = neg_one_pow b
+  unfold neg_one_pow; rw [h]
+
+-> gauss_mu (p a : ℕ) : ℕ :=
+  ∑ i < (p - 1) / 2, if (p - 1) / 2 < (a * (i + 1)) % p then (1 : ℕ) else 0
+
+-> gauss_abs_idx (p a i : ℕ) : ℕ :=
+  (if (a * (i + 1)) % p ≤ (p - 1) / 2 then (a * (i + 1)) % p else p - (a * (i + 1)) % p) - 1
+
++ gauss_rem_pos_lt (p a i : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) (hnd : ¬ (p ∣ a))
+    (hi : i < (p - 1) / 2) : 1 ≤ (a * (i + 1)) % p ∧ (a * (i + 1)) % p < p
+  have hp : 2 ≤ p := hprime.1
+  have hlt := mod_lt.nat (a * (i + 1)) p (by omega)
+  have hpos : 1 ≤ (a * (i + 1)) % p
+    by_contra h0; have hd : p ∣ (a * (i + 1)) := by unfold dvd; omega
+    obtain h1 | h2 := hprime.2 a (i + 1) hd
+    · exact hnd h1
+    · exact not_dvd_of_pos_lt p (i + 1) (by omega) (by omega) h2
+  exact ⟨hpos, hlt⟩
+
++ gauss_abs_idx.bijection (p a : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) (hnd : ¬ (p ∣ a)) :
+    (∀ i < (p - 1) / 2, gauss_abs_idx p a i < (p - 1) / 2) ∧
+    (∀ i < (p - 1) / 2, ∀ j < (p - 1) / 2, gauss_abs_idx p a i = gauss_abs_idx p a j → i = j)
+  have hp : 2 ≤ p := hprime.1
+  have hodd_p := odd_prime_ge_three p hp hodd
+  set m := (p - 1) / 2 with hm_def
+  constructor
+  · intro i hi; unfold gauss_abs_idx; rw [← hm_def]
+    have hr := gauss_rem_pos_lt p a i hprime hodd hnd (by omega)
+    by_cases hle : (a * (i + 1)) % p ≤ m
+    · rw [if_pos hle]; omega
+    · rw [if_neg hle]; omega
+  · intro i hi j hj heq; unfold gauss_abs_idx at heq; rw [← hm_def] at heq
+    have hri := gauss_rem_pos_lt p a i hprime hodd hnd (by omega)
+    have hrj := gauss_rem_pos_lt p a j hprime hodd hnd (by omega)
+    set ri := (a * (i + 1)) % p with hri_def
+    set rj := (a * (j + 1)) % p with hrj_def
+    have hsum_impossible : ri + rj = p → False
+      intro hsum_p
+      have hdvd : p ∣ (a * ((i + 1) + (j + 1)))
+        have h1 : a * ((i + 1) + (j + 1)) = a * (i + 1) + a * (j + 1) := by ring
+        have hpp : p % p = 0 := by
+          have hp01 := add_mul_mod.nat 0 1 p
+          rw [zero_add.nat, mul_one.nat, (div_mod_of_lt.nat 0 p (by omega)).2] at hp01; exact hp01
+        unfold dvd; rw [h1, add_mod.nat, ← hri_def, ← hrj_def, hsum_p, hpp]
+      obtain h1 | h2 := hprime.2 a ((i + 1) + (j + 1)) hdvd
+      · exact hnd h1
+      · exact not_dvd_of_pos_lt p ((i + 1) + (j + 1)) (by omega) (by omega) h2
+    by_cases hli : ri ≤ m
+    · by_cases hlj : rj ≤ m
+      · rw [if_pos hli, if_pos hlj] at heq
+        have hreq : (a * (i + 1)) % p = (a * (j + 1)) % p := by rw [← hri_def, ← hrj_def]; omega
+        have hcan := fp.cancel_left p a (i + 1) (j + 1) hprime hnd hreq
+        rw [(div_mod_of_lt.nat (i + 1) p (by omega)).2, (div_mod_of_lt.nat (j + 1) p (by omega)).2] at hcan; omega
+      · rw [if_pos hli, if_neg hlj] at heq; exfalso; exact hsum_impossible (by omega)
+    · by_cases hlj : rj ≤ m
+      · rw [if_neg hli, if_pos hlj] at heq; exfalso; exact hsum_impossible (by omega)
+      · rw [if_neg hli, if_neg hlj] at heq
+        have hreq : ri = rj := by omega
+        rw [hri_def, hrj_def] at hreq
+        have hcan := fp.cancel_left p a (i + 1) (j + 1) hprime hnd hreq
+        rw [(div_mod_of_lt.nat (i + 1) p (by omega)).2, (div_mod_of_lt.nat (j + 1) p (by omega)).2] at hcan; omega
+
+-- GAUSS'S LEMMA: legendre_sym p a = (-1)^(gauss_mu p a)!
++ qr.gauss_lemma (p a : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) (hnd : ¬ (p ∣ a)) :
+    legendre_sym p a = neg_one_pow (gauss_mu p a)
+  have hp : 2 ≤ p := hprime.1
+  have hodd_p := odd_prime_ge_three p hp hodd
+  have hp3 : 3 ≤ p := hodd_p.1
+  set m := (p - 1) / 2 with hm_def
+  have hbij := gauss_abs_idx.bijection p a hprime hodd hnd
+  rw [← hm_def] at hbij
+  have hprod_cong : ∀ t ≤ m,
+      int_dvd p (((nat_prod t (fun i => a * (i + 1)) : ℕ) : ℤ) -
+        neg_one_pow (∑ i < t, if m < (a * (i + 1)) % p then (1 : ℕ) else 0) *
+        ((nat_prod t (fun i => gauss_abs_idx p a i + 1) : ℕ) : ℤ))
+    intro t ht; induction t with ht r ihr ht
+    · rw [nat_prod.zero, nat_prod.zero, sum_below_zero]
+      have h0 : neg_one_pow 0 = 1 := by unfold neg_one_pow; decide
+      rw [h0, cast_one.int]; exact ⟨0, by ring⟩
+    · rw [succ_eq_add_one.nat] at ht ⊢
+      rw [nat_prod.succ, nat_prod.succ, sum_below_succ, neg_one_pow.add]
+      rw [cast_mul.int (nat_prod r (fun i => a * (i + 1))) (a * (r + 1)), cast_mul.int (nat_prod r (fun i => gauss_abs_idx p a i + 1)) (gauss_abs_idx p a r + 1)]
+      obtain ⟨q1, hq1⟩ := ihr (by omega)
+      have hfac : int_dvd p (((a * (r + 1) : ℕ) : ℤ) - neg_one_pow (if m < (a * (r + 1)) % p then (1 : ℕ) else 0) * ((gauss_abs_idx p a r + 1 : ℕ) : ℤ))
+        have hr_bd := gauss_rem_pos_lt p a r hprime hodd hnd (by omega)
+        have hdm := div_add_mod.nat (a * (r + 1)) p
+        have hc1 : ((p * ((a * (r + 1)) / p) + (a * (r + 1)) % p : ℕ) : ℤ) = ((a * (r + 1) : ℕ) : ℤ) := by rw [hdm]
+        rw [cast_add.int, cast_mul.int] at hc1
+        unfold gauss_abs_idx; rw [← hm_def]
+        by_cases hgt : m < (a * (r + 1)) % p
+        · have hnl : ¬ ((a * (r + 1)) % p ≤ m) := by omega
+          have hsign : neg_one_pow 1 = -1 := by unfold neg_one_pow; decide
+          have hsub : (p - (a * (r + 1)) % p - 1) + 1 = p - (a * (r + 1)) % p := by omega
+          rw [if_pos hgt, if_neg hnl, hsign, hsub]
+          use (((a * (r + 1)) / p : ℕ) : ℤ) + 1
+          have hc2 : ((p - (a * (r + 1)) % p : ℕ) : ℤ) + (((a * (r + 1)) % p : ℕ) : ℤ) = (p : ℤ)
+            have he : (p - (a * (r + 1)) % p) + (a * (r + 1)) % p = p := by omega
+            rw [← cast_add.int, he]
+          linarith
+        · have hle : (a * (r + 1)) % p ≤ m := by omega
+          have hsign : neg_one_pow 0 = 1 := by unfold neg_one_pow; decide
+          have hsub : ((a * (r + 1)) % p - 1) + 1 = (a * (r + 1)) % p := by omega
+          rw [if_neg hgt, if_pos hle, hsign, hsub]
+          exact ⟨(((a * (r + 1)) / p : ℕ) : ℤ), by linarith⟩
+      obtain ⟨q2, hq2⟩ := hfac
+      exact ⟨((a * (r + 1) : ℕ) : ℤ) * q1 + neg_one_pow (∑ i < r, if m < (a * (i + 1)) % p then (1 : ℕ) else 0) * ((nat_prod r (fun i => gauss_abs_idx p a i + 1) : ℕ) : ℤ) * q2,
+        by linear_combination ((a * (r + 1) : ℕ) : ℤ) * hq1 + (neg_one_pow (∑ i < r, if m < (a * (i + 1)) % p then (1 : ℕ) else 0) * ((nat_prod r (fun i => gauss_abs_idx p a i + 1) : ℕ) : ℤ)) * hq2⟩
+  have htot := hprod_cong m (by omega)
+  set M := nat_prod m (fun i => i + 1) with hM_def
+  have hLHS : nat_prod m (fun i => a * (i + 1)) = a ^ m * M := by rw [nat_prod.mul m (fun _ => a) (fun i => i + 1), nat_prod.const, hM_def]
+  have hRHS : nat_prod m (fun i => gauss_abs_idx p a i + 1) = M := by rw [hM_def]; exact fin_prod.bij m (gauss_abs_idx p a) (fun k => k + 1) hbij.1 hbij.2
+  rw [hLHS, hRHS, cast_mul.int] at htot
+  have hnd_M : ¬ int_dvd p (M : ℤ)
+    have hall : ∀ t ≤ m, ¬ (p ∣ nat_prod t (fun i => i + 1))
+      intro t; induction t with ht hd r ihr ht hd
+      · rw [nat_prod.zero] at hd; exact not_dvd_one_of_ge_two p hp hd
+      · rw [succ_eq_add_one.nat] at ht hd; rw [nat_prod.succ] at hd
+        obtain h1 | h2 := hprime.2 (nat_prod r (fun i => i + 1)) (r + 1) hd
+        · exact ihr (by omega) h1
+        · exact not_dvd_of_pos_lt p (r + 1) (by omega) (by omega) h2
+    intro hd; apply hall m (by omega); rw [← hM_def]
+    obtain ⟨q, hq⟩ := hd
+    have hq_nn : 0 ≤ q
+      by_contra hneg
+      nlinarith [(cast_le.int 0 M).mpr (by omega), (cast_pos.int p).mpr (by omega)]
+    set qn := nat_of_int q with hqn_def
+    have hqn : (qn : ℤ) = q := by rw [hqn_def]; exact int_of_nat_of_int q hq_nn
+    exact (dvd.iff_exists p M (by omega)).mpr ⟨qn, (cast_inj.int M (p * qn)).mp (by rw [cast_mul.int p qn, hqn]; exact hq)⟩
+  have hmu_eq : (∑ i < m, if m < (a * (i + 1)) % p then (1 : ℕ) else 0) = gauss_mu p a := by unfold gauss_mu; rw [← hm_def]
+  rw [hmu_eq] at htot
+  have hfac_M : ((a ^ m : ℕ) : ℤ) * (M : ℤ) - neg_one_pow (gauss_mu p a) * (M : ℤ) = (((a ^ m : ℕ) : ℤ) - neg_one_pow (gauss_mu p a)) * (M : ℤ) := by ring
+  rw [hfac_M] at htot
+  have hpow_eq : int_dvd p (((a ^ m : ℕ) : ℤ) - neg_one_pow (gauss_mu p a))
+    obtain h1 | h2 := int_dvd.prime_mul p _ (M : ℤ) hprime htot; exact h1; (exfalso; exact hnd_M h2)
+  have heuler := ((euler.criterion p a hprime hodd hnd).2).2
+  rw [← hm_def] at heuler
+  obtain ⟨q1, hq1⟩ := hpow_eq; obtain ⟨q2, hq2⟩ := heuler
+  have hdiff : int_dvd p (legendre_sym p a - neg_one_pow (gauss_mu p a)) := ⟨q1 - q2, by linear_combination hq1 - hq2⟩
+  have hleg_pm : legendre_sym p a = 1 ∨ legendre_sym p a = -1 := by
+    unfold legendre_sym; by_cases hqr : is_qr p a; (left; simp [hnd, hqr]); (right; simp [hnd, hqr])
+  have hnp_pm : neg_one_pow (gauss_mu p a) = 1 ∨ neg_one_pow (gauss_mu p a) = -1 := by
+    unfold neg_one_pow; by_cases hev : gauss_mu p a % 2 = 0; (left; simp [hev]); (right; simp [hev])
+  have hz := int_dvd.eq_zero_of_abs_le_two p (legendre_sym p a - neg_one_pow (gauss_mu p a)) hp3 (by omega) (by omega) hdiff
+  linarith
+
+-- FIRST SUPPLEMENT TO QUADRATIC RECIPROCITY:
++ qr.first_supplement (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    legendre_sym p (p - 1) = neg_one_pow ((p - 1) / 2) ∧
+    ((∃ x < p, (x * x + 1) % p = 0) ↔ p % 4 = 1)
+  have hp : 2 ≤ p := hprime.1
+  have hodd_p := odd_prime_ge_three p hp hodd
+  have hnd := not_dvd_of_pos_lt p (p - 1) (by omega) (by omega)
+  have hmu : gauss_mu p (p - 1) = (p - 1) / 2
+    unfold gauss_mu
+    set m := (p - 1) / 2 with hm_def
+    have hgen : ∀ t ≤ m, (∑ i < t, if m < ((p - 1) * (i + 1)) % p then (1 : ℕ) else 0) = t
+      intro t ht; induction t with ht r ihr ht
+      · rw [sum_below_zero]
+      · rw [succ_eq_add_one.nat] at ht ⊢; rw [sum_below_succ, ihr (by omega)]
+        have heq : (p - 1) * (r + 1) = (p - (r + 1)) + p * r
+          set u := p - (r + 1)
+          have h1 : p - 1 = u + r := by omega
+          have h2 : p = u + (r + 1) := by omega
+          rw [h1, h2]; ring
+        have hgt : m < p - (r + 1) := by omega
+        rw [heq, add_mul_mod.nat, (div_mod_of_lt.nat (p - (r + 1)) p (by omega)).2, if_pos hgt]
+    exact hgen m (by omega)
+  have hgl := qr.gauss_lemma p (p - 1) hprime hodd hnd
+  rw [hmu] at hgl
+  constructor; exact hgl
+  have hqr_iff : (∃ x < p, (x * x + 1) % p = 0) ↔ is_qr p (p - 1)
+    unfold is_qr
+    have hpm : (p - 1) % p = p - 1 := (div_mod_of_lt.nat (p - 1) p (by omega)).2
+    constructor
+    · intro hex; obtain ⟨x, hxp, hz⟩ := hex
+      use x; constructor; exact hxp
+      rw [hpm]
+      have hlt := mod_lt.nat (x * x) p (by omega)
+      have hadd := add_mod.nat (x * x) 1 p
+      rw [hz, (div_mod_of_lt.nat 1 p (by omega)).2] at hadd
+      by_cases he : (x * x) % p = p - 1
+      · exact he
+      · rw [(div_mod_of_lt.nat ((x * x) % p + 1) p (by omega)).2] at hadd; omega
+    · intro hex; obtain ⟨x, hxp, hsq⟩ := hex
+      use x; constructor; exact hxp
+      rw [hpm] at hsq
+      rw [add_mod.nat (x * x) 1 p, hsq, (div_mod_of_lt.nat 1 p (by omega)).2]
+      have hp1 : (p - 1) + 1 = 0 + p * 1 := by omega
+      rw [hp1, add_mul_mod.nat, (div_mod_of_lt.nat 0 p (by omega)).2]
+  rw [hqr_iff]
+  have hp4_iff : ((p - 1) / 2) % 2 = 0 ↔ p % 4 = 1
+    have hdm2 := div_add_mod.nat (p - 1) 2; have hm2 := mod_lt.nat (p - 1) 2 (by decide)
+    constructor
+    · intro hev; exact (div_mod_unique.nat p 4 ((p - 1) / 2 / 2) 1 (by omega) (by decide)).2.symm
+    · intro hp4; exact (div_mod_unique.nat ((p - 1) / 2) 2 (p / 4) 0 (by omega) (by decide)).2.symm
+  rw [← hp4_iff]
+  unfold legendre_sym neg_one_pow at hgl
+  constructor
+  · intro hqr; by_contra hne; simp [hnd, hqr, hne] at hgl
+  · intro hev; by_contra hnqr; simp [hnd, hnqr, hev] at hgl
+
+-- SECOND SUPPLEMENT TO QUADRATIC RECIPROCITY:
++ qr.second_supplement (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    legendre_sym p 2 = neg_one_pow ((p * p - 1) / 8)
+  have hp : 2 ≤ p := hprime.1
+  have hodd_p := odd_prime_ge_three p hp hodd
+  have hnd2 := not_dvd_of_pos_lt p 2 (by decide) (by omega)
+  rw [qr.gauss_lemma p 2 hprime hodd hnd2]
+  apply neg_one_pow.of_mod_eq
+  set m := (p - 1) / 2 with hm_def
+  have hmu2 : gauss_mu p 2 = m - m / 2
+    unfold gauss_mu; rw [← hm_def]
+    have hgen : ∀ t ≤ m, (∑ i < t, if m < (2 * (i + 1)) % p then (1 : ℕ) else 0) = if t ≤ m / 2 then 0 else t - m / 2
+      intro t ht; induction t with ht r ihr ht
+      · have h0 : 0 ≤ m / 2 := by omega; rw [sum_below_zero, if_pos h0]
+      · rw [succ_eq_add_one.nat] at ht ⊢; rw [sum_below_succ, ihr (by omega)]
+        rw [(div_mod_of_lt.nat (2 * (r + 1)) p (by omega)).2]
+        by_cases hle : r + 1 ≤ m / 2
+        · have hle_r : r ≤ m / 2 := by omega; have hng : ¬ (m < 2 * (r + 1)) := by omega
+          rw [if_pos hle_r, if_pos hle, if_neg hng]; omega
+        · have hgt : m < 2 * (r + 1) := by omega
+          rw [if_neg hle, if_pos hgt]
+          by_cases hle_r : r ≤ m / 2; (rw [if_pos hle_r]; omega); (rw [if_neg hle_r]; omega)
+    have htot := hgen m (by omega)
+    by_cases hm0 : m ≤ m / 2; (rw [if_pos hm0] at htot; omega); (rw [if_neg hm0] at htot; exact htot)
+  rw [hmu2]
+  set q8 := p / 8 with hq8_def
+  set r8 := p % 8 with hr8_def
+  have hr_odd : r8 % 2 = 1
+    have hp2 : p = r8 + 2 * (4 * q8) := by omega
+    rw [hp2, add_mul_mod.nat] at hodd; exact hodd
+  have hr_cases : r8 = 1 ∨ r8 = 3 ∨ r8 = 5 ∨ r8 = 7
+    by_cases h0 : r8 / 2 = 0; (left; omega)
+    by_cases h1 : r8 / 2 = 1; (right; left; omega)
+    by_cases h2 : r8 / 2 = 2; (right; right; left; omega)
+    right; right; right; omega
+  obtain hr1 | hr3 | hr5 | hr7 := hr_cases
+  · have hm_v : m - m / 2 = 2 * q8
+      have hd := (div_mod_unique.nat m 2 (2 * q8) 0 (by omega) (by decide)).1.symm; omega
+    have hpp8 : (p * p - 1) / 8 = 8 * q8 * q8 + 2 * q8
+      have he : p = 8 * q8 + 1 := by omega
+      have hsq : p * p = 8 * (8 * q8 * q8 + 2 * q8) + 1 := by rw [he]; ring
+      exact (div_mod_unique.nat (p * p - 1) 8 (8 * q8 * q8 + 2 * q8) 0 (by omega) (by decide)).1.symm
+    rw [hm_v, hpp8, (div_mod_unique.nat (2 * q8) 2 q8 0 (by ring) (by decide)).2.symm,
+        (div_mod_unique.nat (8 * q8 * q8 + 2 * q8) 2 (4 * q8 * q8 + q8) 0 (by ring) (by decide)).2.symm]
+  · have hm_v : m - m / 2 = 2 * q8 + 1
+      have hd := (div_mod_unique.nat m 2 (2 * q8) 1 (by omega) (by decide)).1.symm; omega
+    have hpp8 : (p * p - 1) / 8 = 8 * q8 * q8 + 6 * q8 + 1
+      have he : p = 8 * q8 + 3 := by omega
+      have hsq : p * p = 8 * (8 * q8 * q8 + 6 * q8 + 1) + 1 := by rw [he]; ring
+      exact (div_mod_unique.nat (p * p - 1) 8 (8 * q8 * q8 + 6 * q8 + 1) 0 (by omega) (by decide)).1.symm
+    rw [hm_v, hpp8, (div_mod_unique.nat (2 * q8 + 1) 2 q8 1 (by ring) (by decide)).2.symm,
+        (div_mod_unique.nat (8 * q8 * q8 + 6 * q8 + 1) 2 (4 * q8 * q8 + 3 * q8) 1 (by ring) (by decide)).2.symm]
+  · have hm_v : m - m / 2 = 2 * q8 + 1
+      have hd := (div_mod_unique.nat m 2 (2 * q8 + 1) 0 (by omega) (by decide)).1.symm; omega
+    have hpp8 : (p * p - 1) / 8 = 8 * q8 * q8 + 10 * q8 + 3
+      have he : p = 8 * q8 + 5 := by omega
+      have hsq : p * p = 8 * (8 * q8 * q8 + 10 * q8 + 3) + 1 := by rw [he]; ring
+      exact (div_mod_unique.nat (p * p - 1) 8 (8 * q8 * q8 + 10 * q8 + 3) 0 (by omega) (by decide)).1.symm
+    rw [hm_v, hpp8, (div_mod_unique.nat (2 * q8 + 1) 2 q8 1 (by ring) (by decide)).2.symm,
+        (div_mod_unique.nat (8 * q8 * q8 + 10 * q8 + 3) 2 (4 * q8 * q8 + 5 * q8 + 1) 1 (by ring) (by decide)).2.symm]
+  · have hm_v : m - m / 2 = 2 * q8 + 2
+      have hd := (div_mod_unique.nat m 2 (2 * q8 + 1) 1 (by omega) (by decide)).1.symm; omega
+    have hpp8 : (p * p - 1) / 8 = 8 * q8 * q8 + 14 * q8 + 6
+      have he : p = 8 * q8 + 7 := by omega
+      have hsq : p * p = 8 * (8 * q8 * q8 + 14 * q8 + 6) + 1 := by rw [he]; ring
+      exact (div_mod_unique.nat (p * p - 1) 8 (8 * q8 * q8 + 14 * q8 + 6) 0 (by omega) (by decide)).1.symm
+    rw [hm_v, hpp8, (div_mod_unique.nat (2 * q8 + 2) 2 (q8 + 1) 0 (by ring) (by decide)).2.symm,
+        (div_mod_unique.nat (8 * q8 * q8 + 14 * q8 + 6) 2 (4 * q8 * q8 + 7 * q8 + 3) 0 (by ring) (by decide)).2.symm]
+
+-- Eisenstein floor-sum parity lemma:
++ qr.eisenstein_parity (p q : ℕ) (hprime : is_prime_nat p) (hp_odd : p % 2 = 1) (hq_odd : q % 2 = 1) (hnd : ¬ (p ∣ q)) :
+    gauss_mu p q % 2 = (∑ i < (p - 1) / 2, (q * (i + 1)) / p) % 2
+  have hp : 2 ≤ p := hprime.1
+  have hodd_p := odd_prime_ge_three p hp hp_odd
+  set m := (p - 1) / 2 with hm_def
+  have hbij := gauss_abs_idx.bijection p q hprime hp_odd hnd
+  rw [← hm_def] at hbij
+  have hsum_bij := fin_sum.bij m (gauss_abs_idx p q) (fun k => k + 1) hbij.1 hbij.2
+  have hstep_id : ∀ i < m,
+      q * (i + 1) + 2 * (if m < (q * (i + 1)) % p then gauss_abs_idx p q i + 1 else 0) =
+      p * ((q * (i + 1)) / p) + p * (if m < (q * (i + 1)) % p then 1 else 0) + (gauss_abs_idx p q i + 1)
+    intro i hi
+    have hdm := div_add_mod.nat (q * (i + 1)) p
+    have hr := gauss_rem_pos_lt p q i hprime hp_odd hnd (by omega)
+    unfold gauss_abs_idx; rw [← hm_def]
+    by_cases hgt : m < (q * (i + 1)) % p
+    · have hnl : ¬ ((q * (i + 1)) % p ≤ m) := by omega
+      rw [if_pos hgt, if_pos hgt, if_neg hnl]; omega
+    · have hle : (q * (i + 1)) % p ≤ m := by omega
+      rw [if_neg hgt, if_neg hgt, if_pos hle]; omega
+  have hsum_all : ∀ t ≤ m,
+      q * (∑ i < t, (i + 1)) + 2 * (∑ i < t, if m < (q * (i + 1)) % p then gauss_abs_idx p q i + 1 else 0) =
+      p * (∑ i < t, (q * (i + 1)) / p) + p * (∑ i < t, if m < (q * (i + 1)) % p then 1 else 0) + (∑ i < t, (gauss_abs_idx p q i + 1))
+    intro t ht; induction t with ht r ihr ht
+    · rw [sum_below_zero, sum_below_zero, sum_below_zero, sum_below_zero, sum_below_zero]; ring
+    · rw [succ_eq_add_one.nat] at ht ⊢
+      rw [sum_below_succ, sum_below_succ, sum_below_succ, sum_below_succ, sum_below_succ]
+      linarith [ihr (by omega), hstep_id r (by omega)]
+  have htot := hsum_all m (by omega)
+  rw [hsum_bij] at htot
+  have hmu_eq : (∑ i < m, if m < (q * (i + 1)) % p then 1 else 0) = gauss_mu p q := by unfold gauss_mu; rw [← hm_def]
+  rw [hmu_eq] at htot
+  set S := ∑ i < m, (i + 1)
+  set T := ∑ i < m, if m < (q * (i + 1)) % p then gauss_abs_idx p q i + 1 else 0
+  set F := ∑ i < m, (q * (i + 1)) / p
+  have heven_lhs : (p * (F + gauss_mu p q)) % 2 = 0
+    set qh := q / 2
+    have hq_ev : q = 2 * qh + 1 := by have hdm := div_add_mod.nat q 2; omega
+    have heq : p * (F + gauss_mu p q) = 2 * (qh * S + T)
+      have h2 : q * S = 2 * (qh * S) + S := by rw [hq_ev]; ring
+      linarith
+    rw [heq]; exact (div_mod_unique.nat (2 * (qh * S + T)) 2 (qh * S + T) 0 (by ring) (by decide)).2.symm
+  rw [mul_mod.nat p (F + gauss_mu p q) 2, hp_odd, one_mul.nat, zmod.mod_mod, add_mod.nat] at heven_lhs
+  by_cases hf0 : F % 2 = 0
+  · rw [hf0] at heven_lhs ⊢
+    by_cases hm0 : gauss_mu p q % 2 = 0
+    · omega
+    · have hm_1 : gauss_mu p q % 2 = 1 := by omega
+      rw [hm_1] at heven_lhs; have h01 : (0 + 1) % 2 = 1 := by decide; omega
+  · have hf_1 : F % 2 = 1 := by omega
+    rw [hf_1] at heven_lhs ⊢
+    by_cases hm0 : gauss_mu p q % 2 = 0
+    · rw [hm0] at heven_lhs; have h10 : (1 + 0) % 2 = 1 := by decide; omega
+    · omega
+
+-- Eisenstein Lattice-Point Rectangle Identity:
++ qr.eisenstein_lattice_sum (p q : ℕ) (hp_pr : is_prime_nat p) (hq_pr : is_prime_nat q)
+    (hp_odd : p % 2 = 1) (hq_odd : q % 2 = 1) (hne : p ≠ q) :
+    (∑ i < (p - 1) / 2, (q * (i + 1)) / p) + (∑ j < (q - 1) / 2, (p * (j + 1)) / q) =
+      ((p - 1) / 2) * ((q - 1) / 2)
+  have hp : 2 ≤ p := hp_pr.1
+  have hq : 2 ≤ q := hq_pr.1
+  have hodd_p := odd_prime_ge_three p hp hp_odd
+  have hodd_q := odd_prime_ge_three q hq hq_odd
+  set mp := (p - 1) / 2 with hmp_def
+  set mq := (q - 1) / 2 with hmq_def
+  have h2mp : 2 * mp = p - 1 := hodd_p.2
+  have h2mq : 2 * mq = q - 1 := hodd_q.2
+  have hnd_pq := distinct_primes_not_dvd p q hp_pr hq_pr hne
+  have hnd_qp := distinct_primes_not_dvd q p hq_pr hp_pr (by omega)
+  have hno_diag : ∀ i < mp, ∀ j < mq, q * (i + 1) ≠ p * (j + 1)
+    intro i hi j hj heq
+    obtain h1 | h2 := hp_pr.2 q (i + 1) ((dvd.iff_exists p (q * (i + 1)) (by omega)).mpr ⟨j + 1, heq⟩)
+    · exact hnd_pq h1
+    · exact not_dvd_of_pos_lt p (i + 1) (by omega) (by omega) h2
+  have hcount_lt : ∀ (M a b : ℕ), 1 ≤ a → ¬ (a ∣ b) → b / a ≤ M →
+      (∑ j < M, if a * (j + 1) < b then (1 : ℕ) else 0) = b / a
+    intro M a b ha hnda hleM
+    have hdm := div_add_mod.nat b a
+    have hrem_pos : 1 ≤ b % a := by by_contra h0; apply hnda; unfold dvd; omega
+    have hgen : ∀ t ≤ M, (∑ j < t, if a * (j + 1) < b then (1 : ℕ) else 0) = if t ≤ b / a then t else b / a
+      intro t ht; induction t with ht r ihr ht
+      · have h0 : 0 ≤ b / a := by omega; rw [sum_below_zero, if_pos h0]
+      · rw [succ_eq_add_one.nat] at ht ⊢; rw [sum_below_succ, ihr (by omega)]
+        by_cases hle : r + 1 ≤ b / a
+        · have hle_r : r ≤ b / a := by omega
+          have hlt : a * (r + 1) < b := by have hm := mul_le_mul_of_nonneg_left.nat (r + 1) (b / a) a hle (by omega); omega
+          rw [if_pos hle_r, if_pos hle, if_pos hlt]
+        · have hng : ¬ (a * (r + 1) < b)
+            have hm := mul_le_mul_of_nonneg_left.nat (b / a + 1) (r + 1) a (by omega) (by omega)
+            have hrem_lt := mod_lt.nat b a (by omega)
+            have hexp : a * (b / a + 1) = a * (b / a) + a := by ring; omega
+          rw [if_neg hle, if_neg hng]
+          by_cases hle_r : r ≤ b / a; (rw [if_pos hle_r]; omega); (rw [if_neg hle_r]; omega)
+    have htot := hgen M (by omega)
+    by_cases hle : M ≤ b / a; (rw [if_pos hle] at htot; omega); (rw [if_neg hle] at htot; exact htot)
+  have hhalf_quot_le : ∀ (A B mA mB i : ℕ), 2 ≤ A → 2 ≤ B → 2 * mA = A - 1 → 2 * mB = B - 1 → i < mA → (B * (i + 1)) / A ≤ mB
+    intro A B mA mB i hA hB hmA hmB hi; by_contra hgt
+    have hdm := div_add_mod.nat (B * (i + 1)) A
+    have h2 := mul_le_mul_of_nonneg_left.nat (mB + 1) ((B * (i + 1)) / A) A (by omega) (by omega)
+    have h3 := mul_le_mul_of_nonneg_left.nat (i + 1) mA B (by omega) (by omega)
+    have h2eq1 : 2 * (A * (mB + 1)) = A * B + A
+      have hB1 : 2 * mB + 2 = B + 1 := by omega
+      calc 2 * (A * (mB + 1)) = A * (2 * mB + 2) := by ring
+        _ = A * (B + 1) := by rw [hB1]
+        _ = A * B + A := by ring
+    have h2eq2 : 2 * (B * mA) + B = A * B
+      have hA1 : 2 * mA + 1 = A := by omega
+      calc 2 * (B * mA) + B = (2 * mA + 1) * B := by ring
+        _ = A * B := by rw [hA1]
+    omega
+  have hsum1 : (∑ i < mp, (q * (i + 1)) / p) = ∑ i < mp, ∑ j < mq, if p * (j + 1) < q * (i + 1) then (1 : ℕ) else 0
+    apply sum_congr.nat; intro i hi
+    have hnd_qi : ¬ (p ∣ (q * (i + 1)))
+      intro hd; obtain h1 | h2 := hp_pr.2 q (i + 1) hd; exact hnd_pq h1; exact not_dvd_of_pos_lt p (i + 1) (by omega) (by omega) h2
+    exact (hcount_lt mq p (q * (i + 1)) (by omega) hnd_qi (hhalf_quot_le p q mp mq i hp hq h2mp h2mq hi)).symm
+  have hsum2 : (∑ j < mq, (p * (j + 1)) / q) = ∑ i < mp, ∑ j < mq, if q * (i + 1) < p * (j + 1) then (1 : ℕ) else 0
+    rw [sum_swap.nat]
+    apply sum_congr.nat; intro j hj
+    have hnd_pj : ¬ (q ∣ (p * (j + 1)))
+      intro hd; obtain h1 | h2 := hq_pr.2 p (j + 1) hd; exact hnd_qp h1; exact not_dvd_of_pos_lt q (j + 1) (by omega) (by omega) h2
+    exact (hcount_lt mp q (p * (j + 1)) (by omega) hnd_pj (hhalf_quot_le q p mq mp j hq hp h2mq h2mp hj)).symm
+  rw [hsum1, hsum2, ← sum_add.nat]
+  have hcomb : (∑ i < mp, ((∑ j < mq, if p * (j + 1) < q * (i + 1) then (1 : ℕ) else 0) + (∑ j < mq, if q * (i + 1) < p * (j + 1) then (1 : ℕ) else 0))) = ∑ i < mp, ∑ j < mq, (1 : ℕ)
+    apply sum_congr.nat; intro i hi; rw [← sum_add.nat]
+    apply sum_congr.nat; intro j hj
+    have hnd := hno_diag i hi j hj
+    by_cases hlt : p * (j + 1) < q * (i + 1)
+    · have hng : ¬ (q * (i + 1) < p * (j + 1)) := by omega
+      rw [if_pos hlt, if_neg hng]; omega
+    · have hgt : q * (i + 1) < p * (j + 1) := by omega
+      rw [if_neg hlt, if_pos hgt]; omega
+  rw [hcomb]
+  have hconst : ∀ n c : ℕ, (∑ i < n, c) = n * c
+    intro n c; induction n with r ihr
+    · rw [sum_below_zero]; ring
+    · rw [succ_eq_add_one.nat, sum_below_succ, ihr]; ring
+  have hcon2 : (∑ i < mp, ∑ j < mq, (1 : ℕ)) = ∑ i < mp, mq := by apply sum_congr.nat; intro i hi; rw [hconst mq 1]; ring
+  rw [hcon2]; exact hconst mp mq
+
+-- GAUSS'S LAW OF QUADRATIC RECIPROCITY:
++ qr.quadratic_reciprocity (p q : ℕ) (hp_pr : is_prime_nat p) (hq_pr : is_prime_nat q)
+    (hp_odd : p % 2 = 1) (hq_odd : q % 2 = 1) (hne : p ≠ q) :
+    legendre_sym q p * legendre_sym p q = neg_one_pow (((p - 1) / 2) * ((q - 1) / 2))
+  have hnd_pq := distinct_primes_not_dvd p q hp_pr hq_pr hne
+  have hnd_qp := distinct_primes_not_dvd q p hq_pr hp_pr (by omega)
+  rw [qr.gauss_lemma q p hq_pr hq_odd hnd_qp, qr.gauss_lemma p q hp_pr hp_odd hnd_pq, ← neg_one_pow.add]
+  have hpar1 := qr.eisenstein_parity p q hp_pr hp_odd hq_odd hnd_pq
+  have hpar2 := qr.eisenstein_parity q p hq_pr hq_odd hp_odd hnd_qp
+  have hlat := qr.eisenstein_lattice_sum p q hp_pr hq_pr hp_odd hq_odd hne
+  apply neg_one_pow.of_mod_eq
+  rw [add_mod.nat (gauss_mu q p) (gauss_mu p q) 2, hpar2, hpar1, ← add_mod.nat]
+  have hcomm : (∑ j < (q - 1) / 2, (p * (j + 1)) / q) + (∑ i < (p - 1) / 2, (q * (i + 1)) / p) =
+      (∑ i < (p - 1) / 2, (q * (i + 1)) / p) + (∑ j < (q - 1) / 2, (p * (j + 1)) / q) := by ring
+  rw [hcomm, hlat]

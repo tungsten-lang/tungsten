@@ -1,0 +1,451 @@
+-- Sharpness of Katz's p-Adic Divisibility for Formal Power Series (0 custom axioms)
+
+import padic.mvps_subst
+
+-- ====================================================================================
+-- SECTION 2: SHARPNESS OF KATZ'S DIVISIBILITY (`New/Curve/KatzDivisibility.lean`)
+-- ====================================================================================
+
+-> sernau.in_phi_series_ring (v_abs : ℂ → ℝ) (phi f : ℕ → ℂ) : Prop :=
+  ∃ g : ℕ → ℂ, (∀ j : ℕ, v_abs (g j) ≤ 1) ∧ ∀ k : ℕ, f k = sernau.fps_subst phi g k
+
+-> sernau.arg_max_fin (F : ℕ → ℝ) : ℕ → ℕ
+  | 0 => 0
+  | K + 1 => if F (sernau.arg_max_fin F K) ≤ F (K + 1) then K + 1 else sernau.arg_max_fin F K
+
++ sernau.phi_max_norm_submult (p : ℕ) (v_abs : ℂ → ℝ) (phi : ℕ → ℂ) (A_add : (ℕ → ℕ) → ℂ)
+    (hp : is_prime_nat p) (hv : sernau.is_padic_val_on_C p v_abs) (hphi0 : phi 0 = complex.zero)
+    (hA_int : ∀ e : ℕ → ℕ, v_abs (A_add e) ≤ 1)
+    (hA_euler : ∀ beta : ℕ → ℕ, sernau.is_midx 2 beta →
+      sernau.mvps_subst_linear 2 (fun _ => complex.one) phi beta =
+      sernau.mvps_subst 2 2 (fun i => sernau.mvps_var 2 i phi) A_add beta) :
+    (∃ M_phi : ℕ → ℝ,
+      M_phi 0 = 1 ∧ (∀ k : ℕ, 0 ≤ M_phi k) ∧
+      (∀ k : ℕ, ∃ f : ℕ → ℂ, sernau.in_phi_series_ring v_abs phi f ∧ M_phi k = v_abs (complex.mul (complex.of_real ((fact k : ℕ) : ℝ)) (f k))) ∧
+      (∀ (k : ℕ) (f : ℕ → ℂ), sernau.in_phi_series_ring v_abs phi f → v_abs (complex.mul (complex.of_real ((fact k : ℕ) : ℝ)) (f k)) ≤ M_phi k) ∧
+      (∀ n k : ℕ, M_phi (n + k) ≤ M_phi n * M_phi k))
+  obtain ⟨hcsum_le, _, hinv_v⟩ := sernau.padic_val_on_C_helpers p v_abs hp hv
+  have hzs := sernau.csum_zero_and_single
+  have hpow_phi_mem : ∀ m : ℕ, sernau.in_phi_series_ring v_abs phi (sernau.fps_pow phi m)
+    intro m; unfold sernau.in_phi_series_ring; use (fun j => if j = m then complex.one else complex.zero); constructor
+    · intro j; by_cases hj : j = m; (rw [if_pos hj, hv.2.1]; linarith); (rw [if_neg hj, hv.1]; linarith)
+    · intro k; unfold sernau.fps_subst
+      by_cases hmk : m < k + 1
+      · have hz_oth : ∀ j < k + 1, j ≠ m → complex.mul (if j = m then complex.one else complex.zero) (sernau.fps_pow phi j k) = complex.zero
+          intro j _ hne; rw [if_neg hne, complex.zero_mul]
+        have hmm : m = m := by rfl
+        rw [hzs.2 (k + 1) m _ hmk hz_oth, if_pos hmm, complex.one_mul]
+      · have hvan : ∀ q : ℕ, ∀ u : ℕ, u < q → sernau.fps_pow phi q u = complex.zero
+          intro q; induction q with u hu r ihr u hu; omega
+          rw [succ_eq_add_one.nat] at hu ⊢; have hs : sernau.fps_pow phi (r + 1) u = sernau.fps_mul (sernau.fps_pow phi r) phi u := by rfl
+          have hc0 : ∀ i < u + 1, complex.mul (sernau.fps_pow phi r i) (phi (u - i)) = complex.zero
+            intro i _; by_cases hir : i < r; (rw [ihr i hir, complex.zero_mul]); (have hui : u - i = 0 := by omega; rw [hui, hphi0, complex.mul_zero])
+          rw [hs]; unfold sernau.fps_mul; rw [csum.congr (u + 1) _ (fun _ => complex.zero) hc0]; exact hzs.1 (u + 1)
+        have hc0 : ∀ j < k + 1, complex.mul (if j = m then complex.one else complex.zero) (sernau.fps_pow phi j k) = complex.zero
+          intro j hj; have hne : j ≠ m := by omega
+          rw [if_neg hne, complex.zero_mul]
+        have hkm : k < m := by omega
+        rw [hvan m k hkm, csum.congr (k + 1) _ (fun _ => complex.zero) hc0, hzs.1 (k + 1)]
+  set j_opt : ℕ → ℕ := fun k => sernau.arg_max_fin (fun j => v_abs (sernau.fps_pow phi j k)) k with hj_def
+  have hj_sp : ∀ k : ℕ, j_opt k < k + 1 ∧ ∀ j < k + 1, v_abs (sernau.fps_pow phi j k) ≤ v_abs (sernau.fps_pow phi (j_opt k) k)
+    intro k; rw [hj_def]; set Fk : ℕ → ℝ := fun j => v_abs (sernau.fps_pow phi j k) with hFk_def
+    have hrec : ∀ K : ℕ, sernau.arg_max_fin Fk K < K + 1 ∧ ∀ j < K + 1, Fk j ≤ Fk (sernau.arg_max_fin Fk K)
+      intro K; induction K with r ihr
+      · have hs0 : sernau.arg_max_fin Fk 0 = 0 := by rfl
+        rw [hs0]; exact ⟨by decide, by intro j hj; have hj0 : j = 0 := by omega; rw [hj0]; linarith⟩
+      · rw [succ_eq_add_one.nat]; obtain ⟨hj0, hbd0⟩ := ihr
+        have hss : sernau.arg_max_fin Fk (r + 1) = (if Fk (sernau.arg_max_fin Fk r) ≤ Fk (r + 1) then r + 1 else sernau.arg_max_fin Fk r) := by rfl
+        rw [hss]; by_cases hcmp : Fk (sernau.arg_max_fin Fk r) ≤ Fk (r + 1)
+        · rw [if_pos hcmp]; exact ⟨by omega, by intro j hj; by_cases hjr : j < r + 1; linarith [hbd0 j hjr]; (have he : j = r + 1 := by omega; rw [he]; linarith)⟩
+        · rw [if_neg hcmp]; exact ⟨by omega, by intro j hj; by_cases hjr : j < r + 1; exact hbd0 j hjr; (have he : j = r + 1 := by omega; rw [he]; linarith)⟩
+    have hrk := hrec k; rw [hFk_def] at hrk ⊢; exact hrk
+  set M_phi : ℕ → ℝ := fun k => v_abs (complex.mul (complex.of_real ((fact k : ℕ) : ℝ)) (sernau.fps_pow phi (j_opt k) k)) with hM_def
+  have hM0 : M_phi 0 = 1
+    rw [hM_def]; have hj0_all := hj_sp 0; have hj0 := hj0_all.1; have he0 : j_opt 0 = 0 := by omega
+    have hp0 : sernau.fps_pow phi 0 0 = complex.one := by rfl
+    rw [he0, fact_zero, cast_one.real, complex.of_real_one, hp0, complex.mul_one, hv.2.1]
+  have hM_sup : ∀ (k : ℕ) (f : ℕ → ℂ), sernau.in_phi_series_ring v_abs phi f → v_abs (complex.mul (complex.of_real ((fact k : ℕ) : ℝ)) (f k)) ≤ M_phi k
+    intro k f hf; unfold sernau.in_phi_series_ring at hf; obtain ⟨g, hg_int, hfk⟩ := hf
+    have hjk := hj_sp k
+    have hsub_le : v_abs (sernau.fps_subst phi g k) ≤ v_abs (sernau.fps_pow phi (j_opt k) k)
+      unfold sernau.fps_subst; have hB_nn := hv.2.2.1 (sernau.fps_pow phi (j_opt k) k)
+      apply hcsum_le (k + 1) _ (v_abs (sernau.fps_pow phi (j_opt k) k)) hB_nn
+      intro j hj; rw [hv.2.2.2.2.2.1]
+      have hm := mul_le_mul_of_nonneg_right.real (v_abs (g j)) 1 (v_abs (sernau.fps_pow phi j k)) (hg_int j) (hv.2.2.1 (sernau.fps_pow phi j k))
+      linarith [hjk.2 j hj]
+    rw [hM_def, hv.2.2.2.2.2.1, hv.2.2.2.2.2.1, hfk k]
+    exact mul_le_mul_of_nonneg_left.real _ _ (v_abs (complex.of_real ((fact k : ℕ) : ℝ))) hsub_le (hv.2.2.1 (complex.of_real ((fact k : ℕ) : ℝ)))
+  have hM_submult : ∀ n k : ℕ, M_phi (n + k) ≤ M_phi n * M_phi k
+    intro n k; set m := j_opt (n + k) with hm_def
+    set beta : ℕ → ℕ := fun x => if x = 0 then n else if x = 1 then k else 0 with hbeta_def
+    have hbeta_m : sernau.is_midx 2 beta := by unfold sernau.is_midx; intro x hx; have h0 : x ≠ 0 := (by omega); have h1 : x ≠ 1 := (by omega); rw [hbeta_def, if_neg h0, if_neg h1]
+    have h00 : (0 : ℕ) = 0 := by rfl
+    have h11 : (1 : ℕ) = 1 := by rfl
+    have h1n0 : (1 : ℕ) ≠ 0 := by decide
+    have h0n1 : (0 : ℕ) ≠ 1 := by decide
+    have hdeg_b : sernau.midx_deg 2 beta = n + k
+      unfold sernau.midx_deg; have h2 : (2 : ℕ) = (0 + 1) + 1 := by rfl
+      have h10 : (0 + 1 : ℕ) ≠ 0 := by decide
+      have h11s : (0 + 1 : ℕ) = 1 := by rfl
+      rw [h2, sum_below_succ, sum_below_succ, sum_below_zero, hbeta_def, if_pos h00, if_neg h10, if_pos h11s]; omega
+    set c1 : ℕ → ℂ := fun _ => complex.one with hc1_def
+    set L1 := sernau.mvps_linear 2 c1 with hL1_def
+    have hL1_z : ∀ i < 1, (fun _ : ℕ => L1) i sernau.midx_zero = complex.zero
+      intro _ _; rw [hL1_def]; unfold sernau.mvps_linear sernau.midx_zero
+      have hc0 : ∀ x < 2, (if (∀ y < 2, 0 = (if y = x then 1 else 0)) then c1 x else complex.zero) = complex.zero
+        intro x hx; have hn : ¬ (∀ y < 2, 0 = (if y = x then 1 else 0)) := by intro hall; have h := hall x hx; have hxx : x = x := by rfl; rw [if_pos hxx] at h; omega
+        rw [if_neg hn]
+      rw [csum.congr 2 _ (fun _ => complex.zero) hc0]; exact hzs.1 2
+    have hz11 : ∀ i < 1, (fun _ : ℕ => sernau.mvps_zero) i sernau.midx_zero = complex.zero := by intro _ _; unfold sernau.mvps_zero; trivial
+    have hsmv1 := sernau.mvps_subst_mul_and_var 1 2 (fun _ => L1) hL1_z
+    have hsmv11 := sernau.mvps_subst_mul_and_var 1 1 (fun _ => sernau.mvps_zero) hz11
+    have hrh2 := sernau.mvps_ring_and_deg_helpers 2 2
+    have hv1_eq : ∀ h : ℕ → ℂ, (fun e : ℕ → ℕ => h (e 0)) = sernau.mvps_var 1 0 h
+      intro h; funext e; unfold sernau.mvps_var; have hall : ∀ x < 1, x ≠ 0 → e x = 0 := by intro x hx hne; omega
+      rw [if_pos hall]
+    have hsl_pow : sernau.mvps_subst_linear 2 c1 (sernau.fps_pow phi m) beta = sernau.mvps_pow 2 (sernau.mvps_subst_linear 2 c1 phi) m beta
+      unfold sernau.mvps_subst_linear; rw [← hL1_def, hv1_eq (sernau.fps_pow phi m), hv1_eq phi, ← hsmv1.2.1 (sernau.mvps_var 1 0 phi) m beta hbeta_m]
+      unfold sernau.mvps_subst; set ub1 : ℕ → ℕ := fun _ => sernau.midx_deg 2 beta; have hb1 := sernau.box_at_spec 1 ub1
+      apply csum.congr; intro idx hidx; have hb1_i := hb1.2.1 idx hidx
+      have hi_m : sernau.is_midx 1 (sernau.box_at 1 ub1 idx) := by unfold sernau.is_midx; exact hb1_i.1
+      have h01 : 0 < 1 := by decide
+      rw [hsmv11.2.2 0 phi m (sernau.box_at 1 ub1 idx) h01 hi_m]
+    set phi_v : ℕ → (ℕ → ℕ) → ℂ := fun i => sernau.mvps_var 2 i phi with hphiv_def
+    have hf0_v : ∀ i < 2, phi_v i sernau.midx_zero = complex.zero
+      intro i _; rw [hphiv_def]; have hall : ∀ x < 2, x ≠ i → (0 : ℕ) = 0 := by intro _ _ _; rfl
+      change (if (∀ x < 2, x ≠ i → (0 : ℕ) = 0) then phi 0 else complex.zero) = complex.zero; rw [if_pos hall, hphi0]
+    have hsmv2 := sernau.mvps_subst_mul_and_var 2 2 phi_v hf0_v
+    have heul_pow : ∀ q : ℕ, ∀ u : ℕ → ℕ, sernau.is_midx 2 u → sernau.mvps_pow 2 (sernau.mvps_subst_linear 2 c1 phi) q u = sernau.mvps_pow 2 (sernau.mvps_subst 2 2 phi_v A_add) q u
+      intro q; induction q with u _ r ihr u hu; rfl
+      rw [succ_eq_add_one.nat]; exact hrh2.2.2.2.2.2.2 _ _ _ _ u ihr hA_euler hu
+    have hA_pow_int : ∀ q : ℕ, ∀ d : ℕ → ℕ, v_abs (sernau.mvps_pow 2 A_add q d) ≤ 1
+      intro q; induction q with d r ihr d
+      · unfold sernau.mvps_pow sernau.mvps_one; by_cases hc : ∀ x < 2, d x = 0; (rw [if_pos hc, hv.2.1]; linarith); (rw [if_neg hc, hv.1]; linarith)
+      · rw [succ_eq_add_one.nat]; unfold sernau.mvps_pow sernau.mvps_mul; apply hcsum_le _ _ 1 (by linarith); intro idx _; rw [hv.2.2.2.2.2.1]
+        linarith [mul_le_mul_of_nonneg_right.real _ 1 (v_abs (A_add (sernau.midx_sub d (sernau.box_at 2 d idx)))) (ihr (sernau.box_at 2 d idx)) (hv.2.2.1 (A_add (sernau.midx_sub d (sernau.box_at 2 d idx)))), hA_int (sernau.midx_sub d (sernau.box_at 2 d idx))]
+    obtain ⟨e, _, _, he_max⟩ := sernau.exists_monomial_max_norm_coeff p 2 2 v_abs phi_v (sernau.mvps_one 2) beta hp hv hf0_v hbeta_m
+    have hbd_e := he_max (sernau.mvps_pow 2 A_add m) (hA_pow_int m)
+    have hm1_l := hrh2.2.2.2.1 (sernau.mvps_subst 2 2 phi_v (sernau.mvps_pow 2 A_add m)) beta hbeta_m
+    have hm1_r := hrh2.2.2.2.1 (sernau.mvps_prod_pow 2 2 phi_v e) beta hbeta_m
+    rw [hm1_l.2, hm1_r.2, hsmv2.2.1 A_add m beta hbeta_m, ← heul_pow m beta hbeta_m, ← hsl_pow] at hbd_e
+    have hpp_eval : sernau.mvps_prod_pow 2 2 phi_v e beta = complex.mul (sernau.fps_pow phi (e 0) n) (sernau.fps_pow phi (e 1) k)
+      have hs_pp : sernau.mvps_prod_pow 2 2 phi_v e beta = sernau.mvps_mul 2 (sernau.mvps_mul 2 (sernau.mvps_one 2) (sernau.mvps_pow 2 (phi_v 0) (e 0))) (sernau.mvps_pow 2 (phi_v 1) (e 1)) beta := by unfold sernau.mvps_prod_pow; rfl
+      have hcA : ∀ u : ℕ → ℕ, sernau.is_midx 2 u → sernau.mvps_mul 2 (sernau.mvps_one 2) (sernau.mvps_pow 2 (phi_v 0) (e 0)) u = sernau.mvps_var 2 0 (sernau.fps_pow phi (e 0)) u
+        intro u hu; have hm0 := hrh2.2.2.2.1 (sernau.mvps_pow 2 (phi_v 0) (e 0)) u hu; have h02 : 0 < 2 := by decide
+        have hpv0 : phi_v 0 = sernau.mvps_var 2 0 phi := by rw [hphiv_def]
+        rw [hm0.1, hpv0, hsmv2.2.2 0 phi (e 0) u h02 hu]
+      have hcB : ∀ v : ℕ → ℕ, sernau.is_midx 2 v → sernau.mvps_pow 2 (phi_v 1) (e 1) v = sernau.mvps_var 2 1 (sernau.fps_pow phi (e 1)) v
+        intro v hv; have h12 : 1 < 2 := by decide
+        have hpv1 : phi_v 1 = sernau.mvps_var 2 1 phi := by rw [hphiv_def]
+        rw [hpv1]; exact hsmv2.2.2 1 phi (e 1) v h12 hv
+      rw [hs_pp, hrh2.2.2.2.2.2.2 _ _ _ _ beta hcA hcB hbeta_m]; unfold sernau.mvps_mul sernau.mvps_var
+      have hbox := sernau.box_at_spec 2 beta; set a0 := sernau.midx_single 0 n with ha0_def
+      have ha0_m : ∀ x : ℕ, 2 ≤ x → a0 x = 0 := by intro x hx; rw [ha0_def]; unfold sernau.midx_single; have hne : x ≠ 0 := by omega; rw [if_neg hne]
+      have ha0_le : ∀ x < 2, a0 x ≤ beta x := by intro x _; rw [ha0_def]; unfold sernau.midx_single; rw [hbeta_def]; by_cases hx0 : x = 0; (rw [if_pos hx0, if_pos hx0]; omega); (rw [if_neg hx0, if_neg hx0]; omega)
+      have ha0_sp := hbox.2.2 a0 ha0_m ha0_le
+      have hz_oth : ∀ idx < sernau.box_card 2 beta, idx ≠ sernau.box_idx 2 beta a0 →
+          complex.mul (if (∀ x < 2, x ≠ 0 → sernau.box_at 2 beta idx x = 0) then sernau.fps_pow phi (e 0) (sernau.box_at 2 beta idx 0) else complex.zero) (if (∀ x < 2, x ≠ 1 → sernau.midx_sub beta (sernau.box_at 2 beta idx) x = 0) then sernau.fps_pow phi (e 1) (sernau.midx_sub beta (sernau.box_at 2 beta idx) 1) else complex.zero) = complex.zero
+        intro idx hidx hne; have hi := hbox.2.1 idx hidx
+        by_cases hc1 : ∀ x < 2, x ≠ 0 → sernau.box_at 2 beta idx x = 0
+        · have hc2 : ¬ (∀ x < 2, x ≠ 1 → sernau.midx_sub beta (sernau.box_at 2 beta idx) x = 0)
+            intro hall2; apply hne; have h02 : 0 < 2 := (by decide); have h12 : 1 < 2 := by decide
+            have hb0 := hall2 0 h02 h0n1; have hb1 := hc1 1 h12 h1n0; unfold sernau.midx_sub at hb0
+            have hle0 := hi.2.1 0 h02
+            have hbeta0_eq : beta 0 = n := by rw [hbeta_def, if_pos h00]
+            rw [hbeta0_eq] at hb0 hle0
+            have hat0 : sernau.box_at 2 beta idx 0 = n := by omega
+            have heq : sernau.box_at 2 beta idx = a0
+              funext x; rw [ha0_def]; unfold sernau.midx_single
+              by_cases hx0 : x = 0; (rw [if_pos hx0, hx0]; exact hat0)
+              rw [if_neg hx0]; by_cases hx1 : x = 1; (rw [hx1]; exact hb1)
+              have hx2 : 2 ≤ x := by omega
+              exact hi.1 x hx2
+            rw [← hi.2.2, heq]
+          rw [if_neg hc2, complex.mul_zero]
+        · rw [if_neg hc1, complex.zero_mul]
+      rw [hzs.2 (sernau.box_card 2 beta) (sernau.box_idx 2 beta a0) _ ha0_sp.1 hz_oth, ha0_sp.2]
+      have hs0 : ∀ x < 2, x ≠ 0 → a0 x = 0 := by intro x _ hne; rw [ha0_def]; unfold sernau.midx_single; rw [if_neg hne]
+      have hs1 : ∀ x < 2, x ≠ 1 → sernau.midx_sub beta a0 x = 0 := by intro x hx hne; have hx0 : x = 0 := (by omega); rw [ha0_def]; unfold sernau.midx_sub sernau.midx_single; rw [hx0, hbeta_def, if_pos h00, if_pos h00]; omega
+      have hv0 : a0 0 = n := by rw [ha0_def]; unfold sernau.midx_single; trivial
+      have hv1 : sernau.midx_sub beta a0 1 = k := by rw [ha0_def]; change beta 1 - (if (1 : ℕ) = 0 then n else 0) = k; rw [hbeta_def, if_neg h1n0, if_pos h11, if_neg h1n0]; omega
+      rw [if_pos hs0, if_pos hs1, hv0, hv1]
+    have hc_lin := sernau.coeff_subst_linear_series 2 c1 (sernau.fps_pow phi m) beta hbeta_m
+    have hcp1 : cprod_c 2 (fun x => cpow_nat (c1 x) (beta x)) = complex.one
+      have h2 : (2 : ℕ) = (0 + 1) + 1 := by rfl
+      have hp1 : ∀ u : ℕ, cpow_nat complex.one u = complex.one := by intro u; induction u with r ihr; rfl; (rw [succ_eq_add_one.nat]; have hs : cpow_nat complex.one (r + 1) = complex.mul (cpow_nat complex.one r) complex.one := by rfl; rw [hs, ihr, complex.mul_one])
+      rw [h2, cprod_c.succ_eq, cprod_c.succ_eq, cprod_c.zero_eq, hc1_def, hp1, hp1, complex.mul_one, complex.mul_one]
+    have hnp_eq : nat_prod 2 (fun x => fact (beta x)) = fact n * fact k
+      have h2 : (2 : ℕ) = (0 + 1) + 1 := by rfl
+      have h10 : (0 + 1 : ℕ) ≠ 0 := by decide
+      have h11s : (0 + 1 : ℕ) = 1 := by rfl
+      rw [h2, nat_prod.succ, nat_prod.succ, nat_prod.zero, hbeta_def, if_pos h00, if_neg h10, if_pos h11s]; ring
+    have hMnk : v_abs (complex.mul (complex.of_real ((fact (n + k) : ℕ) : ℝ)) (sernau.fps_pow phi m (n + k))) = M_phi (n + k) := by rw [hm_def, hM_def]
+    rw [hc_lin, hcp1, complex.one_mul, hdeg_b, hnp_eq, hpp_eval, hv.2.2.2.2.2.1, hMnk, hv.2.2.2.2.2.1] at hbd_e
+    set fn_v := v_abs (complex.of_real ((fact n : ℕ) : ℝ)) with hfn_def; set fk_v := v_abs (complex.of_real ((fact k : ℕ) : ℝ)) with hfk_def
+    have hfnk_pos : 0 < fn_v * fk_v := by rw [hfn_def, hfk_def, hv.2.2.2.2.2.2, hv.2.2.2.2.2.2]; exact mul_pos.real _ _ (padic.abs_pos p (fact n) (fact_pos n)) (padic.abs_pos p (fact k) (fact_pos k))
+    have hfk_prod : v_abs (complex.of_real ((fact n * fact k : ℕ) : ℝ)) = fn_v * fk_v := by rw [cast_mul.real, ← complex.mul_of_real, hv.2.2.2.2.2.1, ← hfn_def, ← hfk_def]
+    have hfk_ne0 : v_abs (complex.of_real ((fact n * fact k : ℕ) : ℝ)) ≠ 0 := by rw [hfk_prod]; linarith
+    rw [hinv_v (complex.of_real ((fact n * fact k : ℕ) : ℝ)) hfk_ne0, hfk_prod] at hbd_e
+    have hmul_fk := mul_le_mul_of_nonneg_left.real _ _ (fn_v * fk_v) hbd_e (by linarith)
+    have hl_simp : (fn_v * fk_v) * (M_phi (n + k) * (1 / (fn_v * fk_v))) = M_phi (n + k) := by rw [div_def.real 1 (fn_v * fk_v)]; have hi := mul_inv_cancel.real (fn_v * fk_v) (by linarith); linear_combination M_phi (n + k) * hi
+    have hr_simp : (fn_v * fk_v) * (v_abs (sernau.fps_pow phi (e 0) n) * v_abs (sernau.fps_pow phi (e 1) k)) = v_abs (complex.mul (complex.of_real ((fact n : ℕ) : ℝ)) (sernau.fps_pow phi (e 0) n)) * v_abs (complex.mul (complex.of_real ((fact k : ℕ) : ℝ)) (sernau.fps_pow phi (e 1) k))
+      rw [hv.2.2.2.2.2.1, hv.2.2.2.2.2.1, ← hfn_def, ← hfk_def]; ring
+    rw [hl_simp, hr_simp] at hmul_fk
+    have hb0 := hM_sup n (sernau.fps_pow phi (e 0)) (hpow_phi_mem (e 0)); have hb1 := hM_sup k (sernau.fps_pow phi (e 1)) (hpow_phi_mem (e 1))
+    have hm1 := mul_le_mul_of_nonneg_right.real _ (M_phi n) (v_abs (complex.mul (complex.of_real ((fact k : ℕ) : ℝ)) (sernau.fps_pow phi (e 1) k))) hb0 (hv.2.2.1 (complex.mul (complex.of_real ((fact k : ℕ) : ℝ)) (sernau.fps_pow phi (e 1) k)))
+    have hm2 := mul_le_mul_of_nonneg_left.real _ (M_phi k) (M_phi n) hb1 (by rw [hM_def]; exact hv.2.2.1 (complex.mul (complex.of_real ((fact n : ℕ) : ℝ)) (sernau.fps_pow phi (j_opt n) n)))
+    linarith
+  exact ⟨M_phi, hM0, by intro k; rw [hM_def]; exact hv.2.2.1 (complex.mul (complex.of_real ((fact k : ℕ) : ℝ)) (sernau.fps_pow phi (j_opt k) k)), by intro k; exact ⟨sernau.fps_pow phi (j_opt k), hpow_phi_mem (j_opt k), by rw [hM_def]⟩, hM_sup, hM_submult⟩
+
++ sernau.katz_divisibility_limit (d p e : ℕ) (v_abs : ℂ → ℝ) (varpi pi_unif : ℂ)
+    (phi T S E : ℕ → ℂ) (A_add : (ℕ → ℕ) → ℂ)
+    (hd : is_prime_nat d) (hd8 : d % 8 = 7) (hp : is_prime_nat p) (hv : sernau.is_padic_val_on_C p v_abs)
+    (hphi0 : phi 0 = complex.zero) (hA_int : ∀ d_e : ℕ → ℕ, v_abs (A_add d_e) ≤ 1)
+    (hA_euler : ∀ beta : ℕ → ℕ, sernau.is_midx 2 beta → sernau.mvps_subst_linear 2 (fun _ => complex.one) phi beta = sernau.mvps_subst 2 2 (fun i => sernau.mvps_var 2 i phi) A_add beta)
+    (he : 1 ≤ e) (hvarpi : v_abs varpi = rpow (p : ℝ) (-sernau.nonsplit_weight d p)) (hpi_lt1 : v_abs pi_unif < 1)
+    (hT_mem : sernau.in_phi_series_ring v_abs phi T) (hS0 : S 0 = complex.zero)
+    (hS_int : ∀ k : ℕ, v_abs (S k) ≤ 1) (hE_int : ∀ k : ℕ, v_abs (E k) ≤ 1)
+    (hTS : ∀ k : ℕ, sernau.fps_rescale varpi T k = sernau.fps_smul varpi S k)
+    (hS_rel : ∀ k : ℕ, sernau.fps_sub S (sernau.fps_pow S (p ^ e)) k = complex.add (sernau.fps_X k) (sernau.fps_smul pi_unif E k)) :
+    (∀ n : ℕ, ∃ f : ℕ → ℂ, sernau.in_phi_series_ring v_abs phi f ∧
+      (rpow (p : ℝ) (sernau.nonsplit_weight d p - 1 / ((p : ℝ) - 1))) ^ n ≤ v_abs (complex.mul (complex.of_real ((fact n : ℕ) : ℝ)) (f n)))
+  obtain ⟨M_phi, hM0, hM_nn, hM_wit, hM_sup, hM_sub⟩ := sernau.phi_max_norm_submult p v_abs phi A_add hp hv hphi0 hA_int hA_euler
+  obtain ⟨hcsum_le, hpow_v, _⟩ := sernau.padic_val_on_C_helpers p v_abs hp hv
+  have hzs := sernau.csum_zero_and_single
+  set R0 := rpow (p : ℝ) (sernau.nonsplit_weight d p - 1 / ((p : ℝ) - 1)) with hR0_def
+  have hR0_pos : 0 < R0 := by rw [hR0_def]; exact rpow.pos (p : ℝ) (sernau.nonsplit_weight d p - 1 / ((p : ℝ) - 1))
+  intro n; obtain ⟨fn, hfn_mem, hfn_eq⟩ := hM_wit n; use fn; constructor; exact hfn_mem; rw [← hfn_eq]
+  by_contra hlt_n; have hn_pos : 1 ≤ n := by by_cases hn0 : n = 0; (rw [hn0, pow_zero.real, hM0] at hlt_n; linarith); omega
+  set c : ℕ → ℝ := fun k => M_phi k / (R0 ^ k) with hc_def
+  have hc_nn : ∀ k : ℕ, 0 ≤ c k := by intro k; rw [hc_def]; exact div_nonneg.real _ _ (hM_nn k) (by linarith [pow_pos.real R0 hR0_pos k])
+  have hc_sub : ∀ a b : ℕ, c (a + b) ≤ c a * c b
+    intro a b; rw [hc_def]
+    have hp_ab : ∀ u : ℕ, R0 ^ (a + u) = (R0 ^ a) * (R0 ^ u) := by intro u; induction u with r ihr; (rw [add_zero.nat, pow_zero.real]; ring); (rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.real, pow_succ.real, ihr]; ring)
+    have hRa := pow_pos.real R0 hR0_pos a; have hRb := pow_pos.real R0 hR0_pos b; have hRab := mul_pos.real _ _ hRa hRb
+    rw [hp_ab b]
+    have hd_iff := div_le_iff.real (M_phi (a + b)) ((M_phi a / (R0 ^ a)) * (M_phi b / (R0 ^ b))) ((R0 ^ a) * (R0 ^ b)) hRab
+    apply hd_iff.mpr
+    have hrw : ((M_phi a / (R0 ^ a)) * (M_phi b / (R0 ^ b))) * ((R0 ^ a) * (R0 ^ b)) = M_phi a * M_phi b
+      rw [div_def.real (M_phi a) (R0 ^ a), div_def.real (M_phi b) (R0 ^ b)]
+      have hia := mul_inv_cancel.real (R0 ^ a) (by linarith); have hib := mul_inv_cancel.real (R0 ^ b) (by linarith)
+      linear_combination (M_phi a * M_phi b * ((R0 ^ b) * (1 / (R0 ^ b)))) * hia + (M_phi a * M_phi b) * hib
+    rw [hrw]; exact hM_sub a b
+  set q0 := c n with hq0_def
+  have hq0_lt1 : q0 < 1
+    rw [hq0_def, hc_def]
+    have hd_iff := div_lt_iff.real (M_phi n) 1 (R0 ^ n) (pow_pos.real R0 hR0_pos n)
+    exact hd_iff.mpr (by linarith)
+  have hq0_nn : 0 ≤ q0 := by rw [hq0_def]; exact hc_nn n
+  set C_rem := 1 + ∑ r < n, c r with hC_def
+  have hcr_le : ∀ r < n, c r ≤ C_rem
+    intro r hr
+    have hle_s : ∀ m : ℕ, r < m → c r ≤ ∑ i < m, c i
+      intro m; induction m with _ u ihu hlt; omega
+      rw [succ_eq_add_one.nat] at hlt ⊢; rw [sum_below_succ]
+      by_cases hru : r < u; linarith [ihu hru, hc_nn u]; (have heq : u = r := by omega; rw [heq]; linarith [sum_nonneg.real c r (by intro i _; exact hc_nn i)])
+    rw [hC_def]; linarith [hle_s n hr]
+  have hcq_le : ∀ (q r : ℕ), r < n → c (n * q + r) ≤ (q0 ^ q) * C_rem
+    intro q r hr; induction q with u ihu; (rw [mul_zero.nat, zero_add.nat, pow_zero.real, one_mul.real]; exact hcr_le r hr)
+    rw [succ_eq_add_one.nat]; have hs : n * (u + 1) + r = (n * u + r) + n := by ring
+    rw [hs, pow_succ.real]; have h1 := hc_sub (n * u + r) n; rw [← hq0_def] at h1
+    have h2 := mul_le_mul_of_nonneg_right.real (c (n * u + r)) ((q0 ^ u) * C_rem) q0 ihu hq0_nn
+    linarith
+  have hv_pos : 0 < v_abs varpi := by rw [hvarpi]; exact rpow.pos (p : ℝ) (-sernau.nonsplit_weight d p)
+  have hex_Q : ∃ Q_b : ℕ, 1 ≤ Q_b ∧ (q0 ^ Q_b) * C_rem < v_abs varpi
+    by_cases hq_z : q0 = 0
+    · use 1; constructor; decide; have hz1 : (0 : ℝ) ^ 1 = 0 := (by ring); rw [hq_z, hz1]; linarith
+    · have hq_pos : 0 < q0 := by linarith
+      set del := (1 - q0) / q0 with hdel_def
+      have hdel_pos : 0 < del := by rw [hdel_def]; exact div_pos.real (1 - q0) q0 (by linarith) hq_pos
+      have h1d_q : (1 + del) * q0 = 1 := by rw [hdel_def, div_def.real (1 - q0) q0]; have hi := mul_inv_cancel.real q0 (by linarith); linear_combination (1 - q0) * hi
+      have hbern : ∀ u : ℕ, 1 + (u : ℝ) * del ≤ (1 + del) ^ u
+        intro u; induction u with r ihr; (rw [cast_zero.real, pow_zero.real]; linarith)
+        rw [succ_eq_add_one.nat, cast_add.real, cast_one.real, pow_succ.real]
+        have hm := mul_le_mul_of_nonneg_right.real (1 + (r : ℝ) * del) ((1 + del) ^ r) (1 + del) ihr (by linarith)
+        have hnn := mul_nonneg.real ((r : ℝ) * del) del (mul_nonneg.real (r : ℝ) del (cast_nonneg.real r) (by linarith)) (by linarith)
+        linarith
+      have h0n : 0 < n := by omega
+      have hC_nn : 0 ≤ C_rem := by linarith [hc_nn 0, hcr_le 0 h0n]
+      set Q_b := nat_floor (C_rem / (v_abs varpi * del)) + 1 with hQb_def
+      have hvd_pos := mul_pos.real (v_abs varpi) del hv_pos hdel_pos
+      have hfl := nat_floor.spec (C_rem / (v_abs varpi * del)) (div_nonneg.real C_rem (v_abs varpi * del) hC_nn (by linarith))
+      have hgt : C_rem < ((Q_b : ℝ) * del) * v_abs varpi
+        have hlt_q : C_rem / (v_abs varpi * del) < (Q_b : ℝ) := by rw [hQb_def]; exact hfl.2
+        have hd_iff := div_lt_iff.real C_rem (Q_b : ℝ) (v_abs varpi * del) (mul_pos.real _ _ hv_pos hdel_pos)
+        have hm := hd_iff.mp hlt_q; linarith
+      have hp_inv : ((1 + del) ^ Q_b) * (q0 ^ Q_b) = 1
+        have hr : ∀ u : ℕ, ((1 + del) ^ u) * (q0 ^ u) = 1 := by intro u; induction u with r ihr; (rw [pow_zero.real, pow_zero.real]; ring); (rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real]; linear_combination ihr + (((1 + del) ^ r) * (q0 ^ r)) * h1d_q)
+        exact hr Q_b
+      use Q_b; constructor; (rw [hQb_def]; omega)
+      have hb_Q := hbern Q_b
+      have hm_le := mul_le_mul_of_nonneg_right.real ((Q_b : ℝ) * del) ((1 + del) ^ Q_b) (v_abs varpi) (by linarith) (by linarith)
+      have hm1 := mul_lt_mul_of_pos_right.real C_rem (((1 + del) ^ Q_b) * v_abs varpi) (q0 ^ Q_b) (by linarith) (pow_pos.real q0 hq_pos Q_b)
+      have hrw : (((1 + del) ^ Q_b) * v_abs varpi) * (q0 ^ Q_b) = v_abs varpi := by linear_combination v_abs varpi * hp_inv
+      linarith
+  obtain ⟨Q_b, hQb1, hQb_lt⟩ := hex_Q; set L := n * Q_b with hL_def
+  have hS_lt1_geL : ∀ k : ℕ, L ≤ k → v_abs (S k) < 1
+    intro k hkL; rw [hL_def] at hkL; have hdm := div_add_mod.nat k n; have hrem := mod_lt.nat k n (by omega)
+    have hq_ge : Q_b ≤ k / n
+      by_contra hlt_q; have hm := mul_le_mul_of_nonneg_left.nat (k / n + 1) Q_b n (by omega) (by omega)
+      have hd : n * (k / n + 1) = n * (k / n) + n := by ring
+      omega
+    have hq_pow_le : ∀ d_q : ℕ, q0 ^ (Q_b + d_q) ≤ q0 ^ Q_b
+      intro d_q; induction d_q with r ihr; (rw [add_zero.nat]; linarith)
+      rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.real]
+      have hm := mul_le_mul_of_nonneg_left.real q0 1 (q0 ^ (Q_b + r)) (by linarith) (pow_nonneg.real q0 hq0_nn (Q_b + r))
+      linarith
+    have hck_lt : c k < v_abs varpi
+      have hk_sp : k / n = Q_b + (k / n - Q_b) := by omega
+      have h1 := hcq_le (k / n) (k % n) hrem; rw [hdm, hk_sp] at h1
+      have h0n : 0 < n := by omega
+      have hC_nn : 0 ≤ C_rem := by linarith [hc_nn 0, hcr_le 0 h0n]
+      have h2 := mul_le_mul_of_nonneg_right.real (q0 ^ (Q_b + (k / n - Q_b))) (q0 ^ Q_b) C_rem (hq_pow_le (k / n - Q_b)) hC_nn
+      linarith
+    have hts_v : (v_abs varpi ^ k) * v_abs (T k) = v_abs varpi * v_abs (S k)
+      have h : v_abs (sernau.fps_rescale varpi T k) = v_abs (sernau.fps_smul varpi S k) := by rw [hTS k]
+      unfold sernau.fps_rescale sernau.fps_smul at h; rw [hv.2.2.2.2.2.1, hv.2.2.2.2.2.1, hpow_v] at h; exact h
+    have hvR_pow : ∀ u : ℕ, (v_abs varpi ^ u) * (R0 ^ u) = rpow (p : ℝ) (-(u : ℝ) / ((p : ℝ) - 1))
+      have hc2p := cast_le.real 2 p
+      have hp1_ne : (p : ℝ) - 1 ≠ 0 := by linarith [hc2p.mpr hp.1]
+      have hvR1 : v_abs varpi * R0 = rpow (p : ℝ) (-(1 / ((p : ℝ) - 1)))
+        rw [hvarpi, hR0_def, ← rpow.add (p : ℝ)]; have hs : -sernau.nonsplit_weight d p + (sernau.nonsplit_weight d p - 1 / ((p : ℝ) - 1)) = -(1 / ((p : ℝ) - 1)) := by ring
+        rw [hs]
+      intro u; induction u with r ihr
+      · rw [pow_zero.real, pow_zero.real, cast_zero.real]; have hz : -(0 : ℝ) / ((p : ℝ) - 1) = 0 := by rw [div_def.real]; ring
+        rw [hz]; unfold rpow; simp [exp_zero]
+      · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, cast_add.real, cast_one.real]
+        have hmul_s : ((v_abs varpi ^ r) * v_abs varpi) * ((R0 ^ r) * R0) = ((v_abs varpi ^ r) * (R0 ^ r)) * (v_abs varpi * R0) := by ring
+        rw [hmul_s, ihr, hvR1, ← rpow.add (p : ℝ), sernau.m81b_exp_alg (r : ℝ) ((p : ℝ) - 1) hp1_ne]
+    have hvp_k := sernau.vp_fact_legendre_bounds p 0 k hp; have hfk_lo := hvp_k.2.1
+    have hfk_pos := padic.abs_pos p (fact k) (fact_pos k)
+    have hTk_le := hM_sup k T hT_mem; rw [hv.2.2.2.2.2.1, hv.2.2.2.2.2.2 (fact k)] at hTk_le
+    have hMk_eq : M_phi k = c k * (R0 ^ k) := by rw [hc_def, div_def.real (M_phi k) (R0 ^ k)]; have hi := mul_inv_cancel.real (R0 ^ k) (by linarith [pow_pos.real R0 hR0_pos k]); linear_combination -(M_phi k) * hi
+    have hchain1 : padic.abs p (fact k) * (v_abs varpi * v_abs (S k)) ≤ (v_abs varpi ^ k) * (c k * (R0 ^ k))
+      have heq1 : padic.abs p (fact k) * (v_abs varpi * v_abs (S k)) = (v_abs varpi ^ k) * (padic.abs p (fact k) * v_abs (T k)) := by linear_combination padic.abs p (fact k) * hts_v.symm
+      rw [heq1, ← hMk_eq]; exact mul_le_mul_of_nonneg_left.real _ (M_phi k) (v_abs varpi ^ k) hTk_le (pow_nonneg.real (v_abs varpi) (by linarith) k)
+    have hchain2 : (v_abs varpi ^ k) * (c k * (R0 ^ k)) ≤ c k * padic.abs p (fact k)
+      have heq2 : (v_abs varpi ^ k) * (c k * (R0 ^ k)) = c k * ((v_abs varpi ^ k) * (R0 ^ k)) := by ring
+      rw [heq2, hvR_pow k]; exact mul_le_mul_of_nonneg_left.real _ _ (c k) hfk_lo (hc_nn k)
+    have hvS_le_ck : v_abs varpi * v_abs (S k) ≤ c k
+      by_contra hgt_c; linarith [mul_lt_mul_of_pos_left.real (c k) (v_abs varpi * v_abs (S k)) (padic.abs p (fact k)) (by linarith) hfk_pos]
+    by_contra hge1; linarith [mul_le_mul_of_nonneg_left.real 1 (v_abs (S k)) (v_abs varpi) (by linarith) (by linarith)]
+  set Q_pow := p ^ e with hQp_def
+  have hQp_ge2 : 2 ≤ Q_pow
+    have hp2 : 2 ≤ p := hp.1; have hp_pos : 0 < p := by omega
+    have he1 : e = (e - 1) + 1 := (by omega); have hp_e1 := pow_pos.nat p (e - 1) hp_pos
+    have hm := mul_le_mul_of_nonneg_right.nat 1 (p ^ (e - 1)) p (by omega) (by omega)
+    rw [hQp_def, he1, pow_succ.nat]; omega
+  have hS_pow_van : ∀ q u : ℕ, u < q → sernau.fps_pow S q u = complex.zero
+    intro q; induction q with u hu r ihr u hu; omega
+    rw [succ_eq_add_one.nat] at hu ⊢; unfold sernau.fps_pow sernau.fps_mul
+    have hc0 : ∀ i < u + 1, complex.mul (sernau.fps_pow S r i) (S (u - i)) = complex.zero := by intro i _; by_cases hir : i < r; (rw [ihr i hir, complex.zero_mul]); (have hui : u - i = 0 := by omega; rw [hui, hS0, complex.mul_zero])
+    rw [csum.congr (u + 1) _ (fun _ => complex.zero) hc0]; exact hzs.1 (u + 1)
+  have hS1_eq1 : v_abs (S 1) = 1
+    have hrel1 := hS_rel 1
+    change complex.sub (S 1) (sernau.fps_pow S Q_pow 1) = complex.add (if (1 : ℕ) = 1 then complex.one else complex.zero) (complex.mul pi_unif (E 1)) at hrel1
+    have h1_lt_Q : 1 < Q_pow := by omega
+    have h11 : (1 : ℕ) = 1 := by rfl
+    rw [hS_pow_van Q_pow 1 h1_lt_Q, if_pos h11] at hrel1
+    have h1_sum : complex.one = complex.add (S 1) (complex.neg (complex.mul pi_unif (E 1)))
+      have hr : complex.re (complex.sub (S 1) complex.zero) = complex.re (complex.add complex.one (complex.mul pi_unif (E 1))) := by rw [hrel1]
+      have hi : complex.im (complex.sub (S 1) complex.zero) = complex.im (complex.add complex.one (complex.mul pi_unif (E 1))) := by rw [hrel1]
+      apply complex.ext <;> (simp at hr hi ⊢; linarith)
+    have htri := hv.2.2.2.2.1 (S 1) (complex.neg (complex.mul pi_unif (E 1))); rw [← h1_sum, hv.2.1, hv.2.2.2.1, hv.2.2.2.2.2.1] at htri
+    have hpiE_lt1 : v_abs pi_unif * v_abs (E 1) < 1 := by linarith [mul_le_mul_of_nonneg_left.real (v_abs (E 1)) 1 (v_abs pi_unif) (hE_int 1) (hv.2.2.1 pi_unif)]
+    by_cases hcmp : v_abs (S 1) ≤ v_abs pi_unif * v_abs (E 1); (unfold max at htri; rw [if_pos hcmp] at htri; linarith); (unfold max at htri; rw [if_neg hcmp] at htri; linarith [hS_int 1])
+  have hL_gt1 : 1 < L := by by_contra hle1; have h := hS_lt1_geL 1 (by omega); linarith
+  have hex_d0 : ∃ d0 : ℕ, 1 ≤ d0 ∧ v_abs (S d0) = 1 ∧ ∀ k : ℕ, d0 < k → v_abs (S k) < 1
+    have hrec_d : ∀ M : ℕ, 1 ≤ M → ∃ d0 : ℕ, 1 ≤ d0 ∧ d0 ≤ M ∧ v_abs (S d0) = 1 ∧ ∀ k : ℕ, d0 < k → k ≤ M → v_abs (S k) < 1
+      intro M; induction M with _ r ihr hr1; omega
+      rw [succ_eq_add_one.nat] at hr1 ⊢
+      by_cases hr0 : r = 0; (rw [hr0]; exact ⟨1, by decide, by decide, hS1_eq1, by intro k hk1 hk2; omega⟩)
+      obtain ⟨d0, hd0_1, hd0_r, hd0_v, hd0_hi⟩ := ihr (by omega)
+      by_cases hv_r1 : v_abs (S (r + 1)) = 1
+      · exact ⟨r + 1, by omega, by omega, hv_r1, by intro k hk1 hk2; omega⟩
+      · have hlt1_r1 : v_abs (S (r + 1)) < 1 := by have hle := hS_int (r + 1); by_contra hge; apply hv_r1; linarith
+        exact ⟨d0, hd0_1, by omega, hd0_v, by intro k hk1 hk2; by_cases hkr : k ≤ r; exact hd0_hi k hk1 hkr; (have heq : k = r + 1 := by omega; rw [heq]; exact hlt1_r1)⟩
+    have h1L : 1 ≤ L := by omega
+    obtain ⟨d0, hd0_1, _, hd0_v, hd0_hi⟩ := hrec_d L h1L
+    exact ⟨d0, hd0_1, hd0_v, by intro k hk; by_cases hkL : k ≤ L; exact hd0_hi k hk hkL; exact hS_lt1_geL k (by omega)⟩
+  obtain ⟨d0, hd0_1, hd0_v, hd0_gt⟩ := hex_d0
+  have hS_pow_int : ∀ m k : ℕ, v_abs (sernau.fps_pow S m k) ≤ 1
+    intro m; induction m with k r ihr k
+    · unfold sernau.fps_pow sernau.fps_one; by_cases hk0 : k = 0; (rw [if_pos hk0, hv.2.1]; linarith); (rw [if_neg hk0, hv.1]; linarith)
+    · rw [succ_eq_add_one.nat]; unfold sernau.fps_pow sernau.fps_mul; apply hcsum_le (k + 1) _ 1 (by linarith); intro i _; rw [hv.2.2.2.2.2.1]
+      linarith [mul_le_mul_of_nonneg_right.real _ 1 (v_abs (S (k - i))) (ihr i) (hv.2.2.1 (S (k - i))), hS_int (k - i)]
+  have hlead : ∀ r : ℕ, v_abs (sernau.fps_pow S (r + 1) (d0 * (r + 1))) = 1 ∧ ∀ k : ℕ, d0 * (r + 1) < k → v_abs (sernau.fps_pow S (r + 1) k) < 1
+    intro r; induction r with m ihm
+    · have hm1 : ∀ k : ℕ, sernau.fps_pow S 1 k = S k
+        intro k; unfold sernau.fps_pow sernau.fps_mul sernau.fps_one
+        have hz_o : ∀ i < k + 1, i ≠ 0 → complex.mul (if i = 0 then complex.one else complex.zero) (S (k - i)) = complex.zero := by intro i _ hne; rw [if_neg hne, complex.zero_mul]
+        have h0k1 : 0 < k + 1 := by omega
+        have h00 : (0 : ℕ) = 0 := by rfl
+        rw [hzs.2 (k + 1) 0 _ h0k1 hz_o, if_pos h00, complex.one_mul]; have hk0 : k - 0 = k := by omega; rw [hk0]
+      have h01 : 0 + 1 = 1 := by rfl
+      have hd01 : d0 * 1 = d0 := by ring
+      exact ⟨by rw [h01, hd01, hm1 d0]; exact hd0_v, by intro k hk; rw [h01, hm1 k]; exact hd0_gt k (by omega)⟩
+    · rw [succ_eq_add_one.nat]; set Pm := sernau.fps_pow S (m + 1) with hPm_def
+      have habove : ∀ k : ℕ, d0 * (m + 1 + 1) < k → v_abs (sernau.fps_pow S (m + 1 + 1) k) < 1
+        intro k hk; have hs : sernau.fps_pow S (m + 1 + 1) k = sernau.fps_mul Pm S k := by rw [hPm_def]; rfl
+        rw [hs]; unfold sernau.fps_mul
+        have hk1_pos : 1 ≤ k + 1 := by omega
+        obtain ⟨idx, hidx, hmax⟩ := sernau.exists_v_abs_csum_le p (k + 1) v_abs (fun i => complex.mul (Pm i) (S (k - i))) hp hv hk1_pos
+        rw [hv.2.2.2.2.2.1] at hmax
+        by_cases hi_hi : d0 * (m + 1) < idx
+        · have him2 := ihm.2 idx hi_hi
+          linarith [him2, mul_le_mul_of_nonneg_left.real (v_abs (S (k - idx))) 1 (v_abs (Pm idx)) (hS_int (k - idx)) (hv.2.2.1 (Pm idx))]
+        · have hki : d0 < k - idx := by have hd : d0 * (m + 1 + 1) = d0 * (m + 1) + d0 := by ring; omega
+          have hp_int := hS_pow_int (m + 1) idx; rw [← hPm_def] at hp_int
+          linarith [hd0_gt (k - idx) hki, mul_le_mul_of_nonneg_right.real (v_abs (Pm idx)) 1 (v_abs (S (k - idx))) hp_int (hv.2.2.1 (S (k - idx)))]
+      constructor
+      · set K0 := d0 * (m + 1 + 1) with hK0_def; set I0 := d0 * (m + 1) with hI0_def
+        have hKI : K0 = I0 + d0 := by rw [hK0_def, hI0_def]; ring
+        have hs : sernau.fps_pow S (m + 1 + 1) K0 = sernau.fps_mul Pm S K0 := by rw [hPm_def]; rfl
+        set G : ℕ → ℂ := fun i => if i = I0 then complex.zero else complex.mul (Pm i) (S (K0 - i)) with hG_def
+        have hsp_cs : sernau.fps_mul Pm S K0 = complex.add (complex.mul (Pm I0) (S d0)) (csum (K0 + 1) G)
+          unfold sernau.fps_mul
+          set F0 : ℕ → ℂ := fun i => if i = I0 then complex.mul (Pm I0) (S (K0 - I0)) else complex.zero with hF0_def
+          have hcon_f : ∀ i < K0 + 1, complex.mul (Pm i) (S (K0 - i)) = complex.add (F0 i) (G i)
+            intro i _; rw [hF0_def, hG_def]; by_cases hi : i = I0; (rw [if_pos hi, if_pos hi, hi, complex.add_zero]); (rw [if_neg hi, if_neg hi, complex.zero_add])
+          have hz_f : ∀ i < K0 + 1, i ≠ I0 → F0 i = complex.zero := by intro i _ hne; rw [hF0_def, if_neg hne]
+          have hsub_d0 : K0 - I0 = d0 := by omega
+          have hIK1 : I0 < K0 + 1 := by omega
+          have hII : I0 = I0 := by rfl
+          rw [csum.congr (K0 + 1) _ _ hcon_f, csum.add, hzs.2 (K0 + 1) I0 F0 hIK1 hz_f, hF0_def, if_pos hII, hsub_d0]
+        have hK1_pos : 1 ≤ K0 + 1 := by omega
+        obtain ⟨idx, hidx, hG_max⟩ := sernau.exists_v_abs_csum_le p (K0 + 1) v_abs G hp hv hK1_pos
+        have hG_lt1 : v_abs (G idx) < 1
+          rw [hG_def]; by_cases hi0 : idx = I0; (rw [if_pos hi0, hv.1]; linarith)
+          rw [if_neg hi0, hv.2.2.2.2.2.1]
+          by_cases hi_gt : I0 < idx
+          · have him2 := ihm.2 idx hi_gt
+            linarith [him2, mul_le_mul_of_nonneg_left.real (v_abs (S (K0 - idx))) 1 (v_abs (Pm idx)) (hS_int (K0 - idx)) (hv.2.2.1 (Pm idx))]
+          · have hki : d0 < K0 - idx := by omega
+            have hp_int := hS_pow_int (m + 1) idx; rw [← hPm_def] at hp_int
+            linarith [hd0_gt (K0 - idx) hki, mul_le_mul_of_nonneg_right.real (v_abs (Pm idx)) 1 (v_abs (S (K0 - idx))) hp_int (hv.2.2.1 (S (K0 - idx)))]
+        have him1 := ihm.1
+        have hlead1 : v_abs (complex.mul (Pm I0) (S d0)) = 1 := by rw [hv.2.2.2.2.2.1, him1, hd0_v]; ring
+        have hrev : complex.mul (Pm I0) (S d0) = complex.add (sernau.fps_pow S (m + 1 + 1) K0) (complex.neg (csum (K0 + 1) G))
+          rw [hs, hsp_cs]; apply complex.ext <;> simp <;> ring
+        have htri := hv.2.2.2.2.1 (sernau.fps_pow S (m + 1 + 1) K0) (complex.neg (csum (K0 + 1) G)); rw [← hrev, hlead1, hv.2.2.2.1] at htri
+        by_cases hcmp : v_abs (sernau.fps_pow S (m + 1 + 1) K0) ≤ v_abs (csum (K0 + 1) G); (unfold max at htri; rw [if_pos hcmp] at htri; linarith)
+        unfold max at htri; rw [if_neg hcmp] at htri; linarith [hS_pow_int (m + 1 + 1) K0]
+      · exact habove
+  have hQ1 : (Q_pow - 1) + 1 = Q_pow := by omega
+  have hlQ := hlead (Q_pow - 1); have hlead_Q := hlQ.1; rw [hQ1] at hlead_Q
+  set K_st := d0 * Q_pow with hKst_def
+  have hK_gt_d0 : d0 < K_st := by rw [hKst_def]; have hm := mul_le_mul_of_nonneg_left.nat 2 Q_pow d0 hQp_ge2 (by omega); have hd2 : d0 * 2 = d0 + d0 := by ring; omega
+  have hrel_K := hS_rel K_st
+  change complex.sub (S K_st) (sernau.fps_pow S Q_pow K_st) = complex.add (if K_st = 1 then complex.one else complex.zero) (complex.mul pi_unif (E K_st)) at hrel_K
+  have hK_ne1 : K_st ≠ 1 := by omega
+  rw [if_neg hK_ne1, complex.zero_add] at hrel_K
+  have hpow_eq : sernau.fps_pow S Q_pow K_st = complex.add (S K_st) (complex.neg (complex.mul pi_unif (E K_st)))
+    have hr : complex.re (complex.sub (S K_st) (sernau.fps_pow S Q_pow K_st)) = complex.re (complex.mul pi_unif (E K_st)) := by rw [hrel_K]
+    have hi : complex.im (complex.sub (S K_st) (sernau.fps_pow S Q_pow K_st)) = complex.im (complex.mul pi_unif (E K_st)) := by rw [hrel_K]
+    apply complex.ext <;> (simp at hr hi ⊢; linarith)
+  have htri_f := hv.2.2.2.2.1 (S K_st) (complex.neg (complex.mul pi_unif (E K_st)))
+  rw [← hpow_eq, hlead_Q, hv.2.2.2.1, hv.2.2.2.2.2.1] at htri_f
+  have hSK_lt1 := hd0_gt K_st hK_gt_d0
+  have hpiEK_lt1 : v_abs pi_unif * v_abs (E K_st) < 1 := by linarith [mul_le_mul_of_nonneg_left.real (v_abs (E K_st)) 1 (v_abs pi_unif) (hE_int K_st) (hv.2.2.1 pi_unif)]
+  by_cases hcmp : v_abs (S K_st) ≤ v_abs pi_unif * v_abs (E K_st); (unfold max at htri_f; rw [if_pos hcmp] at htri_f; linarith); (unfold max at htri_f; rw [if_neg hcmp] at htri_f; linarith)
+

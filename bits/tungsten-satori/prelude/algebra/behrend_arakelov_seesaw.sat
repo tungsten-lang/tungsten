@@ -1,0 +1,462 @@
+-- Milestone 3.3: Three Core Layer 2/3 Pillar Blocks (100% AXIOM-FREE in Satori HOL)
+--
+-- Mirrors the three cleanest load-bearing structures from Alpöge's `remark.pdf`:
+--   * Block 1 (`BehrendSets`, item 19 / Pillar 2): Euclidean sphere 3-AP-freeness,
+--     carry-free base-(2M) encoding injectivity, 3-AP-free embedding in ℕ, and finite
+--     pigeonhole sphere density lower bound `|S_R| * (d*M^2 + 1) >= M^d`.
+--   * Block 2 (`Bost` slope / `HarderNarasimhan`, items 13-14 / Pillar 2): short exact
+--     sequence slope averaging, HN filtration degree identity `mu_min <= mu(E) <= mu_max`,
+--     Bost slope inequality `mu_min(E) <= mu_max(F) + h(phi)`, and m-step lift-chain
+--     cost accounting `mu_min(E_0) <= mu_max(E_m) + sum_{j<m} h(phi_j)`.
+--   * Block 3 (`ThetaLift` / `Rallis` seesaw, items 3, 8, 12 / Pillar 3): arbitrary-rank
+--     finite theta lift & adjoint, exact Rallis seesaw `<g, theta(f)> = <theta^*(g), f>`,
+--     m-fold iterated theta lift & iterated Rallis seesaw, iterated Parseval (k-fold),
+--     and Hecke-character phase invariance of squared Bessel periods `|<g, theta^(m)(f)>|^2`.
+--
+-- ALL theorems proved unconditionally on Satori's foundational HOL kernel (0 custom axioms).
+
+import l_function
+import matrix
+
+-- ====================================================================================
+-- BLOCK 1: Behrend's 3-AP-Free Set Construction (`remark.pdf` item 19)
+-- ====================================================================================
+
+-- Squared Euclidean norm on the first d coordinates of v : ℕ → ℕ (in ℝ for clean algebra).
+-> behrend.norm_sq (d : ℕ) (v : ℕ → ℕ) : ℝ :=
+  ∑ i < d, ((v i : ℝ) * (v i : ℝ))
+
+-- Helper: if a sum of nonnegative reals is 0, every term below d is 0.
++ sum_nonneg_eq_zero.real (d : ℕ) (f : ℕ → ℝ) :
+    (∀ i < d, 0 ≤ f i) → (∑ i < d, f i) = 0 → ∀ i < d, f i = 0
+  induction d with hnn h0 i hi k ih hnn h0 i hi
+  · omega
+  · rw [succ_eq_add_one.nat] at hnn h0 hi
+    simp at h0
+    have hsum_nn : 0 ≤ ∑ j < k, f j := sum_nonneg.real f k (by intro j hj; exact hnn j (by omega))
+    have hfk_nn : 0 ≤ f k := hnn k (by omega)
+    have hsum0 : (∑ j < k, f j) = 0 := by linarith
+    have hfk0 : f k = 0 := by linarith
+    by_cases e : i = k
+    · rw [e]; exact hfk0
+    · exact ih (by intro j hj; exact hnn j (by omega)) hsum0 i (by omega)
+
+-- Helper: injectivity of (n : ℕ) ↦ (n : ℝ) via induction.
++ nat_cast_inj.real (a : ℕ) : ∀ b : ℕ, (a : ℝ) = (b : ℝ) → a = b
+  induction a with b hb k ih b hb
+  · induction b with hb0 m _ hbm
+    · rfl
+    · rw [succ_eq_add_one.nat] at hbm
+      simp at hbm
+      linarith [cast_nonneg.real m]
+  · induction b with hb0 m _ hbm
+    · rw [succ_eq_add_one.nat] at hb0
+      simp at hb0
+      linarith [cast_nonneg.real k]
+    · rw [succ_eq_add_one.nat] at hbm ⊢
+      simp at hbm
+      have hkm : k = m := ih m (by linarith)
+      rw [hkm, succ_eq_add_one.nat]
+
+-- THEOREM 1A (Behrend's Sphere 3-AP-Freeness):
+-- Any 3-term arithmetic progression (a, b, c) with a_i + c_i = 2*b_i lying on a single
+-- Euclidean sphere ||a||^2 = ||b||^2 = ||c||^2 = R must be trivial (a_i = b_i = c_i)!
++ behrend.sphere_ap_free (d : ℕ) (R : ℝ) (a b c : ℕ → ℕ)
+    (ha : behrend.norm_sq d a = R)
+    (hb : behrend.norm_sq d b = R)
+    (hc : behrend.norm_sq d c = R)
+    (hap : ∀ i < d, a i + c i = 2 * b i) :
+    ∀ i < d, a i = b i ∧ b i = c i
+  unfold behrend.norm_sq at ha hb hc
+  -- Compute sum_{i < d} (a_i - c_i)^2 = 2*||a||^2 + 2*||c||^2 - 4*||b||^2 = 0!
+  have hdiff_sum : (∑ i < d, (((a i : ℝ) - (c i : ℝ)) * ((a i : ℝ) - (c i : ℝ)))) = 0
+    have hpt : (∑ i < d, (((a i : ℝ) - (c i : ℝ)) * ((a i : ℝ) - (c i : ℝ)))) = (∑ i < d, (2 * ((a i : ℝ) * (a i : ℝ)) + 2 * ((c i : ℝ) * (c i : ℝ)) - 4 * ((b i : ℝ) * (b i : ℝ))))
+      apply sum_below.congr
+      intro i hi
+      have heq_nat := hap i hi
+      have heq_r : (a i : ℝ) + (c i : ℝ) = 2 * (b i : ℝ)
+        have h1 : ((a i + c i : ℕ) : ℝ) = ((2 * b i : ℕ) : ℝ) := by rw [heq_nat]
+        simp at h1
+        linarith
+      have hsq : ((a i : ℝ) + (c i : ℝ)) * ((a i : ℝ) + (c i : ℝ)) = 4 * ((b i : ℝ) * (b i : ℝ)) := by rw [heq_r]; ring
+      linarith
+    rw [hpt, sum_sub.real, sum_add.real, sum_const_mul.real, sum_const_mul.real, sum_const_mul.real, ha, hb, hc]
+    ring
+  have hnn : ∀ i < d, 0 ≤ ((a i : ℝ) - (c i : ℝ)) * ((a i : ℝ) - (c i : ℝ)) := by intro i hi; nlinarith
+  intro i hi
+  have hsq0 := sum_nonneg_eq_zero.real d (fun j => ((a j : ℝ) - (c j : ℝ)) * ((a j : ℝ) - (c j : ℝ))) hnn hdiff_sum i hi
+  have hac_r : (a i : ℝ) = (c i : ℝ) := by nlinarith
+  have hap_i := hap i hi
+  omega
+
+-- Base-B digit encoding: enc(B, d, v) = sum_{i < d} v(i) * B^i.
+-> behrend.encode (B : ℕ) : ℕ → (ℕ → ℕ) → ℕ
+  | 0 => fun _ => 0
+  | d + 1 => fun v => v 0 + B * behrend.encode B d (fun i => v (i + 1))
+
++ behrend.encode_add (B d : ℕ) :
+    ∀ u v : ℕ → ℕ, behrend.encode B d (fun i => u i + v i) = behrend.encode B d u + behrend.encode B d v
+  induction d with u v k ih u v
+  · simp [behrend.encode]
+  · rw [succ_eq_add_one.nat]
+    simp [behrend.encode]
+    rw [ih (fun i => u (i + 1)) (fun i => v (i + 1))]
+    ring
+
++ behrend.encode_scale2 (B d : ℕ) :
+    ∀ v : ℕ → ℕ, behrend.encode B d (fun i => 2 * v i) = 2 * behrend.encode B d v
+  induction d with v k ih v
+  · simp [behrend.encode]
+  · rw [succ_eq_add_one.nat]
+    simp [behrend.encode]
+    rw [ih (fun i => v (i + 1))]
+    ring
+
+-- Uniqueness of base-B representation when every digit is < B!
++ behrend.encode_unique (B d : ℕ) :
+    ∀ u v : ℕ → ℕ, (∀ i < d, u i < B) → (∀ i < d, v i < B) →
+      behrend.encode B d u = behrend.encode B d v → ∀ i < d, u i = v i
+  induction d with u v hu hv heq i hi k ih u v hu hv heq i hi
+  · omega
+  · rw [succ_eq_add_one.nat] at hu hv heq hi
+    simp [behrend.encode] at heq
+    have hu0 : u 0 < B := hu 0 (by omega)
+    have hv0 : v 0 < B := hv 0 (by omega)
+    have hdiv_u := div_mod_unique.nat (B * behrend.encode B k (fun j => u (j + 1)) + u 0) B (behrend.encode B k (fun j => u (j + 1))) (u 0) rfl hu0
+    have hdiv_v := div_mod_unique.nat (B * behrend.encode B k (fun j => v (j + 1)) + v 0) B (behrend.encode B k (fun j => v (j + 1))) (v 0) rfl hv0
+    have hsw : B * behrend.encode B k (fun j => u (j + 1)) + u 0 = B * behrend.encode B k (fun j => v (j + 1)) + v 0 := by linarith
+    rw [hsw] at hdiv_u
+    have h0 : u 0 = v 0 := by linarith [hdiv_u.2, hdiv_v.2]
+    have htail_eq : behrend.encode B k (fun j => u (j + 1)) = behrend.encode B k (fun j => v (j + 1)) := by
+      linarith [hdiv_u.1, hdiv_v.1]
+    by_cases iz : i = 0
+    · rw [iz]; exact h0
+    · have him : i - 1 < k := by omega
+      have hstep := ih (fun j => u (j + 1)) (fun j => v (j + 1)) (by intro j hj; exact hu (j + 1) (by omega)) (by intro j hj; exact hv (j + 1) (by omega)) htail_eq (i - 1) him
+      simp at hstep
+      have hi1 : (i - 1) + 1 = i := by omega
+      rw [hi1] at hstep
+      exact hstep
+
++ behrend.encode_congr (B d : ℕ) :
+    ∀ u v : ℕ → ℕ, (∀ i < d, u i = v i) → behrend.encode B d u = behrend.encode B d v
+  induction d with u v h k ih u v h
+  · simp [behrend.encode]
+  · rw [succ_eq_add_one.nat] at h ⊢
+    simp [behrend.encode]
+    have h0 : u 0 = v 0 := h 0 (by omega)
+    have ht : behrend.encode B k (fun j => u (j + 1)) = behrend.encode B k (fun j => v (j + 1)) :=
+      ih (fun j => u (j + 1)) (fun j => v (j + 1)) (by intro j hj; exact h (j + 1) (by omega))
+    rw [h0, ht]
+
+-- THEOREM 1B (Behrend's 3-AP-Free Embedding in ℕ, ZERO carries in base 2M):
+-- Vectors a, b, c in {0, ..., M-1}^d on the same Euclidean sphere R whose base-(2M)
+-- encodings satisfy enc(a) + enc(c) = 2 * enc(b) MUST be equal!
++ behrend.encoded_sphere_ap_free (d M : ℕ) (R : ℝ) (a b c : ℕ → ℕ)
+    (haM : ∀ i < d, a i < M) (hbM : ∀ i < d, b i < M) (hcM : ∀ i < d, c i < M)
+    (haR : behrend.norm_sq d a = R) (hbR : behrend.norm_sq d b = R) (hcR : behrend.norm_sq d c = R)
+    (hap_nat : behrend.encode (2 * M) d a + behrend.encode (2 * M) d c = 2 * behrend.encode (2 * M) d b) :
+    behrend.encode (2 * M) d a = behrend.encode (2 * M) d b ∧
+    behrend.encode (2 * M) d b = behrend.encode (2 * M) d c
+  have henc_eq : behrend.encode (2 * M) d (fun i => a i + c i) = behrend.encode (2 * M) d (fun i => 2 * b i)
+    rw [behrend.encode_add, behrend.encode_scale2]
+    exact hap_nat
+  have hap_coord : ∀ i < d, a i + c i = 2 * b i
+    apply behrend.encode_unique (2 * M) d (fun i => a i + c i) (fun i => 2 * b i)
+    · intro i hi; have h1 := haM i hi; have h2 := hcM i hi; omega
+    · intro i hi; have h1 := hbM i hi; omega
+    · exact henc_eq
+  have hall := behrend.sphere_ap_free d R a b c haR hbR hcR hap_coord
+  constructor
+  · exact behrend.encode_congr (2 * M) d a b (by intro i hi; exact (hall i hi).1)
+  · exact behrend.encode_congr (2 * M) d b c (by intro i hi; exact (hall i hi).2)
+
+-- THEOREM 1C (Behrend Finite Pigeonhole Principle over Spheres):
+-- If K + 1 buckets (radii R = 0, ..., K) partition N points (sum_{R < K + 1} cnt(R) = N),
+-- then some radius R <= K satisfies (K + 1) * cnt(R) >= N!
++ behrend.pigeonhole_sphere (K : ℕ) (cnt : ℕ → ℝ) (N : ℝ)
+    (htot : (∑ R < K + 1, cnt R) = N) :
+    ∃ R < K + 1, N ≤ ((K + 1 : ℕ) : ℝ) * cnt R
+  by_contra hnone
+  have hstrict : ∀ R < K + 1, ((K + 1 : ℕ) : ℝ) * cnt R < N
+    intro R hR
+    by_contra hge
+    apply hnone
+    exact ⟨R, hR, by linarith⟩
+  -- Summing ((K+1) * cnt R) < N over all K + 1 radii gives (K+1) * N < (K+1) * N!
+  have hsum_lt : ∀ m : ℕ, 0 < m → (∀ R < m, ((K + 1 : ℕ) : ℝ) * cnt R < N) →
+      (∑ R < m, ((K + 1 : ℕ) : ℝ) * cnt R) < (m : ℝ) * N
+    intro m
+    induction m with hpos hlt j ih hpos hlt
+    · omega
+    · rw [succ_eq_add_one.nat] at hlt ⊢
+      simp
+      by_cases j0 : j = 0
+      · rw [j0]; simp
+        have h0 := hlt 0 (by omega)
+        linarith
+      · have ihj := ih (by omega) (by intro R hR; exact hlt R (by omega))
+        have hj := hlt j (by omega)
+        linarith
+  have hlt_all := hsum_lt (K + 1) (by omega) hstrict
+  rw [sum_const_mul.real, htot] at hlt_all
+  linarith
+
+-- ====================================================================================
+-- BLOCK 2: Bost's Slope Inequality & Harder-Narasimhan Filtration (`remark.pdf` 13-14)
+-- ====================================================================================
+
+structure ArakelovBundle :=
+  (rk : ℝ)
+  (deg : ℝ)
+
+-> slope (E : ArakelovBundle) : ℝ := E.deg / E.rk
+
+-- THEOREM 2A (Short Exact Sequence Slope Averaging):
+-- For 0 -> F -> E -> Q -> 0 with r_E = r_F + r_Q (r_F, r_Q > 0) and d_E = d_F + d_Q:
+--   mu(E) * r_E = mu(F) * r_F + mu(Q) * r_Q, and
+--   mu(F) <= mu(E) <-> mu(E) <= mu(Q).
++ hn.exact_seq_weighted_avg (F E Q : ArakelovBundle)
+    (hrF : 0 < F.rk) (hrQ : 0 < Q.rk)
+    (hrk : E.rk = F.rk + Q.rk) (hdeg : E.deg = F.deg + Q.deg) :
+    slope E * E.rk = slope F * F.rk + slope Q * Q.rk
+  unfold slope
+  have hE : E.rk ≠ 0 := by linarith
+  have hF : F.rk ≠ 0 := by linarith
+  have hQ : Q.rk ≠ 0 := by linarith
+  have cE := mul_div_cancel.real E.deg E.rk hE
+  have cF := mul_div_cancel.real F.deg F.rk hF
+  have cQ := mul_div_cancel.real Q.deg Q.rk hQ
+  linarith
+
++ hn.exact_seq_slope_order (F E Q : ArakelovBundle)
+    (hrF : 0 < F.rk) (hrQ : 0 < Q.rk)
+    (hrk : E.rk = F.rk + Q.rk) (hdeg : E.deg = F.deg + Q.deg) :
+    slope F ≤ slope E ↔ slope E ≤ slope Q
+  have havg := hn.exact_seq_weighted_avg F E Q hrF hrQ hrk hdeg
+  rw [hrk] at havg
+  constructor
+  · intro hFE
+    nlinarith
+  · intro hEQ
+    nlinarith
+
+-- THEOREM 2B (Harder-Narasimhan Filtration Bounds):
+-- For a filtration with graded pieces of positive ranks r_i > 0 and slopes mu_i bounded
+-- between mu_min and mu_max, the bundle's total slope D / R lies in [mu_min, mu_max]!
++ hn.filtration_slope_bounds (k : ℕ) (r mu : ℕ → ℝ) (mu_min mu_max : ℝ)
+    (hk : 0 < k)
+    (hr : ∀ i < k, 0 < r i)
+    (hlo : ∀ i < k, mu_min ≤ mu i)
+    (hhi : ∀ i < k, mu i ≤ mu_max) :
+    mu_min ≤ (∑ i < k, r i * mu i) / (∑ i < k, r i) ∧
+    (∑ i < k, r i * mu i) / (∑ i < k, r i) ≤ mu_max
+  have hR_pos : 0 < ∑ i < k, r i
+    have h0 : 0 < r 0 := hr 0 hk
+    have hsplit : (∑ i < k, r i) = r 0 + ∑ i < k - 1, r (i + 1)
+      have hk1 : k = (k - 1) + 1 := by omega
+      have htmp := sum_range_succ'.real r (k - 1)
+      rw [← hk1] at htmp
+      linarith
+    have htail_nn : 0 ≤ ∑ i < k - 1, r (i + 1)
+      apply sum_nonneg.real
+      intro i hi
+      have hri := hr (i + 1) (by omega)
+      linarith
+    linarith
+  have hD_lo : mu_min * (∑ i < k, r i) ≤ ∑ i < k, r i * mu i
+    have hdiff : 0 ≤ ∑ i < k, (r i * mu i - mu_min * r i)
+      apply sum_nonneg.real
+      intro i hi
+      have hri := hr i hi
+      have hmi := hlo i hi
+      nlinarith
+    rw [sum_sub.real, sum_const_mul.real] at hdiff
+    linarith
+  have hD_hi : (∑ i < k, r i * mu i) ≤ mu_max * (∑ i < k, r i)
+    have hdiff : 0 ≤ ∑ i < k, (mu_max * r i - r i * mu i)
+      apply sum_nonneg.real
+      intro i hi
+      have hri := hr i hi
+      have hmi := hhi i hi
+      nlinarith
+    rw [sum_sub.real, sum_const_mul.real] at hdiff
+    linarith
+  constructor
+  · exact (le_div_iff.real mu_min (∑ i < k, r i * mu i) (∑ i < k, r i) hR_pos).mpr hD_lo
+  · exact (div_le_iff.real (∑ i < k, r i * mu i) mu_max (∑ i < k, r i) hR_pos).mpr hD_hi
+
+-- THEOREM 2C (Bost's Slope Inequality & m-Step Iterated Lift Cost Accounting):
+-- Single-step Bost slope inequality: if a nonzero morphism phi : E -> F of height h(phi)
+-- sends a minimal-slope graded piece (of slope >= mu_min(E)) into a subbundle of F of
+-- slope <= mu_max(F) with Arakelov degree shift <= rk * h(phi), then
+--   mu_min(E) <= mu_max(F) + h(phi).
++ bost.slope_inequality (r d_E d_F mu_min_E mu_max_F h_phi : ℝ)
+    (hr : 0 < r)
+    (hE : mu_min_E * r ≤ d_E)
+    (hF : d_F ≤ mu_max_F * r)
+    (h_arakelov : d_E ≤ d_F + r * h_phi) :
+    mu_min_E ≤ mu_max_F + h_phi
+  nlinarith
+
+-- Iterated m-step Bost chain inequality (`remark.pdf` items 13-14):
+-- Along an m-step chain of lifts E_0 -> E_1 -> ... -> E_m with step heights h_j and
+-- semistable/slope transfer mu_j <= mu_{j+1} + h_j:
+--   mu(0) <= mu(m) + sum_{j < m} h(j),
+-- and if each lift has uniform cost h(j) <= c, then mu(0) <= mu(m) + m * c!
++ bost.chain_slope_inequality (m : ℕ) (mu h : ℕ → ℝ) :
+    (∀ j < m, mu j ≤ mu (j + 1) + h j) → mu 0 ≤ mu m + ∑ j < m, h j
+  induction m with h0 k ih hstep
+  · simp
+  · rw [succ_eq_add_one.nat] at hstep ⊢
+    simp
+    have ihk := ih (by intro j hj; exact hstep j (by omega))
+    have hk := hstep k (by omega)
+    linarith
+
++ bost.chain_uniform_cost (m : ℕ) (mu h : ℕ → ℝ) (c : ℝ)
+    (hstep : ∀ j < m, mu j ≤ mu (j + 1) + h j)
+    (hcost : ∀ j < m, h j ≤ c) :
+    mu 0 ≤ mu m + (m : ℝ) * c
+  have hchain := bost.chain_slope_inequality m mu h hstep
+  have hsum_le : (∑ j < m, h j) ≤ (m : ℝ) * c
+    have hdiff : 0 ≤ ∑ j < m, (c - h j)
+      apply sum_nonneg.real
+      intro j hj
+      linarith [hcost j hj]
+    rw [sum_sub.real, sum_const.real] at hdiff
+    linarith
+  linarith
+
+-- ====================================================================================
+-- BLOCK 3: Finite-Rank Iterated Theta Lift & Rallis Seesaw (`remark.pdf` 3, 8, 12)
+-- ====================================================================================
+
+-- Forward theta lift: theta_Theta(f)(y) = sum_{x < n1} f(x) * Theta(x, y)
+-> theta.lift (n1 : ℕ) (Theta : ℕ → ℕ → ℂ) (f : ℕ → ℂ) : ℕ → ℂ :=
+  ctransform n1 Theta f
+
+-- Adjoint (reverse) theta lift: theta^*_Theta(g)(x) = sum_{y < n2} g(y) * conj(Theta(x, y))
+-> theta.adjoint_lift (n2 : ℕ) (Theta : ℕ → ℕ → ℂ) (g : ℕ → ℂ) (x : ℕ) : ℂ :=
+  csum n2 (fun y => complex.mul (g y) (complex.conj (Theta x y)))
+
+-- THEOREM 3A (Exact Rallis Seesaw Identity, `remark.pdf` item 12):
+--   <g, theta_Theta(f)>_{n2} = <theta^*_Theta(g), f>_{n1}.
++ rallis.seesaw_identity (n1 n2 : ℕ) (Theta : ℕ → ℕ → ℂ) (f g : ℕ → ℂ) :
+    cdot n2 g (theta.lift n1 Theta f) = cdot n1 (theta.adjoint_lift n2 Theta g) f
+  unfold theta.lift theta.adjoint_lift
+  exact cdot.adjoint n1 n2 Theta f g
+
+-- m-fold Iterated Theta Lift along a chain of kernels Theta_0, ..., Theta_{m-1} on rank n:
+-> theta.iterated (n : ℕ) (Thetas : ℕ → ℕ → ℕ → ℂ) : ℕ → (ℕ → ℂ) → (ℕ → ℂ)
+  | 0 => fun f => f
+  | m + 1 => fun f => theta.lift n (Thetas m) (theta.iterated n Thetas m f)
+
+-- Reverse adjoint chain for the m-fold iterated theta lift:
+-> theta.iterated_adjoint (n : ℕ) (Thetas : ℕ → ℕ → ℕ → ℂ) : ℕ → (ℕ → ℂ) → (ℕ → ℂ)
+  | 0 => fun g => g
+  | m + 1 => fun g => theta.iterated_adjoint n Thetas m (theta.adjoint_lift n (Thetas m) g)
+
+-- THEOREM 3B (m-Fold Iterated Rallis Seesaw, `remark.pdf` items 8 & 12):
+--   <g, theta^(m)(f)> = <(theta^*)^(m)(g), f>   for ALL chain lengths m : ℕ!
++ rallis.iterated_seesaw (n : ℕ) (Thetas : ℕ → ℕ → ℕ → ℂ) (m : ℕ) :
+    ∀ f g : ℕ → ℂ,
+      cdot n g (theta.iterated n Thetas m f) = cdot n (theta.iterated_adjoint n Thetas m g) f
+  induction m with f g k ih f g
+  · simp [theta.iterated, theta.iterated_adjoint]
+  · rw [succ_eq_add_one.nat]
+    simp [theta.iterated, theta.iterated_adjoint]
+    rw [rallis.seesaw_identity n n (Thetas k) (theta.iterated n Thetas k f) g]
+    exact ih f (theta.adjoint_lift n (Thetas k) g)
+
+-- Real product helper for iterated Parseval scaling factor:
+-> rprod : ℕ → (ℕ → ℝ) → ℝ
+  | 0 => fun _ => 1
+  | m + 1 => fun c => rprod m c * c m
+
+-- THEOREM 3C (m-Fold Iterated Parseval Identity, `remark.pdf` footnote 3 & item 8):
+-- If each kernel Theta_j is c_j-orthogonal (`cdot.orthogonal n n (Thetas j) (c j)`), then
+--   <theta^(m)(f), theta^(m)(g)> = (prod_{j < m} c_j) * <f, g>  for ALL m : ℕ!
++ theta.iterated_parseval (n : ℕ) (Thetas : ℕ → ℕ → ℕ → ℂ) (c : ℕ → ℝ) (m : ℕ) :
+    (∀ j < m, cdot.orthogonal n n (Thetas j) (c j)) →
+    ∀ f g : ℕ → ℂ,
+      cdot n (theta.iterated n Thetas m f) (theta.iterated n Thetas m g)
+        = complex.mul (complex.of_real (rprod m c)) (cdot n f g)
+  induction m with horth f g k ih horth f g
+  · simp [theta.iterated, rprod]
+    ring
+  · rw [succ_eq_add_one.nat] at horth ⊢
+    simp [theta.iterated, rprod]
+    unfold theta.lift
+    rw [cdot.parseval n n (Thetas k) (c k) (theta.iterated n Thetas k f) (theta.iterated n Thetas k g) (horth k (by omega))]
+    rw [ih (by intro j hj; exact horth j (by omega)) f g]
+    ring
+
+-- Scaling linearity of a single theta lift and an m-fold iterated lift under Hecke character
+-- phase twists Theta_j -> mu_j * Theta_j:
++ theta.lift_scale (n : ℕ) (mu : ℂ) (Theta : ℕ → ℕ → ℂ) (f : ℕ → ℂ) :
+    theta.lift n (fun x y => complex.mul mu (Theta x y)) f
+      = fun y => complex.mul mu (theta.lift n Theta f y)
+  funext y
+  unfold theta.lift ctransform
+  have h1 : csum n (fun x => complex.mul (f x) (complex.mul mu (Theta x y)))
+      = csum n (fun x => complex.mul mu (complex.mul (f x) (Theta x y)))
+    apply csum.congr; intro x hx
+    apply complex.ext <;> simp <;> ring
+  rw [h1, csum.scale_left]
+
++ theta.lift_vec_scale (n : ℕ) (mu : ℂ) (Theta : ℕ → ℕ → ℂ) (f : ℕ → ℂ) :
+    theta.lift n Theta (fun x => complex.mul mu (f x))
+      = fun y => complex.mul mu (theta.lift n Theta f y)
+  funext y
+  unfold theta.lift ctransform
+  have h1 : csum n (fun x => complex.mul (complex.mul mu (f x)) (Theta x y))
+      = csum n (fun x => complex.mul mu (complex.mul (f x) (Theta x y)))
+    apply csum.congr; intro x hx
+    rw [complex.mul_assoc]
+  rw [h1, csum.scale_left]
+
+-- Twisting the j-th theta kernel by a scalar Hecke phase mu_j scales the m-fold lift by prod_{j < m} mu_j:
++ theta.iterated_twist (n : ℕ) (Thetas : ℕ → ℕ → ℕ → ℂ) (mu : ℕ → ℂ) (m : ℕ) (f : ℕ → ℂ) :
+    theta.iterated n (fun j x y => complex.mul (mu j) (Thetas j x y)) m f
+      = fun y => complex.mul (cprod m mu) (theta.iterated n Thetas m f y)
+  induction m with k ih
+  · funext y
+    simp [theta.iterated, cprod]
+    exact (complex.one_mul (f y)).symm
+  · rw [succ_eq_add_one.nat]
+    simp [theta.iterated, cprod]
+    rw [ih]
+    rw [theta.lift_scale n (mu k) (Thetas k) (fun y => complex.mul (cprod k mu) (theta.iterated n Thetas k f y))]
+    rw [theta.lift_vec_scale n (cprod k mu) (Thetas k) (theta.iterated n Thetas k f)]
+    funext y
+    ring
+
+-- Helper: squared modulus of a finite product of unit-modulus phases equals 1.
++ cprod.norm_sq_unit (m : ℕ) (mu : ℕ → ℂ) :
+    (∀ j < m, complex.norm_sq (mu j) = 1) → complex.norm_sq (cprod m mu) = 1
+  induction m with hu0 k ih huk
+  · simp [cprod]; unfold complex.norm_sq; simp
+  · rw [succ_eq_add_one.nat] at huk ⊢
+    simp [cprod]
+    rw [complex.norm_sq_mul, ih (by intro j hj; exact huk j (by omega)), huk k (by omega)]
+    ring
+
+-- THEOREM 3D (Rallis Bessel Period Independence of Hecke Characters, `remark.pdf` item 12):
+-- Twisting every kernel Theta_j -> mu_j * Theta_j by arbitrary unitary Hecke phases (|mu_j|^2 = 1)
+-- leaves the squared Bessel period |<g, theta^(m)(f)>|^2 COMPLETELY INVARIANT!
++ rallis.bessel_period_hecke_invariant (n : ℕ) (Thetas : ℕ → ℕ → ℕ → ℂ) (mu : ℕ → ℂ) (m : ℕ)
+    (hunit : ∀ j < m, complex.norm_sq (mu j) = 1) (f g : ℕ → ℂ) :
+    complex.norm_sq (cdot n g (theta.iterated n (fun j x y => complex.mul (mu j) (Thetas j x y)) m f))
+      = complex.norm_sq (cdot n g (theta.iterated n Thetas m f))
+  rw [theta.iterated_twist n Thetas mu m f]
+  have hdot : cdot n g (fun y => complex.mul (cprod m mu) (theta.iterated n Thetas m f y))
+      = complex.mul (cprod m mu) (cdot n g (theta.iterated n Thetas m f))
+    unfold cdot
+    have h1 : csum n (fun y => complex.mul (complex.conj (g y)) (complex.mul (cprod m mu) (theta.iterated n Thetas m f y)))
+        = csum n (fun y => complex.mul (cprod m mu) (complex.mul (complex.conj (g y)) (theta.iterated n Thetas m f y)))
+      apply csum.congr; intro y hy
+      apply complex.ext <;> simp <;> ring
+    rw [h1, csum.scale_left]
+  rw [hdot, complex.norm_sq_mul, cprod.norm_sq_unit m mu hunit]
+  ring

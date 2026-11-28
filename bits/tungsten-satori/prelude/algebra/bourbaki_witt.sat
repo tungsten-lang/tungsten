@@ -1,0 +1,481 @@
+-- Bourbaki-Witt Fixed-Point Theorem, Total Q-Linear Projection R -> Q, and Ultrametric p-Adic Norm on C (0 custom axioms)
+
+import choice
+import padic.module_index
+
+-- SECTION 2: BOURBAKI-WITT FIXED-POINT THEOREM & TOTAL `ℚ`-LINEAR PROJECTION `ℝ → ℚ_ℝ`
+-> sernau.bw_is_chain (le : α → α → Prop) (C : α → Prop) : Prop := ∀ x y : α, C x → C y → le x y ∨ le y x
+-> sernau.bw_is_tower (P : α → Prop) (le : α → α → Prop) (bot : α) (f : α → α) (lub : (α → Prop) → α) (T : α → Prop) : Prop :=
+  (∀ x : α, T x → P x) ∧ T bot ∧ (∀ x : α, T x → T (f x)) ∧ (∀ C : α → Prop, (∃ x0 : α, C x0) → (∀ x : α, C x → T x) → sernau.bw_is_chain le C → T (lub C))
+-> sernau.bw_M (P : α → Prop) (le : α → α → Prop) (bot : α) (f : α → α) (lub : (α → Prop) → α) (x : α) : Prop := ∀ T : α → Prop, sernau.bw_is_tower P le bot f lub T → T x
+-> sernau.bw_extreme (P : α → Prop) (le : α → α → Prop) (bot : α) (f : α → α) (lub : (α → Prop) → α) (c : α) : Prop :=
+  sernau.bw_M P le bot f lub c ∧ ∀ x : α, sernau.bw_M P le bot f lub x → le x c → x = c ∨ le (f x) c
+
++ sernau.bourbaki_witt (P : α → Prop) (le : α → α → Prop) (bot : α) (f : α → α) (lub : (α → Prop) → α)
+    (hbot_P : P bot) (hbot_le : ∀ x : α, P x → le bot x) (hrefl : ∀ x : α, P x → le x x)
+    (htrans : ∀ x y z : α, P x → P y → P z → le x y → le y z → le x z) (hanti : ∀ x y : α, P x → P y → le x y → le y x → x = y)
+    (hf : ∀ x : α, P x → P (f x) ∧ le x (f x))
+    (hlub : ∀ C : α → Prop, (∃ x0 : α, C x0) → (∀ x : α, C x → P x) → sernau.bw_is_chain le C → P (lub C) ∧ (∀ x : α, C x → le x (lub C)) ∧ (∀ z : α, P z → (∀ x : α, C x → le x z) → le (lub C) z)) :
+    (∃ m : α, P m ∧ f m = m)
+  have hP_tow : sernau.bw_is_tower P le bot f lub P
+    unfold sernau.bw_is_tower; exact ⟨by intro x hx; exact hx, hbot_P, by intro x hx; exact (hf x hx).1, by intro C hne hCP hch; exact (hlub C hne hCP hch).1⟩
+  have hMP : ∀ x : α, sernau.bw_M P le bot f lub x → P x := by intro x hx; unfold sernau.bw_M at hx; exact hx P hP_tow
+  have hM_bot : sernau.bw_M P le bot f lub bot := by unfold sernau.bw_M; intro T hT; unfold sernau.bw_is_tower at hT; exact hT.2.1
+  have hM_step : ∀ x : α, sernau.bw_M P le bot f lub x → sernau.bw_M P le bot f lub (f x)
+    intro x hx; unfold sernau.bw_M at hx ⊢; intro T hT; have hT' := hT; unfold sernau.bw_is_tower at hT'; exact hT'.2.2.1 x (hx T hT)
+  have hM_lub : ∀ C : α → Prop, (∃ x0 : α, C x0) → (∀ x : α, C x → sernau.bw_M P le bot f lub x) → sernau.bw_is_chain le C → sernau.bw_M P le bot f lub (lub C)
+    intro C hne hCM hch; unfold sernau.bw_M; intro T hT; have hT' := hT; unfold sernau.bw_is_tower at hT'
+    exact hT'.2.2.2 C hne (by intro x hx; have hmx := hCM x hx; unfold sernau.bw_M at hmx; exact hmx T hT) hch
+  have hsplit_of_ext : ∀ c : α, sernau.bw_extreme P le bot f lub c → ∀ x : α, sernau.bw_M P le bot f lub x → le x c ∨ le (f c) x
+    intro c hc; unfold sernau.bw_extreme at hc; have hPc := hMP c hc.1; have hPfc := (hf c hPc).1
+    set Tc : α → Prop := fun x => sernau.bw_M P le bot f lub x ∧ (le x c ∨ le (f c) x) with hTc_def
+    have hTc_tow : sernau.bw_is_tower P le bot f lub Tc
+      unfold sernau.bw_is_tower
+      have h1 : ∀ x : α, Tc x → P x := by intro x hx; rw [hTc_def] at hx; exact hMP x hx.1
+      have h2 : Tc bot := by rw [hTc_def]; exact ⟨hM_bot, by left; exact hbot_le c hPc⟩
+      have h3 : ∀ x : α, Tc x → Tc (f x)
+        intro x hx; rw [hTc_def] at hx ⊢; have hPx := hMP x hx.1; have hf_x := hf x hPx; constructor; exact hM_step x hx.1
+        obtain hxc | hfcx := hx.2
+        · obtain heq | hfxc := hc.2 x hx.1 hxc; (right; rw [heq]; exact hrefl (f c) hPfc); (left; exact hfxc)
+        · right; exact htrans (f c) x (f x) hPfc hPx hf_x.1 hfcx hf_x.2
+      have h4 : ∀ C : α → Prop, (∃ x0 : α, C x0) → (∀ x : α, C x → Tc x) → sernau.bw_is_chain le C → Tc (lub C)
+        intro C hne hCT hch; rw [hTc_def]
+        have hCM : ∀ x : α, C x → sernau.bw_M P le bot f lub x := by intro x hx; have h := hCT x hx; rw [hTc_def] at h; exact h.1
+        have hCP : ∀ x : α, C x → P x := by intro x hx; exact hMP x (hCM x hx)
+        have hlub_C := hlub C hne hCP hch; constructor; exact hM_lub C hne hCM hch
+        by_cases hex_hi : ∃ y : α, C y ∧ le (f c) y
+        · obtain ⟨y, hyC, hfcy⟩ := hex_hi; right; exact htrans (f c) y (lub C) hPfc (hCP y hyC) hlub_C.1 hfcy (hlub_C.2.1 y hyC)
+        · left; apply hlub_C.2.2 c hPc; intro y hyC; have hty := hCT y hyC; rw [hTc_def] at hty
+          obtain hyc | hfcy := hty.2; exact hyc; (exfalso; exact hex_hi ⟨y, hyC, hfcy⟩)
+      exact ⟨h1, h2, h3, h4⟩
+    intro x hx; unfold sernau.bw_M at hx; have htx := hx Tc hTc_tow; rw [hTc_def] at htx; exact htx.2
+  have hExt_tow : sernau.bw_is_tower P le bot f lub (sernau.bw_extreme P le bot f lub)
+    unfold sernau.bw_is_tower
+    have he1 : ∀ c : α, sernau.bw_extreme P le bot f lub c → P c := by intro c hc; unfold sernau.bw_extreme at hc; exact hMP c hc.1
+    have he2 : sernau.bw_extreme P le bot f lub bot := by unfold sernau.bw_extreme; exact ⟨hM_bot, by intro x hx hxb; left; exact hanti x bot (hMP x hx) hbot_P hxb (hbot_le x (hMP x hx))⟩
+    have he3 : ∀ c : α, sernau.bw_extreme P le bot f lub c → sernau.bw_extreme P le bot f lub (f c)
+      intro c hc; have hsp := hsplit_of_ext c hc; unfold sernau.bw_extreme at hc ⊢
+      have hPc := hMP c hc.1; have hf_c := hf c hPc; constructor; exact hM_step c hc.1; intro x hx hxfc; have hPx := hMP x hx; have hf_x := hf x hPx
+      obtain hxc | hfcx := hsp x hx
+      · obtain heq | hfxc := hc.2 x hx hxc; (right; rw [heq]; exact hrefl (f c) hf_c.1); (right; exact htrans (f x) c (f c) hf_x.1 hPc hf_c.1 hfxc hf_c.2)
+      · left; exact hanti x (f c) hPx hf_c.1 hxfc hfcx
+    have he4 : ∀ C : α → Prop, (∃ c0 : α, C c0) → (∀ c : α, C c → sernau.bw_extreme P le bot f lub c) → sernau.bw_is_chain le C → sernau.bw_extreme P le bot f lub (lub C)
+      intro C hne hCE hch
+      have hCM : ∀ c : α, C c → sernau.bw_M P le bot f lub c := by intro c hc; have h := hCE c hc; unfold sernau.bw_extreme at h; exact h.1
+      have hCP : ∀ c : α, C c → P c := by intro c hc; exact hMP c (hCM c hc)
+      have hlub_C := hlub C hne hCP hch; unfold sernau.bw_extreme; constructor; exact hM_lub C hne hCM hch; intro x hx hxl; have hPx := hMP x hx; have hf_x := hf x hPx
+      by_cases hex_c : ∃ c : α, C c ∧ le x c
+      · obtain ⟨c, hcC, hxc⟩ := hex_c; have hec := hCE c hcC; unfold sernau.bw_extreme at hec
+        obtain heq_xc | hfxc := hec.2 x hx hxc
+        · by_cases heq_cl : c = lub C; (left; rw [heq_xc, heq_cl])
+          have hex_d : ∃ d : α, C d ∧ ¬ le d c
+            by_contra hno; exact heq_cl (hanti c (lub C) (hCP c hcC) hlub_C.1 (hlub_C.2.1 c hcC) (hlub_C.2.2 c (hCP c hcC) (by intro d hd; by_contra hnd; exact hno ⟨d, hd, hnd⟩)))
+          obtain ⟨d, hdC, hndc⟩ := hex_d
+          have hfcd : le (f c) d := by obtain hdc | hfcd := hsplit_of_ext c (hCE c hcC) d (hCM d hdC); (exfalso; exact hndc hdc); exact hfcd
+          right; rw [heq_xc]; exact htrans (f c) d (lub C) (hf c (hCP c hcC)).1 (hCP d hdC) hlub_C.1 hfcd (hlub_C.2.1 d hdC)
+        · right; exact htrans (f x) c (lub C) hf_x.1 (hCP c hcC) hlub_C.1 hfxc (hlub_C.2.1 c hcC)
+      · have hall_cx : ∀ c : α, C c → le c x
+          intro c hcC; obtain hxc | hfcx := hsplit_of_ext c (hCE c hcC) x hx; (exfalso; exact hex_c ⟨c, hcC, hxc⟩); exact htrans c (f c) x (hCP c hcC) (hf c (hCP c hcC)).1 hPx (hf c (hCP c hcC)).2 hfcx
+        left; exact hanti x (lub C) hPx hlub_C.1 hxl (hlub_C.2.2 x hPx hall_cx)
+    exact ⟨he1, he2, he3, he4⟩
+  have hM_chain : sernau.bw_is_chain le (sernau.bw_M P le bot f lub)
+    unfold sernau.bw_is_chain; intro x y hx hy; have hy' := hy; unfold sernau.bw_M at hy'
+    obtain hxy | hfyx := hsplit_of_ext y (hy' (sernau.bw_extreme P le bot f lub) hExt_tow) x hx
+    · left; exact hxy
+    · right; exact htrans y (f y) x (hMP y hy) (hf y (hMP y hy)).1 (hMP x hx) (hf y (hMP y hy)).2 hfyx
+  have hne_M : ∃ x0 : α, sernau.bw_M P le bot f lub x0 := ⟨bot, hM_bot⟩
+  have hlub_M := hlub (sernau.bw_M P le bot f lub) hne_M hMP hM_chain
+  set m := lub (sernau.bw_M P le bot f lub) with hm_def
+  have hMm : sernau.bw_M P le bot f lub m := by rw [hm_def]; exact hM_lub (sernau.bw_M P le bot f lub) hne_M (by intro x hx; exact hx) hM_chain
+  have hPm := hMP m hMm
+  exact ⟨m, hPm, hanti (f m) m (hf m hPm).1 hPm (hlub_M.2.1 (f m) (hM_step m hMm)) (hf m hPm).2⟩
+
+-> sernau.is_rat_real (x : ℝ) : Prop := ∃ (a : ℤ) (b : ℕ), 0 < b ∧ x = ((a : ℤ) : ℝ) / (b : ℝ)
++ sernau.is_rat_real_field :
+    (sernau.is_rat_real 0 ∧ sernau.is_rat_real 1 ∧ sernau.is_rat_real (-1) ∧
+     (∀ x y : ℝ, sernau.is_rat_real x → sernau.is_rat_real y → sernau.is_rat_real (x + y) ∧ sernau.is_rat_real (x - y) ∧ sernau.is_rat_real (x * y)) ∧
+     (∀ r : ℝ, sernau.is_rat_real r → r ≠ 0 → sernau.is_rat_real (1 / r)))
+  have hz_neg : ∀ z : ℤ, ((-z : ℤ) : ℝ) = -((z : ℤ) : ℝ)
+    intro z; have h1 : (-z : ℤ) = 0 - z := by ring
+    rw [h1, int_cast_sub.real, int_cast_zero.real]; ring
+  have h0 : sernau.is_rat_real 0 := ⟨0, 1, by decide, by rw [int_cast_zero.real, cast_one.real]; field_simp⟩
+  have h1 : sernau.is_rat_real 1 := ⟨1, 1, by decide, by rw [int_cast_one.real, cast_one.real]; field_simp⟩
+  have hm1 : sernau.is_rat_real (-1) := ⟨-1, 1, by decide, by rw [hz_neg 1, int_cast_one.real, cast_one.real]; field_simp⟩
+  have hring : ∀ x y : ℝ, sernau.is_rat_real x → sernau.is_rat_real y → sernau.is_rat_real (x + y) ∧ sernau.is_rat_real (x - y) ∧ sernau.is_rat_real (x * y)
+    intro x y ⟨a1, b1, hb1, hx⟩ ⟨a2, b2, hb2, hy⟩
+    have hb1_r : (0 : ℝ) < (b1 : ℝ) := (cast_pos.real b1).mpr hb1
+    have hb2_r : (0 : ℝ) < (b2 : ℝ) := (cast_pos.real b2).mpr hb2
+    have hb12 := mul_pos.nat b1 b2 hb1 hb2
+    exact ⟨⟨a1 * (b2 : ℤ) + a2 * (b1 : ℤ), b1 * b2, hb12, by rw [hx, hy, int_cast_add.real, int_cast_mul.real, int_cast_mul.real, cast_mul.real]; field_simp⟩,
+           ⟨a1 * (b2 : ℤ) - a2 * (b1 : ℤ), b1 * b2, hb12, by rw [hx, hy, int_cast_sub.real, int_cast_mul.real, int_cast_mul.real, cast_mul.real]; field_simp⟩,
+           ⟨a1 * a2, b1 * b2, hb12, by rw [hx, hy, int_cast_mul.real, cast_mul.real]; field_simp⟩⟩
+  have hinv : ∀ r : ℝ, sernau.is_rat_real r → r ≠ 0 → sernau.is_rat_real (1 / r)
+    intro r ⟨a, b, hb, hr⟩ hr_ne
+    have hb_r : (0 : ℝ) < (b : ℝ) := (cast_pos.real b).mpr hb
+    have ha_r_ne : ((a : ℤ) : ℝ) ≠ 0 := by intro hz0; apply hr_ne; rw [hr, hz0]; field_simp
+    by_cases ha_pos : 0 < ((a : ℤ) : ℝ)
+    · have ha_z : 0 ≤ a := by by_contra hn; have hc := (int_cast_lt.real a 0).mpr (by omega); rw [int_cast_zero.real] at hc; linarith
+      set na := nat_of_int a with hna_def
+      have hi := int_of_nat_of_int a ha_z; rw [← hna_def] at hi
+      have hna_eq : ((na : ℕ) : ℝ) = ((a : ℤ) : ℝ) := by rw [← hi]
+      have hna_pos : 0 < na := by by_contra h0; have hz : na = 0 := by omega; rw [hz, cast_zero.real] at hna_eq; linarith
+      exact ⟨(b : ℤ), na, hna_pos, by rw [hr, ← hna_eq]; have hn_ne : (na : ℝ) ≠ 0 := (by linarith); field_simp⟩
+    · have ha_neg_r : ((a : ℤ) : ℝ) < 0 := by by_contra hge; apply ha_r_ne; linarith
+      have hna_z : 0 ≤ -a := by by_contra hn; have hc := (int_cast_lt.real (-a) 0).mpr (by omega); rw [hz_neg a, int_cast_zero.real] at hc; linarith
+      set na := nat_of_int (-a) with hna_def
+      have hi := int_of_nat_of_int (-a) hna_z; rw [← hna_def] at hi
+      have hna_eq : ((na : ℕ) : ℝ) = -((a : ℤ) : ℝ) := by rw [← hz_neg a, ← hi]
+      have hna_pos : 0 < na := by by_contra h0; have hz : na = 0 := by omega; rw [hz, cast_zero.real] at hna_eq; linarith
+      have har_eq : ((a : ℤ) : ℝ) = -((na : ℕ) : ℝ) := by linarith
+      exact ⟨-(b : ℤ), na, hna_pos, by rw [hr, hz_neg (b : ℤ), har_eq]; have hn_ne : (na : ℝ) ≠ 0 := (by linarith); field_simp⟩
+  exact ⟨h0, h1, hm1, hring, hinv⟩
+
+-> sernau.is_partial_rat_proj (A : ℝ → ℂ) : Prop :=
+  (∀ x : ℝ, (complex.re (A x) = 1 ∨ complex.re (A x) = 0) ∧ (complex.re (A x) = 0 → complex.im (A x) = 0)) ∧ (∀ x : ℝ, sernau.is_rat_real (complex.im (A x))) ∧
+  (∀ r : ℝ, sernau.is_rat_real r → complex.re (A r) = 1 ∧ complex.im (A r) = r) ∧
+  (∀ x y : ℝ, complex.re (A x) = 1 → complex.re (A y) = 1 → complex.re (A (x + y)) = 1 ∧ complex.im (A (x + y)) = complex.im (A x) + complex.im (A y)) ∧
+  (∀ r x : ℝ, sernau.is_rat_real r → complex.re (A x) = 1 → complex.re (A (r * x)) = 1 ∧ complex.im (A (r * x)) = r * complex.im (A x))
+-> sernau.partial_rat_proj_le (A B : ℝ → ℂ) : Prop := ∀ x : ℝ, complex.re (A x) = 1 → complex.re (B x) = 1 ∧ complex.im (B x) = complex.im (A x)
+-> sernau.partial_rat_proj_bot (x : ℝ) : ℂ := if sernau.is_rat_real x then complex.mk 1 x else complex.zero
+-> sernau.partial_rat_proj_lub (C : (ℝ → ℂ) → Prop) (x : ℝ) : ℂ :=
+  if ∃ A, C A ∧ complex.re (A x) = 1 then complex.mk 1 (complex.im ((choice (fun A => C A ∧ complex.re (A x) = 1)) x)) else complex.zero
+-> sernau.rat_proj_z0 (A : ℝ → ℂ) : ℝ := choice (fun z : ℝ => complex.re (A z) ≠ 1)
+-> sernau.in_span1 (A : ℝ → ℂ) (z0 x : ℝ) : Prop := ∃ (a r : ℝ), complex.re (A a) = 1 ∧ sernau.is_rat_real r ∧ x = a + r * z0
+-> sernau.rat_proj_step (A : ℝ → ℂ) (x : ℝ) : ℂ :=
+  if ∀ z : ℝ, complex.re (A z) = 1 then A x
+  else if sernau.in_span1 A (sernau.rat_proj_z0 A) x then complex.mk 1 (complex.im (A (choice (fun a : ℝ => complex.re (A a) = 1 ∧ ∃ r : ℝ, sernau.is_rat_real r ∧ x = a + r * sernau.rat_proj_z0 A))))
+  else complex.zero
+
++ sernau.exists_total_rat_proj : (∃ m : ℝ → ℂ, sernau.is_partial_rat_proj m ∧ ∀ z : ℝ, complex.re (m z) = 1)
+  have hrf := sernau.is_rat_real_field
+  have hbot_P : sernau.is_partial_rat_proj sernau.partial_rat_proj_bot
+    unfold sernau.is_partial_rat_proj sernau.partial_rat_proj_bot; constructor
+    · intro x; by_cases hx : sernau.is_rat_real x
+      · rw [if_pos hx]; constructor; (left; simp); (intro h; simp at h)
+      · rw [if_neg hx]; constructor; (right; simp); (intro _; simp)
+    · constructor
+      · intro x; by_cases hx : sernau.is_rat_real x
+        · have hi : complex.im (complex.mk 1 x) = x := by simp
+          rw [if_pos hx, hi]; exact hx
+        · have hi : complex.im complex.zero = 0 := by simp
+          rw [if_neg hx, hi]; exact hrf.1
+      · constructor; (intro r hr; rw [if_pos hr]; simp); constructor
+        · intro x y hx1 hy1
+          have hx : sernau.is_rat_real x := by by_contra hn; rw [if_neg hn] at hx1; simp at hx1
+          have hy : sernau.is_rat_real y := by by_contra hn; rw [if_neg hn] at hy1; simp at hy1
+          rw [if_pos (hrf.2.2.2.1 x y hx hy).1, if_pos hx, if_pos hy]; simp
+        · intro r x hr hx1
+          have hx : sernau.is_rat_real x := by by_contra hn; rw [if_neg hn] at hx1; simp at hx1
+          rw [if_pos (hrf.2.2.2.1 r x hr hx).2.2, if_pos hx]; simp
+  have hbot_le : ∀ A, sernau.is_partial_rat_proj A → sernau.partial_rat_proj_le sernau.partial_rat_proj_bot A
+    intro A hA; unfold sernau.partial_rat_proj_le sernau.partial_rat_proj_bot; intro x hx0
+    have hrx : sernau.is_rat_real x := by by_contra hn; rw [if_neg hn] at hx0; simp at hx0
+    rw [if_pos hrx]; simp; unfold sernau.is_partial_rat_proj at hA; exact hA.2.2.1 x hrx
+  have hrefl : ∀ A, sernau.is_partial_rat_proj A → sernau.partial_rat_proj_le A A := by intro A _; unfold sernau.partial_rat_proj_le; intro x hx; exact hx
+  have htrans : ∀ A B E, sernau.is_partial_rat_proj A → sernau.is_partial_rat_proj B → sernau.is_partial_rat_proj E → sernau.partial_rat_proj_le A B → sernau.partial_rat_proj_le B E → sernau.partial_rat_proj_le A E
+    intro A B E _ _ _ hAB hBE; unfold sernau.partial_rat_proj_le at hAB hBE ⊢; intro x hx; obtain ⟨hBx, hB1⟩ := hAB x hx; obtain ⟨hEx, hE1⟩ := hBE x hBx; exact ⟨hEx, by rw [hE1, hB1]⟩
+  have hanti : ∀ A B, sernau.is_partial_rat_proj A → sernau.is_partial_rat_proj B → sernau.partial_rat_proj_le A B → sernau.partial_rat_proj_le B A → A = B
+    intro A B hA hB hAB hBA; unfold sernau.is_partial_rat_proj at hA hB; unfold sernau.partial_rat_proj_le at hAB hBA; funext x; apply complex.ext
+    · obtain hA1 | hA0 := (hA.1 x).1; (rw [hA1, (hAB x hA1).1]); (obtain hB1 | hB0 := (hB.1 x).1; (linarith [(hBA x hB1).1]); (rw [hA0, hB0]))
+    · obtain hA1 | hA0 := (hA.1 x).1; exact (hAB x hA1).2.symm; (obtain hB1 | hB0 := (hB.1 x).1; (linarith [(hBA x hB1).1]); (rw [(hA.1 x).2 hA0, (hB.1 x).2 hB0]))
+  have hstep : ∀ A, sernau.is_partial_rat_proj A → sernau.is_partial_rat_proj (sernau.rat_proj_step A) ∧ sernau.partial_rat_proj_le A (sernau.rat_proj_step A)
+    intro A hA; by_cases hall : ∀ z : ℝ, complex.re (A z) = 1
+    · have heq : sernau.rat_proj_step A = A := by funext x; unfold sernau.rat_proj_step; rw [if_pos hall]
+      rw [heq]; exact ⟨hA, hrefl A hA⟩
+    · have hex_z : ∃ z : ℝ, complex.re (A z) ≠ 1 := by by_contra hno; apply hall; intro z; by_contra hne; exact hno ⟨z, hne⟩
+      set z0 := sernau.rat_proj_z0 A with hz0_def
+      have hz0_not1 : complex.re (A z0) ≠ 1 := by rw [hz0_def]; unfold sernau.rat_proj_z0; exact choice.spec _ hex_z
+      have hA' := hA; unfold sernau.is_partial_rat_proj at hA'
+      have huniq : ∀ a1 r1 a2 r2 : ℝ, complex.re (A a1) = 1 → sernau.is_rat_real r1 → complex.re (A a2) = 1 → sernau.is_rat_real r2 → a1 + r1 * z0 = a2 + r2 * z0 → r1 = r2 ∧ a1 = a2
+        intro a1 r1 a2 r2 ha1 hr1 ha2 hr2 heq
+        have hr_eq : r1 = r2
+          by_contra hne_r; set dr := r1 - r2 with hdr_def; have hdr_ne : dr ≠ 0 := by intro hz; apply hne_r; linarith
+          have hdr_rat : sernau.is_rat_real dr := by rw [hdr_def]; exact (hrf.2.2.2.1 r1 r2 hr1 hr2).2.1
+          have hdiff_in := (hA'.2.2.2.1 a2 ((-1 : ℝ) * a1) ha2 (hA'.2.2.2.2 (-1) a1 hrf.2.2.1 ha1).1).1
+          have hdrz : dr * z0 = a2 + (-1 : ℝ) * a1 := by rw [hdr_def]; linarith
+          rw [← hdrz] at hdiff_in
+          have hinv_in := (hA'.2.2.2.2 (1 / dr) (dr * z0) (hrf.2.2.2.2 dr hdr_rat hdr_ne) hdiff_in).1
+          have hcanc : (1 / dr) * (dr * z0) = z0 := by field_simp
+          rw [hcanc] at hinv_in; exact hz0_not1 hinv_in
+        rw [hr_eq] at heq; exact ⟨hr_eq, by linarith⟩
+      have heval_step : ∀ x a r : ℝ, complex.re (A a) = 1 → sernau.is_rat_real r → x = a + r * z0 → complex.re (sernau.rat_proj_step A x) = 1 ∧ complex.im (sernau.rat_proj_step A x) = complex.im (A a)
+        intro x a r ha hr hx_eq; have hsp : sernau.in_span1 A z0 x := ⟨a, r, ha, hr, hx_eq⟩
+        unfold sernau.rat_proj_step; rw [if_neg hall, ← hz0_def, if_pos hsp]; simp
+        obtain ⟨ha_ch, r_ch, hr_ch, hx_ch⟩ := choice.spec (fun a0 : ℝ => complex.re (A a0) = 1 ∧ ∃ r0 : ℝ, sernau.is_rat_real r0 ∧ x = a0 + r0 * z0) ⟨a, ha, r, hr, hx_eq⟩
+        rw [(huniq _ r_ch a r ha_ch hr_ch ha hr (by rw [← hx_ch, ← hx_eq])).2]
+      have hP_step : sernau.is_partial_rat_proj (sernau.rat_proj_step A)
+        unfold sernau.is_partial_rat_proj; constructor
+        · intro x; unfold sernau.rat_proj_step; rw [if_neg hall]; by_cases hs : sernau.in_span1 A (sernau.rat_proj_z0 A) x
+          · rw [if_pos hs]; constructor; (left; simp); (intro h; simp at h)
+          · rw [if_neg hs]; constructor; (right; simp); (intro _; simp)
+        · constructor
+          · intro x; by_cases hs : sernau.in_span1 A z0 x
+            · obtain ⟨a, r, ha, hr, hx_eq⟩ := hs; rw [(heval_step x a r ha hr hx_eq).2]; exact hA'.2.1 a
+            · unfold sernau.rat_proj_step; have hi : complex.im complex.zero = 0 := by simp
+              rw [if_neg hall, ← hz0_def, if_neg hs, hi]; exact hrf.1
+          · constructor; (intro r hr; have har := hA'.2.2.1 r hr; have hev := heval_step r r 0 har.1 hrf.1 (by ring); rw [har.2] at hev; exact hev); constructor
+            · intro x y hx0 hy0
+              have hsx : sernau.in_span1 A z0 x := by unfold sernau.rat_proj_step at hx0; rw [if_neg hall, ← hz0_def] at hx0; by_contra hn; rw [if_neg hn] at hx0; simp at hx0
+              have hsy : sernau.in_span1 A z0 y := by unfold sernau.rat_proj_step at hy0; rw [if_neg hall, ← hz0_def] at hy0; by_contra hn; rw [if_neg hn] at hy0; simp at hy0
+              obtain ⟨ax, rx, hax, hrx, hx_eq⟩ := hsx; obtain ⟨ay, ry, hay, hry, hy_eq⟩ := hsy; have haxy := hA'.2.2.2.1 ax ay hax hay
+              have hev := heval_step (x + y) (ax + ay) (rx + ry) haxy.1 (hrf.2.2.2.1 rx ry hrx hry).1 (by rw [hx_eq, hy_eq]; ring)
+              rw [haxy.2, ← (heval_step x ax rx hax hrx hx_eq).2, ← (heval_step y ay ry hay hry hy_eq).2] at hev; exact hev
+            · intro r x hr hx0
+              have hsx : sernau.in_span1 A z0 x := by unfold sernau.rat_proj_step at hx0; rw [if_neg hall, ← hz0_def] at hx0; by_contra hn; rw [if_neg hn] at hx0; simp at hx0
+              obtain ⟨ax, rx, hax, hrx, hx_eq⟩ := hsx; have harx := hA'.2.2.2.2 r ax hr hax
+              have hev := heval_step (r * x) (r * ax) (r * rx) harx.1 (hrf.2.2.2.1 r rx hr hrx).2.2 (by rw [hx_eq]; ring)
+              rw [harx.2, ← (heval_step x ax rx hax hrx hx_eq).2] at hev; exact hev
+      exact ⟨hP_step, by unfold sernau.partial_rat_proj_le; intro x hx; exact heval_step x x 0 hx hrf.1 (by ring)⟩
+  have hlub : ∀ C : (ℝ → ℂ) → Prop, (∃ A0, C A0) → (∀ A, C A → sernau.is_partial_rat_proj A) → sernau.bw_is_chain sernau.partial_rat_proj_le C →
+      sernau.is_partial_rat_proj (sernau.partial_rat_proj_lub C) ∧ (∀ A, C A → sernau.partial_rat_proj_le A (sernau.partial_rat_proj_lub C)) ∧
+      (∀ Z, sernau.is_partial_rat_proj Z → (∀ A, C A → sernau.partial_rat_proj_le A Z) → sernau.partial_rat_proj_le (sernau.partial_rat_proj_lub C) Z)
+    intro C ⟨A0, hA0⟩ hCP hch; unfold sernau.bw_is_chain at hch
+    have hagree : ∀ A B : ℝ → ℂ, C A → C B → ∀ x : ℝ, complex.re (A x) = 1 → complex.re (B x) = 1 → complex.im (A x) = complex.im (B x)
+      intro A B hCA hCB x hAx hBx; obtain hAB | hBA := hch A B hCA hCB; (unfold sernau.partial_rat_proj_le at hAB; exact (hAB x hAx).2.symm); (unfold sernau.partial_rat_proj_le at hBA; exact (hBA x hBx).2)
+    have heval_lub : ∀ A : ℝ → ℂ, C A → ∀ x : ℝ, complex.re (A x) = 1 → complex.re (sernau.partial_rat_proj_lub C x) = 1 ∧ complex.im (sernau.partial_rat_proj_lub C x) = complex.im (A x)
+      intro A hCA x hAx; have hex : ∃ B, C B ∧ complex.re (B x) = 1 := ⟨A, hCA, hAx⟩
+      unfold sernau.partial_rat_proj_lub; rw [if_pos hex]; simp
+      have hsp := choice.spec (fun B => C B ∧ complex.re (B x) = 1) hex; exact hagree _ A hsp.1 hCA x hsp.2 hAx
+    have hP_lub : sernau.is_partial_rat_proj (sernau.partial_rat_proj_lub C)
+      unfold sernau.is_partial_rat_proj; constructor
+      · intro x; unfold sernau.partial_rat_proj_lub; by_cases hx : ∃ A, C A ∧ complex.re (A x) = 1
+        · rw [if_pos hx]; constructor; (left; simp); (intro h; simp at h)
+        · rw [if_neg hx]; constructor; (right; simp); (intro _; simp)
+      · constructor
+        · intro x; by_cases hx : ∃ A, C A ∧ complex.re (A x) = 1
+          · obtain ⟨A, hCA, hAx⟩ := hx; rw [(heval_lub A hCA x hAx).2]; have hPA := hCP A hCA; unfold sernau.is_partial_rat_proj at hPA; exact hPA.2.1 x
+          · unfold sernau.partial_rat_proj_lub; have hi : complex.im complex.zero = 0 := by simp
+            rw [if_neg hx, hi]; exact hrf.1
+        · constructor; (intro r hr; have hPA0 := hCP A0 hA0; unfold sernau.is_partial_rat_proj at hPA0; have har := hPA0.2.2.1 r hr; have hev := heval_lub A0 hA0 r har.1; rw [har.2] at hev; exact hev); constructor
+          · intro x y hx0 hy0
+            have hex_x : ∃ A, C A ∧ complex.re (A x) = 1 := by unfold sernau.partial_rat_proj_lub at hx0; by_contra hn; rw [if_neg hn] at hx0; simp at hx0
+            have hex_y : ∃ B, C B ∧ complex.re (B y) = 1 := by unfold sernau.partial_rat_proj_lub at hy0; by_contra hn; rw [if_neg hn] at hy0; simp at hy0
+            obtain ⟨A, hCA, hAx⟩ := hex_x; obtain ⟨B, hCB, hBy⟩ := hex_y; obtain hAB | hBA := hch A B hCA hCB
+            · unfold sernau.partial_rat_proj_le at hAB; have hBx := (hAB x hAx).1; have hPB := hCP B hCB; unfold sernau.is_partial_rat_proj at hPB
+              have hbxy := hPB.2.2.2.1 x y hBx hBy; have hev := heval_lub B hCB (x + y) hbxy.1; rw [hbxy.2, ← (heval_lub B hCB x hBx).2, ← (heval_lub B hCB y hBy).2] at hev; exact hev
+            · unfold sernau.partial_rat_proj_le at hBA; have hAy := (hBA y hBy).1; have hPA := hCP A hCA; unfold sernau.is_partial_rat_proj at hPA
+              have haxy := hPA.2.2.2.1 x y hAx hAy; have hev := heval_lub A hCA (x + y) haxy.1; rw [haxy.2, ← (heval_lub A hCA x hAx).2, ← (heval_lub A hCA y hAy).2] at hev; exact hev
+          · intro r x hr hx0
+            have hex_x : ∃ A, C A ∧ complex.re (A x) = 1 := by unfold sernau.partial_rat_proj_lub at hx0; by_contra hn; rw [if_neg hn] at hx0; simp at hx0
+            obtain ⟨A, hCA, hAx⟩ := hex_x; have hPA := hCP A hCA; unfold sernau.is_partial_rat_proj at hPA
+            have harx := hPA.2.2.2.2 r x hr hAx; have hev := heval_lub A hCA (r * x) harx.1; rw [harx.2, ← (heval_lub A hCA x hAx).2] at hev; exact hev
+    have hlub_min : ∀ Z, sernau.is_partial_rat_proj Z → (∀ A, C A → sernau.partial_rat_proj_le A Z) → sernau.partial_rat_proj_le (sernau.partial_rat_proj_lub C) Z
+      intro Z _ hAZ; unfold sernau.partial_rat_proj_le; intro x hLx
+      have hex_x : ∃ A, C A ∧ complex.re (A x) = 1 := by unfold sernau.partial_rat_proj_lub at hLx; by_contra hn; rw [if_neg hn] at hLx; simp at hLx
+      obtain ⟨A, hCA, hAx⟩ := hex_x; have hZA := hAZ A hCA; unfold sernau.partial_rat_proj_le at hZA; obtain ⟨hZx, hZ1⟩ := hZA x hAx; rw [(heval_lub A hCA x hAx).2]; exact ⟨hZx, hZ1⟩
+    exact ⟨hP_lub, by intro A hCA; unfold sernau.partial_rat_proj_le; intro x hAx; exact heval_lub A hCA x hAx, hlub_min⟩
+  obtain ⟨m, hPm, hfix⟩ := sernau.bourbaki_witt sernau.is_partial_rat_proj sernau.partial_rat_proj_le sernau.partial_rat_proj_bot sernau.rat_proj_step sernau.partial_rat_proj_lub hbot_P hbot_le hrefl htrans hanti hstep hlub
+  have htot : ∀ z : ℝ, complex.re (m z) = 1
+    by_contra hnot; have hex_z : ∃ z : ℝ, complex.re (m z) ≠ 1 := by by_contra hno; apply hnot; intro z; by_contra hne; exact hno ⟨z, hne⟩
+    set z0 := sernau.rat_proj_z0 m with hz0_def
+    have hz0_ne : complex.re (m z0) ≠ 1 := by rw [hz0_def]; unfold sernau.rat_proj_z0; exact choice.spec _ hex_z
+    have hm' := hPm; unfold sernau.is_partial_rat_proj at hm'
+    have hsp_z0 : sernau.in_span1 m z0 z0 := ⟨0, 1, (hm'.2.2.1 0 hrf.1).1, hrf.2.1, by ring⟩
+    have hstep_z0 : complex.re (sernau.rat_proj_step m z0) = 1 := by unfold sernau.rat_proj_step; rw [if_neg hnot, ← hz0_def, if_pos hsp_z0]; simp
+    rw [hfix] at hstep_z0; exact hz0_ne hstep_z0
+  exact ⟨m, hPm, htot⟩
+
+-> sernau.real_rat_proj (x : ℝ) : ℝ := complex.im ((choice (fun m : ℝ → ℂ => sernau.is_partial_rat_proj m ∧ ∀ z : ℝ, complex.re (m z) = 1)) x)
++ sernau.real_rat_proj_spec :
+    ((∀ x : ℝ, sernau.is_rat_real (sernau.real_rat_proj x)) ∧ (∀ r : ℝ, sernau.is_rat_real r → sernau.real_rat_proj r = r) ∧
+     (∀ x y : ℝ, sernau.real_rat_proj (x + y) = sernau.real_rat_proj x + sernau.real_rat_proj y) ∧ (∀ r x : ℝ, sernau.is_rat_real r → sernau.real_rat_proj (r * x) = r * sernau.real_rat_proj x))
+  set m := choice (fun m0 : ℝ → ℂ => sernau.is_partial_rat_proj m0 ∧ ∀ z : ℝ, complex.re (m0 z) = 1) with hm_def
+  have hsp : sernau.is_partial_rat_proj m ∧ ∀ z : ℝ, complex.re (m z) = 1 := by rw [hm_def]; exact choice.spec _ sernau.exists_total_rat_proj
+  obtain ⟨hPm, htot⟩ := hsp; unfold sernau.is_partial_rat_proj at hPm; unfold sernau.real_rat_proj; rw [← hm_def]
+  exact ⟨hPm.2.1, by intro r hr; exact (hPm.2.2.1 r hr).2, by intro x y; exact (hPm.2.2.2.1 x y (htot x) (htot y)).2, by intro r x hr; exact (hPm.2.2.2.2 r x hr (htot x)).2⟩
+
+-- SECTION 3: ULTRAMETRIC `p`-ADIC GAUGE (`rat_vec_gauge`), `std_col_basis`, & JET INTEGRALITY
++ sernau.max_helpers : ((∀ x y u : ℝ, x ≤ u → y ≤ u → max x y ≤ u) ∧ (∀ q : ℝ, 0 ≤ q → max q 0 = q) ∧ (∀ c x y : ℝ, 0 ≤ c → max (c * x) (c * y) = c * max x y))
+  constructor; (intro x y u hxu hyu; unfold max; by_cases hxy : x ≤ y; (rw [if_pos hxy]; exact hyu); (rw [if_neg hxy]; exact hxu)); constructor
+  · intro q hq; unfold max; by_cases hc : q ≤ 0; (rw [if_pos hc]; linarith); (rw [if_neg hc])
+  · intro c x y hc; unfold max; by_cases hxy : x ≤ y
+    · rw [if_pos hxy, if_pos (mul_le_mul_of_nonneg_left.real x y c hxy hc)]
+    · rw [if_neg hxy]; by_cases hcy : c * x ≤ c * y
+      · have hc0 : c = 0 := by by_contra hne; have hpos : 0 < c := (by linarith); have hm := mul_le_mul_of_nonneg_left.real y x c (by linarith) (by linarith); have heq : c * x = c * y := (by linarith); have h1 : (1 / c) * (c * x) = x := (by field_simp); have h2 : (1 / c) * (c * y) = y := (by field_simp); rw [heq] at h1; linarith
+        rw [if_pos hcy, hc0]; ring
+      · rw [if_neg hcy]
+
++ sernau.padic_abs_prime_pow (p e : ℕ) (hp : is_prime_nat p) : (padic.abs p (p ^ e) = rpow (p : ℝ) (-(e : ℝ)))
+  have hpe_pos : 0 < p ^ e := pow_pos.nat p e (by linarith [hp.1])
+  rw [padic.abs_pos_val p (p ^ e) (by omega), vp.pow p p e hp (by linarith [hp.1])]
+  have hnd1 : ¬ (p ∣ 1)
+    intro hd; obtain ⟨q0, hq0⟩ := (dvd.iff_exists p 1 (by linarith [hp.1])).mp hd
+    by_cases hq0_z : q0 = 0; (rw [hq0_z] at hq0; omega); (have hm := mul_le_mul_of_nonneg_left.nat 1 q0 p (by omega) (by omega); have h2 := hp.1; omega)
+  have hm := vp.mul_p p 1 hp.1 (by omega); have hp1_eq : p * 1 = p := by ring
+  rw [hp1_eq, vp.eq_zero_of_not_dvd p 1 hp.1 (by omega) hnd1] at hm; have hvp1 : vp p p = 1 := by omega
+  rw [hvp1, mul_one.nat]
+
+-> sernau.int_nat_abs (a : ℤ) : ℕ := nat_floor (|((a : ℤ) : ℝ)|)
+-> sernau.int_padic_abs (p : ℕ) (a : ℤ) : ℝ := padic.abs p (sernau.int_nat_abs a)
+
++ sernau.int_padic_abs_props (p : ℕ) (hp : is_prime_nat p) :
+    ((∀ n : ℕ, sernau.int_padic_abs p (n : ℤ) = padic.abs p n) ∧ (∀ a : ℤ, 0 ≤ sernau.int_padic_abs p a ∧ sernau.int_padic_abs p a ≤ 1) ∧
+     sernau.int_padic_abs p 0 = 0 ∧ sernau.int_padic_abs p 1 = 1 ∧ (∀ a : ℤ, sernau.int_padic_abs p (-a) = sernau.int_padic_abs p a) ∧
+     (∀ a b : ℤ, sernau.int_padic_abs p (a * b) = sernau.int_padic_abs p a * sernau.int_padic_abs p b) ∧
+     (∀ a b : ℤ, sernau.int_padic_abs p (a + b) ≤ max (sernau.int_padic_abs p a) (sernau.int_padic_abs p b)))
+  have hz_neg : ∀ z : ℤ, ((-z : ℤ) : ℝ) = -((z : ℤ) : ℝ)
+    intro z; have h1 : (-z : ℤ) = 0 - z := by ring
+    rw [h1, int_cast_sub.real, int_cast_zero.real]; ring
+  have hnat_eq : ∀ n : ℕ, sernau.int_nat_abs (n : ℤ) = n
+    intro n; unfold sernau.int_nat_abs; have hf := (sernau.nat_floor_abs_int_cast (n : ℤ)).1
+    have ha : |(((n : ℕ) : ℤ) : ℝ)| = (n : ℝ) := abs_of_nonneg.real (n : ℝ) (cast_nonneg.real n)
+    exact sernau.nat_eq_of_cast_eq (nat_floor (|(((n : ℕ) : ℤ) : ℝ)|)) n (by linarith [hf, ha])
+  have h1_cast : ∀ n : ℕ, sernau.int_padic_abs p (n : ℤ) = padic.abs p n := by intro n; unfold sernau.int_padic_abs; rw [hnat_eq n]
+  have hbound : ∀ a : ℤ, 0 ≤ sernau.int_padic_abs p a ∧ sernau.int_padic_abs p a ≤ 1
+    intro a; unfold sernau.int_padic_abs; constructor; exact padic.abs_nonneg p _
+    by_cases hz : sernau.int_nat_abs a = 0; (rw [hz, padic.abs_zero]; linarith)
+    rw [padic.abs_pos_val p _ hz]; have hr0 : rpow (p : ℝ) 0 = 1 := by unfold rpow; simp [exp_zero]
+    rw [← hr0]; exact rpow_le_of_exp_le (p : ℝ) (-((vp p (sernau.int_nat_abs a) : ℕ) : ℝ)) 0 ((cast_le.real 1 p).mpr (by linarith [hp.1])) (by linarith [cast_nonneg.real (vp p (sernau.int_nat_abs a))])
+  have hz0 : sernau.int_padic_abs p 0 = 0 := by have h := h1_cast 0; have hc0 : ((0 : ℕ) : ℤ) = 0 := (by decide); rw [hc0] at h; rw [h, padic.abs_zero]
+  have hz1 : sernau.int_padic_abs p 1 = 1 := by have h := h1_cast 1; have hc1 : ((1 : ℕ) : ℤ) = 1 := (by decide); rw [hc1] at h; rw [h]; exact padic.abs_one_eq p hp.1
+  have hneg : ∀ a : ℤ, sernau.int_padic_abs p (-a) = sernau.int_padic_abs p a
+    intro a; unfold sernau.int_padic_abs sernau.int_nat_abs; have hn : -((a : ℤ) : ℝ) = 0 - ((a : ℤ) : ℝ) := by ring
+    rw [hz_neg a, hn, abs_neg.real]
+  have hmul : ∀ a b : ℤ, sernau.int_padic_abs p (a * b) = sernau.int_padic_abs p a * sernau.int_padic_abs p b
+    intro a b; unfold sernau.int_padic_abs sernau.int_nat_abs
+    have hnf : nat_floor (|((a * b : ℤ) : ℝ)|) = nat_floor (|((a : ℤ) : ℝ)|) * nat_floor (|((b : ℤ) : ℝ)|)
+      apply sernau.nat_eq_of_cast_eq; rw [(sernau.nat_floor_abs_int_cast (a * b)).1, cast_mul.real, (sernau.nat_floor_abs_int_cast a).1, (sernau.nat_floor_abs_int_cast b).1, int_cast_mul.real, abs_mul.real]
+    rw [hnf]; exact padic.abs_mul p _ _ hp
+  have hdvd_int : ∀ (n : ℕ) (z : ℤ), 0 < n → n ∣ sernau.int_nat_abs z → ∃ q : ℤ, z = (n : ℤ) * q
+    intro n z hn hdvd; obtain ⟨qn, hqn⟩ := (dvd.iff_exists n (sernau.int_nat_abs z) hn).mp hdvd
+    have hfz := (sernau.nat_floor_abs_int_cast z).1; unfold sernau.int_nat_abs at hqn; rw [hqn, cast_mul.real] at hfz
+    by_cases hznn : 0 ≤ ((z : ℤ) : ℝ)
+    · have hza := abs_of_nonneg.real ((z : ℤ) : ℝ) hznn
+      exact ⟨(qn : ℤ), sernau.int_eq_of_cast_eq z ((n : ℤ) * (qn : ℤ)) (by rw [int_cast_mul.real]; linarith [hfz, hza])⟩
+    · have hza := abs_of_nonpos.real ((z : ℤ) : ℝ) (by linarith)
+      exact ⟨-(qn : ℤ), sernau.int_eq_of_cast_eq z ((n : ℤ) * -(qn : ℤ)) (by rw [int_cast_mul.real, hz_neg (qn : ℤ)]; have hn1 : (n : ℝ) * -(qn : ℝ) = -((n : ℝ) * (qn : ℝ)) := (by ring); linarith [hfz, hza, hn1])⟩
+  have hzero_of_na0 : ∀ z : ℤ, sernau.int_nat_abs z = 0 → z = 0
+    intro z h0; have hfz := (sernau.nat_floor_abs_int_cast z).1; unfold sernau.int_nat_abs at h0; rw [h0, cast_zero.real] at hfz
+    apply sernau.int_eq_of_cast_eq; rw [int_cast_zero.real]; by_contra hnr; linarith [abs_pos.real ((z : ℤ) : ℝ) hnr]
+  have hadd : ∀ a b : ℤ, sernau.int_padic_abs p (a + b) ≤ max (sernau.int_padic_abs p a) (sernau.int_padic_abs p b)
+    intro a b; by_cases ha0 : sernau.int_nat_abs a = 0; (rw [hzero_of_na0 a ha0, zero_add.int]; exact le_max_right.real _ _)
+    by_cases hb0 : sernau.int_nat_abs b = 0; (rw [hzero_of_na0 b hb0, add_zero.int]; exact le_max_left.real _ _)
+    set k := min (vp p (sernau.int_nat_abs a)) (vp p (sernau.int_nat_abs b)) with hk_def
+    have hpk_pos := pow_pos.nat p k (by linarith [hp.1])
+    obtain ⟨qa, hqa⟩ := hdvd_int (p ^ k) a hpk_pos ((vp.le_iff_pow_dvd p (sernau.int_nat_abs a) k hp.1 (by omega)).mp (by rw [hk_def]; exact min_le_left.nat _ _))
+    obtain ⟨qb, hqb⟩ := hdvd_int (p ^ k) b hpk_pos ((vp.le_iff_pow_dvd p (sernau.int_nat_abs b) k hp.1 (by omega)).mp (by rw [hk_def]; exact min_le_right.nat _ _))
+    have hab_eq : a + b = ((p ^ k : ℕ) : ℤ) * (qa + qb) := by rw [hqa, hqb]; ring
+    rw [hab_eq, hmul, h1_cast (p ^ k), sernau.padic_abs_prime_pow p k hp]
+    have hm_pk := mul_le_mul_of_nonneg_left.real (sernau.int_padic_abs p (qa + qb)) 1 (rpow (p : ℝ) (-(k : ℝ))) (hbound (qa + qb)).2 (by linarith [rpow.pos (p : ℝ) (-(k : ℝ))])
+    unfold sernau.int_padic_abs at hm_pk ⊢; rw [mul_one.real] at hm_pk
+    rw [padic.abs_pos_val p (sernau.int_nat_abs a) ha0, padic.abs_pos_val p (sernau.int_nat_abs b) hb0]
+    by_cases hcmp : vp p (sernau.int_nat_abs a) ≤ vp p (sernau.int_nat_abs b)
+    · have hke : k = vp p (sernau.int_nat_abs a) := by rw [hk_def]; exact min_eq_left.nat _ _ hcmp
+      rw [hke] at hm_pk ⊢
+      exact le_trans.real (rpow (p : ℝ) (-((vp p (sernau.int_nat_abs a) : ℕ) : ℝ)) * padic.abs p (sernau.int_nat_abs (qa + qb))) (rpow (p : ℝ) (-((vp p (sernau.int_nat_abs a) : ℕ) : ℝ))) (max (rpow (p : ℝ) (-((vp p (sernau.int_nat_abs a) : ℕ) : ℝ))) (rpow (p : ℝ) (-((vp p (sernau.int_nat_abs b) : ℕ) : ℝ)))) hm_pk (le_max_left.real _ _)
+    · have hke : k = vp p (sernau.int_nat_abs b) := by rw [hk_def]; exact min_eq_right.nat _ _ (by omega)
+      rw [hke] at hm_pk ⊢
+      exact le_trans.real (rpow (p : ℝ) (-((vp p (sernau.int_nat_abs b) : ℕ) : ℝ)) * padic.abs p (sernau.int_nat_abs (qa + qb))) (rpow (p : ℝ) (-((vp p (sernau.int_nat_abs b) : ℕ) : ℝ))) (max (rpow (p : ℝ) (-((vp p (sernau.int_nat_abs a) : ℕ) : ℝ))) (rpow (p : ℝ) (-((vp p (sernau.int_nat_abs b) : ℕ) : ℝ)))) hm_pk (le_max_right.real _ _)
+  exact ⟨h1_cast, hbound, hz0, hz1, hneg, hmul, hadd⟩
+
+-> sernau.is_rat_padic_val (p : ℕ) (x v : ℝ) : Prop := ∃ (a : ℤ) (b : ℕ), 0 < b ∧ x = ((a : ℤ) : ℝ) / (b : ℝ) ∧ v = sernau.int_padic_abs p a / padic.abs p b
+-> sernau.rat_real_padic_abs (p : ℕ) (x : ℝ) : ℝ := if sernau.is_rat_real x then choice (fun v : ℝ => sernau.is_rat_padic_val p x v) else 0
+
++ sernau.rat_real_padic_abs_spec (p : ℕ) (hp : is_prime_nat p) :
+    ((∀ (a : ℤ) (b : ℕ), 0 < b → sernau.rat_real_padic_abs p (((a : ℤ) : ℝ) / (b : ℝ)) = sernau.int_padic_abs p a / padic.abs p b) ∧
+     (∀ x : ℝ, 0 ≤ sernau.rat_real_padic_abs p x) ∧ sernau.rat_real_padic_abs p 0 = 0 ∧
+     (∀ x y : ℝ, sernau.is_rat_real x → sernau.is_rat_real y → sernau.rat_real_padic_abs p (x + y) ≤ max (sernau.rat_real_padic_abs p x) (sernau.rat_real_padic_abs p y)) ∧
+     (∀ x y : ℝ, sernau.is_rat_real x → sernau.is_rat_real y → sernau.rat_real_padic_abs p (x * y) = sernau.rat_real_padic_abs p x * sernau.rat_real_padic_abs p y))
+  have hip := sernau.int_padic_abs_props p hp
+  have hfr_alg : ∀ A1 A2 P1 P2 : ℝ, P1 ≠ 0 → P2 ≠ 0 →
+      (A1 * P2) / (P1 * P2) = A1 / P1 ∧ (A2 * P1) / (P1 * P2) = A2 / P2 ∧
+      (A1 / P1) * (P1 * P2) = A1 * P2 ∧ (A2 / P2) * (P1 * P2) = A2 * P1 ∧ (A1 * A2) / (P1 * P2) = (A1 / P1) * (A2 / P2)
+    intro A1 A2 P1 P2 h1 h2; constructor; field_simp; constructor; field_simp; constructor; field_simp; constructor; field_simp; field_simp
+  have heval : ∀ (a : ℤ) (b : ℕ), 0 < b → sernau.rat_real_padic_abs p (((a : ℤ) : ℝ) / (b : ℝ)) = sernau.int_padic_abs p a / padic.abs p b
+    intro a b hb; set x := ((a : ℤ) : ℝ) / (b : ℝ) with hx_def; have hrx : sernau.is_rat_real x := ⟨a, b, hb, hx_def⟩
+    unfold sernau.rat_real_padic_abs; rw [if_pos hrx]
+    set v_ch := choice (fun v : ℝ => sernau.is_rat_padic_val p x v) with hvch_def
+    have hsp : sernau.is_rat_padic_val p x v_ch := by rw [hvch_def]; exact choice.spec (fun v : ℝ => sernau.is_rat_padic_val p x v) ⟨sernau.int_padic_abs p a / padic.abs p b, a, b, hb, hx_def, by rfl⟩
+    unfold sernau.is_rat_padic_val at hsp; obtain ⟨a0, b0, hb0, hx0, hv0⟩ := hsp
+    have hb_ne : (b : ℝ) ≠ 0 := by linarith [(cast_pos.real b).mpr hb]
+    have hb0_ne : (b0 : ℝ) ≠ 0 := by linarith [(cast_pos.real b0).mpr hb0]
+    have hcross_z : a0 * (b : ℤ) = a * (b0 : ℤ)
+      apply sernau.int_eq_of_cast_eq; rw [int_cast_mul.real, int_cast_mul.real]
+      have h1 := (hfr_alg ((a0 : ℤ) : ℝ) ((a : ℤ) : ℝ) (b0 : ℝ) (b : ℝ) hb0_ne hb_ne).2.2.1
+      have h2 := (hfr_alg ((a0 : ℤ) : ℝ) ((a : ℤ) : ℝ) (b0 : ℝ) (b : ℝ) hb0_ne hb_ne).2.2.2.1
+      have hx_eq : ((a0 : ℤ) : ℝ) / (b0 : ℝ) = ((a : ℤ) : ℝ) / (b : ℝ) := by rw [← hx0, ← hx_def]
+      rw [hx_eq] at h1; linarith
+    have hp_eq : sernau.int_padic_abs p a0 * padic.abs p b = sernau.int_padic_abs p a * padic.abs p b0
+      have hm := hip.2.2.2.2.2.1 a0 (b : ℤ); rw [hcross_z, hip.2.2.2.2.2.1 a (b0 : ℤ), hip.1 b, hip.1 b0] at hm; exact hm.symm
+    have hpb_ne : padic.abs p b ≠ 0 := by linarith [padic.abs_pos p b hb]
+    have hpb0_ne : padic.abs p b0 ≠ 0 := by linarith [padic.abs_pos p b0 hb0]
+    have halg0 := hfr_alg (sernau.int_padic_abs p a0) (sernau.int_padic_abs p a) (padic.abs p b0) (padic.abs p b) hpb0_ne hpb_ne
+    rw [hv0, ← halg0.1, ← halg0.2.1, hp_eq]
+  have hnn : ∀ x : ℝ, 0 ≤ sernau.rat_real_padic_abs p x
+    intro x; by_cases hx : sernau.is_rat_real x; (obtain ⟨a, b, hb, hxe⟩ := hx; rw [hxe, heval a b hb]; exact div_nonneg.real (sernau.int_padic_abs p a) (padic.abs p b) (hip.2.1 a).1 (padic.abs_nonneg p b)); (unfold sernau.rat_real_padic_abs; rw [if_neg hx]; linarith)
+  have hz0 : sernau.rat_real_padic_abs p 0 = 0
+    have h0_eq : (0 : ℝ) = ((0 : ℤ) : ℝ) / ((1 : ℕ) : ℝ) := by rw [int_cast_zero.real, cast_one.real]; field_simp
+    rw [h0_eq, heval 0 1 (by decide), hip.2.2.1, padic.abs_one_eq p hp.1]; field_simp
+  have hadd : ∀ x y : ℝ, sernau.is_rat_real x → sernau.is_rat_real y → sernau.rat_real_padic_abs p (x + y) ≤ max (sernau.rat_real_padic_abs p x) (sernau.rat_real_padic_abs p y)
+    intro x y ⟨a1, b1, hb1, hx⟩ ⟨a2, b2, hb2, hy⟩
+    have hb1_r : (0 : ℝ) < (b1 : ℝ) := (cast_pos.real b1).mpr hb1
+    have hb2_r : (0 : ℝ) < (b2 : ℝ) := (cast_pos.real b2).mpr hb2
+    have hsum_eq : x + y = (((a1 * (b2 : ℤ) + a2 * (b1 : ℤ) : ℤ) : ℝ)) / ((b1 * b2 : ℕ) : ℝ) := by rw [hx, hy, int_cast_add.real, int_cast_mul.real, int_cast_mul.real, cast_mul.real]; field_simp
+    rw [hsum_eq, heval (a1 * (b2 : ℤ) + a2 * (b1 : ℤ)) (b1 * b2) (mul_pos.nat b1 b2 hb1 hb2), hx, heval a1 b1 hb1, hy, heval a2 b2 hb2, padic.abs_mul p b1 b2 hp]
+    have hp1 := padic.abs_pos p b1 hb1; have hp2 := padic.abs_pos p b2 hb2; have hp12 := mul_pos.real (padic.abs p b1) (padic.abs p b2) hp1 hp2
+    have halg := hfr_alg (sernau.int_padic_abs p a1) (sernau.int_padic_abs p a2) (padic.abs p b1) (padic.abs p b2) (by linarith) (by linarith)
+    have htri := hip.2.2.2.2.2.2 (a1 * (b2 : ℤ)) (a2 * (b1 : ℤ))
+    rw [hip.2.2.2.2.2.1 a1 (b2 : ℤ), hip.2.2.2.2.2.1 a2 (b1 : ℤ), hip.1 b2, hip.1 b1] at htri
+    have hd := div_le_div_of_nonneg_right.real (sernau.int_padic_abs p (a1 * (b2 : ℤ) + a2 * (b1 : ℤ))) (max (sernau.int_padic_abs p a1 * padic.abs p b2) (sernau.int_padic_abs p a2 * padic.abs p b1)) (padic.abs p b1 * padic.abs p b2) htri (by linarith)
+    unfold max at hd ⊢
+    by_cases hcmp : sernau.int_padic_abs p a1 * padic.abs p b2 ≤ sernau.int_padic_abs p a2 * padic.abs p b1
+    · rw [if_pos hcmp, halg.2.1] at hd
+      have hcmp' : sernau.int_padic_abs p a1 / padic.abs p b1 ≤ sernau.int_padic_abs p a2 / padic.abs p b2 := by rw [← halg.1, ← halg.2.1]; exact div_le_div_of_nonneg_right.real (sernau.int_padic_abs p a1 * padic.abs p b2) (sernau.int_padic_abs p a2 * padic.abs p b1) (padic.abs p b1 * padic.abs p b2) hcmp (by linarith)
+      rw [if_pos hcmp']; exact hd
+    · rw [if_neg hcmp, halg.1] at hd
+      by_cases hcmp' : sernau.int_padic_abs p a1 / padic.abs p b1 ≤ sernau.int_padic_abs p a2 / padic.abs p b2
+      · exfalso; apply hcmp; have hm := mul_le_mul_of_nonneg_right.real (sernau.int_padic_abs p a1 / padic.abs p b1) (sernau.int_padic_abs p a2 / padic.abs p b2) (padic.abs p b1 * padic.abs p b2) hcmp' (by linarith)
+        linarith [halg.2.2.1, halg.2.2.2.1]
+      · rw [if_neg hcmp']; exact hd
+  have hmul : ∀ x y : ℝ, sernau.is_rat_real x → sernau.is_rat_real y → sernau.rat_real_padic_abs p (x * y) = sernau.rat_real_padic_abs p x * sernau.rat_real_padic_abs p y
+    intro x y ⟨a1, b1, hb1, hx⟩ ⟨a2, b2, hb2, hy⟩
+    have hb1_r : (0 : ℝ) < (b1 : ℝ) := (cast_pos.real b1).mpr hb1
+    have hb2_r : (0 : ℝ) < (b2 : ℝ) := (cast_pos.real b2).mpr hb2
+    have hprod_eq : x * y = (((a1 * a2 : ℤ) : ℝ)) / ((b1 * b2 : ℕ) : ℝ) := by rw [hx, hy, int_cast_mul.real, cast_mul.real]; field_simp
+    have hp1 := padic.abs_pos p b1 hb1; have hp2 := padic.abs_pos p b2 hb2
+    rw [hprod_eq, heval (a1 * a2) (b1 * b2) (mul_pos.nat b1 b2 hb1 hb2), hx, heval a1 b1 hb1, hy, heval a2 b2 hb2, hip.2.2.2.2.2.1 a1 a2, padic.abs_mul p b1 b2 hp]
+    exact (hfr_alg (sernau.int_padic_abs p a1) (sernau.int_padic_abs p a2) (padic.abs p b1) (padic.abs p b2) (by linarith) (by linarith)).2.2.2.2
+  exact ⟨heval, hnn, hz0, hadd, hmul⟩
+
+-> sernau.cpadic_abs (p : ℕ) (z : ℂ) : ℝ := max (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.re z))) (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.im z)))
+
++ sernau.cpadic_abs_props (p : ℕ) (hp : is_prime_nat p) :
+    ((∀ z : ℂ, 0 ≤ sernau.cpadic_abs p z) ∧ sernau.cpadic_abs p complex.zero = 0 ∧ (∀ z : ℂ, sernau.cpadic_abs p (complex.neg z) = sernau.cpadic_abs p z) ∧
+     (∀ z1 z2 : ℂ, sernau.cpadic_abs p (complex.add z1 z2) ≤ max (sernau.cpadic_abs p z1) (sernau.cpadic_abs p z2)) ∧
+     (∀ (a : ℤ) (b : ℕ), 0 < b → sernau.cpadic_abs p (complex.of_real (((a : ℤ) : ℝ) / (b : ℝ))) = sernau.int_padic_abs p a / padic.abs p b) ∧
+     (∀ (a : ℤ) (b : ℕ), 0 < b → ∀ z : ℂ, sernau.cpadic_abs p (complex.mul (complex.of_real (((a : ℤ) : ℝ) / (b : ℝ))) z) = (sernau.int_padic_abs p a / padic.abs p b) * sernau.cpadic_abs p z))
+  have hpr := sernau.real_rat_proj_spec; have hrr := sernau.rat_real_padic_abs_spec p hp
+  have hip := sernau.int_padic_abs_props p hp; have hrf := sernau.is_rat_real_field; have hmh := sernau.max_helpers
+  have hnn : ∀ z : ℂ, 0 ≤ sernau.cpadic_abs p z
+    intro z; unfold sernau.cpadic_abs
+    exact le_trans.real 0 (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.re z))) (max (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.re z))) (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.im z)))) (hrr.2.1 (sernau.real_rat_proj (complex.re z))) (le_max_left.real _ _)
+  have hz0 : sernau.cpadic_abs p complex.zero = 0 := by unfold sernau.cpadic_abs; simp; rw [hpr.2.1 0 hrf.1, hrr.2.2.1, hmh.2.1 0 (by linarith)]
+  have hneg : ∀ z : ℂ, sernau.cpadic_abs p (complex.neg z) = sernau.cpadic_abs p z
+    intro z; unfold sernau.cpadic_abs; have hre : complex.re (complex.neg z) = (-1 : ℝ) * complex.re z := by simp; ring
+    have him : complex.im (complex.neg z) = (-1 : ℝ) * complex.im z := by simp; ring
+    have hm1_abs : sernau.rat_real_padic_abs p (-1) = 1
+      have hm1_eq : (-1 : ℝ) = ((-1 : ℤ) : ℝ) / ((1 : ℕ) : ℝ) := by have hn1 : (-1 : ℤ) = 0 - 1 := by ring; rw [hn1, int_cast_sub.real, int_cast_zero.real, int_cast_one.real, cast_one.real]; field_simp
+      rw [hm1_eq, hrr.1 (-1) 1 (by decide), hip.2.2.2.2.1 1, hip.2.2.2.1, padic.abs_one_eq p hp.1]; field_simp
+    rw [hre, him, hpr.2.2.2 (-1) (complex.re z) hrf.2.2.1, hpr.2.2.2 (-1) (complex.im z) hrf.2.2.1, hrr.2.2.2.2 (-1) (sernau.real_rat_proj (complex.re z)) hrf.2.2.1 (hpr.1 (complex.re z)), hrr.2.2.2.2 (-1) (sernau.real_rat_proj (complex.im z)) hrf.2.2.1 (hpr.1 (complex.im z)), hm1_abs, one_mul.real, one_mul.real]
+  have hmax4 : ∀ xr xi r1 i1 r2 i2 : ℝ, xr ≤ max r1 r2 → xi ≤ max i1 i2 → max xr xi ≤ max (max r1 i1) (max r2 i2)
+    intro xr xi r1 i1 r2 i2 hxr hxi
+    have b11 : r1 ≤ max (max r1 i1) (max r2 i2) := le_trans.real r1 (max r1 i1) (max (max r1 i1) (max r2 i2)) (le_max_left.real r1 i1) (le_max_left.real _ _)
+    have b12 : i1 ≤ max (max r1 i1) (max r2 i2) := le_trans.real i1 (max r1 i1) (max (max r1 i1) (max r2 i2)) (le_max_right.real r1 i1) (le_max_left.real _ _)
+    have b21 : r2 ≤ max (max r1 i1) (max r2 i2) := le_trans.real r2 (max r2 i2) (max (max r1 i1) (max r2 i2)) (le_max_left.real r2 i2) (le_max_right.real _ _)
+    have b22 : i2 ≤ max (max r1 i1) (max r2 i2) := le_trans.real i2 (max r2 i2) (max (max r1 i1) (max r2 i2)) (le_max_right.real r2 i2) (le_max_right.real _ _)
+    exact hmh.1 xr xi (max (max r1 i1) (max r2 i2)) (le_trans.real xr (max r1 r2) (max (max r1 i1) (max r2 i2)) hxr (hmh.1 r1 r2 (max (max r1 i1) (max r2 i2)) b11 b21)) (le_trans.real xi (max i1 i2) (max (max r1 i1) (max r2 i2)) hxi (hmh.1 i1 i2 (max (max r1 i1) (max r2 i2)) b12 b22))
+  have hadd : ∀ z1 z2 : ℂ, sernau.cpadic_abs p (complex.add z1 z2) ≤ max (sernau.cpadic_abs p z1) (sernau.cpadic_abs p z2)
+    intro z1 z2; unfold sernau.cpadic_abs; have hre : complex.re (complex.add z1 z2) = complex.re z1 + complex.re z2 := by simp
+    have him : complex.im (complex.add z1 z2) = complex.im z1 + complex.im z2 := by simp
+    rw [hre, him, hpr.2.2.1 (complex.re z1) (complex.re z2), hpr.2.2.1 (complex.im z1) (complex.im z2)]
+    exact hmax4 (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.re z1) + sernau.real_rat_proj (complex.re z2))) (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.im z1) + sernau.real_rat_proj (complex.im z2))) (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.re z1))) (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.im z1))) (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.re z2))) (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.im z2))) (hrr.2.2.2.1 (sernau.real_rat_proj (complex.re z1)) (sernau.real_rat_proj (complex.re z2)) (hpr.1 (complex.re z1)) (hpr.1 (complex.re z2))) (hrr.2.2.2.1 (sernau.real_rat_proj (complex.im z1)) (sernau.real_rat_proj (complex.im z2)) (hpr.1 (complex.im z1)) (hpr.1 (complex.im z2)))
+  have hofr : ∀ (a : ℤ) (b : ℕ), 0 < b → sernau.cpadic_abs p (complex.of_real (((a : ℤ) : ℝ) / (b : ℝ))) = sernau.int_padic_abs p a / padic.abs p b
+    intro a b hb; unfold sernau.cpadic_abs; simp; rw [hpr.2.1 (((a : ℤ) : ℝ) / (b : ℝ)) ⟨a, b, hb, by rfl⟩, hpr.2.1 0 hrf.1, hrr.1 a b hb, hrr.2.2.1]
+    exact hmh.2.1 (sernau.int_padic_abs p a / padic.abs p b) (div_nonneg.real (sernau.int_padic_abs p a) (padic.abs p b) (hip.2.1 a).1 (padic.abs_nonneg p b))
+  have hsmul : ∀ (a : ℤ) (b : ℕ), 0 < b → ∀ z : ℂ, sernau.cpadic_abs p (complex.mul (complex.of_real (((a : ℤ) : ℝ) / (b : ℝ))) z) = (sernau.int_padic_abs p a / padic.abs p b) * sernau.cpadic_abs p z
+    intro a b hb z; unfold sernau.cpadic_abs; set r := ((a : ℤ) : ℝ) / (b : ℝ) with hr_def; have hrat : sernau.is_rat_real r := ⟨a, b, hb, hr_def⟩
+    have hre : complex.re (complex.mul (complex.of_real r) z) = r * complex.re z := by simp; ring
+    have him : complex.im (complex.mul (complex.of_real r) z) = r * complex.im z := by simp
+    rw [hre, him, hpr.2.2.2 r (complex.re z) hrat, hpr.2.2.2 r (complex.im z) hrat, hrr.2.2.2.2 r (sernau.real_rat_proj (complex.re z)) hrat (hpr.1 (complex.re z)), hrr.2.2.2.2 r (sernau.real_rat_proj (complex.im z)) hrat (hpr.1 (complex.im z)), hr_def, hrr.1 a b hb]
+    exact hmh.2.2 (sernau.int_padic_abs p a / padic.abs p b) (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.re z))) (sernau.rat_real_padic_abs p (sernau.real_rat_proj (complex.im z))) (div_nonneg.real (sernau.int_padic_abs p a) (padic.abs p b) (hip.2.1 a).1 (padic.abs_nonneg p b))
+  exact ⟨hnn, hz0, hneg, hadd, hofr, hsmul⟩

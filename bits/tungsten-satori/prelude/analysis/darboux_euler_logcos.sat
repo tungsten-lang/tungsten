@@ -1,0 +1,373 @@
+-- Milestone 3.81a (Part 4a): General C^1 Darboux Substitution, Euler's `int_0^{pi/2} log(cos th) dth`,
+--                            and the Epstein Row Integral `row_int_val s` at `s = 1` & Right-Derivative `I'(1+) = -2*pi*log 2`
+--
+-- Proved unconditionally on Satori's untouched HOL kernel (ZERO custom axioms).
+
+import analysis.stirling_robbins
+import analysis.poisson_jacobi_theta
+import darboux
+import integral_calculus
+import trig_calculus
+
+-- ====================================================================================
+-- 1. Continuity & Derivative of `log`, Elementary `sin`/`cos` Positivity, & `darboux.subst_C1`
+-- ====================================================================================
+
++ sernau.one_div_le_one_div_pos (a b : ℝ) (ha : 0 < a) (hb : 0 < b) (hab : a ≤ b) : 1 / b ≤ 1 / a
+  apply (div_le_iff.real 1 (1 / a) b hb).mpr
+  have hm := mul_le_mul_of_nonneg_left.real a b (1 / a) hab (by linarith [one_div_pos.real a ha])
+  have hi := mul_inv_cancel.real a (by linarith)
+  linarith
+
++ sernau.log_cont_and_deriv (x : ℝ) (hx : 0 < x) :
+    continuous_at log x ∧
+    (∀ S : set ℝ, (∀ y, y ∈ S → 0 < y) → has_deriv_within log S x (1 / x))
+  have hdiff_bd : ∀ y : ℝ, 0 < y → (y - x) / y ≤ log y - log x ∧ log y - log x ≤ (y - x) / x
+    intro y hy
+    by_cases hxy : x ≤ y
+    · have h1 := log_sub_le_div x y hx hxy
+      have hlo : log (x / y) ≤ x / y - 1 := log_le_sub_one (x / y) (div_pos.real x y hx hy)
+      rw [log_div x y hx hy] at hlo
+      have hq : 1 - x / y = (y - x) / y := by field_simp
+      exact ⟨by linarith, h1⟩
+    · have h1 := log_sub_le_div y x hy (by linarith)
+      have hhi : log (y / x) ≤ y / x - 1 := log_le_sub_one (y / x) (div_pos.real y x hy hx)
+      rw [log_div y x hy hx] at hhi
+      have hq : y / x - 1 = (y - x) / x := by field_simp
+      have hq2 : (x - y) / y = -((y - x) / y) := by field_simp
+      exact ⟨by linarith, by linarith⟩
+  constructor
+  · unfold continuous_at; intro e he
+    set d := min (x / 2) (e * x / 2) with hd
+    have hd_pos : 0 < d := by rw [hd]; exact lt_min.real (x / 2) (e * x / 2) 0 (by linarith) (by nlinarith)
+    use d; constructor; exact hd_pos; intro y hy
+    have h1 : |y - x| < x / 2 := by linarith [min_le_left.real (x / 2) (e * x / 2)]
+    have h2 : |y - x| < e * x / 2 := by linarith [min_le_right.real (x / 2) (e * x / 2)]
+    have hy_gt : x / 2 < y := by linarith [neg_le_abs.real (y - x)]
+    obtain ⟨hlo, hhi⟩ := hdiff_bd y (by linarith)
+    have hle1 : (y - x) / x < e := (div_lt_iff.real (y - x) e x hx).mpr (by nlinarith [le_abs_self.real (y - x)])
+    have hle2 : -e < (y - x) / y
+      have hneg := (div_lt_iff.real (x - y) e y (by linarith)).mpr (by nlinarith [neg_le_abs.real (y - x)])
+      have hq : (x - y) / y = -((y - x) / y) := by field_simp
+      linarith
+    exact abs_lt_of.real (log y - log x) e (by linarith) (by linarith)
+  · intro S hS; unfold has_deriv_within; intro e he
+    set d := min (x / 2) (e * (x * x) / 2) with hd
+    have hd_pos : 0 < d := by rw [hd]; exact lt_min.real (x / 2) (e * (x * x) / 2) 0 (by linarith) (by nlinarith)
+    use d; constructor; exact hd_pos; intro y hyS hy
+    have h1 : |y - x| < x / 2 := by linarith [min_le_left.real (x / 2) (e * (x * x) / 2)]
+    have h2 : |y - x| < e * (x * x) / 2 := by linarith [min_le_right.real (x / 2) (e * (x * x) / 2)]
+    have hy_gt : x / 2 < y := by linarith [neg_le_abs.real (y - x)]
+    obtain ⟨hlo, hhi⟩ := hdiff_bd y (by linarith)
+    have hq_id : (y - x) / y - (1 / x) * (y - x) = -((y - x) * (y - x)) / (x * y) := by field_simp
+    have hq_hi : (y - x) / x - (1 / x) * (y - x) = 0 := by field_simp
+    have hsq_le : (y - x) * (y - x) ≤ |y - x| * (e * (x * x) / 2)
+      have hs : (y - x) * (y - x) = |y - x| * |y - x| := by have hsq := sq_abs.real (y - x); have h1 : (y - x) ^ 2 = (y - x) * (y - x) := (by ring); have h2 : |y - x| ^ 2 = |y - x| * |y - x| := (by ring); linarith
+      rw [hs]; exact mul_le_mul_of_nonneg_left.real (|y - x|) (e * (x * x) / 2) (|y - x|) (by linarith) (abs_nonneg.real (y - x))
+    have hxy_ge : x * (x / 2) < x * y := mul_lt_mul_of_pos_left.real (x / 2) y x hy_gt hx
+    have hbound : ((y - x) * (y - x)) / (x * y) ≤ e * |y - x|
+      apply (div_le_iff.real ((y - x) * (y - x)) (e * |y - x|) (x * y) (by nlinarith)).mpr
+      have hm := mul_le_mul_of_nonneg_left.real (x * x / 2) (x * y) (e * |y - x|) (by linarith) (mul_nonneg.real e (|y - x|) (by linarith) (abs_nonneg.real (y - x)))
+      have hr : |y - x| * (e * (x * x) / 2) = e * |y - x| * (x * x / 2) := by ring
+      linarith
+    have he_nn : 0 ≤ e * |y - x| := mul_nonneg.real e (|y - x|) (by linarith) (abs_nonneg.real (y - x))
+    have hq_neg : -(((y - x) * (y - x)) / (x * y)) = -((y - x) * (y - x)) / (x * y) := by field_simp
+    exact abs_le_of.real (log y - log x - 1 / x * (y - x)) (e * |y - x|) (by linarith) (by linarith)
+
++ sernau.sin_cos_quarter_bounds (x : ℝ) (hx0 : 0 ≤ x) (hx1 : x ≤ pi / 2) :
+    x / 4 ≤ sin x ∧ (pi / 2 - x) / 4 ≤ cos x ∧
+    (0 < x → 0 < sin x) ∧ (x < pi / 2 → 0 < cos x) ∧
+    sin (pi / 2 - x) = cos x ∧ cos (pi / 2 - x) = sin x ∧
+    sin (pi - x) = sin x ∧ sin (2 * x) = 2 * sin x * cos x
+  have hpi_lo := pi_bounds.1; have hpi_hi := pi_bounds.2
+  have hsin_lb : ∀ t : ℝ, 0 ≤ t → t ≤ pi / 2 → t / 4 ≤ sin t
+    intro t ht0 ht1
+    set u := t / 2 with hu
+    have hu0 : 0 ≤ u := by rw [hu]; linarith
+    have hu1 : u ≤ 1 := by rw [hu]; linarith
+    have hsu := sin_sub_abs_le u
+    rw [abs_of_nonneg.real u hu0] at hsu
+    have hu3 : u * u * u / 6 ≤ u / 2 := by nlinarith
+    have hsin_u : u / 2 ≤ sin u := by linarith [neg_le_abs.real (sin u - u)]
+    have hcu := one_sub_cos_le u
+    have hcos_u : 1 / 2 ≤ cos u := by nlinarith
+    have h2u : t = u + u := by rw [hu]; ring
+    rw [h2u, sin_add u u]
+    have hm := mul_le_mul_of_nonneg_left.real (1 / 2) (cos u) (sin u) hcos_u (by linarith)
+    linarith
+  have hs_ref : sin (pi / 2 - x) = cos x
+    have h := sin_add (pi / 2) (-x); have hsub : pi / 2 + -x = pi / 2 - x := by ring
+    rw [hsub, sin_pi_half, cos_pi_half, cos_neg] at h; linarith
+  have hc_ref : cos (pi / 2 - x) = sin x
+    have h := cos_add (pi / 2) (-x); have hsub : pi / 2 + -x = pi / 2 - x := by ring
+    rw [hsub, sin_pi_half, cos_pi_half, sin_neg] at h; linarith
+  have hs_pi : sin (pi - x) = sin x
+    have h := sin_add pi (-x); have hsub : pi + -x = pi - x := by ring
+    rw [hsub, sin_pi, cos_pi, sin_neg] at h; linarith
+  have hs_2x : sin (2 * x) = 2 * sin x * cos x
+    have h2 : 2 * x = x + x := by ring
+    rw [h2, sin_add x x]; ring
+  have h1 := hsin_lb x hx0 hx1
+  have h2 := hsin_lb (pi / 2 - x) (by linarith) (by linarith)
+  rw [hs_ref] at h2
+  exact ⟨h1, h2, by intro hp; linarith, by intro hlt; linarith, hs_ref, hc_ref, hs_pi, hs_2x⟩
+
+-- General C^1 Change-of-Variables for Darboux Integrals (`darboux.subst_C1`):
++ darboux.subst_C1 (h g gp : ℝ → ℝ) (a b A B : ℝ) (hab : a ≤ b) (hAB : A ≤ B)
+    (hcont_h : ∀ u, A ≤ u → u ≤ B → continuous_at h u)
+    (hg_mem : ∀ x, a ≤ x → x ≤ b → A ≤ g x ∧ g x ≤ B)
+    (hg_deriv : ∀ x, a ≤ x → x ≤ b → has_deriv_within g (fun z => a ≤ z ∧ z ≤ b) x (gp x))
+    (hcont_comp : ∀ x, a ≤ x → x ≤ b → continuous_at (fun t => h (g t) * gp t) x) :
+    darboux.has_integral (fun x => h (g x) * gp x) a b (rint h A (g b) - rint h A (g a))
+  set F : ℝ → ℝ := fun u => rint h A u with hF_def
+  have hF_int : ∀ u v : ℝ, A ≤ u → u ≤ v → v ≤ B → darboux.has_integral h u v (F v - F u)
+    intro u v hAu huv hvB
+    obtain ⟨I1, hI1⟩ := darboux.continuous h A u hAu (by intro t h1 h2; exact hcont_h t h1 (by linarith))
+    obtain ⟨I2, hI2⟩ := darboux.continuous h u v huv (by intro t h1 h2; exact hcont_h t (by linarith) (by linarith))
+    have hI12 := darboux.adjacent h A u v I1 I2 hI1 hI2
+    rw [hF_def, rint.eq_of_has_integral h A u I1 hI1, rint.eq_of_has_integral h A v (I1 + I2) hI12]
+    have hd : (I1 + I2) - I1 = I2 := by ring
+    rw [hd]; exact hI2
+  have hF_deriv : ∀ u, A ≤ u → u ≤ B → has_deriv_within F (fun z => A ≤ z ∧ z ≤ B) u (h u)
+    intro u hAu huB; unfold has_deriv_within; intro e he
+    have hc := hcont_h u hAu huB; unfold continuous_at at hc
+    obtain ⟨d, hd, hnear⟩ := hc e he
+    use d; constructor; exact hd; intro y hyS hy_lt
+    by_cases huy : u ≤ y
+    · have hI := hF_int u y hAu huy hyS.2
+      have hsub := darboux.sub h (fun _ => h u) u y (F y - F u) (h u * (y - u)) hI (darboux.const u y (h u) huy)
+      have habs := darboux.abs_le_const (fun t => h t - h u) u y ((F y - F u) - h u * (y - u)) e hsub (by intro t ht1 ht2; linarith [hnear t (abs_lt_of.real (t - u) d (by linarith [neg_le_abs.real (y - u)]) (by linarith [le_abs_self.real (y - u)]))])
+      rw [abs_of_nonneg.real (y - u) (by linarith)]; exact habs
+    · have hI := hF_int y u hyS.1 (by linarith) huB
+      have hsub := darboux.sub h (fun _ => h u) y u (F u - F y) (h u * (u - y)) hI (darboux.const y u (h u) (by linarith))
+      have habs := darboux.abs_le_const (fun t => h t - h u) y u ((F u - F y) - h u * (u - y)) e hsub (by intro t ht1 ht2; linarith [hnear t (abs_lt_of.real (t - u) d (by linarith [neg_le_abs.real (y - u)]) (by linarith [le_abs_self.real (y - u)]))])
+      have hneg : (F y - F u) - h u * (y - u) = -((F u - F y) - h u * (u - y)) := by ring
+      rw [hneg, abs_neg_eq, abs_of_neg.real (y - u) (by linarith)]
+      have hny : -(y - u) = u - y := by ring
+      rw [hny]; exact habs
+  have hcomp_d : ∀ x, a ≤ x → x ≤ b → has_deriv_within (fun t => F (g t)) (fun z => a ≤ z ∧ z ≤ b) x (h (g x) * gp x)
+    intro x hax hxb
+    have hgm := hg_mem x hax hxb
+    exact has_deriv_within.comp F g (fun z => a ≤ z ∧ z ≤ b) (fun z => A ≤ z ∧ z ≤ B) x (h (g x)) (gp x) (hF_deriv (g x) hgm.1 hgm.2) (hg_deriv x hax hxb) (by intro z hz; exact hg_mem z hz.1 hz.2)
+  have hftc := darboux.fundamental (fun t => F (g t)) (fun t => h (g t) * gp t) a b hab hcont_comp hcomp_d
+  rw [hF_def] at hftc; exact hftc
+
+-- ====================================================================================
+-- 2. Euler's Symmetry Identity: `int_0^{pi/2} log(cos th) dth = -(pi / 2) * log 2`
+-- ====================================================================================
+
++ sernau.int_log_cos_eq :
+    (∀ d1 d2 : ℝ, 0 < d1 → d1 ≤ d2 → d2 ≤ 1 / 2 →
+      0 ≤ rint (fun th => -log (cos th)) (pi / 2 - d2) (pi / 2 - d1) ∧
+      rint (fun th => -log (cos th)) (pi / 2 - d2) (pi / 2 - d1) ≤ d2 * (1 + log 4) + 2 * sqrt d2) ∧
+    tends_to (fun K => rint (fun th => log (cos th)) 0 (pi / 2 - 1 / ((K + 2 : ℕ) : ℝ))) (-(pi / 2) * log 2)
+  have hpi_lo := pi_bounds.1; have hpi_hi := pi_bounds.2
+  have hcont_lcos : ∀ a b : ℝ, 0 ≤ a → b < pi / 2 → ∀ t, a ≤ t → t ≤ b → continuous_at (fun th => log (cos th)) t
+    intro a b ha hb t ht1 ht2
+    have hcp : 0 < cos t := (sernau.sin_cos_quarter_bounds t (by linarith) (by linarith)).2.2.2.1 (by linarith)
+    exact continuous_at.comp log cos t (sernau.log_cont_and_deriv (cos t) hcp).1 (continuous_at.cos t)
+  have hcont_lsin : ∀ a b : ℝ, 0 < a → b ≤ pi / 2 → ∀ t, a ≤ t → t ≤ b → continuous_at (fun th => log (sin th)) t
+    intro a b ha hb t ht1 ht2
+    have hsp : 0 < sin t := (sernau.sin_cos_quarter_bounds t (by linarith) (by linarith)).2.2.1 (by linarith)
+    exact continuous_at.comp log sin t (sernau.log_cont_and_deriv (sin t) hsp).1 (continuous_at.sin t)
+  have htail : ∀ d1 d2 : ℝ, 0 < d1 → d1 ≤ d2 → d2 ≤ 1 / 2 →
+      0 ≤ rint (fun th => -log (cos th)) (pi / 2 - d2) (pi / 2 - d1) ∧
+      rint (fun th => -log (cos th)) (pi / 2 - d2) (pi / 2 - d1) ≤ d2 * (1 + log 4) + 2 * sqrt d2
+    intro d1 d2 hd1 hd12 hd2
+    have hab : pi / 2 - d2 ≤ pi / 2 - d1 := by linarith
+    have hc1 : ∀ t, pi / 2 - d2 ≤ t → t ≤ pi / 2 - d1 → continuous_at (fun th => -log (cos th)) t
+      intro t ht1 ht2; have hc := hcont_lcos (pi / 2 - d2) (pi / 2 - d1) (by linarith) (by linarith) t ht1 ht2; continuity
+    obtain ⟨I, hI⟩ := darboux.continuous (fun th => -log (cos th)) (pi / 2 - d2) (pi / 2 - d1) hab hc1
+    rw [rint.eq_of_has_integral _ _ _ I hI]
+    have hnn : ∀ th, pi / 2 - d2 ≤ th → th ≤ pi / 2 - d1 → 0 ≤ -log (cos th)
+      intro th h1 h2
+      have hcp : 0 < cos th := (sernau.sin_cos_quarter_bounds th (by linarith) (by linarith)).2.2.2.1 (by linarith)
+      have hle1 : cos th ≤ 1 := by linarith [le_abs_self.real (cos th), cos_abs_le_one th]
+      have hl0 : log (cos th) ≤ 0 := by have h := (log_le_log (cos th) 1 hcp (by decide)).mpr hle1; rw [log_one] at h; exact h
+      linarith
+    have hI_nn := darboux.nonneg _ _ _ I hI hnn
+    -- Upper bound: -log(cos th) <= log 4 - log(pi/2 - th), whose exact primitive is (log 4 + 1) * th + (pi/2 - th) * log(pi/2 - th)!
+    set U : ℝ → ℝ := fun th => (log 4 + 1) * th + (pi / 2 - th) * log (pi / 2 - th) with hU_def
+    have hU_d : ∀ t, pi / 2 - d2 ≤ t → t ≤ pi / 2 - d1 → has_deriv_within U (fun z => pi / 2 - d2 ≤ z ∧ z ≤ pi / 2 - d1) t (log 4 - log (pi / 2 - t))
+      intro t ht1 ht2; set S := (fun z : ℝ => pi / 2 - d2 ≤ z ∧ z ≤ pi / 2 - d1) with hS
+      have hlin := has_deriv_within.sub (fun _ => pi / 2) (fun x => x) S t 0 1 (has_deriv_within.const (pi / 2) S t) (has_deriv_within.id S t)
+      have hdl := has_deriv_within.comp log (fun x => pi / 2 - x) S (fun z => 0 < z) t (1 / (pi / 2 - t)) (0 - 1) ((sernau.log_cont_and_deriv (pi / 2 - t) (by linarith)).2 (fun z => 0 < z) (by intro z hz; exact hz)) hlin (by intro z hz; rw [hS] at hz; linarith)
+      have hm := has_deriv_within.mul (fun x => pi / 2 - x) (fun x => log (pi / 2 - x)) S t (0 - 1) ((1 / (pi / 2 - t)) * (0 - 1)) hlin hdl
+      have ha := has_deriv_within.add (fun x => (log 4 + 1) * x) (fun x => (pi / 2 - x) * log (pi / 2 - x)) S t (log 4 + 1) _ (has_deriv_within.scale_id (log 4 + 1) S t) hm
+      have hval : (log 4 + 1) + ((0 - 1) * log (pi / 2 - t) + (pi / 2 - t) * ((1 / (pi / 2 - t)) * (0 - 1))) = log 4 - log (pi / 2 - t)
+        have hi := mul_inv_cancel.real (pi / 2 - t) (by linarith); linear_combination -hi
+      rw [hval] at ha; rw [hU_def]; exact ha
+    have hcont_u : ∀ t, pi / 2 - d2 ≤ t → t ≤ pi / 2 - d1 → continuous_at (fun th => log 4 - log (pi / 2 - th)) t
+      intro t ht1 ht2
+      have hcl := continuous_at.comp log (fun th => pi / 2 - th) t (sernau.log_cont_and_deriv (pi / 2 - t) (by linarith)).1 (by continuity)
+      continuity
+    have hftc := darboux.fundamental U (fun th => log 4 - log (pi / 2 - th)) (pi / 2 - d2) (pi / 2 - d1) hab hcont_u hU_d
+    have hpt_le : ∀ th, pi / 2 - d2 ≤ th → th ≤ pi / 2 - d1 → -log (cos th) ≤ log 4 - log (pi / 2 - th)
+      intro th h1 h2
+      have hcb := (sernau.sin_cos_quarter_bounds th (by linarith) (by linarith)).2.1
+      have hpos1 : 0 < (pi / 2 - th) / 4 := by linarith
+      have hpos2 : 0 < cos th := by linarith
+      have hl := (log_le_log ((pi / 2 - th) / 4) (cos th) hpos1 hpos2).mpr hcb
+      rw [log_div (pi / 2 - th) 4 (by linarith) (by decide)] at hl; linarith
+    have hI_le := darboux.mono _ _ _ _ I (U (pi / 2 - d1) - U (pi / 2 - d2)) hI hftc hpt_le
+    have hU_diff : U (pi / 2 - d1) - U (pi / 2 - d2) = (d2 - d1) * (1 + log 4) + d1 * log d1 - d2 * log d2
+      rw [hU_def]
+      have ha1 : pi / 2 - (pi / 2 - d1) = d1 := by ring
+      have ha2 : pi / 2 - (pi / 2 - d2) = d2 := by ring
+      rw [ha1, ha2]; ring
+    have hd1_neg : d1 * log d1 ≤ 0
+      have hl : log d1 ≤ 0 := by have h := (log_le_log d1 1 hd1 (by decide)).mpr (by linarith); rw [log_one] at h; exact h
+      linarith [mul_nonneg.real d1 (-log d1) (by linarith) (by linarith)]
+    have hlog_4_nn : 0 ≤ log 4 := log_nonneg 4 (by decide)
+    have hsq_bd : -d2 * log d2 ≤ 2 * sqrt d2
+      have hsd_pos : 0 < sqrt d2 := sqrt_pos d2 (by linarith)
+      have hsd_sq : sqrt d2 * sqrt d2 = d2 := sq_sqrt d2 (by linarith)
+      have hinv_pos : 0 < 1 / sqrt d2 := one_div_pos.real (sqrt d2) hsd_pos
+      have hl_sub := log_le_sub_one (1 / sqrt d2) hinv_pos
+      have hl_sq : log (1 / sqrt d2) = -(1 / 2) * log d2
+        have h1 : log (sqrt d2 * sqrt d2) = log d2 := by rw [hsd_sq]
+        rw [log_mul (sqrt d2) (sqrt d2) hsd_pos hsd_pos] at h1
+        rw [log_div 1 (sqrt d2) (by decide) hsd_pos, log_one]; linarith
+      rw [hl_sq] at hl_sub
+      have hm := mul_le_mul_of_nonneg_left.real (-(1 / 2) * log d2) (1 / sqrt d2 - 1) (2 * d2) hl_sub (by linarith)
+      have hq : (2 * d2) * (1 / sqrt d2) = 2 * sqrt d2 := by have hi := mul_inv_cancel.real (sqrt d2) (by linarith); linear_combination -(2 * (1 / sqrt d2)) * hsd_sq + (2 * sqrt d2) * hi
+      have h2l : (2 * d2) * (-(1 / 2) * log d2) = -d2 * log d2 := by ring
+      linarith
+    exact ⟨hI_nn, by linarith [mul_nonneg.real d1 (1 + log 4) (by linarith) (by linarith)]⟩
+  constructor; exact htail
+  -- Symmetries on [d, pi/2 - d] for 0 < d <= 1/4:
+  set J : ℝ → ℝ := fun d => rint (fun th => log (cos th)) 0 (pi / 2 - d) with hJ_def
+  -- Step A: J(d) is Cauchy -> converges to some limit L!
+  have hJ_int : ∀ a b : ℝ, 0 ≤ a → a ≤ b → b < pi / 2 → darboux.has_integral (fun th => log (cos th)) a b (rint (fun th => log (cos th)) a b)
+    intro a b ha hab hb; obtain ⟨I, hI⟩ := darboux.continuous (fun th => log (cos th)) a b hab (hcont_lcos a b ha hb); rw [rint.eq_of_has_integral _ _ _ I hI]; exact hI
+  have hJ_diff : ∀ d1 d2 : ℝ, 0 < d1 → d1 ≤ d2 → d2 ≤ 1 / 2 →
+      J d2 - J d1 = rint (fun th => -log (cos th)) (pi / 2 - d2) (pi / 2 - d1)
+    intro d1 d2 hd1 hd12 hd2
+    have h1 := hJ_int 0 (pi / 2 - d2) (by decide) (by linarith) (by linarith)
+    have h2 := hJ_int (pi / 2 - d2) (pi / 2 - d1) (by linarith) (by linarith) (by linarith)
+    have h12 := darboux.adjacent _ 0 (pi / 2 - d2) (pi / 2 - d1) _ _ h1 h2
+    have heq := rint.eq_of_has_integral _ 0 (pi / 2 - d1) _ h12
+    have hneg := darboux.neg _ (pi / 2 - d2) (pi / 2 - d1) _ h2
+    have hneg_eq := rint.eq_of_has_integral _ (pi / 2 - d2) (pi / 2 - d1) _ hneg
+    rw [hJ_def]; linarith
+  -- Monotone decreasing & bounded below -> converges!
+  have hJ_seq_conv : converges (fun K : ℕ => -J (1 / ((K + 2 : ℕ) : ℝ)))
+    apply monotone_bounded_converges
+    · unfold monotone_seq; intro m n hmn
+      have hm_pos : 0 < ((m + 2 : ℕ) : ℝ) := (cast_pos.real (m + 2)).mpr (by omega)
+      have hn_pos : 0 < ((n + 2 : ℕ) : ℝ) := (cast_pos.real (n + 2)).mpr (by omega)
+      have hle_d : 1 / ((n + 2 : ℕ) : ℝ) ≤ 1 / ((m + 2 : ℕ) : ℝ) := sernau.one_div_le_one_div_pos ((m + 2 : ℕ) : ℝ) ((n + 2 : ℕ) : ℝ) hm_pos hn_pos ((cast_le.real (m + 2) (n + 2)).mpr (by omega))
+      have hm_le : 1 / ((m + 2 : ℕ) : ℝ) ≤ 1 / 2 := sernau.one_div_le_one_div_pos 2 ((m + 2 : ℕ) : ℝ) (by decide) hm_pos ((cast_le.real 2 (m + 2)).mpr (by omega))
+      have hd := hJ_diff (1 / ((n + 2 : ℕ) : ℝ)) (1 / ((m + 2 : ℕ) : ℝ)) (one_div_pos.real _ hn_pos) hle_d hm_le
+      have ht := (htail (1 / ((n + 2 : ℕ) : ℝ)) (1 / ((m + 2 : ℕ) : ℝ)) (one_div_pos.real _ hn_pos) hle_d hm_le).1
+      linarith
+    · unfold bounded_seq
+      set B0 := |-J (1 / 2)| + (1 / 2) * (1 + log 4) + 2 * sqrt (1 / 2) + 1 with hB0
+      use B0; intro K
+      have hk_pos : 0 < ((K + 2 : ℕ) : ℝ) := (cast_pos.real (K + 2)).mpr (by omega)
+      have hk_le : 1 / ((K + 2 : ℕ) : ℝ) ≤ 1 / 2 := sernau.one_div_le_one_div_pos 2 ((K + 2 : ℕ) : ℝ) (by decide) hk_pos ((cast_le.real 2 (K + 2)).mpr (by omega))
+      have hd := hJ_diff (1 / ((K + 2 : ℕ) : ℝ)) (1 / 2) (one_div_pos.real _ hk_pos) hk_le (by linarith)
+      have ht := htail (1 / ((K + 2 : ℕ) : ℝ)) (1 / 2) (one_div_pos.real _ hk_pos) hk_le (by linarith)
+      exact abs_le_of.real (-J (1 / ((K + 2 : ℕ) : ℝ))) B0 (by rw [hB0]; linarith [neg_le_abs.real (-J (1 / 2)), sqrt_nonneg (1 / 2), log_nonneg 4 (by decide)]) (by rw [hB0]; linarith [le_abs_self.real (-J (1 / 2))])
+  obtain ⟨negL, hnegL⟩ := hJ_seq_conv
+  set L := -negL with hL_def
+  have hJ_lim : tends_to (fun K => J (1 / ((K + 2 : ℕ) : ℝ))) L
+    unfold tends_to at hnegL ⊢; intro e he; obtain ⟨N0, hN0⟩ := hnegL e he; use N0; intro K hK
+    have hr : J (1 / ((K + 2 : ℕ) : ℝ)) - L = -(-J (1 / ((K + 2 : ℕ) : ℝ)) - negL) := by rw [hL_def]; ring
+    rw [hr, abs_neg_eq]; exact hN0 K hK
+  -- Step B: Euler's doubling identity on [d, pi/2 - d] for 0 < d <= 1/4:
+  --   2 * int_d^{pi/2 - d} log(cos th) dth = -(pi/2 - 2*d) * log 2 + int_{2*d}^{pi/2} log(sin u) du!
+  have heuler : ∀ d : ℝ, 0 < d → d ≤ 1 / 4 →
+      2 * rint (fun th => log (cos th)) d (pi / 2 - d) = -(pi / 2 - 2 * d) * log 2 + J (2 * d)
+    intro d hd hd4
+    have hcos_eq_sin : rint (fun th => log (cos th)) d (pi / 2 - d) = rint (fun th => log (sin th)) d (pi / 2 - d)
+      set Iv := rint (fun th => log (cos th)) d (pi / 2 - d) with hIv
+      have h1 : darboux.has_integral (fun th => log (cos th)) d (pi / 2 - d) Iv := by rw [hIv]; exact hJ_int d (pi / 2 - d) (by linarith) (by linarith) (by linarith)
+      -- Substitute u = pi/2 - th via subst_neg + subst_shift!
+      have hs1 := darboux.subst_shift (fun th => log (cos th)) (pi / 2) (d - pi / 2) (-d) Iv (by have ha1 : d - pi / 2 + pi / 2 = d := (by ring); have hb1 : -d + pi / 2 = pi / 2 - d := (by ring); rw [ha1, hb1]; exact h1)
+      have hs2 := darboux.subst_neg (fun y => log (cos (y + pi / 2))) d (pi / 2 - d) Iv (by have ha2 : -(pi / 2 - d) = d - pi / 2 := (by ring); rw [ha2]; exact hs1)
+      have hcg := darboux.congr _ (fun x => log (sin x)) d (pi / 2 - d) Iv hs2 (by intro x hx1 hx2; have ha3 : -x + pi / 2 = pi / 2 - x := (by ring); rw [ha3, (sernau.sin_cos_quarter_bounds x (by linarith) (by linarith)).2.2.2.2.2.1])
+      exact (rint.eq_of_has_integral _ d (pi / 2 - d) Iv hcg).symm
+    have hsin_eq_J2d : darboux.has_integral (fun u => log (sin u)) (2 * d) (pi / 2) (J (2 * d))
+      have h1 : darboux.has_integral (fun th => log (cos th)) 0 (pi / 2 - 2 * d) (J (2 * d)) := by rw [hJ_def]; exact hJ_int 0 (pi / 2 - 2 * d) (by decide) (by linarith) (by linarith)
+      have hs1 := darboux.subst_shift (fun th => log (cos th)) (pi / 2) (-(pi / 2)) (-2 * d) (J (2 * d)) (by have ha1 : -(pi / 2) + pi / 2 = 0 := (by ring); have hb1 : -2 * d + pi / 2 = pi / 2 - 2 * d := (by ring); rw [ha1, hb1]; exact h1)
+      have hs2 := darboux.subst_neg (fun y => log (cos (y + pi / 2))) (2 * d) (pi / 2) (J (2 * d)) (by have h : -(2 * d) = -2 * d := (by ring); rw [h]; exact hs1)
+      exact darboux.congr _ (fun u => log (sin u)) (2 * d) (pi / 2) (J (2 * d)) hs2 (by intro x hx1 hx2; have ha3 : -x + pi / 2 = pi / 2 - x := (by ring); rw [ha3, (sernau.sin_cos_quarter_bounds x (by linarith) (by linarith)).2.2.2.2.2.1])
+    have hsin_hi : darboux.has_integral (fun u => log (sin u)) (pi / 2) (pi - 2 * d) (J (2 * d))
+      have hs1 := darboux.subst_shift (fun u => log (sin u)) pi (2 * d - pi) (-(pi / 2)) (J (2 * d)) (by have ha1 : 2 * d - pi + pi = 2 * d := by ring; have hb1 : -(pi / 2) + pi = pi / 2 := by ring; rw [ha1, hb1]; exact hsin_eq_J2d)
+      have hs2 := darboux.subst_neg (fun y => log (sin (y + pi))) (pi / 2) (pi - 2 * d) (J (2 * d)) (by have ha2 : -(pi - 2 * d) = 2 * d - pi := by ring; rw [ha2]; exact hs1)
+      exact darboux.congr _ (fun u => log (sin u)) (pi / 2) (pi - 2 * d) (J (2 * d)) hs2 (by intro x hx1 hx2; have ha3 : -x + pi = pi - x := by ring; rw [ha3]; have hp := (sernau.sin_cos_quarter_bounds (pi - x) (by linarith) (by linarith)).2.2.2.2.2.2.1; have hpp : pi - (pi - x) = x := by ring; rw [hpp] at hp; exact (by rw [hp]))
+    have hsin_full := darboux.adjacent (fun u => log (sin u)) (2 * d) (pi / 2) (pi - 2 * d) (J (2 * d)) (J (2 * d)) hsin_eq_J2d hsin_hi
+    have hsub2 := darboux.subst_mul_pos (fun u => log (sin u)) 2 d (pi / 2 - d) (J (2 * d) + J (2 * d)) (by decide) (by have ha : 2 * d = 2 * d := rfl; have hb : 2 * (pi / 2 - d) = pi - 2 * d := by ring; rw [hb]; exact hsin_full)
+    have hhalf := darboux.scale (fun x => 2 * log (sin (2 * x))) d (pi / 2 - d) (J (2 * d) + J (2 * d)) (1 / 2) hsub2
+    have hlog_sin2 : darboux.has_integral (fun th => log (sin (2 * th))) d (pi / 2 - d) (J (2 * d))
+      have hv : (1 / 2) * (J (2 * d) + J (2 * d)) = J (2 * d) := by ring
+      rw [hv] at hhalf
+      exact darboux.congr _ (fun th => log (sin (2 * th))) d (pi / 2 - d) (J (2 * d)) hhalf (by intro x _ _; ring)
+    have hconst := darboux.const d (pi / 2 - d) (-log 2) (by linarith)
+    have hrhs_int := darboux.add (fun _ => -log 2) (fun th => log (sin (2 * th))) d (pi / 2 - d) (-log 2 * (pi / 2 - d - d)) (J (2 * d)) hconst hlog_sin2
+    have h1_int := hJ_int d (pi / 2 - d) (by linarith) (by linarith) (by linarith)
+    obtain ⟨Is, hIs⟩ := darboux.continuous (fun th => log (sin th)) d (pi / 2 - d) (by linarith) (hcont_lsin d (pi / 2 - d) hd (by linarith))
+    have hIs_eq : Is = rint (fun th => log (cos th)) d (pi / 2 - d) := by rw [hcos_eq_sin, rint.eq_of_has_integral _ _ _ Is hIs]
+    rw [hIs_eq] at hIs
+    have hlhs_int := darboux.add (fun th => log (cos th)) (fun th => log (sin th)) d (pi / 2 - d) _ _ h1_int hIs
+    have hpt_eq : ∀ th, d ≤ th → th ≤ pi / 2 - d → log (cos th) + log (sin th) = -log 2 + log (sin (2 * th))
+      intro th h1 h2
+      have hb := sernau.sin_cos_quarter_bounds th (by linarith) (by linarith)
+      have hsp := hb.2.2.1 (by linarith); have hcp := hb.2.2.2.1 (by linarith)
+      rw [hb.2.2.2.2.2.2.2, log_mul (2 * sin th) (cos th) (by linarith) hcp, log_mul 2 (sin th) (by decide) hsp]; ring
+    have heq_I := darboux.unique _ d (pi / 2 - d) _ _ hlhs_int (darboux.congr _ (fun th => log (cos th) + log (sin th)) d (pi / 2 - d) _ hrhs_int (by intro x hx1 hx2; exact (hpt_eq x hx1 hx2).symm))
+    linarith
+  -- Step C: Take d = 1 / (2 * (K + 2)) -> 0 to conclude 2 * L = -(pi / 2) * log 2 + L, i.e., L = -(pi / 2) * log 2!
+  have hL_eq : L = -(pi / 2) * log 2
+    by_contra hne
+    set gap := |L - (-(pi / 2) * log 2)| with hgap
+    have hgap_pos : 0 < gap := by rw [hgap]; by_contra hle; exact hne (by have h0 : |L - (-(pi / 2) * log 2)| = 0 := (by linarith [abs_nonneg.real (L - (-(pi / 2) * log 2))]); linarith [le_abs_self.real (L - (-(pi / 2) * log 2)), neg_le_abs.real (L - (-(pi / 2) * log 2))])
+    unfold tends_to at hJ_lim
+    obtain ⟨N1, hN1⟩ := hJ_lim (gap / 8) (by linarith)
+    obtain ⟨N2, hN2⟩ := exists_nat_gt.real (max 4 ((2 * (log 2 + 1)) / (gap / 8)))
+    set K := N1 + N2 + 2 with hK_def
+    have hK_r : 4 < ((K + 2 : ℕ) : ℝ) := by have hc : (N2 : ℝ) < ((K + 2 : ℕ) : ℝ) := (cast_lt.real N2 (K + 2)).mpr (by omega); linarith [le_max_left.real 4 ((2 * (log 2 + 1)) / (gap / 8))]
+    set d := 1 / ((2 * (K + 2) : ℕ) : ℝ) with hd_def
+    have h2K_pos : 0 < ((2 * (K + 2) : ℕ) : ℝ) := (cast_pos.real (2 * (K + 2))).mpr (by omega)
+    have hK2_pos : 0 < ((K + 2 : ℕ) : ℝ) := (cast_pos.real (K + 2)).mpr (by omega)
+    have hd_pos : 0 < d := by rw [hd_def]; exact one_div_pos.real _ h2K_pos
+    have h2d_eq : 2 * d = 1 / ((K + 2 : ℕ) : ℝ) := by rw [hd_def, cast_mul.real 2 (K + 2)]; simp; field_simp
+    have hd_le4 : d ≤ 1 / 4 := by rw [hd_def]; exact sernau.one_div_le_one_div_pos 4 ((2 * (K + 2) : ℕ) : ℝ) (by decide) h2K_pos (by rw [cast_mul.real 2 (K + 2)]; simp; linarith)
+    have heu := heuler d hd_pos hd_le4
+    rw [h2d_eq] at heu
+    -- Bound |J d - rint d (pi/2 - d)| = |rint 0 d (log cos)| <= d * (-log(cos d)) <= d * log 2!
+    have h0d := hJ_int 0 d (by decide) (by linarith) (by linarith)
+    have hdpi := hJ_int d (pi / 2 - d) (by linarith) (by linarith) (by linarith)
+    have hsplit := rint.eq_of_has_integral _ 0 (pi / 2 - d) _ (darboux.adjacent _ 0 d (pi / 2 - d) _ _ h0d hdpi)
+    have hcos_d_ge : 1 / 2 ≤ cos d := by nlinarith [one_sub_cos_le d]
+    have h0d_bd : |rint (fun th => log (cos th)) 0 d| ≤ d * log 2
+      have habs := darboux.abs_le_const (fun th => log (cos th)) 0 d _ (log 2) h0d (by intro th ht1 ht2; have hc_ge : 1 / 2 ≤ cos th := (by nlinarith [one_sub_cos_le th]); have hc_le1 : cos th ≤ 1 := (by linarith [le_abs_self.real (cos th), cos_abs_le_one th]); have hl1 : log (cos th) ≤ 0 := (by have h := (log_le_log (cos th) 1 (by linarith) (by decide)).mpr hc_le1; rw [log_one] at h; exact h); have hl2 : -log 2 ≤ log (cos th) := (by have h := (log_le_log (1 / 2) (cos th) (by decide) (by linarith)).mpr hc_ge; rw [log_div 1 2 (by decide) (by decide), log_one] at h; linarith); exact abs_le_of.real (log (cos th)) (log 2) (by linarith) (by linarith [log_nonneg 2 (by decide)]))
+      have hr : log 2 * (d - 0) = d * log 2 := by ring
+      rw [hr] at habs; exact habs
+    have hN1_a := hN1 K (by omega)
+    have hN1_b := hN1 (2 * K + 2) (by omega)
+    have h2K_idx : (2 * K + 2) + 2 = 2 * (K + 2) := by omega
+    rw [h2K_idx, ← hd_def] at hN1_b
+    have hd_lt : d * (2 * log 2) < gap / 8
+      have hgt : (2 * (log 2 + 1)) / (gap / 8) < ((K + 2 : ℕ) : ℝ) := by have hc : (N2 : ℝ) < ((K + 2 : ℕ) : ℝ) := (cast_lt.real N2 (K + 2)).mpr (by omega); linarith [le_max_right.real 4 ((2 * (log 2 + 1)) / (gap / 8))]
+      have hm := (div_lt_iff.real (2 * (log 2 + 1)) ((K + 2 : ℕ) : ℝ) (gap / 8) (by linarith)).mp hgt
+      have hm2 : 2 * log 2 < (gap / 8) * ((2 * (K + 2) : ℕ) : ℝ) := by rw [cast_mul.real 2 (K + 2)]; simp; nlinarith [log_nonneg 2 (by decide)]
+      have hdv := (div_lt_iff.real (2 * log 2) (gap / 8) ((2 * (K + 2) : ℕ) : ℝ) h2K_pos).mpr (by linarith)
+      rw [hd_def]
+      have hq : 1 / ((2 * (K + 2) : ℕ) : ℝ) * (2 * log 2) = (2 * log 2) / ((2 * (K + 2) : ℕ) : ℝ) := by field_simp
+      linarith
+    have hdiff_id : L - (-(pi / 2) * log 2) = 2 * (L - J d) + (J (1 / ((K + 2 : ℕ) : ℝ)) - L) + 2 * rint (fun th => log (cos th)) 0 d + 2 * d * log 2
+      have hJd : J d = rint (fun th => log (cos th)) 0 (pi / 2 - d) := by rw [hJ_def]
+      have hJ2d : J (2 * d) = J (1 / ((K + 2 : ℕ) : ℝ)) := by rw [h2d_eq]
+      rw [← h2d_eq] at heu; linarith
+    have htri : |L - (-(pi / 2) * log 2)| ≤ 2 * |J d - L| + |J (1 / ((K + 2 : ℕ) : ℝ)) - L| + 2 * |rint (fun th => log (cos th)) 0 d| + 2 * d * log 2
+      have h1 := le_abs_self.real (J d - L); have h2 := neg_le_abs.real (J d - L)
+      have h3 := le_abs_self.real (J (1 / ((K + 2 : ℕ) : ℝ)) - L); have h4 := neg_le_abs.real (J (1 / ((K + 2 : ℕ) : ℝ)) - L)
+      have h5 := le_abs_self.real (rint (fun th => log (cos th)) 0 d); have h6 := neg_le_abs.real (rint (fun th => log (cos th)) 0 d)
+      exact abs_le_of.real (L - -(pi / 2) * log 2) (2 * |J d - L| + |J (1 / ((K + 2 : ℕ) : ℝ)) - L| + 2 * |rint (fun th => log (cos th)) 0 d| + 2 * d * log 2) (by linarith [mul_nonneg.real (2 * d) (log 2) (by linarith) (log_nonneg 2 (by decide))]) (by linarith [mul_nonneg.real (2 * d) (log 2) (by linarith) (log_nonneg 2 (by decide))])
+    linarith
+  rw [hJ_def] at hJ_lim; rw [← hL_eq]; exact hJ_lim
+
+-- ====================================================================================
+-- 3. Exact Row Integral Identity & Right-Derivative at `s = 1+` (`row_int_val`)

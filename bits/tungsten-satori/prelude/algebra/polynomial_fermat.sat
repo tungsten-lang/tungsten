@@ -1,0 +1,137 @@
+-- Milestone 3.49: Univariate Polynomial Ring Q[X] (Factor Theorem, Lagrange Root Bound,
+--                 & Lagrange Interpolation), Gaussian Integers Z[i] Euclidean/Bezout GCD,
+--                 & Fermat's Sum of Two Squares Theorem!
+--
+-- Compressed using Satori's bundled `prelude/polynomial.sat` and `prelude/gaussian_int.sat`
+-- (`CommRing GaussInt`, `IntegralDomain GaussInt`), `_` holes, and upgraded `omega`
+-- (ZERO custom axioms!).
+
+import polynomial
+import gaussian_int
+import number_theory.quadratic_reciprocity
+
+-- Helper: a prime dividing a^2 = ng * nq with ng != 1 and nq != 1 forces ng = p!
++ nat.sq_prime_factor_eq (p ng nq : ℕ) (hprime : is_prime_nat p)
+    (hprod : p * p = ng * nq) (hng1 : ng ≠ 1) (hnq1 : nq ≠ 1) : ng = p
+  have hp : 2 ≤ p := hprime.1
+  have hcancel : ∀ a b : ℕ, p * a = p * b → a = b
+    intro a b hab; by_contra hne
+    by_cases hlt : a < b
+    · have h1 := mul_le_mul_of_nonneg_left.nat (a + 1) b p (by omega) (by omega)
+      have h2 : p * (a + 1) = p * a + p := by ring; omega
+    · have h1 := mul_le_mul_of_nonneg_left.nat (b + 1) a p (by omega) (by omega)
+      have h2 : p * (b + 1) = p * b + p := by ring; omega
+  have hpos_of_dvd : ∀ x y : ℕ, p * p = x * y → x ≠ 1 → y ≠ 1 → p ∣ x → x = p
+    intro x y hxy hx1 hy1 hpx
+    obtain ⟨a, ha⟩ := (dvd.iff_exists p x (by omega)).mp hpx
+    by_cases ha0 : a = 0
+    · rw [ha0] at ha; rw [ha] at hxy; have hp2 := mul_pos.nat p p (by omega) (by omega); omega
+    · by_cases ha1 : a = 1
+      · rw [ha, ha1]; ring
+      · have hpy : p = a * y := hcancel p (a * y) (by rw [hxy, ha]; ring)
+        have hy0 : y ≠ 0 := by intro h0; rw [h0] at hpy; omega
+        have hy2 : 2 ≤ y := by omega
+        have ha2 : 2 ≤ a := by omega
+        obtain hap | hyp := hprime.2 a y ((dvd.iff_exists p (a * y) (by omega)).mpr ⟨1, by rw [← hpy]; ring⟩)
+        · obtain ⟨u, hu⟩ := (dvd.iff_exists p a (by omega)).mp hap
+          have hu1 : 1 ≤ u := by by_contra h0; have hz : u = 0 := by omega; rw [hz] at hu; omega
+          have hge1 := mul_le_mul_of_nonneg_left.nat 1 u p hu1 (by omega)
+          have hge2 := mul_le_mul_of_nonneg_left.nat 2 y a hy2 (by omega)
+          have hp1 : p * 1 = p := by ring; have ha_2 : a * 2 = 2 * a := by ring
+          rw [← hu, hp1] at hge1; rw [← hpy, ha_2] at hge2; omega
+        · obtain ⟨u, hu⟩ := (dvd.iff_exists p y (by omega)).mp hyp
+          have hu1 : 1 ≤ u := by by_contra h0; have hz : u = 0 := by omega; rw [hz] at hu; omega
+          have hge1 := mul_le_mul_of_nonneg_left.nat 1 u p hu1 (by omega)
+          have hge2 := mul_le_mul_of_nonneg_right.nat 2 a y ha2 (by omega)
+          have hp1 : p * 1 = p := by ring
+          rw [← hu, hp1] at hge1; rw [← hpy] at hge2; omega
+  obtain h1 | h2 := hprime.2 ng nq ((dvd.iff_exists p (ng * nq) (by omega)).mpr ⟨p, hprod.symm⟩)
+  · exact hpos_of_dvd ng nq hprod hng1 hnq1 h1
+  · have hnq_p := hpos_of_dvd nq ng (by rw [hprod]; ring) hnq1 hng1 h2
+    exact (hcancel p ng (by rw [hprod, hnq_p]; ring)).symm
+
+-- Helper: p >= 2 cannot divide ±1 in Z!
++ int.not_unit_mul_ge_two (p : ℕ) (r eps : ℤ) (hp : 2 ≤ p) (heps : eps = 1 ∨ eps = -1)
+    (heq : eps = (p : ℤ) * r) : False
+  have hp2 : (2 : ℤ) ≤ (p : ℤ) := (cast_le.int 2 p).mpr hp
+  by_cases hr0 : r = 0
+  · rw [hr0] at heq; omega
+  · by_cases hrp : 0 < r
+    · have hge := mul_le_mul_of_nonneg_left.int 1 r (p : ℤ) (by omega) (by omega); omega
+    · have hle := mul_le_mul_of_nonneg_left.int r (-1) (p : ℤ) (by omega) (by omega); omega
+
+-- THEOREM 3A: FERMAT'S SUM OF TWO SQUARES THEOREM (0 CUSTOM AXIOMS!):
+-- For EVERY prime p with p % 4 = 1, there exist natural numbers a, b with a^2 + b^2 = p!
++ fermat.two_squares_of_prime_mod4 (p : ℕ) (hprime : is_prime_nat p) (hp4 : p % 4 = 1) :
+    ∃ a b : ℕ, a * a + b * b = p
+  have hp : 2 ≤ p := hprime.1
+  have hp_odd : p % 2 = 1 := (div_mod_unique.nat p 2 (2 * (p / 4)) 1 (by omega) (by decide)).2.symm
+  obtain ⟨x, hxp, hxsq⟩ := (qr.first_supplement p hprime hp_odd).2.mpr hp4
+  obtain ⟨k_nat, hk_nat⟩ := (dvd.iff_exists p (x * x + 1) (by omega)).mp hxsq
+  set gp := gi.of_int (p : ℤ) with hgp_def
+  set gx := GaussInt.mk (x : ℤ) 1 with hgx_def
+  obtain ⟨g, u, v, hd_gp, hd_gx, hbez⟩ := gauss_int.bezout_gcd gp gx
+  obtain ⟨q_gi, hq_gi⟩ := hd_gp
+  obtain ⟨w, hw⟩ := hd_gx
+  set ng := nat_of_int (gi.norm g) with hng_def
+  set nq := nat_of_int (gi.norm q_gi) with hnq_def
+  have hng_eq : (ng : ℤ) = gi.norm g := by rw [hng_def]; exact int_of_nat_of_int _ (gauss_int.norm_nonneg g)
+  have hnq_eq : (nq : ℤ) = gi.norm q_gi := by rw [hnq_def]; exact int_of_nat_of_int _ (gauss_int.norm_nonneg q_gi)
+  have hnp_eq : gi.norm gp = (p : ℤ) * (p : ℤ) := by rw [hgp_def]; unfold gi.norm gi.of_int; simp
+  have hprod_n : p * p = ng * nq
+    have hz : (p : ℤ) * (p : ℤ) = gi.norm g * gi.norm q_gi := by rw [← hnp_eq, hq_gi, gauss_int.norm_mul]
+    exact (cast_inj.int (p * p) (ng * nq)).mp (by rw [cast_mul.int, cast_mul.int, hng_eq, hnq_eq]; exact hz)
+  have hunit_of_norm1 : ∀ z : GaussInt, gi.norm z = 1 → gi.mul z (gi.conj z) = gi.one
+    intro z hz; apply gi.ext
+    · unfold gi.mul gi.conj gi.one; simp; unfold gi.norm at hz; linarith
+    · unfold gi.mul gi.conj gi.one; simp; ring
+  have hnq_ne1 : nq ≠ 1
+    intro h1
+    have hunit := hunit_of_norm1 q_gi (by rw [← hnq_eq, h1, cast_one.int])
+    have hgx_p : gx = gi.mul gp (gi.mul (gi.conj q_gi) w)
+      have hg_eq : g = gi.mul gp (gi.conj q_gi)
+        calc g = gi.mul g gi.one := (gi.mul_one_r g).symm
+          _ = gi.mul (gi.mul g q_gi) (gi.conj q_gi) := by rw [← hunit, ← gi.mul_assoc]
+          _ = gi.mul gp (gi.conj q_gi) := by rw [← hq_gi]
+      rw [hw, hg_eq, gi.mul_assoc]
+    have him : gx.im = (gi.mul gp (gi.mul (gi.conj q_gi) w)).im := by rw [hgx_p]
+    rw [hgx_def, hgp_def] at him; unfold gi.mul gi.of_int at him; simp at him
+    exact int.not_unit_mul_ge_two p _ 1 hp (by omega) him
+  have hng_ne1 : ng ≠ 1
+    intro h1
+    have hunit := hunit_of_norm1 g (by rw [← hng_eq, h1, cast_one.int])
+    have hx_prod : gi.mul gx (gi.conj gx) = gi.mul gp (gi.of_int (k_nat : ℤ))
+      apply gi.ext
+      · rw [hgx_def, hgp_def]; unfold gi.mul gi.conj gi.of_int; simp
+        have hc : ((x * x + 1 : ℕ) : ℤ) = ((p * k_nat : ℕ) : ℤ) := by rw [hk_nat]
+        rw [cast_add.int, cast_mul.int, cast_mul.int, cast_one.int] at hc; linarith
+      · rw [hgx_def, hgp_def]; unfold gi.mul gi.conj gi.of_int; simp; ring
+    set cg := gi.conj g with hcg_def
+    set rhs := gi.add (gi.mul (gi.mul u cg) (gi.conj gx)) (gi.mul (gi.mul v cg) (gi.of_int (k_nat : ℤ))) with hrhs_def
+    have hcgx_div : gi.conj gx = gi.mul gp rhs
+      have h1 : gi.conj gx = gi.mul (gi.mul (gi.add (gi.mul u gp) (gi.mul v gx)) cg) (gi.conj gx) := by rw [← hbez, hunit, gi.one_mul]
+      have h2 : gi.mul (gi.mul (gi.add (gi.mul u gp) (gi.mul v gx)) cg) (gi.conj gx) = gi.add (gi.mul gp (gi.mul (gi.mul u cg) (gi.conj gx))) (gi.mul (gi.mul v cg) (gi.mul gx (gi.conj gx))) := by apply gi.ext <;> (unfold gi.mul gi.add; simp; ring)
+      rw [h1, h2, hx_prod, hrhs_def]; apply gi.ext <;> (unfold gi.mul gi.add; simp; ring)
+    have him : (gi.conj gx).im = (gi.mul gp rhs).im := by rw [hcgx_div]
+    rw [hgx_def, hgp_def] at him; unfold gi.conj gi.mul gi.of_int at him; simp at him
+    exact int.not_unit_mul_ge_two p _ (-1) hp (by omega) him
+  have hng_eq_p := nat.sq_prime_factor_eq p ng nq hprime hprod_n hng_ne1 hnq_ne1
+  use nat_of_int (abs g.re), nat_of_int (abs g.im)
+  have ha_eq : (nat_of_int (abs g.re) : ℤ) = abs g.re := int_of_nat_of_int _ (abs_nonneg.int g.re)
+  have hb_eq : (nat_of_int (abs g.im) : ℤ) = abs g.im := int_of_nat_of_int _ (abs_nonneg.int g.im)
+  have habs_sq : ∀ z : ℤ, abs z * abs z = z * z := by intro z; obtain ⟨e, _⟩ | ⟨e, _⟩ := abs_cases.int z; (rw [e]); (rw [e]; ring)
+  have hnorm_p : gi.norm g = (p : ℤ) := by rw [← hng_eq, hng_eq_p]
+  unfold gi.norm at hnorm_p
+  exact (cast_inj.int (nat_of_int (abs g.re) * nat_of_int (abs g.re) + nat_of_int (abs g.im) * nat_of_int (abs g.im)) p).mp (by rw [cast_add.int, cast_mul.int, cast_mul.int, ha_eq, hb_eq, habs_sq, habs_sq]; exact hnorm_p)
+
+-- THEOREM 3B: Brahmagupta-Fibonacci Closure of Sums of Two Squares under Multiplication!
++ fermat.two_squares_product (a b c d : ℕ) :
+    ∃ u v : ℕ, u * u + v * v = (a * a + b * b) * (c * c + d * d)
+  set z := gi.mul (GaussInt.mk (a : ℤ) (b : ℤ)) (GaussInt.mk (c : ℤ) (d : ℤ)) with hz_def
+  use nat_of_int (abs z.re), nat_of_int (abs z.im)
+  have hu_eq : (nat_of_int (abs z.re) : ℤ) = abs z.re := int_of_nat_of_int _ (abs_nonneg.int z.re)
+  have hv_eq : (nat_of_int (abs z.im) : ℤ) = abs z.im := int_of_nat_of_int _ (abs_nonneg.int z.im)
+  have habs_sq : ∀ t : ℤ, abs t * abs t = t * t := by intro t; obtain ⟨e, _⟩ | ⟨e, _⟩ := abs_cases.int t; (rw [e]); (rw [e]; ring)
+  have hnm := gauss_int.norm_mul (GaussInt.mk (a : ℤ) (b : ℤ)) (GaussInt.mk (c : ℤ) (d : ℤ))
+  rw [← hz_def] at hnm; unfold gi.norm at hnm; simp at hnm
+  exact (cast_inj.int (nat_of_int (abs z.re) * nat_of_int (abs z.re) + nat_of_int (abs z.im) * nat_of_int (abs z.im)) ((a * a + b * b) * (c * c + d * d))).mp (by rw [cast_add.int, cast_mul.int, cast_mul.int, hu_eq, hv_eq, habs_sq, habs_sq, cast_mul.int, cast_add.int, cast_add.int, cast_mul.int, cast_mul.int, cast_mul.int, cast_mul.int]; exact hnm)

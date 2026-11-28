@@ -1,0 +1,293 @@
+-- Complete Prime Enumeration `< M` and Exact Rational Adelic Product Formula (0 custom axioms)
+
+import adelic
+import von_mangoldt
+
++ real_prod.exp_sum (S : ℕ) (e : ℕ → ℝ) : real_prod S (fun s => exp (e s)) = exp (∑ s < S, e s)
+  induction S with m ihm
+  · rw [real_prod.zero, sum_below_zero, exp_zero]
+  · rw [succ_eq_add_one.nat, real_prod.succ, sum_below_succ, exp_add, ihm]
+
++ padic.abs_one_eq (p : ℕ) (hp : 2 ≤ p) : padic.abs p 1 = 1
+  have hvp0 : vp p 1 = 0
+    apply vp.eq_zero_of_not_dvd p 1 hp (by omega); intro hd
+    obtain ⟨q, hq⟩ := (dvd.iff_exists p 1 (by omega)).mp hd
+    by_cases hq0 : q = 0
+    · rw [hq0] at hq; omega
+    · have hq1 : 1 ≤ q := by omega
+      nlinarith
+  rw [padic.abs_pos_val p 1 (by omega), hvp0]; unfold rpow; simp; exact exp_zero
+
++ padic.abs_eq_one_of_not_dvd (p n : ℕ) (hp : 2 ≤ p) (hn : 0 < n) (hnd : ¬ (p ∣ n)) :
+    padic.abs p n = 1
+  have hvp0 : vp p n = 0 := vp.eq_zero_of_not_dvd p n hp hn hnd
+  rw [padic.abs_pos_val p n (by omega), hvp0]; unfold rpow; simp; exact exp_zero
+
+-- ====================================================================================
+-- SECTION 1: COMPLETE PRIME ENUMERATION `< M` & RATIONAL PRODUCT FORMULA (`H_den < M`)
+-- ====================================================================================
+
++ sernau.is_prime_nat_to_full (p : ℕ) (hp : is_prime_nat p) : is_prime_full p
+  unfold is_prime_full; constructor; exact hp
+  intro d hdvd
+  by_cases hd0 : d = 0
+  · exfalso; rw [hd0] at hdvd; unfold dvd at hdvd
+    have hdiv := div_add_mod.nat p 0; have h0m : 0 * (p / 0) = 0 := by ring
+    rw [h0m, hdvd] at hdiv; have hp2 := hp.1; omega
+  · obtain ⟨q, hq⟩ := (dvd.iff_exists d p (by omega)).mp hdvd
+    by_cases hd1 : d = 1
+    · left; exact hd1
+    · by_cases hdp : d = p
+      · right; exact hdp
+      · exfalso
+        have hd_lt : d < p
+          by_contra hge
+          have hq_pos : 1 ≤ q := by by_contra h0; have hz : q = 0 := by omega; rw [hz] at hq; have hp2 := hp.1; omega
+          have hm := mul_le_mul_of_nonneg_left.nat 1 q d hq_pos (by omega); omega
+        have hq_ge2 : 2 ≤ q
+          by_contra hlt2; by_cases hq0 : q = 0; (rw [hq0] at hq; have hp2 := hp.1; omega)
+          have hq1 : q = 1 := by omega
+          rw [hq1] at hq; omega
+        have hq_lt : q < p := by have hm := mul_le_mul_of_nonneg_right.nat 2 d q (by omega) (by omega); omega
+        have hpdvd : p ∣ (d * q) := (dvd.iff_exists p (d * q) (by linarith [hp.1])).mpr ⟨1, by rw [← hq]; ring⟩
+        obtain h1 | h2 := hp.2 d q hpdvd
+        · have hle := le_of_dvd.nat d p (by omega) h1; omega
+        · have hle := le_of_dvd.nat q p (by omega) h2; omega
+
++ sernau.is_prime_full_iff_nat (q : ℕ) : is_prime_full q ↔ is_prime_nat q
+  constructor
+  · intro hf; exact hf.1
+  · intro hn; exact sernau.is_prime_nat_to_full q hn
+
++ sernau.prime_dvd_cases (p d : ℕ) (hp : is_prime_nat p) (hd : 0 < d) (hdvd : d ∣ p) :
+    d = 1 ∨ d = p
+  exact (sernau.is_prime_nat_to_full p hp).2 d hdvd
+
++ odd_of_prime_ne_two (p : ℕ) (hp : is_prime_nat p) (hne2 : p ≠ 2) : p % 2 = 1
+  have hlt := mod_lt.nat p 2 (by decide)
+  by_cases h0 : p % 2 = 0
+  · exfalso; have hd : 2 ∣ p := h0
+    obtain c1 | c2 := sernau.prime_dvd_cases p 2 hp (by decide) hd; omega; omega
+  · omega
+
++ sernau.prime_iff_is_prime_nat (p : ℕ) : prime p ↔ is_prime_nat p
+  constructor
+  · intro hp; exact ⟨hp.1, by intro a b hd; exact prime_dvd_mul.nat p a b hp hd⟩
+  · intro hp; constructor; exact hp.1; (intro d hdp hd2 hmod; obtain h1 | h2 := sernau.prime_dvd_cases p d hp (by omega) hmod; omega; omega)
+
++ sernau.prime_pow_unique (p1 e1 p2 e2 : ℕ)
+    (hp1 : is_prime_nat p1) (hp2 : is_prime_nat p2) (he1 : 1 ≤ e1) (he2 : 1 ≤ e2)
+    (heq : p1 ^ e1 = p2 ^ e2) : p1 = p2 ∧ e1 = e2
+  have hdvd_pow : ∀ k : ℕ, 1 ≤ k → p1 ∣ (p2 ^ k) → p1 ∣ p2
+    intro k; induction k with _ _ m ihm _ hd
+    · omega
+    · rw [succ_eq_add_one.nat] at hd; rw [pow_succ.nat] at hd
+      obtain h1 | h2 := hp1.2 (p2 ^ m) p2 hd
+      · by_cases hm0 : m = 0
+        · rw [hm0, pow_zero.nat] at h1; exfalso; have hle := le_of_dvd.nat 1 p1 (by decide) h1; have hp12 := hp1.1; omega
+        · exact ihm (by omega) h1
+      · exact h2
+  have hp1_eq_p2 : p1 = p2
+    by_contra hne
+    have hp1_dvd_pow : p1 ∣ (p2 ^ e2)
+      set e1p := e1 - 1; have he1_sp : e1 = e1p + 1 := by omega
+      have h1 : p1 ^ e1 = p1 * (p1 ^ e1p) := by rw [he1_sp, pow_succ.nat]; ring
+      exact (dvd.iff_exists p1 (p2 ^ e2) (by linarith [hp1.1])).mpr ⟨p1 ^ e1p, by rw [← heq, h1]⟩
+    have hp1_dvd_p2 := hdvd_pow e2 he2 hp1_dvd_pow
+    obtain h1 | h2 := sernau.prime_dvd_cases p2 p1 hp2 (by linarith [hp1.1]) hp1_dvd_p2; (have hp1_2 := hp1.1; omega); omega
+  have he1_eq_e2 : e1 = e2
+    rw [hp1_eq_p2] at heq; have hp2_ge2 : 2 ≤ p2 := hp2.1
+    have hstrict : ∀ a b : ℕ, a < b → p2 ^ a < p2 ^ b
+      intro a b hab; have hd : b = a + ((b - a - 1) + 1) := by omega
+      have hgt1 : ∀ m : ℕ, 2 ≤ p2 ^ (m + 1)
+        intro m; induction m with k ihk; (simp; omega)
+        rw [succ_eq_add_one.nat, pow_succ.nat]
+        have hm1 := mul_le_mul_of_nonneg_right.nat 2 (p2 ^ (k + 1)) p2 ihk (by omega)
+        have hm2 := mul_le_mul_of_nonneg_left.nat 2 p2 2 hp2_ge2 (by omega); omega
+      have hp_pos := pow_pos.nat p2 a (by omega)
+      have hmul := mul_le_mul_of_nonneg_left.nat 2 (p2 ^ ((b - a - 1) + 1)) (p2 ^ a) (hgt1 (b - a - 1)) (by omega)
+      rw [hd, pow_add.nat]; omega
+    by_contra hne_e; by_cases hlt : e1 < e2; (have h := hstrict e1 e2 hlt; omega); (have h := hstrict e2 e1 (by omega); omega)
+  exact ⟨hp1_eq_p2, he1_eq_e2⟩
+
+-> sernau.primes_below_len : ℕ → ℕ
+  | 0 => 0
+  | m + 1 => if is_prime_full m then sernau.primes_below_len m + 1 else sernau.primes_below_len m
+
+-> sernau.primes_below_at : ℕ → ℕ → ℕ
+  | 0 => fun _ => 2
+  | m + 1 => fun s => if is_prime_full m then (if s < sernau.primes_below_len m then sernau.primes_below_at m s else m) else sernau.primes_below_at m s
+
++ sernau.primes_below_len_zero : sernau.primes_below_len 0 = 0 := by rfl
++ sernau.primes_below_len_succ (m : ℕ) :
+    sernau.primes_below_len (m + 1) = (if is_prime_full m then sernau.primes_below_len m + 1 else sernau.primes_below_len m) := by rfl
++ sernau.primes_below_at_succ (m s : ℕ) :
+    sernau.primes_below_at (m + 1) s = (if is_prime_full m then (if s < sernau.primes_below_len m then sernau.primes_below_at m s else m) else sernau.primes_below_at m s) := by rfl
+
++ sernau.primes_below_spec (M : ℕ) :
+    ((∀ s < sernau.primes_below_len M, is_prime_full (sernau.primes_below_at M s) ∧ sernau.primes_below_at M s < M) ∧
+     (∀ s1 s2, s1 < sernau.primes_below_len M → s2 < sernau.primes_below_len M → s1 ≠ s2 → sernau.primes_below_at M s1 ≠ sernau.primes_below_at M s2) ∧
+     (∀ q < M, is_prime_full q → ∃ s < sernau.primes_below_len M, sernau.primes_below_at M s = q) ∧
+     (∀ f : ℕ → ℝ, (∑ s < sernau.primes_below_len M, f (sernau.primes_below_at M s)) = ∑ q < M, if is_prime_nat q then f q else 0))
+  induction M with m ihm
+  · rw [sernau.primes_below_len_zero]
+    constructor; (intro s hs; omega)
+    constructor; (intro s1 _ h1 _ _; omega)
+    constructor; (intro q hq _; omega)
+    intro f; rw [sum_below_zero, sum_below_zero]
+  · obtain ⟨hpr_m, hdist_m, hmem_m, hsum_m⟩ := ihm
+    rw [succ_eq_add_one.nat, sernau.primes_below_len_succ]
+    by_cases hpm : is_prime_full m
+    · rw [if_pos hpm]
+      have hat_s : ∀ s : ℕ, sernau.primes_below_at (m + 1) s = (if s < sernau.primes_below_len m then sernau.primes_below_at m s else m)
+        intro s; rw [sernau.primes_below_at_succ, if_pos hpm]
+      constructor
+      · intro s hs; rw [hat_s s]
+        by_cases hlt : s < sernau.primes_below_len m
+        · rw [if_pos hlt]; obtain ⟨hp1, hp2⟩ := hpr_m s hlt; exact ⟨hp1, by omega⟩
+        · rw [if_neg hlt]; exact ⟨hpm, by omega⟩
+      · constructor
+        · intro s1 s2 hs1 hs2 hne; rw [hat_s s1, hat_s s2]
+          by_cases h1 : s1 < sernau.primes_below_len m
+          · rw [if_pos h1]
+            by_cases h2 : s2 < sernau.primes_below_len m
+            · rw [if_pos h2]; exact hdist_m s1 s2 h1 h2 hne
+            · rw [if_neg h2]; have hlt1 := (hpr_m s1 h1).2; omega
+          · rw [if_neg h1]
+            by_cases h2 : s2 < sernau.primes_below_len m
+            · rw [if_pos h2]; have hlt2 := (hpr_m s2 h2).2; omega
+            · exfalso; omega
+        · constructor
+          · intro q hq hqf
+            by_cases hqm : q < m
+            · obtain ⟨s0, hs0, heq0⟩ := hmem_m q hqm hqf
+              exact ⟨s0, by omega, by rw [hat_s s0, if_pos hs0]; exact heq0⟩
+            · have hqe : q = m := by omega
+              exact ⟨sernau.primes_below_len m, by omega, by rw [hat_s (sernau.primes_below_len m), if_neg (by omega), hqe]⟩
+          · intro f; rw [sum_below_succ, sum_below_succ, if_pos hpm.1]
+            have hcon : (∑ s < sernau.primes_below_len m, f (sernau.primes_below_at (m + 1) s)) = ∑ s < sernau.primes_below_len m, f (sernau.primes_below_at m s)
+              apply sum_below.congr; intro s hs; rw [hat_s s, if_pos hs]
+            have hat_top : sernau.primes_below_at (m + 1) (sernau.primes_below_len m) = m := by rw [hat_s (sernau.primes_below_len m), if_neg (by omega)]
+            rw [hcon, hat_top, hsum_m f]
+    · have hnot_nat : ¬ is_prime_nat m := by intro hn; exact hpm (sernau.is_prime_nat_to_full m hn)
+      rw [if_neg hpm]
+      have hat_s : ∀ s : ℕ, sernau.primes_below_at (m + 1) s = sernau.primes_below_at m s
+        intro s; rw [sernau.primes_below_at_succ, if_neg hpm]
+      constructor
+      · intro s hs; rw [hat_s s]; obtain ⟨hp1, hp2⟩ := hpr_m s hs; exact ⟨hp1, by omega⟩
+      · constructor
+        · intro s1 s2 hs1 hs2 hne; rw [hat_s s1, hat_s s2]; exact hdist_m s1 s2 hs1 hs2 hne
+        · constructor
+          · intro q hq hqf
+            have hqm : q < m := by by_contra hge; have he : q = m := by omega; rw [he] at hqf; exact hpm hqf
+            obtain ⟨s0, hs0, heq0⟩ := hmem_m q hqm hqf
+            exact ⟨s0, hs0, by rw [hat_s s0]; exact heq0⟩
+          · intro f; rw [sum_below_succ, if_neg hnot_nat]
+            have hcon : (∑ s < sernau.primes_below_len m, f (sernau.primes_below_at (m + 1) s)) = ∑ s < sernau.primes_below_len m, f (sernau.primes_below_at m s)
+              apply sum_below.congr; intro s _; rw [hat_s s]
+            rw [hcon, hsum_m f]; ring
+
++ sernau.real_prod_single_one (S s0 : ℕ) (v : ℝ) (hs0 : s0 < S) :
+    real_prod S (fun s => if s = s0 then v else 1) = v
+  induction S with h0 m ihm hm
+  · omega
+  · rw [succ_eq_add_one.nat] at hm ⊢; rw [real_prod.succ]
+    by_cases hlt : s0 < m
+    · rw [ihm hlt, if_neg (by omega)]; ring
+    · have heq : m = s0 := by omega
+      have hpre1 : real_prod m (fun s => if s = s0 then v else 1) = 1
+        have hcon : ∀ s < m, (if s = s0 then v else 1) = (1 : ℝ) := by intro s hs; rw [if_neg (by omega)]
+        rw [real_prod.congr m (fun s => if s = s0 then v else 1) (fun _ => (1 : ℝ)) hcon, real_prod.ones]
+      rw [hpre1, if_pos heq]; ring
+
++ sernau.prime_mul_prod_padic_abs_eq_one (M q : ℕ) (hq_lt : q < M) (hq_pr : is_prime_full q) :
+    (q : ℝ) * real_prod (sernau.primes_below_len M) (fun s => padic.abs (sernau.primes_below_at M s) q) = 1
+  obtain ⟨hpr_M, hdist_M, hmem_M, _⟩ := sernau.primes_below_spec M
+  obtain ⟨s0, hs0, heq_s0⟩ := hmem_M q hq_lt hq_pr
+  have hq2 : 2 ≤ q := hq_pr.1.1
+  have hq_pos : (0 : ℝ) < (q : ℝ) := (cast_pos.real q).mpr (by omega)
+  have hpad_self : padic.abs q q = rpow (q : ℝ) (-((1 : ℕ) : ℝ))
+    rw [padic.abs_pos_val q q (by omega)]
+    have hnd1 : ¬ (q ∣ 1)
+      intro hd; obtain ⟨u, hu⟩ := (dvd.iff_exists q 1 (by omega)).mp hd
+      by_cases hu0 : u = 0; (rw [hu0] at hu; omega)
+      have hm := mul_le_mul_of_nonneg_left.nat 1 u q (by omega) (by omega); omega
+    have hvp1 : vp q q = 1
+      have hm := vp.mul_p q 1 hq2 (by omega)
+      have hq1_eq : q * 1 = q := by ring
+      have hz := vp.eq_zero_of_not_dvd q 1 hq2 (by omega) hnd1
+      rw [hq1_eq, hz] at hm; omega
+    rw [hvp1]
+  have hcon : ∀ s < sernau.primes_below_len M, padic.abs (sernau.primes_below_at M s) q = (if s = s0 then rpow (q : ℝ) (-((1 : ℕ) : ℝ)) else 1)
+    intro s hs
+    by_cases hss : s = s0
+    · rw [if_pos hss, hss, heq_s0, hpad_self]
+    · rw [if_neg hss]
+      have hps_pr := (hpr_M s hs).1
+      have hne_p : sernau.primes_below_at M s ≠ q := by rw [← heq_s0]; exact hdist_M s s0 hs hs0 hss
+      have hndvd := prime_not_dvd_distinct_prime (sernau.primes_below_at M s) q hps_pr hq_pr hne_p
+      exact padic.abs_eq_one_of_not_dvd (sernau.primes_below_at M s) q hps_pr.1.1 (by omega) hndvd
+  have hprod_one : (q : ℝ) * rpow (q : ℝ) (-((1 : ℕ) : ℝ)) = 1
+    have hlg : log (rpow (q : ℝ) (-((1 : ℕ) : ℝ))) = -log (q : ℝ)
+      unfold rpow; rw [log_exp]; ring
+    have hrp_pos : 0 < rpow (q : ℝ) (-((1 : ℕ) : ℝ)) := rpow.pos (q : ℝ) (-((1 : ℕ) : ℝ))
+    have h1 : rpow (q : ℝ) (-((1 : ℕ) : ℝ)) = exp (-log (q : ℝ))
+      rw [← exp_log (rpow (q : ℝ) (-((1 : ℕ) : ℝ))) hrp_pos, hlg]
+    have h2 : exp (log (q : ℝ)) * exp (-log (q : ℝ)) = 1
+      rw [← exp_add]; have hz : log (q : ℝ) + -log (q : ℝ) = 0 := by ring
+      rw [hz, exp_zero]
+    rw [exp_log (q : ℝ) hq_pos] at h2
+    rw [h1]; exact h2
+  rw [real_prod.congr (sernau.primes_below_len M) _ _ hcon, sernau.real_prod_single_one (sernau.primes_below_len M) s0 (rpow (q : ℝ) (-((1 : ℕ) : ℝ))) hs0, hprod_one]
+
++ sernau.nat_mul_prod_padic_abs_eq_one (M n : ℕ) (hn_pos : 0 < n) (hn_lt : n < M) :
+    (n : ℝ) * real_prod (sernau.primes_below_len M) (fun s => padic.abs (sernau.primes_below_at M s) n) = 1
+  obtain ⟨hpr_M, _, _, _⟩ := sernau.primes_below_spec M
+  have hstrong : ∀ K : ℕ, ∀ m : ℕ, 0 < m → m ≤ K → m < M → (m : ℝ) * real_prod (sernau.primes_below_len M) (fun s => padic.abs (sernau.primes_below_at M s) m) = 1
+    intro K; induction K with m hm_pos hm0 hm_lt k ihk m hm_pos hmk hm_lt
+    · omega
+    · rw [succ_eq_add_one.nat] at hmk
+      by_cases hm_le_k : m ≤ k
+      · exact ihk m hm_pos hm_le_k hm_lt
+      · have hmeq : m = k + 1 := by omega
+        by_cases hm1 : m = 1
+        · rw [hm1, cast_one.real, one_mul.real]
+          have hcon1 : ∀ s < sernau.primes_below_len M, padic.abs (sernau.primes_below_at M s) 1 = 1
+            intro s hs; exact padic.abs_one_eq (sernau.primes_below_at M s) (hpr_M s hs).1.1.1
+          rw [real_prod.congr (sernau.primes_below_len M) _ _ hcon1, real_prod.ones]
+        · have hm2 : 2 ≤ m := by omega
+          set q := min_fac m with hq_def
+          have hsp := min_fac.spec m hm2
+          have hq_pr_raw : prime q := by rw [hq_def]; exact min_fac.prime m hm2
+          have hq_nat : is_prime_nat q := ⟨hq_pr_raw.1, by intro a b hd; exact prime_dvd_mul.nat q a b hq_pr_raw hd⟩
+          have hq_pr : is_prime_full q := sernau.is_prime_nat_to_full q hq_nat
+          have hq2 : 2 ≤ q := by rw [hq_def]; exact hsp.1
+          have hq_dvd : q ∣ m := by rw [hq_def]; exact hsp.2.2.1
+          obtain ⟨d, hmd⟩ := (dvd.iff_exists q m (by omega)).mp hq_dvd
+          have hd_pos : 0 < d := by by_contra h0; have hz : d = 0 := by omega; rw [hz] at hmd; omega
+          have hq_le_m : q ≤ m := by have hm_ge := mul_le_mul_of_nonneg_left.nat 1 d q (by omega) (by omega); omega
+          have hd_lt_m : d < m := by have hm_ge := mul_le_mul_of_nonneg_right.nat 2 q d hq2 (by omega); omega
+          have hcon_mul : ∀ s < sernau.primes_below_len M, padic.abs (sernau.primes_below_at M s) (q * d) = padic.abs (sernau.primes_below_at M s) q * padic.abs (sernau.primes_below_at M s) d
+            intro s hs; exact padic.abs_mul (sernau.primes_below_at M s) q d (hpr_M s hs).1.1
+          rw [hmd, cast_mul.real q d, real_prod.congr (sernau.primes_below_len M) _ _ hcon_mul, real_prod.mul]
+          have hre : ((q : ℝ) * (d : ℝ)) * (real_prod (sernau.primes_below_len M) (fun s => padic.abs (sernau.primes_below_at M s) q) * real_prod (sernau.primes_below_len M) (fun s => padic.abs (sernau.primes_below_at M s) d)) =
+              ((q : ℝ) * real_prod (sernau.primes_below_len M) (fun s => padic.abs (sernau.primes_below_at M s) q)) * ((d : ℝ) * real_prod (sernau.primes_below_len M) (fun s => padic.abs (sernau.primes_below_at M s) d)) := by ring
+          rw [hre, sernau.prime_mul_prod_padic_abs_eq_one M q (by omega) hq_pr, ihk d hd_pos (by omega) (by omega)]; ring
+  exact hstrong n n hn_pos (by omega) hn_lt
+
++ sernau.log_add_sum_log_padic_abs_eq_zero (M n : ℕ) (hn_pos : 0 < n) (hn_lt : n < M) :
+    log (n : ℝ) + (∑ s < sernau.primes_below_len M, log (padic.abs (sernau.primes_below_at M s) n)) = 0
+  have hn_r : (0 : ℝ) < (n : ℝ) := (cast_pos.real n).mpr hn_pos
+  have hexp_sum : exp (log (n : ℝ) + (∑ s < sernau.primes_below_len M, log (padic.abs (sernau.primes_below_at M s) n))) = 1
+    rw [exp_add, exp_log (n : ℝ) hn_r, ← real_prod.exp_sum]
+    have hcon : ∀ s < sernau.primes_below_len M, exp (log (padic.abs (sernau.primes_below_at M s) n)) = padic.abs (sernau.primes_below_at M s) n
+      intro s _; exact exp_log (padic.abs (sernau.primes_below_at M s) n) (padic.abs_pos (sernau.primes_below_at M s) n hn_pos)
+    rw [real_prod.congr (sernau.primes_below_len M) _ _ hcon]
+    exact sernau.nat_mul_prod_padic_abs_eq_one M n hn_pos hn_lt
+  rw [← exp_zero] at hexp_sum
+  have hle1 : log (n : ℝ) + (∑ s < sernau.primes_below_len M, log (padic.abs (sernau.primes_below_at M s) n)) ≤ 0
+    exact (exp_le_exp (log (n : ℝ) + (∑ s < sernau.primes_below_len M, log (padic.abs (sernau.primes_below_at M s) n))) 0).mp (by linarith)
+  have hle2 : 0 ≤ log (n : ℝ) + (∑ s < sernau.primes_below_len M, log (padic.abs (sernau.primes_below_at M s) n))
+    exact (exp_le_exp 0 (log (n : ℝ) + (∑ s < sernau.primes_below_len M, log (padic.abs (sernau.primes_below_at M s) n)))).mp (by linarith)
+  linarith
+

@@ -1,0 +1,562 @@
+-- Hensel Lifting for Four Squares (-2 mod p^M) and Multivariate Power Series Inverses mod p^K (0 custom axioms)
+
+import padic.katz_divisibility
+import number_theory.dirichlet_twists
+
++ sernau.exists_four_squares_cong_neg_two (p M : ℕ) (hp : is_prime_nat p) :
+    (∃ j0 j1 j2 j3 q : ℕ, 0 < q ∧ j0 * j0 + j1 * j1 + j2 * j2 + j3 * j3 + 2 = (p ^ M) * q)
+  by_cases hM0 : M = 0
+  · rw [hM0, pow_zero.nat]; exact ⟨0, 0, 0, 0, 2, by decide, by decide⟩
+  have hM1 : 1 ≤ M := by omega
+  by_cases hp_eq2 : p = 2
+  · rw [hp_eq2]
+    have h2_lift : ∀ k : ℕ, ∃ x q : ℕ, x % 2 = 1 ∧ 0 < q ∧ x * x + 7 = (2 ^ (k + 3)) * q
+      intro k; induction k with r ihr
+      · exact ⟨1, 1, by decide, by decide, by decide⟩
+      · rw [succ_eq_add_one.nat]; obtain ⟨x, q, hx_od, hq_pos, hxq⟩ := ihr
+        set rq := q % 2 with hrq_def; set sq := q / 2 with hsq_def
+        have hdm_q := div_add_mod.nat q 2; rw [← hsq_def, ← hrq_def] at hdm_q
+        have hrq_lt := mod_lt.nat q 2 (by decide); rw [← hrq_def] at hrq_lt
+        by_cases hrq0 : rq = 0
+        · have hsq_pos : 0 < sq := by omega
+          have hq_eq : q = 2 * sq := by omega
+          have hp_step : 2 ^ (r + 1 + 3) = (2 ^ (r + 3)) * 2 := by have he : r + 1 + 3 = (r + 3) + 1 := (by omega); rw [he, pow_succ.nat]
+          exact ⟨x, sq, hx_od, hsq_pos, by rw [hxq, hq_eq, hp_step]; ring⟩
+        · have hrq_eq1 : rq = 1 := by omega
+          set P2 := 2 ^ (r + 2) with hP2_def
+          have hP2_even : P2 % 2 = 0
+            rw [hP2_def]; have he : r + 2 = (r + 1) + 1 := by omega
+            have h22 : 2 % 2 = 0 := by decide
+            rw [he, pow_succ.nat, mul_mod.nat, h22, mul_zero.nat]; decide
+          have hx'_od : (x + P2) % 2 = 1 := by rw [add_mod.nat, hx_od, hP2_even]; decide
+          have hqx_ev : (q + x) % 2 = 0 := by rw [add_mod.nat, ← hrq_def, hrq_eq1, hx_od]; decide
+          set s := (q + x) / 2 with hs_def; have hdm_s := div_add_mod.nat (q + x) 2; rw [← hs_def, hqx_ev] at hdm_s
+          have hs2 : 2 * s = q + x := by omega
+          have hp3 : 2 ^ (r + 3) = P2 * 2 := by rw [hP2_def]; have he : r + 3 = (r + 2) + 1 := (by omega); rw [he, pow_succ.nat]
+          have hp4 : 2 ^ (r + 1 + 3) = P2 * 4 := by rw [hP2_def]; have he : r + 1 + 3 = (r + 2) + 2 := (by omega); rw [he, pow_add.nat]; ring
+          have hP2_4 : P2 = (2 ^ r) * 4 := by rw [hP2_def, pow_add.nat]; ring
+          have h2r_pos : 0 < 2 ^ r := pow_pos.nat 2 r (by decide)
+          have hexp_x : (x + P2) * (x + P2) + 7 = (x * x + 7) + P2 * (2 * x + P2) := by ring
+          use (x + P2), (s + 2 ^ r); constructor; exact hx'_od; constructor; omega
+          rw [hexp_x, hxq, hp3, hp4]; linear_combination (P2 * 2) * hs2.symm + P2 * hP2_4
+    obtain ⟨x, q, _, hq_pos, hxq⟩ := h2_lift M
+    have hpM3 : 2 ^ (M + 3) = (2 ^ M) * 8 := by rw [pow_add.nat]; ring
+    have hsum7 : x * x + 1 * 1 + 2 * 2 + 0 * 0 + 2 = x * x + 7 := by ring
+    exact ⟨x, 1, 2, 0, 8 * q, by omega, by rw [hsum7, hxq, hpM3]; ring⟩
+  · have hp2 : 2 ≤ p := hp.1
+    have hp3 : 3 ≤ p := by omega
+    have hp_pos : 0 < p := by omega
+    have hp_od : p % 2 = 1 := odd_of_prime_ne_two p hp hp_eq2
+    have hp_pr : prime p := (prime_iff_is_prime_nat p).mpr hp
+    have hadd_mod_cancel : ∀ r1 r2 : ℕ, r1 < p → r2 < p → (r1 + r2) % p = r2 → r1 = 0
+      intro r1 r2 hr1 hr2 heq
+      by_cases hlt : r1 + r2 < p
+      · rw [(div_mod_of_lt.nat (r1 + r2) p hlt).2] at heq; omega
+      · have hsub : r1 + r2 = (r1 + r2 - p) + p * 1 := by omega
+        rw [hsub, add_mul_mod.nat, (div_mod_of_lt.nat (r1 + r2 - p) p (by omega)).2] at heq; omega
+    have hpigeon : ∀ (n : ℕ) (h : ℕ → ℕ), (∀ i < n + 1, h i < n) → (∀ i1 < n + 1, ∀ i2 < n + 1, h i1 = h i2 → i1 = i2) → False
+      intro n; induction n with h hh _ r ihr h hh hinj
+      · have h0 := hh 0 (by decide); omega
+      · rw [succ_eq_add_one.nat] at hh hinj
+        set h' : ℕ → ℕ := fun i => if h i = r then h (r + 1) else h i with hh'_def
+        have hh' : ∀ i < r + 1, h' i < r
+          intro i hi; rw [hh'_def]; by_cases heq : h i = r
+          · rw [if_pos heq]; have hlast := hh (r + 1) (by omega)
+            have hne : h (r + 1) ≠ r := by intro hr1; have hi_eq := hinj i (by omega) (r + 1) (by omega) (by rw [heq, hr1]); omega
+            omega
+          · rw [if_neg heq]; have hi_bd := hh i (by omega); omega
+        have hinj' : ∀ i1 < r + 1, ∀ i2 < r + 1, h' i1 = h' i2 → i1 = i2
+          intro i1 hi1 i2 hi2 he12; rw [hh'_def] at he12
+          by_cases c1 : h i1 = r
+          · rw [if_pos c1] at he12; by_cases c2 : h i2 = r
+            · exact hinj i1 (by omega) i2 (by omega) (by rw [c1, c2])
+            · rw [if_neg c2] at he12; have hi_eq := hinj (r + 1) (by omega) i2 (by omega) he12; omega
+          · rw [if_neg c1] at he12; by_cases c2 : h i2 = r
+            · rw [if_pos c2] at he12; have hi_eq := hinj i1 (by omega) (r + 1) (by omega) he12; omega
+            · rw [if_neg c2] at he12; exact hinj i1 (by omega) i2 (by omega) he12
+        exact ihr h' hh' hinj'
+    set K := (p + 1) / 2 with hK_def
+    have hmod_p1 : (p + 1) % 2 = 0 := by rw [add_mod.nat, hp_od]; decide
+    have hdm_K := div_add_mod.nat (p + 1) 2; rw [← hK_def, hmod_p1] at hdm_K
+    have h2K : 2 * K = p + 1 := by omega
+    have hsq_lt : ∀ u v : ℕ, u < v → v < K → (u * u) % p ≠ (v * v) % p
+      intro u v huv hvK heq; set d1 := v - u with hd1_def; set d2 := v + u with hd2_def
+      have hv_u : v = u + d1 := by omega
+      have hd_bds : 0 < d1 ∧ d1 < p ∧ 0 < d2 ∧ d2 < p := ⟨by omega, by omega, by omega, by omega⟩
+      have hid : d1 * d2 + u * u = v * v := by rw [hd2_def, hv_u]; ring
+      have hm_eq : (d1 * d2 + u * u) % p = (u * u) % p := by rw [hid, heq]
+      rw [add_mod.nat] at hm_eq
+      have hr0 := hadd_mod_cancel ((d1 * d2) % p) ((u * u) % p) (mod_lt.nat (d1 * d2) p hp_pos) (mod_lt.nat (u * u) p hp_pos) hm_eq
+      have hdvd_prod : p ∣ (d1 * d2) := by unfold dvd; exact hr0
+      obtain hd1_d | hd2_d := prime.dvd_mul_or p d1 d2 hp_pr hdvd_prod
+      · have hle := le_of_dvd.nat d1 p hd_bds.1 hd1_d; omega
+      · have hle := le_of_dvd.nat d2 p hd_bds.2.2.1 hd2_d; omega
+    have hsq_inj : ∀ a b : ℕ, a < K → b < K → (a * a) % p = (b * b) % p → a = b
+      intro a b ha hb heq; by_contra hne
+      by_cases hab : a < b
+      · exact hsq_lt a b hab hb heq
+      · exact hsq_lt b a (by omega) ha heq.symm
+    have hpp0 : p % p = 0 := ((div_mod_unique.nat p p 1 0 (by ring) hp_pos).2).symm
+    have hneg_inj : ∀ r1 r2 : ℕ, r1 < p → r2 < p → (p - r1) % p = (p - r2) % p → r1 = r2
+      intro r1 r2 hr1 hr2 heq
+      by_cases z1 : r1 = 0
+      · have hs1 : p - r1 = p := by omega
+        rw [hs1, hpp0] at heq
+        by_cases z2 : r2 = 0; omega
+        have hlt2 : p - r2 < p := by omega
+        rw [(div_mod_of_lt.nat (p - r2) p hlt2).2] at heq; omega
+      · have hlt1 : p - r1 < p := by omega
+        rw [(div_mod_of_lt.nat (p - r1) p hlt1).2] at heq
+        by_cases z2 : r2 = 0
+        · have hs2 : p - r2 = p := by omega
+          rw [hs2, hpp0] at heq; omega
+        · have hlt2 : p - r2 < p := by omega
+          rw [(div_mod_of_lt.nat (p - r2) p hlt2).2] at heq; omega
+    set f_sq : ℕ → ℕ := fun x => (x * x) % p with hf_def
+    set g_sq : ℕ → ℕ := fun y => (p - ((y * y + 2) % p)) % p with hg_def
+    have hg_inj : ∀ a b : ℕ, a < K → b < K → g_sq a = g_sq b → a = b
+      intro a b ha hb heq; rw [hg_def] at heq
+      have h1 := hneg_inj ((a * a + 2) % p) ((b * b + 2) % p) (mod_lt.nat (a * a + 2) p hp_pos) (mod_lt.nat (b * b + 2) p hp_pos) heq
+      have hc2 : ∀ z : ℕ, (((z + 2) % p) + (p - 2)) % p = z % p
+        intro z; rw [add_mod.nat ((z + 2) % p) (p - 2) p, zmod.mod_mod, ← add_mod.nat (z + 2) (p - 2) p]
+        have hs : (z + 2) + (p - 2) = z + p * 1 := by omega
+        rw [hs, add_mul_mod.nat]
+      have h2 : (((a * a + 2) % p) + (p - 2)) % p = (((b * b + 2) % p) + (p - 2)) % p := by rw [h1]
+      rw [hc2 (a * a), hc2 (b * b)] at h2; exact hsq_inj a b ha hb h2
+    have hex_xy : ∃ x < K, ∃ y < K, f_sq x = g_sq y
+      by_contra hno
+      set h_comb : ℕ → ℕ := fun i => if i < K then f_sq i else g_sq (i - K) with hcomb_def
+      have hh_bd : ∀ i < p + 1, h_comb i < p
+        intro i _; rw [hcomb_def]; by_cases hi : i < K
+        · rw [if_pos hi, hf_def]; exact mod_lt.nat (i * i) p hp_pos
+        · rw [if_neg hi, hg_def]; exact mod_lt.nat (p - (((i - K) * (i - K) + 2) % p)) p hp_pos
+      have hh_inj : ∀ i1 < p + 1, ∀ i2 < p + 1, h_comb i1 = h_comb i2 → i1 = i2
+        intro i1 hi1 i2 hi2 heq; rw [hcomb_def] at heq
+        by_cases c1 : i1 < K
+        · rw [if_pos c1] at heq; by_cases c2 : i2 < K
+          · rw [if_pos c2, hf_def] at heq; exact hsq_inj i1 i2 c1 c2 heq
+          · rw [if_neg c2] at heq; exfalso; have hk2 : i2 - K < K := (by omega); exact hno ⟨i1, c1, i2 - K, hk2, heq⟩
+        · rw [if_neg c1] at heq; by_cases c2 : i2 < K
+          · rw [if_pos c2] at heq; exfalso; have hk1 : i1 - K < K := (by omega); exact hno ⟨i2, c2, i1 - K, hk1, heq.symm⟩
+          · rw [if_neg c2] at heq; have he := hg_inj (i1 - K) (i2 - K) (by omega) (by omega) heq; omega
+      exact hpigeon p h_comb hh_bd hh_inj
+    obtain ⟨x0, _, y0, _, hfg⟩ := hex_xy
+    have hxy0_mod : (x0 * x0 + y0 * y0 + 2) % p = 0
+      rw [hf_def, hg_def] at hfg; set r := (y0 * y0 + 2) % p with hr_def
+      have hr_lt : r < p := by rw [hr_def]; exact mod_lt.nat (y0 * y0 + 2) p hp_pos
+      have hsum_eq : (x0 * x0 + y0 * y0 + 2) % p = ((x0 * x0) % p + r) % p
+        have hs : x0 * x0 + y0 * y0 + 2 = x0 * x0 + (y0 * y0 + 2) := by ring
+        rw [hs, add_mod.nat, ← hr_def]
+      rw [hsum_eq, hfg]
+      by_cases hr0 : r = 0
+      · have hpr : p - r = p := by omega
+        rw [hpr, hpp0, hr0]; exact (div_mod_of_lt.nat 0 p hp_pos).2
+      · have hlt_pr : p - r < p := by omega
+        have hpr_sum : (p - r) + r = p := by omega
+        rw [(div_mod_of_lt.nat (p - r) p hlt_pr).2, hpr_sum, hpp0]
+    have hex_uv : ∃ u0 v0 : ℕ, u0 % p ≠ 0 ∧ (u0 * u0 + v0 * v0 + 2) % p = 0
+      by_cases hx_z : x0 % p = 0
+      · have hy_nz : y0 % p ≠ 0
+          intro hy_z; have h0p : 0 % p = 0 := (div_mod_of_lt.nat 0 p hp_pos).2
+          have hsq_z : (x0 * x0 + y0 * y0 + 2) % p = 2 % p
+            rw [add_mod.nat (x0 * x0 + y0 * y0) 2 p, add_mod.nat (x0 * x0) (y0 * y0) p, mul_mod.nat x0 x0 p, mul_mod.nat y0 y0 p, hx_z, hy_z, mul_zero.nat, h0p, add_zero.nat, h0p, zero_add.nat, zmod.mod_mod]
+          rw [hsq_z, (div_mod_of_lt.nat 2 p (by omega)).2] at hxy0_mod; omega
+        have hcomm_xy : y0 * y0 + x0 * x0 + 2 = x0 * x0 + y0 * y0 + 2 := by ring
+        exact ⟨y0, x0, hy_nz, by rw [hcomm_xy]; exact hxy0_mod⟩
+      · exact ⟨x0, y0, hx_z, hxy0_mod⟩
+    obtain ⟨u0, v0, hu0_nz, huv_mod⟩ := hex_uv
+    have h2u_nz : (2 * u0) % p ≠ 0
+      intro hz; have hdvd : p ∣ (2 * u0) := by unfold dvd; exact hz
+      obtain hd2 | hdu := prime.dvd_mul_or p 2 u0 hp_pr hdvd
+      · have hle := le_of_dvd.nat 2 p (by decide) hd2; omega
+      · unfold dvd at hdu; exact hu0_nz hdu
+    have hu_2u : zmod.is_unit p ((2 * u0) % p)
+      apply (zmod.is_unit_iff_no_common_prime p ((2 * u0) % p) hp_pos).mpr
+      intro l hl hlp hlu
+      have hl_eq_p : l = p
+        obtain h1 | h2 := sernau.prime_dvd_cases p l hp (by have := hl.1; omega) hlp
+        · have := hl.1; omega
+        · exact h2
+      rw [hl_eq_p] at hlu
+      have hr_pos : 0 < (2 * u0) % p := by omega
+      have hle := le_of_dvd.nat ((2 * u0) % p) p hr_pos hlu
+      have hlt := mod_lt.nat (2 * u0) p hp_pos; omega
+    obtain ⟨inv_2u, _, hinv_2u⟩ := hu_2u
+    have hhensel : ∀ k : ℕ, ∃ u q : ℕ, u % p = u0 % p ∧ 0 < q ∧ u * u + v0 * v0 + 2 = (p ^ (k + 1)) * q
+      intro k; induction k with r ihr
+      · set q0 := (u0 * u0 + v0 * v0 + 2) / p with hq0_def
+        have hdm0 := div_add_mod.nat (u0 * u0 + v0 * v0 + 2) p; rw [← hq0_def, huv_mod] at hdm0
+        have hq0_pos : 0 < q0 := by by_contra hz; have h0 : q0 = 0 := (by omega); rw [h0] at hdm0; omega
+        have hp1 : p ^ (0 + 1) = p := by rw [zero_add.nat, pow_one.nat]
+        exact ⟨u0, q0, by rfl, hq0_pos, by rw [hp1]; omega⟩
+      · rw [succ_eq_add_one.nat]; obtain ⟨u, q, hu_mod, hq_pos, huq⟩ := ihr
+        set rq := q % p with hrq_def
+        have hrq_lt : rq < p := by rw [hrq_def]; exact mod_lt.nat q p hp_pos
+        set t := ((p - rq) * inv_2u) % p with ht_def
+        set P_r := p ^ (r + 1) with hPr_def
+        set u' := u + t * P_r with hu'_def
+        have hPr_mod : P_r % p = 0
+          rw [hPr_def, pow_succ.nat, mul_mod.nat (p ^ r) p p, hpp0, mul_zero.nat]; exact (div_mod_of_lt.nat 0 p hp_pos).2
+        have hu'_mod : u' % p = u0 % p
+          rw [hu'_def, add_mod.nat, mul_mod.nat t P_r p, hPr_mod, mul_zero.nat, (div_mod_of_lt.nat 0 p hp_pos).2, add_zero.nat, zmod.mod_mod, hu_mod]
+        set S_q := q + 2 * u * t + (t * t) * P_r with hSq_def
+        have h2ut_mod : (2 * u * t) % p = (p - rq) % p
+          have h2u_eq : (2 * u) % p = (2 * u0) % p := by rw [mul_mod.nat 2 u p, hu_mod, ← mul_mod.nat 2 u0 p]
+          rw [mul_mod.nat (2 * u) t p, h2u_eq, ht_def, zmod.mod_mod, ← zmod.mod_mod (2 * u0) p, ← mul_mod.nat ((2 * u0) % p) ((p - rq) * inv_2u) p]
+          have ha : ((2 * u0) % p) * ((p - rq) * inv_2u) = (((2 * u0) % p) * inv_2u) * (p - rq) := by ring
+          rw [ha, mul_mod.nat (((2 * u0) % p) * inv_2u) (p - rq) p, hinv_2u, ← mul_mod.nat 1 (p - rq) p, one_mul.nat]
+        have hSq_mod : S_q % p = 0
+          rw [hSq_def, add_mod.nat (q + 2 * u * t) ((t * t) * P_r) p, mul_mod.nat (t * t) P_r p, hPr_mod, mul_zero.nat, (div_mod_of_lt.nat 0 p hp_pos).2, add_zero.nat, zmod.mod_mod, add_mod.nat q (2 * u * t) p, ← hrq_def, h2ut_mod]
+          by_cases hrq0 : rq = 0
+          · have hpr : p - rq = p := by omega
+            rw [hpr, hpp0, hrq0]; exact (div_mod_of_lt.nat 0 p hp_pos).2
+          · have hlt_pr : p - rq < p := by omega
+            have hsum_p : rq + (p - rq) = p := by omega
+            rw [(div_mod_of_lt.nat (p - rq) p hlt_pr).2, hsum_p, hpp0]
+        set q' := S_q / p with hq'_def
+        have hdm_Sq := div_add_mod.nat S_q p; rw [← hq'_def, hSq_mod] at hdm_Sq
+        have hSq_pos : 0 < S_q := by rw [hSq_def]; omega
+        have hq'_pos : 0 < q' := by by_contra hz; have h0 : q' = 0 := (by omega); rw [h0] at hdm_Sq; omega
+        have hSq_eq : S_q = p * q' := by omega
+        have hexp_u : u' * u' + v0 * v0 + 2 = (u * u + v0 * v0 + 2) + P_r * (2 * u * t + (t * t) * P_r) := by rw [hu'_def]; ring
+        have hp_next : p ^ (r + 1 + 1) = P_r * p := by rw [hPr_def, pow_succ.nat]
+        use u', q'; constructor; exact hu'_mod; constructor; exact hq'_pos
+        rw [hexp_u, huq, hp_next]
+        have hlin : P_r * q + P_r * (2 * u * t + (t * t) * P_r) = P_r * S_q := by rw [hSq_def]; ring
+        rw [hlin, hSq_eq]; ring
+    obtain ⟨u, q, _, hq_pos, huq⟩ := hhensel (M - 1)
+    have hM_eq : (M - 1) + 1 = M := by omega
+    rw [hM_eq] at huq
+    exact ⟨u, v0, 0, 0, q, hq_pos, by have hs : u * u + v0 * v0 + 0 * 0 + 0 * 0 + 2 = u * u + v0 * v0 + 2 := (by ring); rw [hs]; exact huq⟩
+
++ sernau.mvps_inv_int_and_p_pow_approx (p X_card : ℕ) (v_abs : ℂ → ℝ) (F F_inv : (ℕ → ℕ) → ℂ)
+    (hp : is_prime_nat p) (hv : sernau.is_padic_val_on_C p v_abs)
+    (hF0 : F sernau.midx_zero = complex.one)
+    (hF_int : ∀ d : ℕ → ℕ, sernau.is_midx X_card d → v_abs (F d) ≤ 1)
+    (hinv : ∀ d : ℕ → ℕ, sernau.is_midx X_card d → sernau.mvps_mul X_card F F_inv d = sernau.mvps_one X_card d) :
+    (F_inv sernau.midx_zero = complex.one ∧
+     (∀ d : ℕ → ℕ, sernau.is_midx X_card d → v_abs (F_inv d) ≤ 1) ∧
+     (∀ (D_max K q : ℕ), 0 < q → ∀ d : ℕ → ℕ, sernau.is_midx X_card d → sernau.midx_deg X_card d ≤ D_max →
+       v_abs (complex.sub (sernau.mvps_pow X_card F ((p ^ (D_max + K)) * q - 1) d) (F_inv d)) ≤ (padic.abs p p) ^ K))
+  obtain ⟨hcsum_le, _, _⟩ := sernau.padic_val_on_C_helpers p v_abs hp hv
+  have hrh := sernau.mvps_ring_and_deg_helpers 1 X_card; have hzs := sernau.csum_zero_and_single
+  have hz_m : sernau.is_midx X_card sernau.midx_zero := by intro _ _; rfl
+  have hdeg_z_eq : ∀ d : ℕ → ℕ, sernau.is_midx X_card d → sernau.midx_deg X_card d = 0 → d = sernau.midx_zero
+    intro d hd h0; unfold sernau.is_midx at hd; funext x; unfold sernau.midx_zero
+    by_cases hx : x < X_card
+    · have hle_s : ∀ m : ℕ, x < m → d x ≤ ∑ u < m, d u := by intro m; induction m with _ r ihr hlt; omega; (rw [succ_eq_add_one.nat] at hlt ⊢; rw [sum_below_succ]; by_cases hxr : x < r; (have h := ihr hxr; omega); (have he : r = x := by omega; rw [he]; omega))
+      have hdx : d x ≤ 0 := by unfold sernau.midx_deg at h0; rw [← h0]; exact hle_s X_card hx
+      omega
+    · exact hd x (by omega)
+  have hcs1 : ∀ g : ℕ → ℂ, csum 1 g = g 0 := by intro g; change csum (0 + 1) g = g 0; rw [csum.succ, csum.zero, complex.zero_add]
+  have hFinv0 : F_inv sernau.midx_zero = complex.one
+    have hi0 := hinv sernau.midx_zero hz_m
+    unfold sernau.mvps_mul sernau.mvps_one at hi0
+    have hbox0 := sernau.box_at_spec X_card sernau.midx_zero
+    have hcard0 : sernau.box_card X_card sernau.midx_zero = 1
+      have hr : ∀ m : ℕ, sernau.box_card m sernau.midx_zero = 1
+        intro m; induction m with r ihr; rfl
+        rw [succ_eq_add_one.nat]; have hs : sernau.box_card (r + 1) sernau.midx_zero = sernau.box_card r sernau.midx_zero * (sernau.midx_zero r + 1) := (by rfl); have hz : sernau.midx_zero r = 0 := (by rfl); rw [hs, ihr, hz]; omega
+      exact hr X_card
+    have hat0 : sernau.box_at X_card sernau.midx_zero 0 = sernau.midx_zero
+      have h0_lt : 0 < sernau.box_card X_card sernau.midx_zero := by rw [hcard0]; decide
+      have hsp := hbox0.2.1 0 h0_lt
+      funext x; by_cases hx : x < X_card
+      · have hle := hsp.2.1 x hx; unfold sernau.midx_zero at hle ⊢; omega
+      · exact hsp.1 x (by omega)
+    have hsub0 : sernau.midx_sub sernau.midx_zero sernau.midx_zero = sernau.midx_zero := by funext x; unfold sernau.midx_sub sernau.midx_zero; omega
+    have hall0 : ∀ x < X_card, sernau.midx_zero x = 0 := by intro _ _; rfl
+    rw [hcard0, hcs1, hat0, hsub0, hF0, complex.one_mul, if_pos hall0] at hi0; exact hi0
+  have hFinv_deg : ∀ N : ℕ, ∀ d : ℕ → ℕ, sernau.is_midx X_card d → sernau.midx_deg X_card d ≤ N → v_abs (F_inv d) ≤ 1
+    intro N; induction N with d hd hdeg r ihr d hd hdeg
+    · rw [hdeg_z_eq d hd (by omega), hFinv0, hv.2.1]; linarith
+    · rw [succ_eq_add_one.nat] at hdeg
+      by_cases hle_r : sernau.midx_deg X_card d ≤ r; exact ihr d hd hle_r
+      have hnot0 : ¬ (∀ x < X_card, d x = 0)
+        intro hall; apply hle_r; unfold sernau.midx_deg
+        have hz : ∀ m : ℕ, m ≤ X_card → (∑ x < m, d x) = 0 := by intro m; induction m with _ q ihq hqX; rw [sum_below_zero]; (rw [succ_eq_add_one.nat] at hqX ⊢; rw [sum_below_succ, ihq (by omega), hall q (by omega)]; omega)
+        rw [hz X_card (by omega)]; omega
+      have hi_d := hinv d hd; unfold sernau.mvps_one at hi_d; rw [if_neg hnot0] at hi_d
+      unfold sernau.mvps_mul at hi_d; have hbox := sernau.box_at_spec X_card d
+      have hzm_fn : ∀ x : ℕ, X_card ≤ x → sernau.midx_zero x = 0 := (by intro _ _; rfl); have hz_le : ∀ x < X_card, sernau.midx_zero x ≤ d x := by intro _ _; unfold sernau.midx_zero; omega
+      have hz_sp := hbox.2.2 sernau.midx_zero hzm_fn hz_le; set i0 := sernau.box_idx X_card d sernau.midx_zero with hi0_def
+      set G : ℕ → ℂ := fun idx => if idx = i0 then complex.zero else complex.mul (F (sernau.box_at X_card d idx)) (F_inv (sernau.midx_sub d (sernau.box_at X_card d idx))) with hG_def
+      set F0 : ℕ → ℂ := fun idx => if idx = i0 then complex.mul (F (sernau.box_at X_card d idx)) (F_inv (sernau.midx_sub d (sernau.box_at X_card d idx))) else complex.zero with hF0_fn
+      have hsp_sum : csum (sernau.box_card X_card d) (fun idx => complex.mul (F (sernau.box_at X_card d idx)) (F_inv (sernau.midx_sub d (sernau.box_at X_card d idx)))) = complex.add (F_inv d) (csum (sernau.box_card X_card d) G)
+        have hcon : ∀ idx < sernau.box_card X_card d, complex.mul (F (sernau.box_at X_card d idx)) (F_inv (sernau.midx_sub d (sernau.box_at X_card d idx))) = complex.add (F0 idx) (G idx)
+          intro idx _; rw [hF0_fn, hG_def]; by_cases hc : idx = i0; (rw [if_pos hc, if_pos hc, complex.add_zero]); (rw [if_neg hc, if_neg hc, complex.zero_add])
+        have hz_f0 : ∀ idx < sernau.box_card X_card d, idx ≠ i0 → F0 idx = complex.zero := by intro idx _ hne; rw [hF0_fn, if_neg hne]
+        have hi0_eq : i0 = i0 := (by rfl); have hsub_z : sernau.midx_sub d sernau.midx_zero = d := by funext x; unfold sernau.midx_sub sernau.midx_zero; omega
+        rw [csum.congr (sernau.box_card X_card d) _ _ hcon, csum.add, hzs.2 (sernau.box_card X_card d) i0 F0 hz_sp.1 hz_f0, hF0_fn, if_pos hi0_eq, hz_sp.2, hsub_z, hF0, complex.one_mul]
+      rw [hsp_sum] at hi_d
+      have hFinv_neg : F_inv d = complex.neg (csum (sernau.box_card X_card d) G)
+        have hr : complex.re (complex.add (F_inv d) (csum (sernau.box_card X_card d) G)) = complex.re complex.zero := (by rw [hi_d]); have him : complex.im (complex.add (F_inv d) (csum (sernau.box_card X_card d) G)) = complex.im complex.zero := by rw [hi_d]
+        apply complex.ext <;> (simp at hr him ⊢; linarith)
+      rw [hFinv_neg, hv.2.2.2.1]
+      apply hcsum_le (sernau.box_card X_card d) G 1 (by linarith); intro idx hidx; rw [hG_def]
+      by_cases hc : idx = i0; (rw [if_pos hc, hv.1]; linarith)
+      rw [if_neg hc, hv.2.2.2.2.2.1]
+      set a := sernau.box_at X_card d idx with ha_def; set b := sernau.midx_sub d a with hb_def
+      have ha_sp := hbox.2.1 idx hidx; rw [← ha_def] at ha_sp
+      have ha_m : sernau.is_midx X_card a := by unfold sernau.is_midx; exact ha_sp.1
+      have hd0 : ∀ x : ℕ, X_card ≤ x → d x = 0 := by unfold sernau.is_midx at hd; exact hd
+      have hb_m : sernau.is_midx X_card b := by unfold sernau.is_midx; intro x hx; rw [hb_def]; unfold sernau.midx_sub; rw [hd0 x hx, ha_sp.1 x hx]; omega
+      have hab : sernau.midx_add a b = d := by funext x; unfold sernau.midx_add; rw [hb_def]; unfold sernau.midx_sub; by_cases hx : x < X_card; (have hle := ha_sp.2.1 x hx; omega); (rw [ha_sp.1 x (by omega), hd0 x (by omega)]; omega)
+      have hdeg_ab : sernau.midx_deg X_card a + sernau.midx_deg X_card b = sernau.midx_deg X_card d := by rw [← hrh.1 a b, hab]
+      have ha_deg_pos : 0 < sernau.midx_deg X_card a
+        by_contra haz; have ha_z := hdeg_z_eq a ha_m (by omega)
+        apply hc; rw [hi0_def, ← ha_sp.2.2, ha_z]
+      have hb_le_r : sernau.midx_deg X_card b ≤ r := by omega
+      linarith [mul_le_mul_of_nonneg_right.real (v_abs (F a)) 1 (v_abs (F_inv b)) (hF_int a ha_m) (hv.2.2.1 (F_inv b)), ihr b hb_m hb_le_r]
+  have hFinv_int : ∀ d : ℕ → ℕ, sernau.is_midx X_card d → v_abs (F_inv d) ≤ 1 := by intro d hd; exact hFinv_deg (sernau.midx_deg X_card d) d hd (by omega)
+  have hmul_add_r : ∀ (A B1 B2 : (ℕ → ℕ) → ℂ) (d : ℕ → ℕ), sernau.mvps_mul X_card A (sernau.mvps_add B1 B2) d = complex.add (sernau.mvps_mul X_card A B1 d) (sernau.mvps_mul X_card A B2 d)
+    intro A B1 B2 d; unfold sernau.mvps_mul sernau.mvps_add; rw [← csum.add]; apply csum.congr; intro idx _; apply complex.ext <;> simp <;> ring
+  have hpow_add_m : ∀ (A : (ℕ → ℕ) → ℂ) (a b : ℕ) (d : ℕ → ℕ), sernau.is_midx X_card d → sernau.mvps_pow X_card A (a + b) d = sernau.mvps_mul X_card (sernau.mvps_pow X_card A a) (sernau.mvps_pow X_card A b) d
+    intro A a b; induction b with d hd r ihr d hd
+    · rw [add_zero.nat]; have hp0 : sernau.mvps_pow X_card A 0 = sernau.mvps_one X_card := (by rfl); rw [hp0, (hrh.2.2.2.1 _ d hd).2]
+    · rw [succ_eq_add_one.nat, ← add_assoc.nat]
+      have hs1 : sernau.mvps_pow X_card A (a + r + 1) d = sernau.mvps_mul X_card (sernau.mvps_pow X_card A (a + r)) A d := by rfl
+      have hs2 : sernau.mvps_pow X_card A (r + 1) = sernau.mvps_mul X_card (sernau.mvps_pow X_card A r) A := by rfl
+      have hcA : ∀ u : ℕ → ℕ, sernau.is_midx X_card u → sernau.mvps_pow X_card A (a + r) u = sernau.mvps_mul X_card (sernau.mvps_pow X_card A a) (sernau.mvps_pow X_card A r) u := by intro u hu; exact ihr u hu
+      have hcB : ∀ v : ℕ → ℕ, sernau.is_midx X_card v → A v = A v := by intro _ _; rfl
+      rw [hs1, hs2, ← hrh.2.2.2.2.2.1 (sernau.mvps_pow X_card A a) (sernau.mvps_pow X_card A r) A d hd]
+      exact hrh.2.2.2.2.2.2 _ _ A A d hcA hcB hd
+  have hpow_mul_m : ∀ (A : (ℕ → ℕ) → ℂ) (a b : ℕ) (d : ℕ → ℕ), sernau.is_midx X_card d → sernau.mvps_pow X_card (sernau.mvps_pow X_card A a) b d = sernau.mvps_pow X_card A (a * b) d
+    intro A a b; induction b with d hd r ihr d hd
+    · rw [mul_zero.nat]; rfl
+    · rw [succ_eq_add_one.nat]; have hm : a * (r + 1) = a * r + a := by ring
+      have hs : sernau.mvps_pow X_card (sernau.mvps_pow X_card A a) (r + 1) d = sernau.mvps_mul X_card (sernau.mvps_pow X_card (sernau.mvps_pow X_card A a) r) (sernau.mvps_pow X_card A a) d := by rfl
+      have hcA : ∀ u : ℕ → ℕ, sernau.is_midx X_card u → sernau.mvps_pow X_card (sernau.mvps_pow X_card A a) r u = sernau.mvps_pow X_card A (a * r) u := by intro u hu; exact ihr u hu
+      have hcB : ∀ v : ℕ → ℕ, sernau.is_midx X_card v → sernau.mvps_pow X_card A a v = sernau.mvps_pow X_card A a v := by intro _ _; rfl
+      rw [hs, hm, hpow_add_m A (a * r) a d hd]; exact hrh.2.2.2.2.2.2 _ _ _ _ d hcA hcB hd
+  have hbinom_mvps : ∀ (E : (ℕ → ℕ) → ℂ) (n : ℕ) (d : ℕ → ℕ), sernau.is_midx X_card d →
+      sernau.mvps_pow X_card (sernau.mvps_add (sernau.mvps_one X_card) E) n d =
+        csum (n + 1) (fun k => complex.mul (complex.of_real ((choose n k : ℕ) : ℝ)) (sernau.mvps_pow X_card E k d))
+    intro E n; induction n with d hd r ihr d hd
+    · have h01 : 0 + 1 = 1 := (by rfl); rw [h01, hcs1, choose_zero_zero, cast_one.real, complex.of_real_one, complex.one_mul]; rfl
+    · rw [succ_eq_add_one.nat]
+      set S := sernau.mvps_add (sernau.mvps_one X_card) E with hS_def
+      have hs_pow : sernau.mvps_pow X_card S (r + 1) d = complex.add (sernau.mvps_pow X_card S r d) (sernau.mvps_mul X_card (sernau.mvps_pow X_card S r) E d)
+        have hs : sernau.mvps_pow X_card S (r + 1) d = sernau.mvps_mul X_card (sernau.mvps_pow X_card S r) S d := by rfl
+        rw [hs, hS_def, hmul_add_r, (hrh.2.2.2.1 _ d hd).2]
+      have hcA : ∀ u : ℕ → ℕ, sernau.is_midx X_card u → sernau.mvps_pow X_card S r u = (fun v => csum (r + 1) (fun k => complex.mul (complex.of_real ((choose r k : ℕ) : ℝ)) (sernau.mvps_pow X_card E k v))) u := by intro u hu; exact ihr u hu
+      have hcB : ∀ v : ℕ → ℕ, sernau.is_midx X_card v → E v = E v := by intro _ _; rfl
+      have hmul_sum : sernau.mvps_mul X_card (sernau.mvps_pow X_card S r) E d = csum (r + 1) (fun k => complex.mul (complex.of_real ((choose r k : ℕ) : ℝ)) (sernau.mvps_pow X_card E (k + 1) d))
+        rw [hrh.2.2.2.2.2.2 _ _ E E d hcA hcB hd]; unfold sernau.mvps_mul
+        have hcon_i : ∀ idx < sernau.box_card X_card d, complex.mul (csum (r + 1) (fun k => complex.mul (complex.of_real ((choose r k : ℕ) : ℝ)) (sernau.mvps_pow X_card E k (sernau.box_at X_card d idx)))) (E (sernau.midx_sub d (sernau.box_at X_card d idx))) =
+            csum (r + 1) (fun k => complex.mul (complex.of_real ((choose r k : ℕ) : ℝ)) (complex.mul (sernau.mvps_pow X_card E k (sernau.box_at X_card d idx)) (E (sernau.midx_sub d (sernau.box_at X_card d idx)))))
+          intro idx _; rw [← csum.scale_right]; apply csum.congr; intro k _; exact complex.mul_assoc _ _ _
+        rw [csum.congr (sernau.box_card X_card d) _ _ hcon_i, csum.swap]; apply csum.congr; intro k _; rw [csum.scale_left]; unfold sernau.mvps_pow sernau.mvps_mul; trivial
+      have hshift_c : ∀ (M : ℕ) (g : ℕ → ℂ), csum (M + 1) g = complex.add (g 0) (csum M (fun k => g (k + 1)))
+        intro M g; induction M with m ihm; (rw [zero_add.nat, hcs1, csum.zero, complex.add_zero]); (rw [succ_eq_add_one.nat, csum.succ (m + 1), ihm, csum.succ m, complex.add_assoc])
+      rw [hs_pow, ihr d hd, hmul_sum, hshift_c r (fun k => complex.mul (complex.of_real ((choose r k : ℕ) : ℝ)) (sernau.mvps_pow X_card E k d)), csum.succ r (fun k => complex.mul (complex.of_real ((choose r k : ℕ) : ℝ)) (sernau.mvps_pow X_card E (k + 1) d))]
+      rw [csum.succ (r + 1), hshift_c r (fun k => complex.mul (complex.of_real ((choose (r + 1) k : ℕ) : ℝ)) (sernau.mvps_pow X_card E k d))]
+      have hmid_eq : csum r (fun k => complex.add (complex.mul (complex.of_real ((choose r (k + 1) : ℕ) : ℝ)) (sernau.mvps_pow X_card E (k + 1) d)) (complex.mul (complex.of_real ((choose r k : ℕ) : ℝ)) (sernau.mvps_pow X_card E (k + 1) d))) =
+          csum r (fun k => complex.mul (complex.of_real ((choose (r + 1) (k + 1) : ℕ) : ℝ)) (sernau.mvps_pow X_card E (k + 1) d))
+        apply csum.congr; intro k _; rw [choose_succ_succ r k, cast_add.real]; apply complex.ext <;> simp <;> ring
+      rw [choose_zero_right, choose_zero_right, choose_self r, choose_self (r + 1), ← hmid_eq, csum.add]; apply complex.ext <;> simp <;> ring
+  have hp2 : 2 ≤ p := hp.1
+  have h1_nn : (0 : ℝ) ≤ 1 := by linarith
+  have hp_abs_le1 : padic.abs p p ≤ 1
+    have hp1 : p ^ 1 = p := by have e1 : (1 : ℕ) = 0 + 1 := (by rfl); rw [e1, pow_succ.nat, pow_zero.nat]; ring
+    have hp_eq := sernau.padic_abs_prime_pow p 1 hp
+    rw [hp1, cast_one.real] at hp_eq
+    rw [hp_eq]
+    have hr0 : rpow (p : ℝ) 0 = 1 := by unfold rpow; simp [exp_zero]
+    have hle := rpow.mono_exp (p : ℝ) (-1) 0 ((cast_le.real 1 p).mpr (by omega)) (by linarith)
+    rw [hr0] at hle; exact hle
+  have hp_abs_nn : 0 ≤ padic.abs p p := padic.abs_nonneg p p
+  have hcard0_eq : sernau.box_card X_card sernau.midx_zero = 1
+    have hr0 : ∀ m : ℕ, sernau.box_card m sernau.midx_zero = 1 := by intro m; induction m with q ihq; rfl; (rw [succ_eq_add_one.nat]; have hs0 : sernau.box_card (q + 1) sernau.midx_zero = sernau.box_card q sernau.midx_zero * (sernau.midx_zero q + 1) := (by rfl); have hz0 : sernau.midx_zero q = 0 := (by rfl); rw [hs0, ihq, hz0]; omega)
+    exact hr0 X_card
+  have hF_pow_int : ∀ n : ℕ, sernau.mvps_pow X_card F n sernau.midx_zero = complex.one ∧ ∀ d : ℕ → ℕ, sernau.is_midx X_card d → v_abs (sernau.mvps_pow X_card F n d) ≤ 1
+    intro n; induction n with r ihr
+    · constructor
+      · unfold sernau.mvps_pow sernau.mvps_one; have hall0 : ∀ x < X_card, sernau.midx_zero x = 0 := (by intro _ _; rfl); rw [if_pos hall0]
+      · intro d _; unfold sernau.mvps_pow sernau.mvps_one; by_cases hc : ∀ x < X_card, d x = 0; (rw [if_pos hc, hv.2.1]; linarith); (rw [if_neg hc, hv.1]; linarith)
+    · rw [succ_eq_add_one.nat]; constructor
+      · have hs : sernau.mvps_pow X_card F (r + 1) sernau.midx_zero = sernau.mvps_mul X_card (sernau.mvps_pow X_card F r) F sernau.midx_zero := by rfl
+        rw [hs]; unfold sernau.mvps_mul; have hbox0 := sernau.box_at_spec X_card sernau.midx_zero
+        have hat0 : sernau.box_at X_card sernau.midx_zero 0 = sernau.midx_zero
+          have h0_lt : 0 < sernau.box_card X_card sernau.midx_zero := by rw [hcard0_eq]; decide
+          have hsp := hbox0.2.1 0 h0_lt; funext x; by_cases hx : x < X_card; (have hle := hsp.2.1 x hx; unfold sernau.midx_zero at hle ⊢; omega); exact hsp.1 x (by omega)
+        have hsub0 : sernau.midx_sub sernau.midx_zero sernau.midx_zero = sernau.midx_zero := by funext x; unfold sernau.midx_sub sernau.midx_zero; omega
+        rw [hcard0_eq, hcs1, hat0, hsub0, ihr.1, hF0, complex.mul_one]
+      · intro d hd; unfold sernau.mvps_pow sernau.mvps_mul; apply hcsum_le _ _ 1 h1_nn; intro idx hidx; rw [hv.2.2.2.2.2.1]
+        have hb := (sernau.box_at_spec X_card d).2.1 idx hidx; unfold sernau.is_midx at hd
+        have ha_m : sernau.is_midx X_card (sernau.box_at X_card d idx) := by unfold sernau.is_midx; exact hb.1
+        have hc_m : sernau.is_midx X_card (sernau.midx_sub d (sernau.box_at X_card d idx)) := by unfold sernau.is_midx; intro x hx; unfold sernau.midx_sub; rw [hd x hx, hb.1 x hx]; omega
+        linarith [mul_le_mul_of_nonneg_right.real _ 1 (v_abs (F (sernau.midx_sub d (sernau.box_at X_card d idx)))) (ihr.2 _ ha_m) (hv.2.2.1 _), hF_int _ hc_m]
+  set E_fn : ℕ → (ℕ → ℕ) → ℂ := fun m d => complex.sub (sernau.mvps_pow X_card F (p ^ m) d) (sernau.mvps_one X_card d) with hE_def
+  have hE_basic : ∀ m : ℕ, E_fn m sernau.midx_zero = complex.zero ∧ (∀ d : ℕ → ℕ, sernau.is_midx X_card d → v_abs (E_fn m d) ≤ 1) ∧
+      (∀ d : ℕ → ℕ, sernau.is_midx X_card d → E_fn (m + 1) d = complex.add (csum (p - 1) (fun k => complex.mul (complex.of_real ((choose p (k + 1) : ℕ) : ℝ)) (sernau.mvps_pow X_card (E_fn m) (k + 1) d))) (sernau.mvps_pow X_card (E_fn m) p d))
+    intro m; have hm0 : E_fn m sernau.midx_zero = complex.zero
+      rw [hE_def, (hF_pow_int (p ^ m)).1]; unfold sernau.mvps_one; have hall0 : ∀ x < X_card, sernau.midx_zero x = 0 := (by intro _ _; rfl); rw [if_pos hall0, complex.sub_self]
+    have hm_int : ∀ d : ℕ → ℕ, sernau.is_midx X_card d → v_abs (E_fn m d) ≤ 1
+      intro d hd; rw [hE_def]; have hs : complex.sub (sernau.mvps_pow X_card F (p ^ m) d) (sernau.mvps_one X_card d) = complex.add (sernau.mvps_pow X_card F (p ^ m) d) (complex.neg (sernau.mvps_one X_card d)) := by apply complex.ext <;> simp <;> ring
+      rw [hs]; have htri := hv.2.2.2.2.1 (sernau.mvps_pow X_card F (p ^ m) d) (complex.neg (sernau.mvps_one X_card d))
+      rw [hv.2.2.2.1] at htri
+      have hone_le : v_abs (sernau.mvps_one X_card d) ≤ 1 := by unfold sernau.mvps_one; by_cases hc : ∀ x < X_card, d x = 0; (rw [if_pos hc, hv.2.1]; linarith); (rw [if_neg hc, hv.1]; linarith)
+      exact le_trans.real _ _ 1 htri (sernau.max_helpers.1 _ _ 1 ((hF_pow_int (p ^ m)).2 d hd) hone_le)
+    constructor; exact hm0; constructor; exact hm_int
+    intro d hd
+    have hlhs : E_fn (m + 1) d = complex.sub (sernau.mvps_pow X_card F (p ^ (m + 1)) d) (sernau.mvps_one X_card d) := by rw [hE_def]
+    rw [hlhs, pow_succ.nat p m, ← hpow_mul_m F (p ^ m) p d hd]
+    have h1E : sernau.mvps_pow X_card F (p ^ m) = sernau.mvps_add (sernau.mvps_one X_card) (E_fn m)
+      funext u; unfold sernau.mvps_add; rw [hE_def]; apply complex.ext <;> simp <;> ring
+    have hshift_p : ∀ g : ℕ → ℂ, csum (p + 1) g = complex.add (g 0) (complex.add (csum (p - 1) (fun k => g (k + 1))) (g p))
+      intro g; rw [csum.succ p]; have hp_s : p = (p - 1) + 1 := by omega
+      have hsh : ∀ r : ℕ, csum (r + 1) g = complex.add (g 0) (csum r (fun k => g (k + 1)))
+        intro r; induction r with q ihq; (rw [zero_add.nat, hcs1, csum.zero, complex.add_zero]); (rw [succ_eq_add_one.nat, csum.succ (q + 1), ihq, csum.succ q, complex.add_assoc])
+      have hsh_p := hsh (p - 1); rw [← hp_s] at hsh_p; rw [hsh_p, complex.add_assoc]
+    rw [h1E, hbinom_mvps (E_fn m) p d hd, hshift_p, choose_zero_right, choose_self p, cast_one.real, complex.of_real_one, complex.one_mul, complex.one_mul]
+    have hp0 : sernau.mvps_pow X_card (E_fn m) 0 d = sernau.mvps_one X_card d := by rfl
+    rw [hp0]; apply complex.ext <;> simp <;> ring
+  have hE_pow_int : ∀ m k : ℕ, ∀ d : ℕ → ℕ, sernau.is_midx X_card d → v_abs (sernau.mvps_pow X_card (E_fn m) k d) ≤ 1
+    intro m k; induction k with d _ r ihr d hd
+    · unfold sernau.mvps_pow sernau.mvps_one; by_cases hc : ∀ x < X_card, d x = 0; (rw [if_pos hc, hv.2.1]; linarith); (rw [if_neg hc, hv.1]; linarith)
+    · rw [succ_eq_add_one.nat]; unfold sernau.mvps_pow sernau.mvps_mul; apply hcsum_le _ _ 1 h1_nn; intro idx hidx; rw [hv.2.2.2.2.2.1]
+      have hb := (sernau.box_at_spec X_card d).2.1 idx hidx; unfold sernau.is_midx at hd
+      have ha_m : sernau.is_midx X_card (sernau.box_at X_card d idx) := by unfold sernau.is_midx; exact hb.1
+      have hc_m : sernau.is_midx X_card (sernau.midx_sub d (sernau.box_at X_card d idx)) := by unfold sernau.is_midx; intro x hx; unfold sernau.midx_sub; rw [hd x hx, hb.1 x hx]; omega
+      linarith [mul_le_mul_of_nonneg_right.real _ 1 (v_abs (E_fn m (sernau.midx_sub d (sernau.box_at X_card d idx)))) (ihr _ ha_m) (hv.2.2.1 _), (hE_basic m).2.1 _ hc_m]
+  have hchoose_p_bd : ∀ k < p - 1, v_abs (complex.of_real ((choose p (k + 1) : ℕ) : ℝ)) ≤ padic.abs p p
+    intro k hk; rw [hv.2.2.2.2.2.2 (choose p (k + 1))]
+    have hdvd_c := prime.dvd_choose p (k + 1) hp (by omega) (by omega)
+    obtain ⟨qc, hqc⟩ := (dvd.iff_exists p (choose p (k + 1)) (by omega)).mp hdvd_c
+    rw [hqc, padic.abs_mul p p qc hp]
+    have hqc_le1 : padic.abs p qc ≤ 1 := by have hip := sernau.int_padic_abs_props p hp; rw [← hip.1 qc]; exact (hip.2.1 (qc : ℤ)).2
+    linarith [mul_le_mul_of_nonneg_left.real (padic.abs p qc) 1 (padic.abs p p) hqc_le1 hp_abs_nn]
+  have hphase1 : ∀ m : ℕ, ∀ d : ℕ → ℕ, sernau.is_midx X_card d → sernau.midx_deg X_card d ≤ m → v_abs (E_fn m d) ≤ padic.abs p p
+    intro m; induction m with d hd hdeg r ihr d hd hdeg
+    · rw [hdeg_z_eq d hd (by omega), (hE_basic 0).1, hv.1]; exact hp_abs_nn
+    · rw [succ_eq_add_one.nat] at hdeg ⊢; rw [(hE_basic r).2.2 d hd]
+      have hmid : v_abs (csum (p - 1) (fun k => complex.mul (complex.of_real ((choose p (k + 1) : ℕ) : ℝ)) (sernau.mvps_pow X_card (E_fn r) (k + 1) d))) ≤ padic.abs p p
+        apply hcsum_le (p - 1) _ (padic.abs p p) hp_abs_nn; intro k hk; rw [hv.2.2.2.2.2.1]
+        have hm1 := mul_le_mul_of_nonneg_right.real _ (padic.abs p p) (v_abs (sernau.mvps_pow X_card (E_fn r) (k + 1) d)) (hchoose_p_bd k hk) (hv.2.2.1 _)
+        linarith [mul_le_mul_of_nonneg_left.real (v_abs (sernau.mvps_pow X_card (E_fn r) (k + 1) d)) 1 (padic.abs p p) (hE_pow_int r (k + 1) d hd) hp_abs_nn]
+      have htop : v_abs (sernau.mvps_pow X_card (E_fn r) p d) ≤ padic.abs p p
+        have hp_sp : p = (p - 1) + 1 := by omega
+        have hstep_p : sernau.mvps_pow X_card (E_fn r) ((p - 1) + 1) d = sernau.mvps_mul X_card (sernau.mvps_pow X_card (E_fn r) (p - 1)) (E_fn r) d := by rw [← succ_eq_add_one.nat]; rfl
+        rw [← hp_sp] at hstep_p
+        rw [hstep_p]; unfold sernau.mvps_mul; apply hcsum_le _ _ (padic.abs p p) hp_abs_nn; intro idx hidx
+        set a := sernau.box_at X_card d idx with ha_def; set b := sernau.midx_sub d a with hb_def
+        have hbox := sernau.box_at_spec X_card d; have ha_sp := hbox.2.1 idx hidx; rw [← ha_def] at ha_sp
+        have ha_m : sernau.is_midx X_card a := by unfold sernau.is_midx; exact ha_sp.1
+        have hd0 : ∀ x : ℕ, X_card ≤ x → d x = 0 := by unfold sernau.is_midx at hd; exact hd
+        have hb_m : sernau.is_midx X_card b := by unfold sernau.is_midx; intro x hx; rw [hb_def]; unfold sernau.midx_sub; rw [hd0 x hx, ha_sp.1 x hx]; omega
+        have hab : sernau.midx_add a b = d := by funext x; unfold sernau.midx_add; rw [hb_def]; unfold sernau.midx_sub; by_cases hx : x < X_card; (have hle := ha_sp.2.1 x hx; omega); (rw [ha_sp.1 x (by omega), hd0 x (by omega)]; omega)
+        have hdeg_ab : sernau.midx_deg X_card a + sernau.midx_deg X_card b = sernau.midx_deg X_card d := by rw [← hrh.1 a b, hab]
+        by_cases ha_z : sernau.midx_deg X_card a = 0
+        · have ha_lt : sernau.midx_deg X_card a < p - 1 := by omega
+          rw [hrh.2.1 (E_fn r) (p - 1) a (hE_basic r).1 ha_m ha_lt, complex.zero_mul, hv.1]; exact hp_abs_nn
+        · have hb_le_r : sernau.midx_deg X_card b ≤ r := by omega
+          rw [hv.2.2.2.2.2.1]
+          have hm1 := mul_le_mul_of_nonneg_right.real _ 1 (v_abs (E_fn r b)) (hE_pow_int r (p - 1) a ha_m) (hv.2.2.1 _)
+          linarith [ihr b hb_m hb_le_r]
+      have htr := hv.2.2.2.2.1 (csum (p - 1) (fun k => complex.mul (complex.of_real ((choose p (k + 1) : ℕ) : ℝ)) (sernau.mvps_pow X_card (E_fn r) (k + 1) d))) (sernau.mvps_pow X_card (E_fn r) p d)
+      exact le_trans.real _ _ (padic.abs p p) htr (sernau.max_helpers.1 _ _ (padic.abs p p) hmid htop)
+  have hphase2 : ∀ (D_max K : ℕ) (d : ℕ → ℕ), sernau.is_midx X_card d → sernau.midx_deg X_card d ≤ D_max → v_abs (E_fn (D_max + K) d) ≤ (padic.abs p p) ^ (K + 1)
+    intro D_max K; induction K with d hd hdeg r ihr d hd hdeg
+    · rw [add_zero.nat, zero_add.nat, pow_one.real]; exact hphase1 D_max d hd hdeg
+    · rw [succ_eq_add_one.nat, ← add_assoc.nat, (hE_basic (D_max + r)).2.2 d hd]
+      set B_r := (padic.abs p p) ^ (r + 1) with hBr_def
+      have hBr_nn : 0 ≤ B_r := by rw [hBr_def]; exact pow_nonneg.real (padic.abs p p) hp_abs_nn (r + 1)
+      have hBr_le_p : B_r ≤ padic.abs p p
+        rw [hBr_def, pow_succ.real]; have hp_r_le1 : (padic.abs p p) ^ r ≤ 1
+          have hr1 : ∀ u : ℕ, (padic.abs p p) ^ u ≤ 1 := by intro u; induction u with q ihq; (rw [pow_zero.real]; linarith); (rw [succ_eq_add_one.nat, pow_succ.real]; linarith [mul_le_mul_of_nonneg_right.real ((padic.abs p p) ^ q) 1 (padic.abs p p) ihq hp_abs_nn])
+          exact hr1 r
+        linarith [mul_le_mul_of_nonneg_right.real ((padic.abs p p) ^ r) 1 (padic.abs p p) hp_r_le1 hp_abs_nn]
+      have hpow_Br : ∀ (j : ℕ) (u : ℕ → ℕ), sernau.is_midx X_card u → sernau.midx_deg X_card u ≤ D_max → v_abs (sernau.mvps_pow X_card (E_fn (D_max + r)) (j + 1) u) ≤ B_r
+        intro j u hu hu_deg; unfold sernau.mvps_pow sernau.mvps_mul; apply hcsum_le _ _ B_r hBr_nn; intro idx hidx; rw [hv.2.2.2.2.2.1]
+        set a := sernau.box_at X_card u idx with ha_def; set b := sernau.midx_sub u a with hb_def
+        have hbox := sernau.box_at_spec X_card u; have ha_sp := hbox.2.1 idx hidx; rw [← ha_def] at ha_sp
+        have ha_m : sernau.is_midx X_card a := by unfold sernau.is_midx; exact ha_sp.1
+        have hu0 : ∀ x : ℕ, X_card ≤ x → u x = 0 := by unfold sernau.is_midx at hu; exact hu
+        have hb_m : sernau.is_midx X_card b := by unfold sernau.is_midx; intro x hx; rw [hb_def]; unfold sernau.midx_sub; rw [hu0 x hx, ha_sp.1 x hx]; omega
+        have hab : sernau.midx_add a b = u := by funext x; unfold sernau.midx_add; rw [hb_def]; unfold sernau.midx_sub; by_cases hx : x < X_card; (have hle := ha_sp.2.1 x hx; omega); (rw [ha_sp.1 x (by omega), hu0 x (by omega)]; omega)
+        have hdeg_ab : sernau.midx_deg X_card a + sernau.midx_deg X_card b = sernau.midx_deg X_card u := by rw [← hrh.1 a b, hab]
+        have hb_deg : sernau.midx_deg X_card b ≤ D_max := by omega
+        linarith [mul_le_mul_of_nonneg_right.real _ 1 (v_abs (E_fn (D_max + r) b)) (hE_pow_int (D_max + r) j a ha_m) (hv.2.2.1 _), ihr b hb_m hb_deg]
+      have hB_next : padic.abs p p * B_r = (padic.abs p p) ^ (r + 1 + 1) := by rw [hBr_def, pow_succ.real ((padic.abs p p)) (r + 1)]; ring
+      have hBn_nn : 0 ≤ padic.abs p p * B_r := mul_nonneg.real (padic.abs p p) B_r hp_abs_nn hBr_nn
+      have hmid : v_abs (csum (p - 1) (fun k => complex.mul (complex.of_real ((choose p (k + 1) : ℕ) : ℝ)) (sernau.mvps_pow X_card (E_fn (D_max + r)) (k + 1) d))) ≤ padic.abs p p * B_r
+        apply hcsum_le (p - 1) _ (padic.abs p p * B_r) hBn_nn; intro k hk; rw [hv.2.2.2.2.2.1]
+        have hm1 := mul_le_mul_of_nonneg_right.real _ (padic.abs p p) (v_abs (sernau.mvps_pow X_card (E_fn (D_max + r)) (k + 1) d)) (hchoose_p_bd k hk) (hv.2.2.1 _)
+        linarith [mul_le_mul_of_nonneg_left.real (v_abs (sernau.mvps_pow X_card (E_fn (D_max + r)) (k + 1) d)) B_r (padic.abs p p) (hpow_Br k d hd hdeg) hp_abs_nn]
+      have htop : v_abs (sernau.mvps_pow X_card (E_fn (D_max + r)) p d) ≤ padic.abs p p * B_r
+        have hp_sp : p = ((p - 2) + 1) + 1 := by omega
+        have hstep_p : sernau.mvps_pow X_card (E_fn (D_max + r)) (((p - 2) + 1) + 1) d = sernau.mvps_mul X_card (sernau.mvps_pow X_card (E_fn (D_max + r)) ((p - 2) + 1)) (E_fn (D_max + r)) d := by rw [← succ_eq_add_one.nat]; rfl
+        rw [← hp_sp] at hstep_p
+        rw [hstep_p]; unfold sernau.mvps_mul; apply hcsum_le _ _ (padic.abs p p * B_r) hBn_nn; intro idx hidx; rw [hv.2.2.2.2.2.1]
+        set a := sernau.box_at X_card d idx with ha_def; set b := sernau.midx_sub d a with hb_def
+        have hbox := sernau.box_at_spec X_card d; have ha_sp := hbox.2.1 idx hidx; rw [← ha_def] at ha_sp
+        have ha_m : sernau.is_midx X_card a := by unfold sernau.is_midx; exact ha_sp.1
+        have hd0 : ∀ x : ℕ, X_card ≤ x → d x = 0 := by unfold sernau.is_midx at hd; exact hd
+        have hb_m : sernau.is_midx X_card b := by unfold sernau.is_midx; intro x hx; rw [hb_def]; unfold sernau.midx_sub; rw [hd0 x hx, ha_sp.1 x hx]; omega
+        have hab : sernau.midx_add a b = d := by funext x; unfold sernau.midx_add; rw [hb_def]; unfold sernau.midx_sub; by_cases hx : x < X_card; (have hle := ha_sp.2.1 x hx; omega); (rw [ha_sp.1 x (by omega), hd0 x (by omega)]; omega)
+        have hdeg_ab : sernau.midx_deg X_card a + sernau.midx_deg X_card b = sernau.midx_deg X_card d := by rw [← hrh.1 a b, hab]
+        have ha_deg : sernau.midx_deg X_card a ≤ D_max := by omega
+        have hb_deg : sernau.midx_deg X_card b ≤ D_max := by omega
+        have ha_bd : v_abs (sernau.mvps_pow X_card (E_fn (D_max + r)) ((p - 2) + 1) a) ≤ padic.abs p p := le_trans.real _ B_r (padic.abs p p) (hpow_Br (p - 2) a ha_m ha_deg) hBr_le_p
+        have hm1 := mul_le_mul_of_nonneg_right.real _ (padic.abs p p) (v_abs (E_fn (D_max + r) b)) ha_bd (hv.2.2.1 _)
+        linarith [mul_le_mul_of_nonneg_left.real (v_abs (E_fn (D_max + r) b)) B_r (padic.abs p p) (ihr b hb_m hb_deg) hp_abs_nn]
+      have htr := hv.2.2.2.2.1 (csum (p - 1) (fun k => complex.mul (complex.of_real ((choose p (k + 1) : ℕ) : ℝ)) (sernau.mvps_pow X_card (E_fn (D_max + r)) (k + 1) d))) (sernau.mvps_pow X_card (E_fn (D_max + r)) p d)
+      rw [← hB_next]; exact le_trans.real _ _ _ htr (sernau.max_helpers.1 _ _ _ hmid htop)
+  constructor; exact hFinv0; constructor; exact hFinv_int
+  intro D_max K q hq_pos d hd hdeg
+  set M := D_max + K with hM_def; set B_K := (padic.abs p p) ^ K with hBK_def
+  have hBK_nn : 0 ≤ B_K := by rw [hBK_def]; exact pow_nonneg.real (padic.abs p p) hp_abs_nn K
+  have hEM_bd : ∀ u : ℕ → ℕ, sernau.is_midx X_card u → sernau.midx_deg X_card u ≤ D_max → v_abs (E_fn M u) ≤ B_K
+    intro u hu hu_deg; have h2 := hphase2 D_max K u hu hu_deg; rw [← hM_def, pow_succ.real, ← hBK_def] at h2
+    linarith [mul_le_mul_of_nonneg_left.real (padic.abs p p) 1 B_K hp_abs_le1 hBK_nn]
+  have hq_pow_bd : ∀ r : ℕ, ∀ u : ℕ → ℕ, sernau.is_midx X_card u → sernau.midx_deg X_card u ≤ D_max →
+      v_abs (complex.sub (sernau.mvps_pow X_card F ((p ^ M) * r) u) (sernau.mvps_one X_card u)) ≤ B_K
+    intro r; induction r with u hu _ s ihs u hu hu_deg
+    · rw [mul_zero.nat]; have hp0 : sernau.mvps_pow X_card F 0 u = sernau.mvps_one X_card u := (by rfl); rw [hp0, complex.sub_self, hv.1]; exact hBK_nn
+    · rw [succ_eq_add_one.nat]
+      have hm_s : (p ^ M) * (s + 1) = (p ^ M) * s + p ^ M := by ring
+      have h1E : sernau.mvps_pow X_card F (p ^ M) = sernau.mvps_add (sernau.mvps_one X_card) (E_fn M)
+        funext v; unfold sernau.mvps_add; rw [hE_def]; apply complex.ext <;> simp <;> ring
+      rw [hm_s, hpow_add_m F ((p ^ M) * s) (p ^ M) u hu, h1E, hmul_add_r, (hrh.2.2.2.1 _ u hu).2]
+      have hsub_sp : ∀ x y z : ℂ, complex.sub (complex.add x y) z = complex.add (complex.sub x z) y := by intro x y z; apply complex.ext <;> simp <;> ring
+      rw [hsub_sp]
+      have hprod_bd : v_abs (sernau.mvps_mul X_card (sernau.mvps_pow X_card F ((p ^ M) * s)) (E_fn M) u) ≤ B_K
+        unfold sernau.mvps_mul; apply hcsum_le _ _ B_K hBK_nn; intro idx hidx; rw [hv.2.2.2.2.2.1]
+        set a := sernau.box_at X_card u idx with ha_def; set b := sernau.midx_sub u a with hb_def
+        have hbox := sernau.box_at_spec X_card u; have ha_sp := hbox.2.1 idx hidx; rw [← ha_def] at ha_sp
+        have ha_m : sernau.is_midx X_card a := by unfold sernau.is_midx; exact ha_sp.1
+        have hu0 : ∀ x : ℕ, X_card ≤ x → u x = 0 := by unfold sernau.is_midx at hu; exact hu
+        have hb_m : sernau.is_midx X_card b := by unfold sernau.is_midx; intro x hx; rw [hb_def]; unfold sernau.midx_sub; rw [hu0 x hx, ha_sp.1 x hx]; omega
+        have hab : sernau.midx_add a b = u := by funext x; unfold sernau.midx_add; rw [hb_def]; unfold sernau.midx_sub; by_cases hx : x < X_card; (have hle := ha_sp.2.1 x hx; omega); (rw [ha_sp.1 x (by omega), hu0 x (by omega)]; omega)
+        have hdeg_ab : sernau.midx_deg X_card a + sernau.midx_deg X_card b = sernau.midx_deg X_card u := by rw [← hrh.1 a b, hab]
+        linarith [mul_le_mul_of_nonneg_right.real _ 1 (v_abs (E_fn M b)) ((hF_pow_int ((p ^ M) * s)).2 a ha_m) (hv.2.2.1 _), hEM_bd b hb_m (by omega)]
+      have htr := hv.2.2.2.2.1 (complex.sub (sernau.mvps_pow X_card F ((p ^ M) * s) u) (sernau.mvps_one X_card u)) (sernau.mvps_mul X_card (sernau.mvps_pow X_card F ((p ^ M) * s)) (E_fn M) u)
+      exact le_trans.real _ _ B_K htr (sernau.max_helpers.1 _ _ B_K (ihs u hu hu_deg) hprod_bd)
+  set N_tot := (p ^ M) * q with hN_def; have hpM_pos : 0 < p ^ M := pow_pos.nat p M (by omega)
+  have hN_pos : 1 ≤ N_tot := by rw [hN_def]; linarith [mul_pos.nat (p ^ M) q hpM_pos hq_pos]
+  have hN_sp : N_tot = (N_tot - 1) + 1 := by omega
+  set R_err : (ℕ → ℕ) → ℂ := fun u => complex.sub (sernau.mvps_pow X_card F N_tot u) (sernau.mvps_one X_card u) with hR_def
+  have hpow_pred : sernau.mvps_mul X_card F_inv (sernau.mvps_pow X_card F N_tot) d = sernau.mvps_pow X_card F (N_tot - 1) d
+    have hc_sp : ∀ u : ℕ → ℕ, sernau.is_midx X_card u → sernau.mvps_pow X_card F N_tot u = sernau.mvps_mul X_card F (sernau.mvps_pow X_card F (N_tot - 1)) u
+      intro u hu
+      have hs1 : sernau.mvps_pow X_card F ((N_tot - 1) + 1) u = sernau.mvps_mul X_card (sernau.mvps_pow X_card F (N_tot - 1)) F u := by rw [← succ_eq_add_one.nat]; rfl
+      rw [← hN_sp] at hs1; rw [hs1]; exact hrh.2.2.2.2.1 _ F u hu
+    have hc_id : ∀ u : ℕ → ℕ, sernau.is_midx X_card u → F_inv u = F_inv u := by intro _ _; rfl
+    have hc_inv : ∀ u : ℕ → ℕ, sernau.is_midx X_card u → sernau.mvps_mul X_card F_inv F u = sernau.mvps_one X_card u := by intro u hu; rw [hrh.2.2.2.2.1 F_inv F u hu]; exact hinv u hu
+    have hc_id2 : ∀ v : ℕ → ℕ, sernau.is_midx X_card v → sernau.mvps_pow X_card F (N_tot - 1) v = sernau.mvps_pow X_card F (N_tot - 1) v := by intro _ _; rfl
+    rw [hrh.2.2.2.2.2.2 F_inv F_inv _ _ d hc_id hc_sp hd, ← hrh.2.2.2.2.2.1 F_inv F _ d hd, hrh.2.2.2.2.2.2 _ (sernau.mvps_one X_card) _ _ d hc_inv hc_id2 hd, (hrh.2.2.2.1 _ d hd).1]
+  have hdiff_eq : complex.sub (sernau.mvps_pow X_card F (N_tot - 1) d) (F_inv d) = sernau.mvps_mul X_card F_inv R_err d
+    have h1R : sernau.mvps_pow X_card F N_tot = sernau.mvps_add (sernau.mvps_one X_card) R_err := by funext u; unfold sernau.mvps_add; rw [hR_def]; apply complex.ext <;> simp <;> ring
+    rw [← hpow_pred, h1R, hmul_add_r, (hrh.2.2.2.1 F_inv d hd).2]; apply complex.ext <;> simp <;> ring
+  rw [hdiff_eq]; unfold sernau.mvps_mul; apply hcsum_le _ _ B_K hBK_nn; intro idx hidx; rw [hv.2.2.2.2.2.1]
+  set a := sernau.box_at X_card d idx with ha_def; set b := sernau.midx_sub d a with hb_def
+  have hbox := sernau.box_at_spec X_card d; have ha_sp := hbox.2.1 idx hidx; rw [← ha_def] at ha_sp
+  have ha_m : sernau.is_midx X_card a := by unfold sernau.is_midx; exact ha_sp.1
+  have hd0 : ∀ x : ℕ, X_card ≤ x → d x = 0 := by unfold sernau.is_midx at hd; exact hd
+  have hb_m : sernau.is_midx X_card b := by unfold sernau.is_midx; intro x hx; rw [hb_def]; unfold sernau.midx_sub; rw [hd0 x hx, ha_sp.1 x hx]; omega
+  have hab : sernau.midx_add a b = d := by funext x; unfold sernau.midx_add; rw [hb_def]; unfold sernau.midx_sub; by_cases hx : x < X_card; (have hle := ha_sp.2.1 x hx; omega); (rw [ha_sp.1 x (by omega), hd0 x (by omega)]; omega)
+  have hdeg_ab : sernau.midx_deg X_card a + sernau.midx_deg X_card b = sernau.midx_deg X_card d := by rw [← hrh.1 a b, hab]
+  have hb_R : v_abs (R_err b) ≤ B_K := by rw [hR_def, hN_def]; exact hq_pow_bd q b hb_m (by omega)
+  linarith [mul_le_mul_of_nonneg_right.real _ 1 (v_abs (R_err b)) (hFinv_int a ha_m) (hv.2.2.1 _)]
+

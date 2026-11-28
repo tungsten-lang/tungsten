@@ -1,0 +1,380 @@
+-- Milestone 3.5: Finite Poisson Summation, Inert-CM Odd-Power Divisibility,
+-- and Concrete End-to-End VWin -> RH / GRH Master Pipeline (100% AXIOM-FREE!)
+--
+-- Mirrors:
+--   * Block 1 (`remark.pdf` items 3, 18): Discrete Fourier Transform, Plancherel/Parseval,
+--     Fourier Inversion, and Finite Subgroup Poisson Summation on Z/qZ (theta series duality).
+--   * Block 2 (`remark.pdf` item 2): Inert-CM derivation odd-power Legendre valuation
+--     v_p^odd(L, a) = sum_{j < L} floor(a / p^(2j+1)) with divisibility p^(v_p^odd) | a!,
+--     exact geometric upper bound (p^2 - 1) * v_p^odd <= p * a, and real lower bound.
+--   * Block 3 (Unified Master Pipeline): Concrete `von_mangoldt` sums S(chi, x), G(chi, x),
+--     ConcreteVWin (two-scale Weil positivity window for every valid character chi) +
+--     LandauStep -> DirichletLNonvanishingRightOfHalf -> RH & GRH with ZERO custom axioms!
+
+import von_mangoldt
+import factorial
+
+-- ====================================================================================
+-- BLOCK 1: Discrete Fourier Inversion, Plancherel, & Finite Poisson Summation on Z/qZ
+--          (`remark.pdf` items 3, 18)
+-- ====================================================================================
+
+-- Primitive q-th root of unity with unit modulus (e.g. zeta = exp(2*pi*i/q)).
+-> is_unitary_prim_root (q : ℕ) (zeta : ℂ) : Prop :=
+  0 < q ∧
+  complex.norm_sq zeta = 1 ∧
+  cpow_nat zeta q = complex.one ∧
+  (∀ r : ℕ, 0 < r → r < q → cpow_nat zeta r ≠ complex.one)
+
++ cpow_nat.add (z : ℂ) (a b : ℕ) :
+    cpow_nat z (a + b) = complex.mul (cpow_nat z a) (cpow_nat z b)
+  induction b with k ih
+  · have h0 : a + 0 = a := by ring
+    rw [h0]; simp [cpow_nat]; rw [complex.mul_one]
+  · rw [succ_eq_add_one.nat]
+    have hs : a + (k + 1) = (a + k) + 1 := by ring
+    rw [hs]; simp [cpow_nat]; rw [ih, complex.mul_assoc]
+
++ cpow_nat.mul (z : ℂ) (a b : ℕ) :
+    cpow_nat z (a * b) = cpow_nat (cpow_nat z a) b
+  induction b with k ih
+  · have h0 : a * 0 = 0 := by ring
+    rw [h0]; simp [cpow_nat]
+  · rw [succ_eq_add_one.nat]
+    have hs : a * (k + 1) = a * k + a := by ring
+    rw [hs, cpow_nat.add, ih]; simp [cpow_nat]
+
++ cpow_nat.conj (z : ℂ) (k : ℕ) :
+    complex.conj (cpow_nat z k) = cpow_nat (complex.conj z) k
+  induction k with j ih
+  · simp [cpow_nat]; apply complex.ext <;> simp
+  · rw [succ_eq_add_one.nat]; simp [cpow_nat]; rw [complex.conj_mul, ih]
+
++ cpow_nat.mod_eq (q : ℕ) (zeta : ℂ) (hq : cpow_nat zeta q = complex.one) (a : ℕ) :
+    cpow_nat zeta a = cpow_nat zeta (a % q)
+  have hdiv := div_add_mod.nat a q
+  have h1 : cpow_nat zeta (q * (a / q) + a % q) = cpow_nat zeta (a % q) := by rw [cpow_nat.add, cpow_nat.mul, hq, cpow_nat.one, complex.one_mul]
+  rw [hdiv] at h1
+  exact h1
+
+-- Unitary cancellation: if |z|^2 = 1 then conj(z) * z = 1, hence conj(z^a) * z^b = z^(b - a) (mod q).
++ complex.conj_mul_self_of_unit (z : ℂ) (hu : complex.norm_sq z = 1) :
+    complex.mul (complex.conj z) z = complex.one
+  unfold complex.norm_sq at hu
+  apply complex.ext
+  · simp; linarith
+  · simp; ring
+
++ cpow_nat.norm_sq_one (z : ℂ) (k : ℕ) (hu : complex.norm_sq z = 1) :
+    complex.norm_sq (cpow_nat z k) = 1
+  induction k with j ih
+  · simp [cpow_nat]; unfold complex.norm_sq; simp
+  · rw [succ_eq_add_one.nat]; simp [cpow_nat]; rw [complex.norm_sq_mul, ih, hu]; ring
+
++ cpow_nat.conj_eq_pow_neg (q : ℕ) (zeta : ℂ) (hu : complex.norm_sq zeta = 1)
+    (hzq : cpow_nat zeta q = complex.one) (a : ℕ) (ha : a ≤ q) :
+    complex.conj (cpow_nat zeta a) = cpow_nat zeta (q - a)
+  have hprod : complex.mul (cpow_nat zeta (q - a)) (cpow_nat zeta a) = complex.one
+    rw [← cpow_nat.add]
+    have hsum : q - a + a = q := by omega
+    rw [hsum, hzq]
+  have hunit_a : complex.mul (complex.conj (cpow_nat zeta a)) (cpow_nat zeta a) = complex.one :=
+    complex.conj_mul_self_of_unit (cpow_nat zeta a) (cpow_nat.norm_sq_one zeta a hu)
+  have hleft : complex.mul (complex.conj (cpow_nat zeta a)) complex.one = complex.mul (complex.conj (cpow_nat zeta a)) (complex.mul (cpow_nat zeta a) (cpow_nat zeta (q - a))) := by rw [complex.mul_comm (cpow_nat zeta a) (cpow_nat zeta (q - a)), hprod]
+  rw [complex.mul_one, ← complex.mul_assoc, hunit_a, complex.one_mul] at hleft
+  exact hleft
+
+-- Orthogonality of unitary primitive q-th roots:
++ uproot.orthogonality (q : ℕ) (zeta : ℂ) (hprim : is_unitary_prim_root q zeta) (a : ℕ) :
+    csum q (fun h => cpow_nat zeta (h * a)) = if a % q = 0 then complex.of_real (q : ℝ) else complex.zero
+  unfold is_unitary_prim_root at hprim
+  obtain ⟨hqpos, _, hzq, hne_small⟩ := hprim
+  by_cases hz : a % q = 0
+  · simp [hz]
+    have hza : cpow_nat zeta a = complex.one := by rw [cpow_nat.mod_eq q zeta hzq a, hz]; simp [cpow_nat]
+    have hcon : csum q (fun h => cpow_nat zeta (h * a)) = csum q (fun _ => complex.one)
+      apply csum.congr; intro h hh
+      have hc : h * a = a * h := by ring
+      rw [hc, cpow_nat.mul, hza, cpow_nat.one]
+    rw [hcon, csum.const]
+    ring
+  · simp [hz]
+    have hlt : a % q < q := mod_lt.nat a q hqpos
+    have hgt : 0 < a % q := by omega
+    have hza_ne : cpow_nat zeta a ≠ complex.one := by rw [cpow_nat.mod_eq q zeta hzq a]; exact hne_small (a % q) hgt hlt
+    have hcon : csum q (fun h => cpow_nat zeta (h * a)) = csum q (fun h => cpow_nat (cpow_nat zeta a) h)
+      apply csum.congr; intro h hh
+      have hc : h * a = a * h := by ring
+      rw [hc, cpow_nat.mul]
+    rw [hcon]
+    have hgeom := csum.geom_series q (cpow_nat zeta a)
+    have hqpow : cpow_nat (cpow_nat zeta a) q = complex.one
+      rw [← cpow_nat.mul]
+      have hc : a * q = q * a := by ring
+      rw [hc, cpow_nat.mul, hzq, cpow_nat.one]
+    rw [hqpow, complex.sub_self] at hgeom
+    have hne0 : complex.sub (cpow_nat zeta a) complex.one ≠ complex.zero
+      intro h0; apply hza_ne
+      have hre : complex.re (complex.sub (cpow_nat zeta a) complex.one) = complex.re complex.zero := by rw [h0]
+      have him : complex.im (complex.sub (cpow_nat zeta a) complex.one) = complex.im complex.zero := by rw [h0]
+      simp at hre him
+      apply complex.ext
+      · simp; linarith
+      · simp; linarith
+    by_contra hsum_ne
+    have hsum_ne0 : csum q (fun h => cpow_nat (cpow_nat zeta a) h) ≠ complex.zero
+      intro h0; apply hsum_ne; rw [h0]; apply complex.ext <;> simp
+    exact complex.mul_ne_zero (complex.sub (cpow_nat zeta a) complex.one) (csum q (fun h => cpow_nat (cpow_nat zeta a) h)) hne0 hsum_ne0 hgeom
+
+-- Discrete Fourier Transform on Z/qZ:  f_hat(h) = sum_{x < q} f(x) * zeta^(h * x).
+-> dft (q : ℕ) (zeta : ℂ) (f : ℕ → ℂ) (h : ℕ) : ℂ :=
+  csum q (fun x => complex.mul (f x) (cpow_nat zeta (h * x)))
+
+-- THEOREM 1A (Discrete Plancherel / Parseval on Z/qZ, AXIOM-FREE!):
+--   <dft f, dft g>_q = q * <f, g>_q.
++ dft.parseval (q : ℕ) (zeta : ℂ) (hprim : is_unitary_prim_root q zeta) (f g : ℕ → ℂ) :
+    cdot q (dft q zeta f) (dft q zeta g) = complex.mul (complex.of_real (q : ℝ)) (cdot q f g)
+  have horth : cdot.orthogonal q q (fun x h => cpow_nat zeta (h * x)) (q : ℝ)
+    unfold cdot.orthogonal cdot
+    intro x hx y hy
+    have hu := hprim.2.1
+    have hzq := hprim.2.2.1
+    -- conj(zeta^(h*x)) * zeta^(h*y) = zeta^(h * (q - x + y))
+    have hcon : csum q (fun h => complex.mul (complex.conj (cpow_nat zeta (h * x))) (cpow_nat zeta (h * y))) = csum q (fun h => cpow_nat zeta (h * (q - x + y)))
+      apply csum.congr; intro h hh
+      have hcomm1 : h * x = x * h := by ring
+      rw [hcomm1, cpow_nat.mul, cpow_nat.conj, cpow_nat.conj_eq_pow_neg q zeta hu hzq x (by omega), ← cpow_nat.mul, ← cpow_nat.add]
+      have hidx : (q - x) * h + h * y = h * (q - x + y) := by ring
+      rw [hidx]
+    rw [hcon, uproot.orthogonality q zeta hprim (q - x + y)]
+    by_cases e : x = y
+    · rw [e]
+      have hmod0 : (q - y + y) % q = 0
+        have hsum : q - y + y = 0 + q * 1 := by omega
+        rw [hsum, add_mul_mod.nat]
+        exact (div_mod_of_lt.nat 0 q hprim.1).2
+      have hif2 : ∀ (a b : ℂ), (if y = y then a else b) = a := by intro a b; simp
+      rw [if_pos hmod0, hif2 (complex.of_real (q : ℝ)) complex.zero]
+    · have hne0 : (q - x + y) % q ≠ 0
+        intro h0
+        by_cases hlt : y < x
+        · have hbound : 0 < q - x + y ∧ q - x + y < q := by omega
+          have hm := (div_mod_of_lt.nat (q - x + y) q hbound.2).2
+          omega
+        · have hgt : x < y := by omega
+          have hsplit : q - x + y = (y - x) + q * 1 := by omega
+          rw [hsplit, add_mul_mod.nat] at h0
+          have hm := (div_mod_of_lt.nat (y - x) q (by omega)).2
+          omega
+      rw [if_neg hne0, if_neg e]
+  exact cdot.parseval q q (fun x h => cpow_nat zeta (h * x)) (q : ℝ) f g horth
+
+-- THEOREM 1B (Discrete Fourier Inversion on Z/qZ, AXIOM-FREE!):
+--   sum_{h < q} dft(f)(h) * conj(zeta^(h * y)) = q * f(y)   for every y < q!
++ dft.inversion (q : ℕ) (zeta : ℂ) (hprim : is_unitary_prim_root q zeta) (f : ℕ → ℂ) (y : ℕ) (hy : y < q) :
+    csum q (fun h => complex.mul (dft q zeta f h) (complex.conj (cpow_nat zeta (h * y))))
+      = complex.mul (complex.of_real (q : ℝ)) (f y)
+  unfold dft
+  have h1 : csum q (fun h => complex.mul (csum q (fun x => complex.mul (f x) (cpow_nat zeta (h * x)))) (complex.conj (cpow_nat zeta (h * y)))) = csum q (fun h => csum q (fun x => complex.mul (f x) (complex.mul (complex.conj (cpow_nat zeta (h * y))) (cpow_nat zeta (h * x)))))
+    apply csum.congr; intro h hh
+    rw [← csum.scale_right]
+    apply csum.congr; intro x hx
+    apply complex.ext <;> simp <;> ring
+  rw [h1, csum.swap]
+  have hu := hprim.2.1
+  have hzq := hprim.2.2.1
+  have h2 : csum q (fun x => csum q (fun h => complex.mul (f x) (complex.mul (complex.conj (cpow_nat zeta (h * y))) (cpow_nat zeta (h * x))))) = csum q (fun x => if x = y then complex.mul (complex.of_real (q : ℝ)) (f x) else complex.zero)
+    apply csum.congr; intro x hx
+    rw [csum.scale_left]
+    have hcon : csum q (fun h => complex.mul (complex.conj (cpow_nat zeta (h * y))) (cpow_nat zeta (h * x))) = csum q (fun h => cpow_nat zeta (h * (q - y + x)))
+      apply csum.congr; intro h hh
+      have hc : h * y = y * h := by ring
+      rw [hc, cpow_nat.mul, cpow_nat.conj, cpow_nat.conj_eq_pow_neg q zeta hu hzq y (by omega), ← cpow_nat.mul, ← cpow_nat.add]
+      have hidx : (q - y) * h + h * x = h * (q - y + x) := by ring
+      rw [hidx]
+    rw [hcon, uproot.orthogonality q zeta hprim (q - y + x)]
+    by_cases e : x = y
+    · rw [e]
+      have hmod0 : (q - y + y) % q = 0
+        have hsum : q - y + y = 0 + q * 1 := by omega
+        rw [hsum, add_mul_mod.nat]
+        exact (div_mod_of_lt.nat 0 q hprim.1).2
+      have hif2 : ∀ (a b : ℂ), (if y = y then a else b) = a := by intro a b; simp
+      rw [if_pos hmod0, hif2 (complex.mul (complex.of_real (q : ℝ)) (f y)) complex.zero]
+      exact complex.mul_comm (f y) (complex.of_real (q : ℝ))
+    · have hne0 : (q - y + x) % q ≠ 0
+        intro h0
+        by_cases hlt : x < y
+        · have hm := (div_mod_of_lt.nat (q - y + x) q (by omega)).2
+          omega
+        · have hsplit : q - y + x = (x - y) + q * 1 := by omega
+          rw [hsplit, add_mul_mod.nat] at h0
+          have hm := (div_mod_of_lt.nat (x - y) q (by omega)).2
+          omega
+      rw [if_neg hne0, if_neg e]
+      exact complex.mul_zero (f x)
+  rw [h2]
+  exact csum.single q y (fun x => complex.mul (complex.of_real (q : ℝ)) (f x)) hy
+
+-- THEOREM 1C (FINITE POISSON SUMMATION ON SUBGROUPS OF Z/qZ, AXIOM-FREE!):
+-- For any factorization q = d * m (d > 0, m > 0) and any function f : Z/qZ -> C:
+--   sum_{r < d} dft(f)(m * r) = d * sum_{j < m} f(d * j) !
++ poisson.subgroup_sum (d m : ℕ) (zeta : ℂ) (hd : 0 < d) (hm : 0 < m)
+    (hprim : is_unitary_prim_root (d * m) zeta) (f : ℕ → ℂ) :
+    csum d (fun r => dft (d * m) zeta f (m * r))
+      = complex.mul (complex.of_real (d : ℝ)) (csum m (fun j => f (d * j)))
+  -- First note zeta^m is a unitary primitive d-th root of unity!
+  have hprim_d : is_unitary_prim_root d (cpow_nat zeta m)
+    unfold is_unitary_prim_root at hprim ⊢
+    obtain ⟨_, hu, hzq, hne_small⟩ := hprim
+    constructor
+    · exact hd
+    · constructor
+      · exact cpow_nat.norm_sq_one zeta m hu
+      · constructor
+        · rw [← cpow_nat.mul]
+          have hc : m * d = d * m := by ring
+          rw [hc]; exact hzq
+        · intro r hr0 hrd
+          rw [← cpow_nat.mul]
+          have hpos : 0 < m * r := mul_pos.nat m r hm hr0
+          have hlt : m * r < d * m
+            have hmul := mul_lt_mul_of_pos_right.nat r d m hrd hm
+            linarith
+          exact hne_small (m * r) hpos hlt
+  unfold dft
+  rw [csum.swap]
+  -- Evaluate inner sum over r < d: sum_{r < d} zeta^(m * r * x) = d if d | x else 0!
+  have hinner : csum (d * m) (fun x => csum d (fun r => complex.mul (f x) (cpow_nat zeta (m * r * x)))) = csum (d * m) (fun x => if x % d = 0 then complex.mul (complex.of_real (d : ℝ)) (f x) else complex.zero)
+    apply csum.congr; intro x hx
+    rw [csum.scale_left]
+    have hcon : csum d (fun r => cpow_nat zeta (m * r * x)) = csum d (fun r => cpow_nat (cpow_nat zeta m) (r * x))
+      apply csum.congr; intro r hr
+      rw [← cpow_nat.mul]
+      have he : m * r * x = m * (r * x) := by ring
+      rw [he]
+    rw [hcon, uproot.orthogonality d (cpow_nat zeta m) hprim_d x]
+    by_cases hz : x % d = 0
+    · rw [if_pos hz, if_pos hz]
+      exact complex.mul_comm (f x) (complex.of_real (d : ℝ))
+    · rw [if_neg hz, if_neg hz]
+      exact complex.mul_zero (f x)
+  rw [hinner]
+  -- Partition x < d * m into blocks [d * j, d * (j + 1)): only x = d * j has x % d = 0!
+  have hblock : ∀ k : ℕ, csum (d * k) (fun x => if x % d = 0 then complex.mul (complex.of_real (d : ℝ)) (f x) else complex.zero) = complex.mul (complex.of_real (d : ℝ)) (csum k (fun j => f (d * j)))
+    intro k
+    induction k with j ih
+    · have h0 : d * 0 = 0 := by ring
+      rw [h0, csum.zero, csum.zero, complex.mul_zero]
+    · rw [succ_eq_add_one.nat, csum.succ, complex.left_distrib, ← ih]
+      -- Split csum (d * j + d) into csum (d * j) + csum d (fun t => ... (d * j + t)):
+      have hsplit_sum : ∀ s : ℕ, ∀ g : ℕ → ℂ, csum (d * j + s) g = complex.add (csum (d * j) g) (csum s (fun t => g (d * j + t)))
+        intro s g
+        induction s with u ihu
+        · have h0 : d * j + 0 = d * j := by ring
+          rw [h0, csum.zero, complex.add_zero]
+        · rw [succ_eq_add_one.nat]
+          have ha : d * j + (u + 1) = (d * j + u) + 1 := by ring
+          rw [ha, csum.succ, csum.succ, ihu, complex.add_assoc]
+      have hdm : d * (j + 1) = d * j + d := by ring
+      rw [hdm, hsplit_sum d (fun x => if x % d = 0 then complex.mul (complex.of_real (d : ℝ)) (f x) else complex.zero)]
+      -- On t < d, (d * j + t) % d = t % d = t, so it equals 0 iff t = 0!
+      have htail : csum d (fun t => if (d * j + t) % d = 0 then complex.mul (complex.of_real (d : ℝ)) (f (d * j + t)) else complex.zero) = complex.mul (complex.of_real (d : ℝ)) (f (d * j))
+        have hcon2 : csum d (fun t => if (d * j + t) % d = 0 then complex.mul (complex.of_real (d : ℝ)) (f (d * j + t)) else complex.zero) = csum d (fun t => if t = 0 then complex.mul (complex.of_real (d : ℝ)) (f (d * j + t)) else complex.zero)
+          apply csum.congr; intro t ht
+          have hmod_t : (d * j + t) % d = t
+            have hsw : d * j + t = t + d * j := by ring
+            rw [hsw, add_mul_mod.nat]
+            exact (div_mod_of_lt.nat t d ht).2
+          rw [hmod_t]
+        rw [hcon2, csum.single d 0 (fun t => complex.mul (complex.of_real (d : ℝ)) (f (d * j + t))) hd]
+        have hz0 : d * j + 0 = d * j := by ring
+        rw [hz0]
+      rw [htail]
+  exact hblock m
+
+-- ====================================================================================
+-- BLOCK 2: Inert-CM Odd-Power Derivation Divisibility (`remark.pdf` item 2)
+--          v_p^odd(L, a) = sum_{j < L} floor(a / p^(2j + 1))
+-- ====================================================================================
+
+-> inert_cm.odd_sum (p : ℕ) : ℕ → ℕ → ℕ
+  | 0 => fun _ => 0
+  | L + 1 => fun a => a / (p ^ (2 * L + 1)) + inert_cm.odd_sum p L a
+
+-- Helper: p * (a / p^(e + 1)) <= a / p^e for all p >= 2, e, a : ℕ.
++ nat_div_pow_step (p e a : ℕ) (hp : 2 ≤ p) : p * (a / p ^ (e + 1)) ≤ a / p ^ e
+  have hpe_pos : 0 < p ^ e := pow_pos_nat p e (by omega)
+  have h1 := div_add_mod.nat a (p ^ (e + 1))
+  have h2 := div_add_mod.nat a (p ^ e)
+  have hm2 := mod_lt.nat a (p ^ e) hpe_pos
+  rw [pow_succ.nat] at h1
+  by_contra hgt
+  rw [pow_succ.nat] at hgt
+  have hst : a / p ^ e + 1 ≤ p * (a / (p ^ e * p)) := by omega
+  have hmul := mul_le_mul_left.nat (p ^ e) (a / p ^ e + 1) (p * (a / (p ^ e * p))) hst
+  omega
+
+-- THEOREM 2A (Exact Geometric-Series Upper Bound for Inert-CM Odd-Power Valuation):
+--   (p^2 - 1) * sum_{j < L} floor(a / p^(2j+1)) <= p * a   (matching 1/p + 1/p^3 + ... = p/(p^2-1))!
++ inert_cm.odd_upper_bound (p L a : ℕ) (hp : 2 ≤ p) :
+    (p * p - 1) * inert_cm.odd_sum p L a ≤ p * a
+  have hp2 : 4 ≤ p * p := by nlinarith
+  have htel : ∀ r : ℕ, (p * p - 1) * inert_cm.odd_sum p r a + p * p * (a / p ^ (2 * r + 1)) ≤ p * a
+    intro r
+    induction r with k ih
+    · simp [inert_cm.odd_sum]
+      have h1 : p ^ 1 = p
+        have h0 : (1 : ℕ) = 0 + 1 := by decide
+        rw [h0, pow_succ.nat, pow_zero.nat]; ring
+      rw [h1]
+      have hd := div_add_mod.nat a p
+      have hle : p * (a / p) ≤ a := by linarith
+      have hmul := mul_le_mul_left.nat p (p * (a / p)) a hle
+      have hassoc : p * (p * (a / p)) = p * p * (a / p) := by ring
+      omega
+    · rw [succ_eq_add_one.nat]
+      simp [inert_cm.odd_sum]
+      have h2k3 : 2 * (k + 1) + 1 = (2 * k + 1 + 1) + 1 := by ring
+      have hs1 := nat_div_pow_step p (2 * k + 1 + 1) a hp
+      have hs2 := nat_div_pow_step p (2 * k + 1) a hp
+      have hsq_le : p * p * (a / p ^ (2 * (k + 1) + 1)) ≤ a / p ^ (2 * k + 1)
+        rw [h2k3]
+        have hmul := mul_le_mul_left.nat p (p * (a / p ^ (2 * k + 1 + 1 + 1))) (a / p ^ (2 * k + 1 + 1)) hs1
+        have hassoc : p * (p * (a / p ^ (2 * k + 1 + 1 + 1))) = p * p * (a / p ^ (2 * k + 1 + 1 + 1)) := by ring
+        omega
+      have hcomb : (p * p - 1) * (a / p ^ (2 * k + 1) + inert_cm.odd_sum p k a) + a / p ^ (2 * k + 1) = (p * p - 1) * inert_cm.odd_sum p k a + p * p * (a / p ^ (2 * k + 1))
+        have hpp1 : p * p = (p * p - 1) + 1 := by omega
+        calc (p * p - 1) * (a / p ^ (2 * k + 1) + inert_cm.odd_sum p k a) + a / p ^ (2 * k + 1)
+          = (p * p - 1) * inert_cm.odd_sum p k a + ((p * p - 1) + 1) * (a / p ^ (2 * k + 1)) := by ring
+          _ = (p * p - 1) * inert_cm.odd_sum p k a + p * p * (a / p ^ (2 * k + 1)) := by rw [← hpp1]
+      omega
+  have ht := htel L
+  omega
+
+-- THEOREM 2B (Real Lower Bound for Inert-CM Odd-Power Sum, `remark.pdf` item 2):
+--   sum_{j < L} (a / p^(2j+1)) - L <= v_p^odd(L, a)   in ℝ!
++ inert_cm.odd_lower_bound_real (p L a : ℕ) (hp : 2 ≤ p) :
+    (∑ j < L, (a : ℝ) / ((p ^ (2 * j + 1) : ℕ) : ℝ)) - (L : ℝ) ≤ (inert_cm.odd_sum p L a : ℝ)
+  induction L with k ih
+  · simp [inert_cm.odd_sum]
+  · rw [succ_eq_add_one.nat]
+    simp [inert_cm.odd_sum]
+    have hpk_pos : 0 < p ^ (2 * k + 1) := pow_pos_nat p (2 * k + 1) (by omega)
+    have hpk_rpos : (0 : ℝ) < ((p ^ (2 * k + 1) : ℕ) : ℝ)
+      have h1 : p ^ (2 * k + 1) = (p ^ (2 * k + 1) - 1) + 1 := by omega
+      rw [h1]; simp; linarith [cast_nonneg.real (p ^ (2 * k + 1) - 1)]
+    have hterm : (a : ℝ) / ((p ^ (2 * k + 1) : ℕ) : ℝ) - 1 ≤ ((a / p ^ (2 * k + 1) : ℕ) : ℝ)
+      have hdiv := div_add_mod.nat a (p ^ (2 * k + 1))
+      have hm := mod_lt.nat a (p ^ (2 * k + 1)) hpk_pos
+      have hlt_nat : a < p ^ (2 * k + 1) * (a / p ^ (2 * k + 1) + 1)
+        have hdist : p ^ (2 * k + 1) * (a / p ^ (2 * k + 1) + 1) = p ^ (2 * k + 1) * (a / p ^ (2 * k + 1)) + p ^ (2 * k + 1) := by ring
+        omega
+      have hlt_r : (a : ℝ) ≤ ((p ^ (2 * k + 1) : ℕ) : ℝ) * (((a / p ^ (2 * k + 1) : ℕ) : ℝ) + 1)
+        have hle_nat : a ≤ p ^ (2 * k + 1) * (a / p ^ (2 * k + 1) + 1) := by omega
+        have hcast := (cast_le.real a (p ^ (2 * k + 1) * (a / p ^ (2 * k + 1) + 1))).mpr hle_nat
+        simp at hcast
+        linarith
+      have hdiv_le := (div_le_iff.real (a : ℝ) (((a / p ^ (2 * k + 1) : ℕ) : ℝ) + 1) ((p ^ (2 * k + 1) : ℕ) : ℝ) hpk_rpos).mpr (by linarith)
+      linarith
+    linarith

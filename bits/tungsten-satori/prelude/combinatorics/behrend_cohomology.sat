@@ -1,0 +1,932 @@
+-- Milestone 3.41: Full Quantitative Behrend (1946) 3-AP-Free Theorem, Finite Cyclic Group
+--                 Cohomology H^1(G, M) & Odd-Torsion Parity Killing, & Alpöge's Footnote 3
+--                 Iterated-Parseval Square-Root Cancellation Bound on the Path Quadric!
+--
+-- Compressed via Sernau's unroll-unify-reroll pattern & Satori cast/ring/field automation:
+--   1. Full Quantitative Behrend (1946) Theorem (`behrend.large_ap_free_set_exists`, `behrend.density_exp_sqrt_log`)
+--   2. Finite Cyclic Group Cohomology H^1(G, M) = Z^1 / B^1 & Unified +- Parity Killing
+--      (`cohom.coboundary_is_cocycle`, `cohom.cocycle_eq_partial_norm`, `cohom.cocycle_iff_ker_norm`,
+--       `cohom.coprime_H1_vanish`, `cohom.involution_parity_split`, `cohom.odd_torsion_parity_killing`)
+--   3. Alpöge's Footnote 3 Iterated-Parseval Square-Root Cancellation on the Path Quadric
+--      (`path_tail.iterated_parseval_bound`, `path_freq.sqrt_cancellation_bound`,
+--       `path_quadric.remainder_sqrt_bound`, `path_quadric.solution_exists_of_density`)
+--
+-- ALL theorems proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import padic
+import finite_field
+import algebra.behrend_arakelov_seesaw
+import combinatorics.path_quadric
+
++ sum_single_nat_m41 (M a : ℕ) (ha : a < M) :
+    (∑ v < M, if a = v then (1 : ℕ) else 0) = 1
+  induction M with ha r ihr ha
+  · omega
+  · rw [succ_eq_add_one.nat] at ha ⊢
+    rw [sum_below_succ]
+    by_cases har : a = r
+    · have hz : (∑ v < r, if a = v then (1 : ℕ) else 0) = 0
+        have h0 : ∀ t : ℕ, (∀ v < t, a ≠ v) → (∑ v < t, if a = v then (1 : ℕ) else 0) = 0
+          intro t ht; induction t with ht s ihs ht
+          · rw [sum_below_zero]
+          · rw [succ_eq_add_one.nat] at ht ⊢
+            rw [sum_below_succ, ihs (by intro v hv; exact ht v (by omega)), if_neg (ht s (by omega))]; omega
+        exact h0 r (by intro v hv; omega)
+      rw [hz, if_pos har]; omega
+    · rw [if_neg har, ihr (by omega)]; omega
+
++ sum_indicator_unique_m41 (L : ℕ) (P : ℕ → Prop)
+    (huniq : ∀ u1 u2 : ℕ, u1 < L → u2 < L → P u1 → P u2 → u1 = u2) :
+    (if (∃ u < L, P u) then (1 : ℕ) else 0) = ∑ u < L, if P u then (1 : ℕ) else 0
+  by_cases hex : ∃ u < L, P u
+  · rw [if_pos hex]
+    obtain ⟨u0, hu0, hPu0⟩ := hex
+    have hcon : (∑ u < L, if P u then (1 : ℕ) else 0) = ∑ u < L, if u0 = u then (1 : ℕ) else 0
+      apply sum_below.congr; intro u hu
+      by_cases heq : u0 = u
+      · rw [if_pos heq, ← heq, if_pos hPu0]
+      · have hnp : ¬ P u := by intro hPu; exact heq (huniq u0 u hu0 hu hPu0 hPu)
+        rw [if_neg heq, if_neg hnp]
+    rw [hcon, sum_single_nat_m41 L u0 hu0]
+  · rw [if_neg hex]
+    have h0 : ∀ t ≤ L, (∑ u < t, if P u then (1 : ℕ) else 0) = 0
+      intro t ht; induction t with ht s ihs ht
+      · rw [sum_below_zero]
+      · rw [succ_eq_add_one.nat] at ht ⊢
+        have hnp : ¬ P s := by intro hPs; exact hex ⟨s, by omega, hPs⟩
+        rw [sum_below_succ, ihs (by omega), if_neg hnp]; omega
+    exact (h0 L (by omega)).symm
+
+-- ====================================================================================
+-- 1. Full Quantitative Behrend (1946) 3-AP-Free Theorem (`remark.pdf` item 19)
+-- ====================================================================================
+
++ behrend.nat_floor_exists (x : ℝ) (hx : 0 ≤ x) :
+    ∃ n : ℕ, (n : ℝ) ≤ x ∧ x < ((n + 1 : ℕ) : ℝ)
+  obtain ⟨K, hK⟩ := exists_nat_gt.real x
+  have hrec : ∀ m : ℕ, x < (m : ℝ) → ∃ n : ℕ, (n : ℝ) ≤ x ∧ x < ((n + 1 : ℕ) : ℝ)
+    intro m hm; induction m with hm r ihr hm
+    · rw [cast_zero.real] at hm; linarith
+    · rw [succ_eq_add_one.nat] at hm
+      by_cases hlt : x < (r : ℝ)
+      · exact ihr hlt
+      · exact ⟨r, by linarith, hm⟩
+  exact hrec K hK
+
+-> behrend.decode_grid (M u i : ℕ) : ℕ := (u / M ^ i) % M
+
++ behrend.decode_grid_lt (M u i : ℕ) (hM : 1 ≤ M) : behrend.decode_grid M u i < M
+  unfold behrend.decode_grid; exact mod_lt.nat (u / M ^ i) M (by omega)
+
++ behrend.div_div_pow (M j u : ℕ) (hM : 1 ≤ M) : (u / M) / M ^ j = u / M ^ (j + 1)
+  set q1 := u / M with hq1; set r1 := u % M with hr1
+  set q2 := q1 / M ^ j with hq2; set r2 := q1 % M ^ j with hr2
+  have hd1 : M * q1 + r1 = u := by rw [hq1, hr1]; exact div_add_mod.nat u M
+  have hm1 : r1 < M := by rw [hr1]; exact mod_lt.nat u M (by omega)
+  have hd2 : M ^ j * q2 + r2 = q1 := by rw [hq2, hr2]; exact div_add_mod.nat q1 (M ^ j)
+  have hm2 : r2 < M ^ j := by rw [hr2]; exact mod_lt.nat q1 (M ^ j) (pow_pos.nat M j (by omega))
+  have hm2_le : r2 + 1 ≤ M ^ j := by omega
+  have hp : M ^ (j + 1) = M * M ^ j := by rw [pow_succ.nat]; ring
+  exact (div_mod_unique.nat u (M ^ (j + 1)) q2 (M * r2 + r1) (by rw [hp, ← hd1, ← hd2]; ring) (by rw [hp]; nlinarith [hm2_le, hm1])).1
+
++ behrend.decode_grid_inj (M d : ℕ) (hM : 1 ≤ M) :
+    ∀ u1 u2 : ℕ, u1 < M ^ d → u2 < M ^ d →
+    (∀ i < d, behrend.decode_grid M u1 i = behrend.decode_grid M u2 i) → u1 = u2
+  induction d with u1 u2 h1 h2 heq r ihr u1 u2 h1 h2 heq
+  · rw [pow_zero.nat] at h1 h2; omega
+  · rw [succ_eq_add_one.nat, pow_succ.nat] at h1 h2
+    have hmod : u1 % M = u2 % M
+      have h0 := heq 0 (by omega)
+      have hd1 : ∀ u : ℕ, u / 1 = u := by intro u; have h := div_add_mod.nat u 1; have hm := mod_lt.nat u 1 (by decide); omega
+      unfold behrend.decode_grid at h0; rw [pow_zero.nat, hd1 u1, hd1 u2] at h0; exact h0
+    have hdiv_lt : ∀ u : ℕ, u < M ^ r * M → u / M < M ^ r
+      intro u hu; by_contra hge; have hd := div_add_mod.nat u M; nlinarith
+    have htail : ∀ j < r, behrend.decode_grid M (u1 / M) j = behrend.decode_grid M (u2 / M) j
+      intro j hj; unfold behrend.decode_grid; rw [behrend.div_div_pow M j u1 hM, behrend.div_div_pow M j u2 hM]; exact heq (j + 1) (by omega)
+    have hdiv_eq := ihr (u1 / M) (u2 / M) (hdiv_lt u1 h1) (hdiv_lt u2 h2) htail
+    have hd1 := div_add_mod.nat u1 M; have hd2 := div_add_mod.nat u2 M
+    rw [hdiv_eq, hmod] at hd1; omega
+
++ behrend.encode_lt (B d : ℕ) (hB : 1 ≤ B) :
+    ∀ v : ℕ → ℕ, (∀ i < d, v i < B) → behrend.encode B d v < B ^ d
+  induction d with v hv r ihr v hv
+  · simp [behrend.encode]
+  · rw [succ_eq_add_one.nat] at hv ⊢
+    simp [behrend.encode]; rw [pow_succ.nat]
+    have hv0 := hv 0 (by omega)
+    have htl := ihr (fun i => v (i + 1)) (by intro i hi; exact hv (i + 1) (by omega))
+    nlinarith
+
+-> behrend.norm_sq_nat (d : ℕ) (v : ℕ → ℕ) : ℕ := ∑ i < d, v i * v i
+
++ behrend.norm_sq_nat_cast (d : ℕ) (v : ℕ → ℕ) :
+    ((behrend.norm_sq_nat d v : ℕ) : ℝ) = behrend.norm_sq d v
+  unfold behrend.norm_sq_nat behrend.norm_sq
+  induction d with r ihr
+  · rw [sum_below_zero, sum_below_zero, cast_zero.real]
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, cast_add.real, cast_mul.real, ihr]
+
++ behrend.norm_sq_nat_le (d M : ℕ) (v : ℕ → ℕ) (hv : ∀ i < d, v i < M) :
+    behrend.norm_sq_nat d v ≤ d * M * M
+  unfold behrend.norm_sq_nat
+  induction d with hv r ihr hv
+  · rw [sum_below_zero]; omega
+  · rw [succ_eq_add_one.nat] at hv ⊢
+    rw [sum_below_succ]
+    have hprev := ihr (by intro i hi; exact hv i (by omega))
+    have hvr := hv r (by omega); have hsq : v r * v r ≤ M * M := by nlinarith
+    omega
+
+-> behrend.sphere_count (d M R : ℕ) : ℕ :=
+  ∑ u < M ^ d, if behrend.norm_sq_nat d (behrend.decode_grid M u) = R then 1 else 0
+
++ behrend.sphere_count_sum (d M : ℕ) (hM : 1 ≤ M) :
+    (∑ R < d * M * M + 1, behrend.sphere_count d M R) = M ^ d
+  unfold behrend.sphere_count
+  rw [sum_swap.nat (fun R u => if behrend.norm_sq_nat d (behrend.decode_grid M u) = R then 1 else 0) (d * M * M + 1) (M ^ d)]
+  have hcon : (∑ u < M ^ d, (∑ R < d * M * M + 1, if behrend.norm_sq_nat d (behrend.decode_grid M u) = R then (1 : ℕ) else 0)) = ∑ u < M ^ d, (1 : ℕ)
+    apply sum_below.congr; intro u _
+    have hle := behrend.norm_sq_nat_le d M (behrend.decode_grid M u) (by intro i _; exact behrend.decode_grid_lt M u i hM)
+    exact sum_single_nat_m41 (d * M * M + 1) (behrend.norm_sq_nat d (behrend.decode_grid M u)) (by omega)
+  rw [hcon, sum_const.nat]; ring
+
+-> behrend.sphere_set (d M R x : ℕ) : Prop :=
+  ∃ u < M ^ d, behrend.norm_sq_nat d (behrend.decode_grid M u) = R ∧
+    x = behrend.encode (2 * M) d (behrend.decode_grid M u)
+
++ behrend.sphere_set_lt (d M R x : ℕ) (hM : 1 ≤ M) (hx : behrend.sphere_set d M R x) :
+    x < (2 * M) ^ d
+  unfold behrend.sphere_set at hx; obtain ⟨u, _, _, hxeq⟩ := hx; rw [hxeq]
+  apply behrend.encode_lt (2 * M) d (by omega)
+  intro i _; have hlt := behrend.decode_grid_lt M u i hM; omega
+
++ behrend.sphere_set_ap_free (d M R x y z : ℕ) (hM : 1 ≤ M)
+    (hx : behrend.sphere_set d M R x) (hy : behrend.sphere_set d M R y) (hz : behrend.sphere_set d M R z)
+    (hap : x + z = 2 * y) : x = y ∧ y = z
+  unfold behrend.sphere_set at hx hy hz
+  obtain ⟨ux, _, hRx, hxe⟩ := hx; obtain ⟨uy, _, hRy, hye⟩ := hy; obtain ⟨uz, _, hRz, hze⟩ := hz
+  rw [hxe, hye, hze] at hap ⊢
+  apply behrend.encoded_sphere_ap_free d M (R : ℝ) (behrend.decode_grid M ux) (behrend.decode_grid M uy) (behrend.decode_grid M uz)
+  · intro i _; exact behrend.decode_grid_lt M ux i hM
+  · intro i _; exact behrend.decode_grid_lt M uy i hM
+  · intro i _; exact behrend.decode_grid_lt M uz i hM
+  · rw [← behrend.norm_sq_nat_cast, hRx]
+  · rw [← behrend.norm_sq_nat_cast, hRy]
+  · rw [← behrend.norm_sq_nat_cast, hRz]
+  · exact hap
+
++ behrend.sphere_set_card_eq (d M R : ℕ) (hM : 1 ≤ M) :
+    (∑ x < (2 * M) ^ d, if behrend.sphere_set d M R x then (1 : ℕ) else 0) = behrend.sphere_count d M R
+  have hpt : (∑ x < (2 * M) ^ d, if behrend.sphere_set d M R x then (1 : ℕ) else 0) =
+      ∑ x < (2 * M) ^ d, (∑ u < M ^ d, if behrend.norm_sq_nat d (behrend.decode_grid M u) = R ∧ x = behrend.encode (2 * M) d (behrend.decode_grid M u) then (1 : ℕ) else 0)
+    apply sum_below.congr; intro x _
+    unfold behrend.sphere_set
+    apply sum_indicator_unique_m41 (M ^ d) (fun u => behrend.norm_sq_nat d (behrend.decode_grid M u) = R ∧ x = behrend.encode (2 * M) d (behrend.decode_grid M u))
+    intro u1 u2 hu1 hu2 h1 h2
+    have hcoord := behrend.encode_unique (2 * M) d (behrend.decode_grid M u1) (behrend.decode_grid M u2) (by intro i _; have h := behrend.decode_grid_lt M u1 i hM; omega) (by intro i _; have h := behrend.decode_grid_lt M u2 i hM; omega) (by rw [← h1.2, ← h2.2])
+    exact behrend.decode_grid_inj M d hM u1 u2 hu1 hu2 hcoord
+  rw [hpt, sum_swap.nat (fun x u => if behrend.norm_sq_nat d (behrend.decode_grid M u) = R ∧ x = behrend.encode (2 * M) d (behrend.decode_grid M u) then 1 else 0) ((2 * M) ^ d) (M ^ d)]
+  unfold behrend.sphere_count
+  apply sum_below.congr; intro u _
+  by_cases hR : behrend.norm_sq_nat d (behrend.decode_grid M u) = R
+  · rw [if_pos hR]
+    have hcon : (∑ x < (2 * M) ^ d, if behrend.norm_sq_nat d (behrend.decode_grid M u) = R ∧ x = behrend.encode (2 * M) d (behrend.decode_grid M u) then (1 : ℕ) else 0) =
+        ∑ x < (2 * M) ^ d, if behrend.encode (2 * M) d (behrend.decode_grid M u) = x then (1 : ℕ) else 0
+      apply sum_below.congr; intro x _
+      by_cases hx_eq : behrend.encode (2 * M) d (behrend.decode_grid M u) = x
+      · rw [if_pos hx_eq]; exact if_pos ⟨hR, hx_eq.symm⟩
+      · have hnc : ¬ (behrend.norm_sq_nat d (behrend.decode_grid M u) = R ∧ x = behrend.encode (2 * M) d (behrend.decode_grid M u)) := by intro h; exact hx_eq h.2.symm
+        rw [if_neg hx_eq]; exact if_neg hnc
+    rw [hcon]
+    have helt := behrend.encode_lt (2 * M) d (by omega) (behrend.decode_grid M u) (by intro i _; have h := behrend.decode_grid_lt M u i hM; omega)
+    exact sum_single_nat_m41 ((2 * M) ^ d) (behrend.encode (2 * M) d (behrend.decode_grid M u)) helt
+  · rw [if_neg hR]
+    have h0 : ∀ t : ℕ, (∑ x < t, if behrend.norm_sq_nat d (behrend.decode_grid M u) = R ∧ x = behrend.encode (2 * M) d (behrend.decode_grid M u) then (1 : ℕ) else 0) = 0
+      intro t; induction t with s ihs
+      · rw [sum_below_zero]
+      · have hnc : ¬ (behrend.norm_sq_nat d (behrend.decode_grid M u) = R ∧ s = behrend.encode (2 * M) d (behrend.decode_grid M u)) := by intro h; exact hR h.1
+        rw [succ_eq_add_one.nat, sum_below_succ, ihs, if_neg hnc]; omega
+    exact h0 ((2 * M) ^ d)
+
++ behrend.large_ap_free_set_exists (d M : ℕ) (hM : 1 ≤ M) :
+    ∃ R < d * M * M + 1,
+      (∀ x : ℕ, behrend.sphere_set d M R x → x < (2 * M) ^ d) ∧
+      (∀ x y z : ℕ, behrend.sphere_set d M R x → behrend.sphere_set d M R y → behrend.sphere_set d M R z → x + z = 2 * y → x = y ∧ y = z) ∧
+      M ^ d ≤ (d * M * M + 1) * (∑ x < (2 * M) ^ d, if behrend.sphere_set d M R x then (1 : ℕ) else 0)
+  have hsum_nat := behrend.sphere_count_sum d M hM
+  have hsum_real : (∑ R < d * M * M + 1, ((behrend.sphere_count d M R : ℕ) : ℝ)) = ((M ^ d : ℕ) : ℝ)
+    have hcast : ∀ t : ℕ, ∀ f : ℕ → ℕ, ((∑ i < t, f i : ℕ) : ℝ) = ∑ i < t, ((f i : ℕ) : ℝ)
+      intro t f; induction t with r ihr
+      · rw [sum_below_zero, sum_below_zero, cast_zero.real]
+      · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, cast_add.real, ihr]
+    rw [← hcast (d * M * M + 1) (behrend.sphere_count d M), hsum_nat]
+  obtain ⟨R, hR, hge⟩ := behrend.pigeonhole_sphere (d * M * M) (fun r => ((behrend.sphere_count d M r : ℕ) : ℝ)) ((M ^ d : ℕ) : ℝ) hsum_real
+  use R; constructor; exact hR
+  constructor
+  · intro x hx; exact behrend.sphere_set_lt d M R x hM hx
+  · constructor
+    · intro x y z hx hy hz hap; exact behrend.sphere_set_ap_free d M R x y z hM hx hy hz hap
+    · rw [behrend.sphere_set_card_eq d M R hM]; rw [← cast_mul.real] at hge
+      exact (cast_le.real (M ^ d) ((d * M * M + 1) * behrend.sphere_count d M R)).mp hge
+
++ behrend.density_exp_sqrt_log (N : ℕ) (hN : 256 ≤ N) :
+    ∃ S : ℕ → Prop,
+      (∀ x : ℕ, S x → x < N) ∧
+      (∀ x y z : ℕ, S x → S y → S z → x + z = 2 * y → x = y ∧ y = z) ∧
+      (N : ℝ) * exp (-6 * sqrt (log (N : ℝ))) ≤ ((∑ x < N, if S x then (1 : ℕ) else 0 : ℕ) : ℝ)
+  have hN_pos : (0 : ℝ) < (N : ℝ) := (cast_pos.real N).mpr (by omega)
+  have hexp_half : exp (1 / 2) ≤ 2
+    have h1 := exp_le_inv_one_sub (1 / 2) (by linarith)
+    have hc := mul_inv_cancel.real (1 - (1 / 2 : ℝ)) (by linarith)
+    rw [div_def.real 1 (1 - (1 / 2 : ℝ))] at h1
+    linarith
+  have hexp4_le : exp 4 ≤ (N : ℝ)
+    have h8 : (4 : ℝ) = ((8 : ℕ) : ℝ) * (1 / 2) := by linarith
+    rw [h8, exp_nat_mul]
+    have hp : ∀ k : ℕ, exp (1 / 2) ^ k ≤ (2 : ℝ) ^ k
+      intro k; induction k with r ihr
+      · rw [pow_zero.real, pow_zero.real]; linarith
+      · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real]; nlinarith [pow_nonneg.real 2 (by linarith) r, exp_nonneg (1 / 2)]
+    linarith [hp 8]
+  have hlogN_ge4 : 4 ≤ log (N : ℝ) := by have h := (log_le_log (exp 4) (N : ℝ) (exp_pos 4) hN_pos).mpr hexp4_le; rw [log_exp 4] at h; exact h
+  set L := log (N : ℝ) with hL_def
+  set s := sqrt L with hs_def
+  have hs_ge2 : 2 ≤ s := by rw [hs_def]; exact (le_sqrt_iff L 2 (by linarith) (by linarith)).mpr (by linarith)
+  have hs_sq : s * s = L := by have h := sq_sqrt L (by linarith); rw [← hs_def] at h; linarith
+  obtain ⟨d, hd_le, hd_gt⟩ := behrend.nat_floor_exists s (by linarith)
+  have hd_ge2 : 2 ≤ d := by by_contra hlt; have h := (cast_le.real (d + 1) 2).mpr (by omega); linarith
+  have hd_pos : (0 : ℝ) < (d : ℝ) := (cast_pos.real d).mpr (by omega)
+  set xM := exp (L / (d : ℝ)) / 2 with hxM_def
+  have hLd_ge_s : s ≤ L / (d : ℝ) := (le_div_iff.real s L (d : ℝ) hd_pos).mpr (by nlinarith)
+  have hexp_Ld_ge5 : 5 ≤ exp (L / (d : ℝ)) := by nlinarith [quadratic_le_exp_of_nonneg (L / (d : ℝ)) (by linarith)]
+  obtain ⟨M, hM_le, hM_gt⟩ := behrend.nat_floor_exists xM (by linarith)
+  have hM_ge2 : 2 ≤ M := by by_contra hlt; have h := (cast_le.real (M + 1) 2).mpr (by omega); linarith
+  have h2M_le : ((2 * M : ℕ) : ℝ) ≤ exp (L / (d : ℝ)) := by rw [cast_mul.real 2 M]; rw [hxM_def] at hM_le; linarith
+  have hpow_mono : ∀ (a b : ℝ) (k : ℕ), 0 ≤ a → a ≤ b → a ^ k ≤ b ^ k
+    intro a b k ha hab; induction k with r ihr
+    · rw [pow_zero.real, pow_zero.real]; linarith
+    · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real]; nlinarith [pow_nonneg.real a ha r, pow_nonneg.real b (by linarith) r]
+  have h2Md_le_N : (2 * M) ^ d ≤ N
+    apply (cast_le.real ((2 * M) ^ d) N).mp
+    rw [cast_pow.real]
+    have h1 := hpow_mono ((2 * M : ℕ) : ℝ) (exp (L / (d : ℝ))) d (cast_nonneg.real (2 * M)) h2M_le
+    rw [← exp_nat_mul] at h1
+    have hcancel : (d : ℝ) * (L / (d : ℝ)) = L := by field_simp
+    rw [hcancel, hL_def, exp_log (N : ℝ) hN_pos] at h1; exact h1
+  obtain ⟨R, _, hS_lt, hS_ap, hS_card⟩ := behrend.large_ap_free_set_exists d M (by omega)
+  use behrend.sphere_set d M R
+  constructor
+  · intro x hx; have hlt := hS_lt x hx; omega
+  · constructor
+    · exact hS_ap
+    · have hcard_eq : (∑ x < N, if behrend.sphere_set d M R x then (1 : ℕ) else 0) = ∑ x < (2 * M) ^ d, if behrend.sphere_set d M R x then (1 : ℕ) else 0
+        have hpad : ∀ k : ℕ, (∑ x < (2 * M) ^ d + k, if behrend.sphere_set d M R x then (1 : ℕ) else 0) = ∑ x < (2 * M) ^ d, if behrend.sphere_set d M R x then (1 : ℕ) else 0
+          intro k; induction k with r ihr
+          · have h0 : (2 * M) ^ d + 0 = (2 * M) ^ d := by omega; rw [h0]
+          · rw [succ_eq_add_one.nat]
+            have h1 : (2 * M) ^ d + (r + 1) = ((2 * M) ^ d + r) + 1 := by omega
+            have hns : ¬ behrend.sphere_set d M R ((2 * M) ^ d + r) := by intro hs; have hlt := hS_lt ((2 * M) ^ d + r) hs; omega
+            rw [h1, sum_below_succ, ihr, if_neg hns]; omega
+        have hdiff : (2 * M) ^ d + (N - (2 * M) ^ d) = N := by omega
+        rw [← hdiff]; exact hpad (N - (2 * M) ^ d)
+      rw [hcard_eq]
+      set C_nat := ∑ x < (2 * M) ^ d, if behrend.sphere_set d M R x then (1 : ℕ) else 0 with hC_def
+      have hM_lo : exp (L / (d : ℝ)) / 4 ≤ (M : ℝ) := by rw [hxM_def] at hM_gt; linarith
+      have hMd_lo : (N : ℝ) / (4 : ℝ) ^ d ≤ (M : ℝ) ^ d
+        have h1 := hpow_mono (exp (L / (d : ℝ)) / 4) (M : ℝ) d (by linarith [exp_pos (L / (d : ℝ))]) hM_lo
+        rw [div_pow.real (exp (L / (d : ℝ))) 4 d, ← exp_nat_mul] at h1
+        have hcancel : (d : ℝ) * (L / (d : ℝ)) = L := by field_simp
+        rw [hcancel, hL_def, exp_log (N : ℝ) hN_pos] at h1; exact h1
+      have h4d_le : (4 : ℝ) ^ d ≤ exp (2 * s)
+        have hlog4 : log 4 ≤ 2 := by have h1 : (4 : ℝ) = 2 * 2 := by ring; rw [h1, log_mul 2 2 (by linarith) (by linarith)]; linarith [log_le_sub_one 2 (by linarith)]
+        rw [← exp_log 4 (by linarith), ← exp_nat_mul]
+        exact (exp_le_exp ((d : ℝ) * log 4) (2 * s)).mpr (by nlinarith [log_pos 4 (by linarith)])
+      have hd_ge2r : (2 : ℝ) ≤ (d : ℝ) := (cast_le.real 2 d).mpr hd_ge2
+      have hdM2_le : ((d * M * M + 1 : ℕ) : ℝ) ≤ exp (4 * s)
+        rw [cast_add.real, cast_mul.real, cast_mul.real, cast_one.real]
+        have hM2_le : (M : ℝ) * (M : ℝ) ≤ exp (2 * L / (d : ℝ)) / 4
+          have hsq : (M : ℝ) * (M : ℝ) ≤ xM * xM := by nlinarith
+          have hxM2 : xM * xM = exp (2 * L / (d : ℝ)) / 4
+            rw [hxM_def]
+            have he2 : exp (L / (d : ℝ)) * exp (L / (d : ℝ)) = exp (2 * L / (d : ℝ))
+              rw [← exp_add]
+              have harg : L / (d : ℝ) + L / (d : ℝ) = 2 * L / (d : ℝ) := by rw [div_def.real L (d : ℝ), div_def.real (2 * L) (d : ℝ)]; ring
+              rw [harg]
+            linarith
+          linarith
+        have h2Ld_le : 2 * L / (d : ℝ) ≤ 3 * s
+          rw [cast_add.real d 1, cast_one.real] at hd_gt
+          exact (div_le_iff.real (2 * L) (3 * s) (d : ℝ) hd_pos).mpr (by nlinarith)
+        have hexp_ge1 : 1 ≤ exp (2 * L / (d : ℝ)) := (one_le_exp_iff (2 * L / (d : ℝ))).mpr (by linarith [div_pos.real (2 * L) (d : ℝ) (by linarith) hd_pos])
+        have hstep1 : (d : ℝ) * (M : ℝ) * (M : ℝ) + 1 ≤ (d : ℝ) * exp (2 * L / (d : ℝ))
+          have h1 := mul_le_mul_of_nonneg_left.real ((M : ℝ) * (M : ℝ)) (exp (2 * L / (d : ℝ)) / 4) (d : ℝ) hM2_le (by linarith)
+          have h3 := mul_le_mul_of_nonneg_right.real 2 (d : ℝ) (exp (2 * L / (d : ℝ))) hd_ge2r (by linarith)
+          linarith
+        have hd_exp : (d : ℝ) ≤ exp s := by linarith [quadratic_le_exp_of_nonneg s (by linarith)]
+        have hexp3s : exp (2 * L / (d : ℝ)) ≤ exp (3 * s) := (exp_le_exp (2 * L / (d : ℝ)) (3 * s)).mpr h2Ld_le
+        have h1 := mul_le_mul_of_nonneg_right.real (d : ℝ) (exp s) (exp (2 * L / (d : ℝ))) hd_exp (exp_nonneg (2 * L / (d : ℝ)))
+        have h2 := mul_le_mul_of_nonneg_left.real (exp (2 * L / (d : ℝ))) (exp (3 * s)) (exp s) hexp3s (exp_nonneg s)
+        have h4s : exp s * exp (3 * s) = exp (4 * s) := by rw [← exp_add]; have ha : s + 3 * s = 4 * s := by ring; rw [ha]
+        linarith
+      have hcard_r : (M : ℝ) ^ d ≤ ((d * M * M + 1 : ℕ) : ℝ) * (C_nat : ℝ)
+        have h := (cast_le.real (M ^ d) ((d * M * M + 1) * C_nat)).mpr hS_card
+        rw [cast_pow.real, cast_mul.real] at h; exact h
+      have h4d_pos : (0 : ℝ) < (4 : ℝ) ^ d := pow_pos.real 4 d (by linarith)
+      have hN_le_4Md : (N : ℝ) ≤ (4 : ℝ) ^ d * (M : ℝ) ^ d := by linarith [(div_le_iff.real (N : ℝ) ((M : ℝ) ^ d) ((4 : ℝ) ^ d) h4d_pos).mp hMd_lo]
+      have hprod_le : (4 : ℝ) ^ d * ((d * M * M + 1 : ℕ) : ℝ) ≤ exp (6 * s)
+        have ha := mul_le_mul_of_nonneg_right.real ((4 : ℝ) ^ d) (exp (2 * s)) ((d * M * M + 1 : ℕ) : ℝ) h4d_le (cast_nonneg.real (d * M * M + 1))
+        have hb := mul_le_mul_of_nonneg_left.real ((d * M * M + 1 : ℕ) : ℝ) (exp (4 * s)) (exp (2 * s)) hdM2_le (exp_nonneg (2 * s))
+        have h6 : exp (2 * s) * exp (4 * s) = exp (6 * s) := by rw [← exp_add]; have h : 2 * s + 4 * s = 6 * s := by ring; rw [h]
+        linarith
+      have hN_le_expC : (N : ℝ) ≤ exp (6 * s) * (C_nat : ℝ)
+        have h1 := mul_le_mul_of_nonneg_left.real ((M : ℝ) ^ d) (((d * M * M + 1 : ℕ) : ℝ) * (C_nat : ℝ)) ((4 : ℝ) ^ d) hcard_r (by linarith)
+        have h3 := mul_le_mul_of_nonneg_right.real ((4 : ℝ) ^ d * ((d * M * M + 1 : ℕ) : ℝ)) (exp (6 * s)) (C_nat : ℝ) hprod_le (cast_nonneg.real C_nat)
+        linarith
+      have hmul_neg := mul_le_mul_of_nonneg_right.real (N : ℝ) (exp (6 * s) * (C_nat : ℝ)) (exp (-6 * s)) hN_le_expC (exp_nonneg (-6 * s))
+      have hcancel : exp (6 * s) * (C_nat : ℝ) * exp (-6 * s) = (C_nat : ℝ)
+        have hneg : -6 * s = -(6 * s) := by ring
+        rw [hneg]; have hc := exp_neg_mul' (6 * s)
+        calc exp (6 * s) * (C_nat : ℝ) * exp (-(6 * s)) = (exp (6 * s) * exp (-(6 * s))) * (C_nat : ℝ) := by ring
+          _ = (C_nat : ℝ) := by rw [hc]; ring
+      linarith
+
+-- ====================================================================================
+-- 2. Finite Cyclic Group Cohomology H^1(G, M) = Z^1 / B^1 & Unified +- Parity Killing
+-- ====================================================================================
+
+-> cohom.mod_eq (r : ℕ) (q : ℤ) (x y : ℕ → ℤ) : Prop :=
+  ∀ i < r, ∃ k : ℤ, x i - y i = q * k
+
++ cohom.mod_eq_refl (r : ℕ) (q : ℤ) (x : ℕ → ℤ) : cohom.mod_eq r q x x
+  unfold cohom.mod_eq; intro i _; exact ⟨0, by ring⟩
+
++ cohom.mod_eq_symm (r : ℕ) (q : ℤ) (x y : ℕ → ℤ) (h : cohom.mod_eq r q x y) :
+    cohom.mod_eq r q y x
+  unfold cohom.mod_eq at h ⊢; intro i hi; obtain ⟨k, hk⟩ := h i hi; exact ⟨-k, by linarith⟩
+
++ cohom.mod_eq_trans (r : ℕ) (q : ℤ) (x y z : ℕ → ℤ)
+    (h1 : cohom.mod_eq r q x y) (h2 : cohom.mod_eq r q y z) : cohom.mod_eq r q x z
+  unfold cohom.mod_eq at h1 h2 ⊢
+  intro i hi; obtain ⟨k1, hk1⟩ := h1 i hi; obtain ⟨k2, hk2⟩ := h2 i hi; exact ⟨k1 + k2, by linarith⟩
+
++ cohom.mod_eq_add (r : ℕ) (q : ℤ) (x1 x2 y1 y2 : ℕ → ℤ)
+    (h1 : cohom.mod_eq r q x1 y1) (h2 : cohom.mod_eq r q x2 y2) :
+    cohom.mod_eq r q (fun i => x1 i + x2 i) (fun i => y1 i + y2 i)
+  unfold cohom.mod_eq at h1 h2 ⊢
+  intro i hi; obtain ⟨k1, hk1⟩ := h1 i hi; obtain ⟨k2, hk2⟩ := h2 i hi; exact ⟨k1 + k2, by linarith⟩
+
+-> cohom.iter (sigma : (ℕ → ℤ) → (ℕ → ℤ)) : ℕ → (ℕ → ℤ) → (ℕ → ℤ)
+  | 0 => fun x => x
+  | k + 1 => fun x => sigma (cohom.iter sigma k x)
+
++ cohom.iter_zero (sigma : (ℕ → ℤ) → (ℕ → ℤ)) (x : ℕ → ℤ) : cohom.iter sigma 0 x = x := by rfl
+
++ cohom.iter_succ (sigma : (ℕ → ℤ) → (ℕ → ℤ)) (k : ℕ) (x : ℕ → ℤ) :
+    cohom.iter sigma (k + 1) x = sigma (cohom.iter sigma k x) := by rfl
+
++ cohom.iter_add (sigma : (ℕ → ℤ) → (ℕ → ℤ)) (a b : ℕ) (x : ℕ → ℤ) :
+    cohom.iter sigma (a + b) x = cohom.iter sigma a (cohom.iter sigma b x)
+  induction a with k ih
+  · have h0 : 0 + b = b := by omega; rw [h0, cohom.iter_zero]
+  · rw [succ_eq_add_one.nat]; have hs : k + 1 + b = (k + b) + 1 := by omega
+    rw [hs, cohom.iter_succ, cohom.iter_succ, ih]
+
+-> cohom.is_cyclic_action (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ)) : Prop :=
+  (∀ x y : ℕ → ℤ, cohom.mod_eq r q x y → cohom.mod_eq r q (sigma x) (sigma y)) ∧
+  (∀ x y : ℕ → ℤ, cohom.mod_eq r q (sigma (fun i => x i + y i)) (fun i => sigma x i + sigma y i)) ∧
+  (∀ (a : ℤ) (x : ℕ → ℤ), cohom.mod_eq r q (sigma (fun i => a * x i)) (fun i => a * sigma x i)) ∧
+  (∀ x : ℕ → ℤ, cohom.mod_eq r q (cohom.iter sigma m x) x)
+
++ cohom.iter_congr (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma) (k : ℕ) (x y : ℕ → ℤ)
+    (hxy : cohom.mod_eq r q x y) : cohom.mod_eq r q (cohom.iter sigma k x) (cohom.iter sigma k y)
+  induction k with s ihs
+  · rw [cohom.iter_zero, cohom.iter_zero]; exact hxy
+  · rw [succ_eq_add_one.nat, cohom.iter_succ, cohom.iter_succ]
+    exact hact.1 (cohom.iter sigma s x) (cohom.iter sigma s y) ihs
+
++ cohom.iter_add_vec (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma) (k : ℕ) (x y : ℕ → ℤ) :
+    cohom.mod_eq r q (cohom.iter sigma k (fun i => x i + y i)) (fun i => cohom.iter sigma k x i + cohom.iter sigma k y i)
+  induction k with s ihs
+  · rw [cohom.iter_zero, cohom.iter_zero, cohom.iter_zero]; exact cohom.mod_eq_refl r q (fun i => x i + y i)
+  · rw [succ_eq_add_one.nat, cohom.iter_succ, cohom.iter_succ, cohom.iter_succ]
+    exact cohom.mod_eq_trans r q _ _ _ (hact.1 (cohom.iter sigma s (fun i => x i + y i)) (fun i => cohom.iter sigma s x i + cohom.iter sigma s y i) ihs) (hact.2.1 (cohom.iter sigma s x) (cohom.iter sigma s y))
+
++ cohom.iter_scale (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma) (k : ℕ) (a : ℤ) (x : ℕ → ℤ) :
+    cohom.mod_eq r q (cohom.iter sigma k (fun i => a * x i)) (fun i => a * cohom.iter sigma k x i)
+  induction k with s ihs
+  · rw [cohom.iter_zero, cohom.iter_zero]; exact cohom.mod_eq_refl r q (fun i => a * x i)
+  · rw [succ_eq_add_one.nat, cohom.iter_succ, cohom.iter_succ]
+    exact cohom.mod_eq_trans r q _ _ _ (hact.1 (cohom.iter sigma s (fun i => a * x i)) (fun i => a * cohom.iter sigma s x i) ihs) (hact.2.2.1 a (cohom.iter sigma s x))
+
++ cohom.iter_lin (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma) (k : ℕ) (a b : ℤ) (x y : ℕ → ℤ) :
+    cohom.mod_eq r q (cohom.iter sigma k (fun i => a * x i + b * y i)) (fun i => a * cohom.iter sigma k x i + b * cohom.iter sigma k y i)
+  have had := cohom.iter_add_vec r m q sigma hact k (fun i => a * x i) (fun i => b * y i)
+  have hsa := cohom.iter_scale r m q sigma hact k a x
+  have hsb := cohom.iter_scale r m q sigma hact k b y
+  exact cohom.mod_eq_trans r q _ _ _ had (cohom.mod_eq_add r q _ _ _ _ hsa hsb)
+
++ cohom.sigma_sub (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma) (x y : ℕ → ℤ) :
+    cohom.mod_eq r q (sigma (fun i => x i - y i)) (fun i => sigma x i - sigma y i)
+  have h1 : (fun i => x i - y i) = (fun i => x i + (-1) * y i) := by funext i; ring
+  rw [h1]
+  have hadd := hact.2.1 x (fun i => (-1) * y i)
+  have hsc := hact.2.2.1 (-1) y
+  have h2 := cohom.mod_eq_add r q (sigma x) (sigma (fun j => (-1) * y j)) (sigma x) (fun i => (-1) * sigma y i) (cohom.mod_eq_refl r q (sigma x)) hsc
+  have h3 := cohom.mod_eq_trans r q (sigma (fun i => x i + (-1) * y i)) (fun i => sigma x i + sigma (fun j => (-1) * y j) i) (fun i => sigma x i + (-1) * sigma y i) hadd h2
+  unfold cohom.mod_eq at h3 ⊢; intro i hi; obtain ⟨k, hk⟩ := h3 i hi; exact ⟨k, by linarith⟩
+
++ cohom.sigma_sum (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma) (K : ℕ) (f : ℕ → ℕ → ℤ) :
+    cohom.mod_eq r q (sigma (fun i => ∑ j < K, f j i)) (fun i => ∑ j < K, sigma (f j) i)
+  induction K with s ihs
+  · have h0 : (fun i => ∑ j < 0, f j i) = (fun _ => (0 : ℤ) * (0 : ℤ)) := by funext i; rw [sum_below_zero]; ring
+    have h0' : (fun i => ∑ j < 0, sigma (f j) i) = (fun i => (0 : ℤ) * sigma (fun _ => 0) i) := by funext i; rw [sum_below_zero]; ring
+    rw [h0, h0']; exact hact.2.2.1 0 (fun _ => 0)
+  · rw [succ_eq_add_one.nat]
+    have hs1 : (fun i => ∑ j < s + 1, f j i) = (fun i => (∑ j < s, f j i) + f s i) := by funext i; rw [sum_below_succ]
+    have hs2 : (fun i => ∑ j < s + 1, sigma (f j) i) = (fun i => (∑ j < s, sigma (f j) i) + sigma (f s) i) := by funext i; rw [sum_below_succ]
+    rw [hs1, hs2]
+    exact cohom.mod_eq_trans r q _ _ _ (hact.2.1 (fun i => ∑ j < s, f j i) (f s)) (cohom.mod_eq_add r q _ _ _ _ ihs (cohom.mod_eq_refl r q (sigma (f s))))
+
+-> cohom.partial_norm (sigma : (ℕ → ℤ) → (ℕ → ℤ)) (k : ℕ) (x : ℕ → ℤ) (i : ℕ) : ℤ :=
+  ∑ j < k, cohom.iter sigma j x i
+
+-> cohom.is_1cocycle (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ)) (c : ℕ → ℕ → ℤ) : Prop :=
+  cohom.mod_eq r q (c 0) (fun _ => 0) ∧
+  cohom.mod_eq r q (c m) (fun _ => 0) ∧
+  (∀ g h : ℕ, cohom.mod_eq r q (c (g + h)) (fun i => c g i + cohom.iter sigma g (c h) i))
+
+-> cohom.is_1coboundary (r : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ)) (c : ℕ → ℕ → ℤ) : Prop :=
+  ∃ b : ℕ → ℤ, ∀ g : ℕ, cohom.mod_eq r q (c g) (fun i => cohom.iter sigma g b i - b i)
+
++ cohom.coboundary_is_cocycle (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma) (c : ℕ → ℕ → ℤ)
+    (hb : cohom.is_1coboundary r q sigma c) : cohom.is_1cocycle r m q sigma c
+  unfold cohom.is_1coboundary at hb; unfold cohom.is_1cocycle
+  obtain ⟨b, hbg⟩ := hb
+  constructor
+  · have h0 := hbg 0; rw [cohom.iter_zero] at h0
+    unfold cohom.mod_eq at h0 ⊢; intro i hi; obtain ⟨k, hk⟩ := h0 i hi; exact ⟨k, by linarith⟩
+  · constructor
+    · have hm := hbg m; have hper := hact.2.2.2 b
+      unfold cohom.mod_eq at hm hper ⊢
+      intro i hi; obtain ⟨k1, hk1⟩ := hm i hi; obtain ⟨k2, hk2⟩ := hper i hi; exact ⟨k1 + k2, by linarith⟩
+    · intro g h
+      have hgh := hbg (g + h); have hg := hbg g; have hh := hbg h
+      have hih := cohom.iter_congr r m q sigma hact g (c h) (fun i => cohom.iter sigma h b i - b i) hh
+      have hlin := cohom.iter_lin r m q sigma hact g 1 (-1) (cohom.iter sigma h b) b
+      have hfn : (fun i => 1 * cohom.iter sigma h b i + (-1) * b i) = (fun i => cohom.iter sigma h b i - b i) := by funext i; ring
+      rw [hfn, ← cohom.iter_add sigma g h b] at hlin
+      have hcomb := cohom.mod_eq_trans r q _ _ _ hih hlin
+      unfold cohom.mod_eq at hgh hg hcomb ⊢
+      intro i hi
+      obtain ⟨k1, hk1⟩ := hgh i hi; obtain ⟨k2, hk2⟩ := hg i hi; obtain ⟨k3, hk3⟩ := hcomb i hi
+      exact ⟨k1 - k2 - k3, by linarith⟩
+
++ cohom.cocycle_eq_partial_norm (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma) (c : ℕ → ℕ → ℤ)
+    (hc : cohom.is_1cocycle r m q sigma c) (k : ℕ) :
+    cohom.mod_eq r q (c k) (cohom.partial_norm sigma k (c 1))
+  unfold cohom.is_1cocycle at hc
+  induction k with s ihs
+  · have hc0 := hc.1; unfold cohom.mod_eq cohom.partial_norm at hc0 ⊢
+    intro i hi; rw [sum_below_zero]; exact hc0 i hi
+  · rw [succ_eq_add_one.nat]
+    have ht := cohom.mod_eq_trans r q _ _ _ (hc.2.2 s 1) (cohom.mod_eq_add r q _ _ _ _ ihs (cohom.mod_eq_refl r q (cohom.iter sigma s (c 1))))
+    unfold cohom.mod_eq cohom.partial_norm at ht ⊢
+    intro i hi; rw [sum_below_succ]; exact ht i hi
+
++ cohom.cocycle_iff_ker_norm (r m : ℕ) (q : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma) (x : ℕ → ℤ) :
+    cohom.is_1cocycle r m q sigma (fun k => cohom.partial_norm sigma k x) ↔
+    cohom.mod_eq r q (cohom.partial_norm sigma m x) (fun _ => 0)
+  constructor
+  · intro hc; unfold cohom.is_1cocycle at hc; exact hc.2.1
+  · intro hker
+    unfold cohom.is_1cocycle
+    constructor
+    · unfold cohom.mod_eq cohom.partial_norm; intro i _; rw [sum_below_zero]; exact ⟨0, by ring⟩
+    · constructor
+      · exact hker
+      · intro g h
+        induction h with s ihs
+        · have h0 : g + 0 = g := by omega
+          have hpn0 : cohom.partial_norm sigma 0 x = (fun _ => 0) := by funext i; unfold cohom.partial_norm; rw [sum_below_zero]
+          rw [h0, hpn0]
+          have hsc := cohom.iter_scale r m q sigma hact g 0 (fun _ => 0)
+          have h0eq : (fun (_ : ℕ) => (0 : ℤ)) = (fun _ => (0 : ℤ) * (0 : ℤ)) := by funext _; ring
+          unfold cohom.mod_eq at hsc ⊢; intro i hi; rw [h0eq]; obtain ⟨k, hk⟩ := hsc i hi; exact ⟨-k, by linarith⟩
+        · rw [succ_eq_add_one.nat]; have hadd : g + (s + 1) = (g + s) + 1 := by omega
+          have hpn_s1 : cohom.partial_norm sigma (s + 1) x = (fun i => cohom.partial_norm sigma s x i + cohom.iter sigma s x i) := by funext i; unfold cohom.partial_norm; rw [sum_below_succ]
+          have hpn_gs1 : cohom.partial_norm sigma ((g + s) + 1) x = (fun i => cohom.partial_norm sigma (g + s) x i + cohom.iter sigma (g + s) x i) := by funext i; unfold cohom.partial_norm; rw [sum_below_succ]
+          rw [hadd, hpn_s1, hpn_gs1]
+          have hlin := cohom.iter_add_vec r m q sigma hact g (cohom.partial_norm sigma s x) (cohom.iter sigma s x)
+          rw [← cohom.iter_add sigma g s x] at hlin
+          unfold cohom.mod_eq at ihs hlin ⊢
+          intro i hi; obtain ⟨k1, hk1⟩ := ihs i hi; obtain ⟨k2, hk2⟩ := hlin i hi; exact ⟨k1 - k2, by linarith⟩
+
++ cohom.coprime_H1_vanish (r m : ℕ) (q u : ℤ) (sigma : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma)
+    (hinv : ∃ k : ℤ, (m : ℤ) * u - 1 = q * k)
+    (c : ℕ → ℕ → ℤ) (hc : cohom.is_1cocycle r m q sigma c) :
+    cohom.is_1coboundary r q sigma c
+  unfold cohom.is_1cocycle at hc; unfold cohom.is_1coboundary
+  set S : ℕ → ℤ := fun i => ∑ h < m, c h i with hS_def
+  set b : ℕ → ℤ := fun i => (-u) * S i with hb_def
+  have h1eq : (1 : ℕ) = 0 + 1 := by decide
+  have hit1 : ∀ v : ℕ → ℤ, cohom.iter sigma 1 v = sigma v := by intro v; rw [h1eq, cohom.iter_succ, cohom.iter_zero]
+  have hstep_S : cohom.mod_eq r q (fun i => sigma S i - S i) (fun i => -((m : ℤ) * c 1 i))
+    have hsigS := cohom.sigma_sum r m q sigma hact m c
+    have hsum_term : ∀ t ≤ m, cohom.mod_eq r q (fun i => (t : ℤ) * c 1 i + ∑ h < t, sigma (c h) i) (fun i => ∑ h < t, c (h + 1) i)
+      intro t ht; induction t with ht k ihk ht
+      · unfold cohom.mod_eq; intro i _; rw [sum_below_zero, sum_below_zero]; exact ⟨0, by simp⟩
+      · rw [succ_eq_add_one.nat] at ht ⊢
+        have hprev := ihk (by omega)
+        have h1k := hc.2.2 1 k; have had1 : 1 + k = k + 1 := by omega
+        rw [had1, hit1 (c k)] at h1k
+        have htk := cohom.mod_eq_symm r q _ _ h1k
+        unfold cohom.mod_eq at hprev htk ⊢; intro i hi
+        rw [sum_below_succ, sum_below_succ, cast_add.int k 1, cast_one.int]
+        obtain ⟨a1, ha1⟩ := hprev i hi; obtain ⟨a2, ha2⟩ := htk i hi; exact ⟨a1 + a2, by linarith⟩
+    have htele : ∀ t i : ℕ, (∑ h < t, c (h + 1) i) - (∑ h < t, c h i) = c t i - c 0 i
+      intro t i; induction t with k ihk
+      · rw [sum_below_zero, sum_below_zero]; ring
+      · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]; linarith
+    have hsumM := hsum_term m (by omega); have hc0 := hc.1; have hcm := hc.2.1
+    unfold cohom.mod_eq at hsigS hsumM hc0 hcm ⊢; intro i hi
+    obtain ⟨a1, ha1⟩ := hsigS i hi; obtain ⟨a2, ha2⟩ := hsumM i hi
+    obtain ⟨a3, ha3⟩ := hcm i hi; obtain ⟨a4, ha4⟩ := hc0 i hi
+    have hti := htele m i; rw [hS_def]; exact ⟨a1 + a2 + a3 - a4, by linarith⟩
+  have hb1 : cohom.mod_eq r q (c 1) (fun i => sigma b i - b i)
+    have hsc := hact.2.2.1 (-u) S; obtain ⟨ku, hku⟩ := hinv
+    unfold cohom.mod_eq at hsc hstep_S ⊢; intro i hi
+    obtain ⟨k1, hk1⟩ := hsc i hi; obtain ⟨k2, hk2⟩ := hstep_S i hi
+    rw [hb_def]; use -k1 + u * k2 - ku * c 1 i
+    have halg : c 1 i - (sigma (fun j => (-u) * S j) i - (-u) * S i) =
+        -(sigma (fun j => (-u) * S j) i - (-u) * sigma S i) + u * (sigma S i - S i - -((m : ℤ) * c 1 i)) - ((m : ℤ) * u - 1) * c 1 i := by ring
+    rw [halg, hk1, hk2, hku]; ring
+  use b; intro g
+  induction g with k ihk
+  · rw [cohom.iter_zero]; have hc0 := hc.1; unfold cohom.mod_eq at hc0 ⊢
+    intro i hi; obtain ⟨a, ha⟩ := hc0 i hi; exact ⟨a, by linarith⟩
+  · rw [succ_eq_add_one.nat, cohom.iter_succ]
+    have hstep := hc.2.2 1 k; have h1k : 1 + k = k + 1 := by omega
+    rw [h1k, hit1 (c k)] at hstep
+    have hsig_ck := hact.1 (c k) (fun i => cohom.iter sigma k b i - b i) ihk
+    have hsig_sub := cohom.sigma_sub r m q sigma hact (cohom.iter sigma k b) b
+    unfold cohom.mod_eq at hstep hb1 hsig_ck hsig_sub ⊢; intro i hi
+    obtain ⟨a1, ha1⟩ := hstep i hi; obtain ⟨a2, ha2⟩ := hb1 i hi
+    obtain ⟨a3, ha3⟩ := hsig_ck i hi; obtain ⟨a4, ha4⟩ := hsig_sub i hi
+    exact ⟨a1 + a2 + a3 + a4, by linarith⟩
+
+-> cohom.proj_plus (u2 : ℤ) (tau : (ℕ → ℤ) → (ℕ → ℤ)) (x : ℕ → ℤ) (i : ℕ) : ℤ :=
+  u2 * (x i + tau x i)
+
+-> cohom.proj_minus (u2 : ℤ) (tau : (ℕ → ℤ) → (ℕ → ℤ)) (x : ℕ → ℤ) (i : ℕ) : ℤ :=
+  u2 * (x i - tau x i)
+
+-> cohom.proj_sign (eps u2 : ℤ) (tau : (ℕ → ℤ) → (ℕ → ℤ)) (x : ℕ → ℤ) (i : ℕ) : ℤ :=
+  u2 * (x i + eps * tau x i)
+
++ cohom.proj_sign_eigen (r : ℕ) (q eps u2 : ℤ) (tau : (ℕ → ℤ) → (ℕ → ℤ))
+    (htau : cohom.is_cyclic_action r 2 q tau) (heps : eps * eps = 1) (x : ℕ → ℤ) :
+    cohom.mod_eq r q (tau (cohom.proj_sign eps u2 tau x)) (fun i => eps * cohom.proj_sign eps u2 tau x i)
+  have hp_eta : cohom.proj_sign eps u2 tau x = (fun j => u2 * (x j + eps * tau x j)) := by funext j; rfl
+  rw [hp_eta]
+  have ht2 := htau.2.2.2 x
+  have e2 : (2 : ℕ) = 1 + 1 := by decide
+  have e1 : (1 : ℕ) = 0 + 1 := by decide
+  have hit2 : cohom.iter tau 2 x = tau (tau x) := by rw [e2, cohom.iter_succ, e1, cohom.iter_succ, cohom.iter_zero]
+  rw [hit2] at ht2
+  have hlin := cohom.iter_lin r 2 q tau htau 1 u2 (u2 * eps) x (tau x)
+  have hit_a : cohom.iter tau 1 (fun i => u2 * x i + (u2 * eps) * tau x i) = tau (fun j => u2 * (x j + eps * tau x j))
+    rw [e1, cohom.iter_succ, cohom.iter_zero]
+    have hfn : (fun i => u2 * x i + (u2 * eps) * tau x i) = (fun j => u2 * (x j + eps * tau x j)) := by funext j; ring
+    rw [hfn]
+  have hit_b : cohom.iter tau 1 x = tau x := by rw [e1, cohom.iter_succ, cohom.iter_zero]
+  have hit_c : cohom.iter tau 1 (tau x) = tau (tau x) := by rw [e1, cohom.iter_succ, cohom.iter_zero]
+  rw [hit_a, hit_b, hit_c] at hlin
+  unfold cohom.mod_eq at hlin ht2 ⊢
+  intro i hi
+  obtain ⟨k1, hk1⟩ := hlin i hi; obtain ⟨k2, hk2⟩ := ht2 i hi
+  use k1 + u2 * eps * k2
+  have halg : tau (fun j => u2 * (x j + eps * tau x j)) i - eps * (u2 * (x i + eps * tau x i)) =
+      (tau (fun j => u2 * (x j + eps * tau x j)) i - (u2 * tau x i + (u2 * eps) * tau (tau x) i)) +
+      u2 * eps * (tau (tau x) i - x i) + u2 * (1 - eps * eps) * tau x i := by ring
+  have he0 : 1 - eps * eps = 0 := by linarith
+  rw [halg, hk1, hk2, he0]; ring
+
++ cohom.involution_parity_split (r : ℕ) (q u2 : ℤ) (tau : (ℕ → ℤ) → (ℕ → ℤ))
+    (htau : cohom.is_cyclic_action r 2 q tau)
+    (hodd : ∃ k : ℤ, 2 * u2 - 1 = q * k) (x : ℕ → ℤ) :
+    cohom.mod_eq r q x (fun i => cohom.proj_plus u2 tau x i + cohom.proj_minus u2 tau x i) ∧
+    cohom.mod_eq r q (tau (cohom.proj_plus u2 tau x)) (cohom.proj_plus u2 tau x) ∧
+    cohom.mod_eq r q (tau (cohom.proj_minus u2 tau x)) (fun i => -(cohom.proj_minus u2 tau x i))
+  obtain ⟨k2, hk2⟩ := hodd
+  have hp_eq : cohom.proj_plus u2 tau x = cohom.proj_sign 1 u2 tau x := by funext i; unfold cohom.proj_plus cohom.proj_sign; ring
+  have hm_eq : cohom.proj_minus u2 tau x = cohom.proj_sign (-1) u2 tau x := by funext i; unfold cohom.proj_minus cohom.proj_sign; ring
+  constructor
+  · unfold cohom.mod_eq cohom.proj_plus cohom.proj_minus
+    intro i _; use -k2 * x i
+    have halg : x i - (u2 * (x i + tau x i) + u2 * (x i - tau x i)) = -(2 * u2 - 1) * x i := by ring
+    rw [halg, hk2]; ring
+  · constructor
+    · rw [hp_eq]
+      have he := cohom.proj_sign_eigen r q 1 u2 tau htau (by ring) x
+      unfold cohom.mod_eq at he ⊢; intro i hi; obtain ⟨k, hk⟩ := he i hi; exact ⟨k, by linarith⟩
+    · rw [hm_eq]
+      have he := cohom.proj_sign_eigen r q (-1) u2 tau htau (by ring) x
+      unfold cohom.mod_eq at he ⊢; intro i hi; obtain ⟨k, hk⟩ := he i hi; exact ⟨k, by linarith⟩
+
++ cohom.proj_sign_cocycle (r m : ℕ) (q eps u2 : ℤ)
+    (sigma tau : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma)
+    (htau : cohom.is_cyclic_action r 2 q tau)
+    (hcomm : ∀ x : ℕ → ℤ, cohom.mod_eq r q (sigma (tau x)) (tau (sigma x)))
+    (c : ℕ → ℕ → ℤ) (hc : cohom.is_1cocycle r m q sigma c) :
+    cohom.is_1cocycle r m q sigma (fun g => cohom.proj_sign eps u2 tau (c g))
+  unfold cohom.is_1cocycle at hc ⊢
+  have hcomm_iter : ∀ (g : ℕ) (x : ℕ → ℤ), cohom.mod_eq r q (cohom.iter sigma g (tau x)) (tau (cohom.iter sigma g x))
+    intro g x; induction g with k ihk
+    · rw [cohom.iter_zero, cohom.iter_zero]; exact cohom.mod_eq_refl r q (tau x)
+    · rw [succ_eq_add_one.nat, cohom.iter_succ, cohom.iter_succ]
+      exact cohom.mod_eq_trans r q _ _ _ (hact.1 (cohom.iter sigma k (tau x)) (tau (cohom.iter sigma k x)) ihk) (hcomm (cohom.iter sigma k x))
+  have hp_zero : ∀ x : ℕ → ℤ, cohom.mod_eq r q x (fun _ => 0) → cohom.mod_eq r q (cohom.proj_sign eps u2 tau x) (fun _ => 0)
+    intro x hx
+    have htx := htau.1 x (fun _ => 0) hx
+    have ht0 := htau.2.2.1 0 (fun _ => 0)
+    have h0eq : (fun (_ : ℕ) => (0 : ℤ)) = (fun _ => (0 : ℤ) * (0 : ℤ)) := by funext _; ring
+    rw [← h0eq] at ht0
+    unfold cohom.mod_eq cohom.proj_sign at hx htx ht0 ⊢
+    intro i hi
+    obtain ⟨a1, ha1⟩ := hx i hi; obtain ⟨a2, ha2⟩ := htx i hi; obtain ⟨a3, ha3⟩ := ht0 i hi
+    use u2 * (a1 + eps * (a2 + a3))
+    have halg : u2 * (x i + eps * tau x i) - 0 = u2 * ((x i - 0) + eps * ((tau x i - tau (fun _ => 0) i) + (tau (fun _ => 0) i - 0 * tau (fun _ => 0) i))) := by ring
+    rw [halg, ha1, ha2, ha3]; ring
+  constructor; exact hp_zero (c 0) hc.1
+  constructor; exact hp_zero (c m) hc.2.1
+  intro g h
+  have hp_eta : ∀ y : ℕ → ℤ, cohom.proj_sign eps u2 tau y = (fun j => u2 * (y j + eps * tau y j)) := by intro y; funext j; rfl
+  rw [hp_eta (c (g + h)), hp_eta (c g), hp_eta (c h)]
+  have hgh := hc.2.2 g h
+  have htgh := htau.1 (c (g + h)) (fun i => c g i + cohom.iter sigma g (c h) i) hgh
+  have htadd := htau.2.1 (c g) (cohom.iter sigma g (c h))
+  have hlin := cohom.iter_lin r m q sigma hact g u2 (u2 * eps) (c h) (tau (c h))
+  have hfn : (fun i => u2 * c h i + (u2 * eps) * tau (c h) i) = (fun j => u2 * (c h j + eps * tau (c h) j)) := by funext j; ring
+  rw [hfn] at hlin
+  have hci := hcomm_iter g (c h)
+  unfold cohom.mod_eq at hgh htgh htadd hlin hci ⊢
+  intro i hi
+  obtain ⟨a1, ha1⟩ := hgh i hi; obtain ⟨a2, ha2⟩ := htgh i hi; obtain ⟨a3, ha3⟩ := htadd i hi
+  obtain ⟨a4, ha4⟩ := hlin i hi; obtain ⟨a5, ha5⟩ := hci i hi
+  use u2 * (a1 + eps * (a2 + a3)) - a4 - u2 * eps * a5
+  have halg : u2 * (c (g + h) i + eps * tau (c (g + h)) i) - (u2 * (c g i + eps * tau (c g) i) + cohom.iter sigma g (fun j => u2 * (c h j + eps * tau (c h) j)) i) =
+      u2 * ((c (g + h) i - (c g i + cohom.iter sigma g (c h) i)) + eps * ((tau (c (g + h)) i - tau (fun j => c g j + cohom.iter sigma g (c h) j) i) + (tau (fun j => c g j + cohom.iter sigma g (c h) j) i - (tau (c g) i + tau (cohom.iter sigma g (c h)) i)))) -
+      (cohom.iter sigma g (fun j => u2 * (c h j + eps * tau (c h) j)) i - (u2 * cohom.iter sigma g (c h) i + (u2 * eps) * cohom.iter sigma g (tau (c h)) i)) -
+      u2 * eps * (cohom.iter sigma g (tau (c h)) i - tau (cohom.iter sigma g (c h)) i) := by ring
+  rw [halg, ha1, ha2, ha3, ha4, ha5]; ring
+
++ cohom.odd_torsion_parity_killing (r m : ℕ) (q u2 : ℤ)
+    (sigma tau : (ℕ → ℤ) → (ℕ → ℤ))
+    (hact : cohom.is_cyclic_action r m q sigma)
+    (htau : cohom.is_cyclic_action r 2 q tau)
+    (hcomm : ∀ x : ℕ → ℤ, cohom.mod_eq r q (sigma (tau x)) (tau (sigma x)))
+    (hodd : ∃ k : ℤ, 2 * u2 - 1 = q * k) :
+    (∀ c : ℕ → ℕ → ℤ, cohom.is_1cocycle r 2 q tau c → cohom.is_1coboundary r q tau c) ∧
+    (∀ c : ℕ → ℕ → ℤ, cohom.is_1cocycle r m q sigma c →
+      cohom.is_1cocycle r m q sigma (fun g => cohom.proj_plus u2 tau (c g)) ∧
+      cohom.is_1cocycle r m q sigma (fun g => cohom.proj_minus u2 tau (c g)) ∧
+      (cohom.is_1coboundary r q sigma (fun g => cohom.proj_plus u2 tau (c g)) →
+        ∃ b : ℕ → ℤ, ∀ g : ℕ, cohom.mod_eq r q (c g) (fun i => cohom.proj_minus u2 tau (c g) i + (cohom.iter sigma g b i - b i))))
+  constructor
+  · intro c hc; have h2cast : ((2 : ℕ) : ℤ) = 2 := by decide
+    exact cohom.coprime_H1_vanish r 2 q u2 tau htau (by rw [h2cast]; exact hodd) c hc
+  · intro c hc
+    have hp_eq : (fun g => cohom.proj_plus u2 tau (c g)) = (fun g => cohom.proj_sign 1 u2 tau (c g)) := by funext g i; unfold cohom.proj_plus cohom.proj_sign; ring
+    have hm_eq : (fun g => cohom.proj_minus u2 tau (c g)) = (fun g => cohom.proj_sign (-1) u2 tau (c g)) := by funext g i; unfold cohom.proj_minus cohom.proj_sign; ring
+    constructor
+    · rw [hp_eq]; exact cohom.proj_sign_cocycle r m q 1 u2 sigma tau hact htau hcomm c hc
+    · constructor
+      · rw [hm_eq]; exact cohom.proj_sign_cocycle r m q (-1) u2 sigma tau hact htau hcomm c hc
+      · intro hbp; unfold cohom.is_1coboundary at hbp; obtain ⟨b, hb⟩ := hbp; use b; intro g
+        have hsp := (cohom.involution_parity_split r q u2 tau htau hodd (c g)).1
+        have hbg := hb g
+        unfold cohom.mod_eq at hsp hbg ⊢; intro i hi
+        obtain ⟨a1, ha1⟩ := hsp i hi; obtain ⟨a2, ha2⟩ := hbg i hi; exact ⟨a1 + a2, by linarith⟩
+
+-- ====================================================================================
+-- 3. Alpöge's Footnote 3 Iterated-Parseval Square-Root Cancellation on the Path Quadric
+-- ====================================================================================
+
++ prim_root.pow_of_prime (q h : ℕ) (zeta : ℂ) (hprime : is_prime_nat q)
+    (hprim : is_primitive_root q zeta) (hunit : complex.norm_sq zeta = 1)
+    (hh1 : 0 < h) (hh2 : h < q) :
+    is_primitive_root q (cpow_nat zeta h) ∧ complex.norm_sq (cpow_nat zeta h) = 1
+  have hnorm : ∀ k : ℕ, complex.norm_sq (cpow_nat zeta k) = 1
+    intro k; induction k with s ihs
+    · simp [cpow_nat]; unfold complex.norm_sq; simp
+    · rw [succ_eq_add_one.nat]; simp [cpow_nat]; rw [complex.norm_sq_mul, ihs, hunit]; ring
+  constructor
+  · unfold is_primitive_root at hprim ⊢; obtain ⟨hqpos, hzq, hne_small⟩ := hprim
+    constructor; exact hqpos
+    constructor
+    · rw [← cpow_nat.mul]; have hc : h * q = q * h := by ring; rw [hc, cpow_nat.mul, hzq, cpow_nat.one]
+    · intro r hr0 hrq heq
+      rw [← cpow_nat.mul, cpow_nat.mod_eq q zeta hzq (h * r)] at heq
+      have hmod0 : (h * r) % q = 0
+        by_contra hnz; exact hne_small ((h * r) % q) (by omega) (mod_lt.nat (h * r) q hqpos) heq
+      obtain hqh | hqr := hprime.2 h r hmod0
+      · exact not_dvd_of_pos_lt q h hh1 hh2 hqh
+      · exact not_dvd_of_pos_lt q r hr0 hrq hqr
+  · exact hnorm h
+
++ path_quadric.dft_parseval (q : ℕ) (zeta : ℂ) (hprim : is_primitive_root q zeta)
+    (hunit : complex.norm_sq zeta = 1) (f : ℕ → ℂ) :
+    (∑ x < q, complex.norm_sq (csum q (fun y => complex.mul (f y) (cpow_nat zeta (x * y))))) =
+      (q : ℝ) * (∑ y < q, complex.norm_sq (f y))
+  have hnorm_k : ∀ k : ℕ, complex.norm_sq (cpow_nat zeta k) = 1
+    intro k; induction k with s ihs
+    · simp [cpow_nat]; unfold complex.norm_sq; simp
+    · rw [succ_eq_add_one.nat]; simp [cpow_nat]; rw [complex.norm_sq_mul, ihs, hunit]; ring
+  have hconj_pow : ∀ a ≤ q, complex.conj (cpow_nat zeta a) = cpow_nat zeta (q - a)
+    intro a ha
+    have hprod : complex.mul (cpow_nat zeta (q - a)) (cpow_nat zeta a) = complex.one := by rw [← cpow_nat.add]; have hs : q - a + a = q := by omega; rw [hs, hprim.2.1]
+    have hunit_a : complex.mul (complex.conj (cpow_nat zeta a)) (cpow_nat zeta a) = complex.one
+      have hn := hnorm_k a; unfold complex.norm_sq at hn; apply complex.ext <;> simp <;> linarith
+    have hleft : complex.mul (complex.conj (cpow_nat zeta a)) complex.one = complex.mul (complex.conj (cpow_nat zeta a)) (complex.mul (cpow_nat zeta a) (cpow_nat zeta (q - a)))
+      rw [complex.mul_comm (cpow_nat zeta a) (cpow_nat zeta (q - a)), hprod]
+    rw [complex.mul_one, ← complex.mul_assoc, hunit_a, complex.one_mul] at hleft; exact hleft
+  have hconj_nat : ∀ (z : ℂ) (k : ℕ), complex.conj (cpow_nat z k) = cpow_nat (complex.conj z) k
+    intro z k; induction k with s ihs
+    · simp [cpow_nat]; apply complex.ext <;> simp
+    · rw [succ_eq_add_one.nat]; simp [cpow_nat]; rw [complex.conj_mul, ihs]
+  have horth : cdot.orthogonal q q (fun y x => cpow_nat zeta (x * y)) (q : ℝ)
+    unfold cdot.orthogonal cdot; intro y1 hy1 y2 hy2
+    have hcon : csum q (fun x => complex.mul (complex.conj (cpow_nat zeta (x * y1))) (cpow_nat zeta (x * y2))) = csum q (fun x => cpow_nat zeta (x * (q - y1 + y2)))
+      apply csum.congr; intro x _
+      have hc1 : x * y1 = y1 * x := by ring
+      rw [hc1, cpow_nat.mul, hconj_nat, hconj_pow y1 (by omega), ← cpow_nat.mul, ← cpow_nat.add]
+      have hidx : (q - y1) * x + x * y2 = x * (q - y1 + y2) := by ring; rw [hidx]
+    rw [hcon, root.orthogonality q zeta hprim (q - y1 + y2)]
+    by_cases e : y1 = y2
+    · rw [e]; have hs : q - y2 + y2 = 0 + q * 1 := by omega
+      have hmod0 : (q - y2 + y2) % q = 0 := by rw [hs, add_mul_mod.nat]; exact (div_mod_of_lt.nat 0 q hprim.1).2
+      rw [if_pos hmod0]; have hyy : y2 = y2 := rfl; rw [if_pos hyy]
+    · have hne0 : (q - y1 + y2) % q ≠ 0
+        intro h0
+        by_cases hlt : y2 < y1
+        · have hm := (div_mod_of_lt.nat (q - y1 + y2) q (by omega)).2; omega
+        · have hsp : q - y1 + y2 = (y2 - y1) + q * 1 := by omega
+          rw [hsp, add_mul_mod.nat, (div_mod_of_lt.nat (y2 - y1) q (by omega)).2] at h0; omega
+      rw [if_neg hne0, if_neg e]
+  have hp := cdot.parseval q q (fun y x => cpow_nat zeta (x * y)) (q : ℝ) f f horth
+  have hre : complex.re (cdot q (ctransform q (fun y x => cpow_nat zeta (x * y)) f) (ctransform q (fun y x => cpow_nat zeta (x * y)) f)) = complex.re (complex.mul (complex.of_real (q : ℝ)) (cdot q f f)) := by rw [hp]
+  have hre_rhs : complex.re (complex.mul (complex.of_real (q : ℝ)) (cdot q f f)) = (q : ℝ) * complex.re (cdot q f f) := by simp; ring
+  rw [cdot.self_re, hre_rhs, cdot.self_re] at hre; unfold ctransform at hre; exact hre
+
++ path_tail.iterated_parseval_bound (q h : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (B : ℝ)
+    (hprime : is_prime_nat q) (hprim : is_primitive_root q zeta) (hunit : complex.norm_sq zeta = 1)
+    (hh1 : 0 < h) (hh2 : h < q) (hB : 0 ≤ B)
+    (htB : ∀ y < q, complex.norm_sq (t y) ≤ B * B) (k : ℕ) :
+    (∑ x < q, complex.norm_sq (path_tail q zeta t h (k + 1) x)) ≤
+      (q : ℝ) ^ (k + 1) * (B * B) ^ k * (∑ y < q, complex.norm_sq (t y))
+  have hph := prim_root.pow_of_prime q h zeta hprime hprim hunit hh1 hh2
+  have hstep_eq : ∀ (r x : ℕ), path_tail q zeta t h (r + 1) x = csum q (fun y => complex.mul (complex.mul (t y) (path_tail q zeta t h r y)) (cpow_nat (cpow_nat zeta h) (x * y)))
+    intro r x; simp only [path_tail]; apply csum.congr; intro y _; rw [← cpow_nat.mul]; apply complex.ext <;> simp <;> ring
+  have hstep_parseval : ∀ r : ℕ, (∑ x < q, complex.norm_sq (path_tail q zeta t h (r + 1) x)) = (q : ℝ) * (∑ y < q, complex.norm_sq (t y) * complex.norm_sq (path_tail q zeta t h r y))
+    intro r
+    have hcon : (∑ x < q, complex.norm_sq (path_tail q zeta t h (r + 1) x)) = ∑ x < q, complex.norm_sq (csum q (fun y => complex.mul (complex.mul (t y) (path_tail q zeta t h r y)) (cpow_nat (cpow_nat zeta h) (x * y)))) := by apply sum_below.congr; intro x _; rw [hstep_eq r x]
+    rw [hcon, path_quadric.dft_parseval q (cpow_nat zeta h) hph.1 hph.2 (fun y => complex.mul (t y) (path_tail q zeta t h r y))]
+    have hc2 : (∑ y < q, complex.norm_sq (complex.mul (t y) (path_tail q zeta t h r y))) = ∑ y < q, complex.norm_sq (t y) * complex.norm_sq (path_tail q zeta t h r y) := by apply sum_below.congr; intro y _; exact complex.norm_sq_mul (t y) (path_tail q zeta t h r y)
+    rw [hc2]
+  induction k with r ihr
+  · rw [hstep_parseval 0]; have h0 : (0 + 1 : ℕ) = 1 := by decide
+    rw [h0, pow_one.real, pow_zero.real]
+    have hc : (∑ y < q, complex.norm_sq (t y) * complex.norm_sq (path_tail q zeta t h 0 y)) = ∑ y < q, complex.norm_sq (t y)
+      apply sum_below.congr; intro y _; have h1 : path_tail q zeta t h 0 y = complex.one := by rfl
+      rw [h1]; unfold complex.norm_sq; simp
+    rw [hc]; linarith
+  · rw [succ_eq_add_one.nat, hstep_parseval (r + 1)]
+    have hbound : (∑ y < q, complex.norm_sq (t y) * complex.norm_sq (path_tail q zeta t h (r + 1) y)) ≤ (B * B) * (∑ y < q, complex.norm_sq (path_tail q zeta t h (r + 1) y))
+      rw [← sum_const_mul.real]; apply sum_le.real; intro y hy
+      exact mul_le_mul_of_nonneg_right.real (complex.norm_sq (t y)) (B * B) (complex.norm_sq (path_tail q zeta t h (r + 1) y)) (htB y hy) (complex.norm_sq_nonneg (path_tail q zeta t h (r + 1) y))
+    have hq_nn := cast_nonneg.real q; have hB2_nn : 0 ≤ B * B := by nlinarith
+    have h1 := mul_le_mul_of_nonneg_left.real (∑ y < q, complex.norm_sq (t y) * complex.norm_sq (path_tail q zeta t h (r + 1) y)) ((B * B) * (∑ y < q, complex.norm_sq (path_tail q zeta t h (r + 1) y))) (q : ℝ) hbound hq_nn
+    have h2 := mul_le_mul_of_nonneg_left.real (∑ x < q, complex.norm_sq (path_tail q zeta t h (r + 1) x)) ((q : ℝ) ^ (r + 1) * (B * B) ^ r * (∑ y < q, complex.norm_sq (t y))) ((q : ℝ) * (B * B)) ihr (mul_nonneg.real (q : ℝ) (B * B) hq_nn hB2_nn)
+    rw [pow_succ.real (q : ℝ) (r + 1), pow_succ.real (B * B) r]; linarith
+
++ path_freq.sqrt_cancellation_bound (q h : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (B : ℝ)
+    (hprime : is_prime_nat q) (hprim : is_primitive_root q zeta) (hunit : complex.norm_sq zeta = 1)
+    (hh1 : 0 < h) (hh2 : h < q) (hB : 0 ≤ B)
+    (htB : ∀ y < q, complex.norm_sq (t y) ≤ B * B) (k : ℕ) :
+    complex.abs (path_freq q zeta t h (k + 1)) ≤
+      sqrt ((q : ℝ) ^ (k + 1)) * B ^ k * (∑ y < q, complex.norm_sq (t y))
+  have hdot : path_freq q zeta t h (k + 1) = cdot q (fun x => complex.conj (t x)) (path_tail q zeta t h (k + 1))
+    unfold path_freq cdot; apply csum.congr; intro x _; rw [complex.conj_conj]
+  have hcs := cdot.cauchy_schwarz q (fun x => complex.conj (t x)) (path_tail q zeta t h (k + 1))
+  rw [← hdot, cdot.self_re, cdot.self_re] at hcs
+  have hconj_t : (∑ x < q, complex.norm_sq (complex.conj (t x))) = ∑ x < q, complex.norm_sq (t x) := by apply sum_below.congr; intro x _; unfold complex.norm_sq; simp; ring
+  rw [hconj_t] at hcs
+  set T2 := ∑ y < q, complex.norm_sq (t y) with hT2_def
+  have hT2_nn : 0 ≤ T2 := by rw [hT2_def]; exact sum_nonneg.real _ q (by intro y _; exact complex.norm_sq_nonneg (t y))
+  have hpar := path_tail.iterated_parseval_bound q h zeta t B hprime hprim hunit hh1 hh2 hB htB k
+  rw [← hT2_def] at hpar
+  have hsq : complex.norm_sq (path_freq q zeta t h (k + 1)) ≤ (sqrt ((q : ℝ) ^ (k + 1)) * B ^ k * T2) ^ 2
+    have hq_nn := pow_nonneg.real (q : ℝ) (cast_nonneg.real q) (k + 1)
+    have hB_sq : ∀ r : ℕ, (B * B) ^ r = (B ^ r) ^ 2
+      intro r; induction r with s ihs
+      · rw [pow_zero.real, pow_zero.real]; ring
+      · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, ihs]; ring
+    have hrhs : (sqrt ((q : ℝ) ^ (k + 1)) * B ^ k * T2) ^ 2 = (q : ℝ) ^ (k + 1) * (B * B) ^ k * (T2 * T2)
+      have hs := sq_sqrt ((q : ℝ) ^ (k + 1)) hq_nn
+      rw [hB_sq k]; calc (sqrt ((q : ℝ) ^ (k + 1)) * B ^ k * T2) ^ 2 = (sqrt ((q : ℝ) ^ (k + 1)) ^ 2) * ((B ^ k) ^ 2) * (T2 * T2) := by ring
+        _ = (q : ℝ) ^ (k + 1) * (B ^ k) ^ 2 * (T2 * T2) := by rw [hs]
+    rw [hrhs]; linarith [mul_le_mul_of_nonneg_left.real _ _ T2 hpar hT2_nn]
+  unfold complex.abs
+  have hr_nn := mul_nonneg.real (sqrt ((q : ℝ) ^ (k + 1)) * B ^ k) T2 (mul_nonneg.real (sqrt ((q : ℝ) ^ (k + 1))) (B ^ k) (sqrt_nonneg ((q : ℝ) ^ (k + 1))) (pow_nonneg.real B hB k)) hT2_nn
+  exact (sqrt_le_iff (complex.norm_sq (path_freq q zeta t h (k + 1))) (sqrt ((q : ℝ) ^ (k + 1)) * B ^ k * T2) (complex.norm_sq_nonneg (path_freq q zeta t h (k + 1))) hr_nn).mpr hsq
+
++ csum.abs_le_sum_abs_m41 (m : ℕ) (f : ℕ → ℂ) :
+    complex.abs (csum m f) ≤ ∑ i < m, complex.abs (f i)
+  induction m with r ihr
+  · have h0 : csum 0 f = complex.zero := by rfl
+    rw [h0, sum_below_zero]; unfold complex.abs complex.norm_sq; simp; rw [sqrt_zero]; linarith
+  · rw [succ_eq_add_one.nat, sum_below_succ]
+    have hs : csum (r + 1) f = complex.add (csum r f) (f r) := by rfl
+    rw [hs]; linarith [complex.abs_add_le (csum r f) (f r)]
+
++ path_quadric.remainder_sqrt_bound (q : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (B : ℝ)
+    (hprime : is_prime_nat q) (hprim : is_primitive_root q zeta) (hunit : complex.norm_sq zeta = 1)
+    (hB : 0 ≤ B) (htB : ∀ y < q, complex.norm_sq (t y) ≤ B * B) (k : ℕ) :
+    complex.abs (path_remainder q zeta t (k + 1)) ≤
+      ((q - 1 : ℕ) : ℝ) * sqrt ((q : ℝ) ^ (k + 1)) * B ^ k * (∑ y < q, complex.norm_sq (t y))
+  unfold path_remainder
+  have htri := csum.abs_le_sum_abs_m41 (q - 1) (fun h => path_freq q zeta t (h + 1) (k + 1))
+  have hsum : (∑ h < q - 1, complex.abs (path_freq q zeta t (h + 1) (k + 1))) ≤ ∑ h < q - 1, (sqrt ((q : ℝ) ^ (k + 1)) * B ^ k * (∑ y < q, complex.norm_sq (t y)))
+    apply sum_le.real; intro h hh
+    exact path_freq.sqrt_cancellation_bound q (h + 1) zeta t B hprime hprim hunit (by omega) (by omega) hB htB k
+  rw [sum_const.real] at hsum; linarith
+
++ path_quadric.solution_exists_of_density (q : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (k : ℕ)
+    (hprime : is_prime_nat q) (hprim : is_primitive_root q zeta) (hunit : complex.norm_sq zeta = 1)
+    (hind : ∀ y < q, t y = complex.zero ∨ t y = complex.one)
+    (hM_pos : 0 < complex.re (csum q t))
+    (hthresh : ((q - 1 : ℕ) : ℝ) * sqrt ((q : ℝ) ^ (k + 1)) < (complex.re (csum q t)) ^ (k + 1)) :
+    0 < complex.re (complex.smul (q : ℝ) (path_sol_count q t (k + 1))) ∧
+    path_sol_count q t (k + 1) ≠ complex.zero
+  have ht_real : ∀ y < q, complex.im (t y) = 0 ∧ complex.norm_sq (t y) = complex.re (t y) ∧ complex.norm_sq (t y) ≤ 1 * 1
+    intro y hy; obtain hz | ho := hind y hy
+    · rw [hz]; unfold complex.norm_sq; simp
+    · rw [ho]; unfold complex.norm_sq; simp
+  have hsum_real : complex.im (csum q t) = 0 ∧ (∑ y < q, complex.norm_sq (t y)) = complex.re (csum q t)
+    have hrec : ∀ m ≤ q, complex.im (csum m t) = 0 ∧ (∑ y < m, complex.norm_sq (t y)) = complex.re (csum m t)
+      intro m hm; induction m with hm r ihr hm
+      · have h0 : csum 0 t = complex.zero := by rfl; rw [h0, sum_below_zero]; simp
+      · rw [succ_eq_add_one.nat] at hm ⊢
+        have hs : csum (r + 1) t = complex.add (csum r t) (t r) := by rfl
+        rw [hs, sum_below_succ]; have hp := ihr (by omega); have hr := ht_real r (by omega)
+        have him_add : complex.im (complex.add (csum r t) (t r)) = complex.im (csum r t) + complex.im (t r) := by simp
+        have hre_add : complex.re (complex.add (csum r t) (t r)) = complex.re (csum r t) + complex.re (t r) := by simp
+        constructor
+        · rw [him_add, hp.1, hr.1]; ring
+        · rw [hre_add, ← hp.2, hr.2.1]
+    exact hrec q (by omega)
+  set M := complex.re (csum q t) with hM_def
+  have hcsum_eq : csum q t = complex.of_real M
+    apply complex.ext
+    · rw [hM_def]; simp
+    · simp; exact hsum_real.1
+  have hpow_eq : cpow_nat (csum q t) (k + 2) = complex.of_real (M ^ (k + 2))
+    rw [hcsum_eq]
+    have hp : ∀ r : ℕ, cpow_nat (complex.of_real M) r = complex.of_real (M ^ r)
+      intro r; induction r with s ihs
+      · simp [cpow_nat]; apply complex.ext <;> simp
+      · rw [succ_eq_add_one.nat]; simp [cpow_nat]; rw [ihs, pow_succ.real]; apply complex.ext <;> simp <;> ring
+    exact hp (k + 2)
+  have hmast := path_quadric.master_identity q zeta t (k + 1) hprim.1 hprim
+  have hk2 : (k + 1) + 1 = k + 2 := by omega
+  rw [hk2, hpow_eq] at hmast
+  have hrem := path_quadric.remainder_sqrt_bound q zeta t 1 hprime hprim hunit (by linarith) (by intro y hy; exact (ht_real y hy).2.2) k
+  rw [hsum_real.2] at hrem
+  have h1k : ∀ r : ℕ, (1 : ℝ) ^ r = 1
+    intro r; induction r with s ihs
+    · rw [pow_zero.real]
+    · rw [succ_eq_add_one.nat, pow_succ.real, ihs]; ring
+  rw [h1k k] at hrem
+  have hre_R_ge : -complex.abs (path_remainder q zeta t (k + 1)) ≤ complex.re (path_remainder q zeta t (k + 1))
+    have hsq : complex.re (path_remainder q zeta t (k + 1)) ^ 2 ≤ complex.norm_sq (path_remainder q zeta t (k + 1)) := by unfold complex.norm_sq; nlinarith
+    have habs : |complex.re (path_remainder q zeta t (k + 1))| ≤ complex.abs (path_remainder q zeta t (k + 1))
+      unfold complex.abs
+      have h1 := sqrt_le_sqrt (complex.re (path_remainder q zeta t (k + 1)) ^ 2) (complex.norm_sq (path_remainder q zeta t (k + 1))) (by nlinarith) hsq; rw [sqrt_sq_eq_abs] at h1; exact h1
+    linarith [neg_le_abs.real (complex.re (path_remainder q zeta t (k + 1)))]
+  have hre_mast : complex.re (complex.smul (q : ℝ) (path_sol_count q t (k + 1))) = M ^ (k + 2) + complex.re (path_remainder q zeta t (k + 1))
+    have h1 : complex.re (complex.smul (q : ℝ) (path_sol_count q t (k + 1))) = complex.re (complex.add (complex.of_real (M ^ (k + 2))) (path_remainder q zeta t (k + 1))) := by rw [hmast]
+    simp at h1; exact h1
+  have hMk2 : M ^ (k + 2) = M ^ (k + 1) * M := by have hk2' : k + 2 = (k + 1) + 1 := by omega; rw [hk2', pow_succ.real]
+  have hpos : 0 < complex.re (complex.smul (q : ℝ) (path_sol_count q t (k + 1))) := by rw [hre_mast, hMk2]; nlinarith
+  exact ⟨hpos, by intro hz; rw [hz] at hpos; simp at hpos⟩

@@ -1,0 +1,423 @@
+-- Milestone 3.20: Exact Gaussian Fourier Self-Duality Differential Equation &
+--                 Complex Holomorphy of e^z and Dirichlet Terms n^(-s) (0 CUSTOM AXIOMS!)
+--
+-- Two foundational analytic breakthroughs on Satori's untouched 869-line HOL kernel (0 custom axioms):
+--   1. GAUSSIAN FOURIER SELF-DUALITY (Analytic Heart of Jacobi Theta Inversion & Frontier #1):
+--        For the truncated Gaussian Fourier cosine transform
+--          g_hat_R(xi) = int_{-R}^{R} e^(-pi * x^2) * cos(2 * pi * xi * x) dx,
+--        we prove:
+--          (a) `gaussian.fourier_deriv`: differentiation under the integral sign via `darboux.parameter_deriv`
+--                d/dxi g_hat_R(xi) = int_{-R}^{R} (-2*pi*x) * e^(-pi * x^2) * sin(2 * pi * xi * x) dx
+--          (b) `gaussian.fourier_ode`: integration by parts via `darboux.by_parts` gives the EXACT ODE
+--                d/dxi g_hat_R(xi) = -2*pi*xi * g_hat_R(xi) + 2 * e^(-pi * R^2) * sin(2 * pi * xi * R)
+--          (c) `gaussian.fourier_self_duality_bound`: multiplying by integrating factor e^(pi * xi^2)
+--              and bounding the increment gives the UNIFORM EXPONENTIAL ERROR BOUND
+--                |g_hat_R(xi) - e^(-pi * xi^2) * g_hat_R(0)| <= 2 * |xi| * e^(-pi * R^2) !
+--          (d) `gaussian.fourier_self_duality_limit`: as R -> infty,
+--                g_hat_R(xi) -> C * e^(-pi * xi^2)  whenever  g_hat_R(0) -> C !
+--   2. COMPLEX HOLOMORPHY OF e^z AND EVERY DIRICHLET TERM x^(-s) (Frontier #2):
+--        (a) `has_cderiv_at.cexp`: d/dz (e^z) = e^z for ALL z in C!
+--        (b) `has_cderiv_at.cpow_real_neg`: d/ds (x^(-s)) = -(log x) * x^(-s) for ALL x > 0, s in C!
+
+import trig_calculus
+import integral_parameter
+
+-- ====================================================================================
+-- 1. GAUSSIAN FOURIER SELF-DUALITY: EXACT ODE & EXPONENTIAL ERROR BOUND (0 AXIOMS!)
+-- ====================================================================================
+
+-- Gaussian Fourier kernel: K(xi, x) = e^(-pi * x^2) * cos(2 * pi * xi * x)
+-> gauss_cos (xi x : ℝ) : ℝ :=
+  exp (-pi * x * x) * cos (2 * pi * xi * x)
+
+-- Parameter derivative kernel: d/dxi K(xi, x) = (-2 * pi * x) * e^(-pi * x^2) * sin(2 * pi * xi * x)
+-> gauss_sin_deriv (xi x : ℝ) : ℝ :=
+  (-2 * pi * x * exp (-pi * x * x)) * sin (2 * pi * xi * x)
+
+-- Helper: uniform Taylor remainder for cos: |cos(a + h) - cos(a) - (-sin(a)) * h| <= |h|^2!
++ cos_linear_remainder_le (a h : ℝ) (hh : |h| ≤ 1) :
+    |cos (a + h) - cos a - (-sin a) * h| ≤ h * h
+  have hdecomp : cos (a + h) - cos a - (-sin a) * h = cos a * (cos h - 1) - sin a * (sin h - h) := by rw [cos_add]; ring
+  rw [hdecomp]
+  have hcos_bd := one_sub_cos_le h
+  have hsin_bd := sin_sub_abs_le h
+  have hc1 := cos_abs_le_one a
+  have hs1 := sin_abs_le_one a
+  have ht1 : |cos a * (cos h - 1)| ≤ h * h / 2
+    rw [abs_mul.real]
+    have hneg : |cos h - 1| = 1 - cos h := by rw [abs_of_nonpos.real (cos h - 1) (by linarith)]; ring
+    rw [hneg]
+    have hm := mul_le_mul_of_nonneg_right.real (|cos a|) 1 (1 - cos h) hc1 hcos_bd.1
+    linarith
+  have ht2 : |sin a * (sin h - h)| ≤ |h| * |h| * |h| / 6
+    rw [abs_mul.real]
+    have hm := mul_le_mul_of_nonneg_right.real (|sin a|) 1 (|sin h - h|) hs1 (abs_nonneg.real (sin h - h))
+    linarith
+  have hsum : |cos a * (cos h - 1) - sin a * (sin h - h)| ≤ h * h / 2 + |h| * |h| * |h| / 6
+    have hlo : 0 - (h * h / 2 + |h| * |h| * |h| / 6) ≤ cos a * (cos h - 1) - sin a * (sin h - h) := by linarith [neg_le_abs.real (cos a * (cos h - 1)), le_abs_self.real (sin a * (sin h - h))]
+    have hhi : cos a * (cos h - 1) - sin a * (sin h - h) ≤ h * h / 2 + |h| * |h| * |h| / 6 := by linarith [le_abs_self.real (cos a * (cos h - 1)), neg_le_abs.real (sin a * (sin h - h))]
+    exact abs_le_of.real (cos a * (cos h - 1) - sin a * (sin h - h)) (h * h / 2 + |h| * |h| * |h| / 6) hlo hhi
+  have hhsq : h * h = |h| * |h| := (sq_abs.real h).symm
+  have hcube : |h| * |h| * |h| ≤ |h| * |h|
+    have hnn := abs_nonneg.real h
+    nlinarith
+  rw [hhsq] at hsum ⊢
+  linarith
+
+-- Step A: Differentiation under the Gaussian Fourier integral (`darboux.parameter_deriv`)!
++ gaussian.fourier_deriv (J : ℝ → ℝ) (S : set ℝ) (R xi V : ℝ)
+    (hR : 0 ≤ R) (hxi : xi ∈ S)
+    (hslices : ∀ s ∈ S, darboux.has_integral (gauss_cos s) (-R) R (J s))
+    (hrate : darboux.has_integral (gauss_sin_deriv xi) (-R) R V) :
+    has_deriv_within J S xi V
+  apply darboux.parameter_deriv gauss_cos (gauss_sin_deriv xi) J S (-R) R xi V hxi hslices hrate
+  unfold uniform_deriv_within
+  intro e he
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  set M := 2 * pi * R + 1 with hM
+  have hM_pos : 0 < M := by rw [hM]; nlinarith
+  set d := min (1 / M) (e / (M * M)) with hd
+  have hd_pos : 0 < d
+    rw [hd]
+    exact lt_min.real (1 / M) (e / (M * M)) 0 (one_div_pos.real M hM_pos) (div_pos.real e (M * M) he (by nlinarith))
+  use d; constructor
+  · exact hd_pos
+  · intro s hs hnear x hx
+    have hx_abs : |x| ≤ R := abs_le_of.real x R (by linarith [hx.1]) hx.2
+    have h2pix : |2 * pi * x| ≤ M
+      have h1 : |2 * pi * x| = (2 * pi) * |x| := by rw [abs_mul.real, abs_of_pos.real (2 * pi) (by linarith)]
+      rw [h1, hM]; nlinarith
+    have harg_le1 : |2 * pi * (s - xi) * x| ≤ 1
+      have heq : 2 * pi * (s - xi) * x = (s - xi) * (2 * pi * x) := by ring
+      rw [heq, abs_mul.real]
+      have h1 : |s - xi| < 1 / M := by linarith [min_le_left.real (1 / M) (e / (M * M))]
+      have h2 := mul_le_mul_of_nonneg_left.real (|2 * pi * x|) M (|s - xi|) h2pix (abs_nonneg.real (s - xi))
+      have h3 : |s - xi| * M < 1 := by have h := (lt_div_iff.real (|s - xi|) 1 M hM_pos).mp h1; linarith
+      linarith
+    have hfac : gauss_cos s x - gauss_cos xi x - (s - xi) * gauss_sin_deriv xi x = exp (-pi * x * x) * (cos (2 * pi * xi * x + 2 * pi * (s - xi) * x) - cos (2 * pi * xi * x) - (-sin (2 * pi * xi * x)) * (2 * pi * (s - xi) * x))
+      unfold gauss_cos gauss_sin_deriv
+      have ha : 2 * pi * xi * x + 2 * pi * (s - xi) * x = 2 * pi * s * x := by ring
+      rw [ha]; ring
+    rw [hfac, abs_mul.real]
+    have hexp_le1 : exp (-pi * x * x) ≤ 1
+      have hxx : 0 ≤ x * x := by nlinarith
+      have hle0 : -pi * x * x ≤ 0 := by nlinarith
+      have h := (exp_le_exp (-pi * x * x) 0).mpr hle0
+      rw [exp_zero] at h; exact h
+    have hexp_pos : 0 < exp (-pi * x * x) := exp_pos (-pi * x * x)
+    rw [abs_of_pos.real (exp (-pi * x * x)) hexp_pos]
+    have hrem := cos_linear_remainder_le (2 * pi * xi * x) (2 * pi * (s - xi) * x) harg_le1
+    have hprod_le : exp (-pi * x * x) * |cos (2 * pi * xi * x + 2 * pi * (s - xi) * x) - cos (2 * pi * xi * x) - (-sin (2 * pi * xi * x)) * (2 * pi * (s - xi) * x)| ≤ (2 * pi * (s - xi) * x) * (2 * pi * (s - xi) * x)
+      have h1 := mul_le_mul_of_nonneg_left.real (|cos (2 * pi * xi * x + 2 * pi * (s - xi) * x) - cos (2 * pi * xi * x) - (-sin (2 * pi * xi * x)) * (2 * pi * (s - xi) * x)|) ((2 * pi * (s - xi) * x) * (2 * pi * (s - xi) * x)) (exp (-pi * x * x)) hrem (by linarith)
+      have h2 := mul_le_mul_of_nonneg_right.real (exp (-pi * x * x)) 1 ((2 * pi * (s - xi) * x) * (2 * pi * (s - xi) * x)) hexp_le1 (by nlinarith)
+      linarith
+    have hsq_bd : (2 * pi * (s - xi) * x) * (2 * pi * (s - xi) * x) ≤ (M * M) * |s - xi| * |s - xi|
+      have h1 : (2 * pi * (s - xi) * x) * (2 * pi * (s - xi) * x) = ((2 * pi * x) * (2 * pi * x)) * ((s - xi) * (s - xi)) := by ring
+      have hs1 : (2 * pi * x) * (2 * pi * x) = |2 * pi * x| * |2 * pi * x| := (sq_abs.real (2 * pi * x)).symm
+      have hs2 : (s - xi) * (s - xi) = |s - xi| * |s - xi| := (sq_abs.real (s - xi)).symm
+      rw [h1, hs1, hs2]
+      have h2 : |2 * pi * x| * |2 * pi * x| ≤ M * M := by nlinarith [abs_nonneg.real (2 * pi * x)]
+      have h3 := mul_le_mul_of_nonneg_right.real (|2 * pi * x| * |2 * pi * x|) (M * M) (|s - xi| * |s - xi|) h2 (by nlinarith [abs_nonneg.real (s - xi)])
+      linarith
+    have hnear_e : |s - xi| < e / (M * M) := by linarith [min_le_right.real (1 / M) (e / (M * M))]
+    have hMe : (M * M) * |s - xi| < e
+      have h := (lt_div_iff.real (|s - xi|) e (M * M) (by nlinarith)).mp hnear_e
+      linarith
+    have hfin := mul_le_mul_of_nonneg_right.real ((M * M) * |s - xi|) e (|s - xi|) (by linarith) (abs_nonneg.real (s - xi))
+    linarith
+
+-- Step B: Integration by parts on [-R, R] gives the EXACT Gaussian Fourier ODE!
++ gaussian.fourier_ibp (R xi I V : ℝ) (hR : 0 ≤ R)
+    (hI : darboux.has_integral (gauss_cos xi) (-R) R I)
+    (hV : darboux.has_integral (gauss_sin_deriv xi) (-R) R V) :
+    V + (2 * pi * xi) * I = 2 * exp (-pi * R * R) * sin (2 * pi * xi * R)
+  have hF_deriv : ∀ t, -R ≤ t → t ≤ R → has_deriv_within (fun x => exp (-pi * x * x)) (fun z => -R ≤ z ∧ z ≤ R) t (-2 * pi * t * exp (-pi * t * t))
+    intro t _ _
+    have hsq : has_deriv_within (fun x => x * x) (fun z => -R ≤ z ∧ z ≤ R) t (t + t)
+      have h := has_deriv_within.mul (fun x => x) (fun x => x) (fun z => -R ≤ z ∧ z ≤ R) t 1 1 (has_deriv_within.id (fun z => -R ≤ z ∧ z ≤ R) t) (has_deriv_within.id (fun z => -R ≤ z ∧ z ≤ R) t)
+      have hv : 1 * t + t * 1 = t + t := by ring
+      rw [hv] at h; exact h
+    have hsc := has_deriv_within.scale (-pi) (fun x => x * x) (fun z => -R ≤ z ∧ z ≤ R) t (t + t) hsq
+    have hf : (fun x => -pi * (x * x)) = (fun x => -pi * x * x) := by funext x; ring
+    rw [hf] at hsc
+    have hexp := has_deriv_within.exp_comp (fun x => -pi * x * x) (fun z => -R ≤ z ∧ z ≤ R) t ((-pi) * (t + t)) hsc
+    have hv : exp (-pi * t * t) * ((-pi) * (t + t)) = -2 * pi * t * exp (-pi * t * t) := by ring
+    rw [hv] at hexp; exact hexp
+  have hG_deriv : ∀ t, -R ≤ t → t ≤ R → has_deriv_within (fun x => sin (2 * pi * xi * x)) (fun z => -R ≤ z ∧ z ≤ R) t (2 * pi * xi * cos (2 * pi * xi * t))
+    intro t _ _
+    have h1 := has_deriv_within.comp sin (fun x => 2 * pi * xi * x) (fun z => -R ≤ z ∧ z ≤ R) (fun _ => True) t (cos (2 * pi * xi * t)) (2 * pi * xi) (has_deriv_within.sin (fun _ => True) (2 * pi * xi * t)) (has_deriv_within.scale_id (2 * pi * xi) (fun z => -R ≤ z ∧ z ≤ R) t) (by intro z _; trivial)
+    have hv : cos (2 * pi * xi * t) * (2 * pi * xi) = 2 * pi * xi * cos (2 * pi * xi * t) := by ring
+    rw [hv] at h1; exact h1
+  have hJ : darboux.has_integral (fun x => exp (-pi * x * x) * (2 * pi * xi * cos (2 * pi * xi * x))) (-R) R ((2 * pi * xi) * I)
+    have hsc := darboux.scale (gauss_cos xi) (-R) R I (2 * pi * xi) hI
+    have hfeq : (fun x => (2 * pi * xi) * gauss_cos xi x) = (fun x => exp (-pi * x * x) * (2 * pi * xi * cos (2 * pi * xi * x))) := by funext x; unfold gauss_cos; ring
+    rw [hfeq] at hsc; exact hsc
+  have hbp := darboux.by_parts (fun x => exp (-pi * x * x)) (fun x => sin (2 * pi * xi * x)) (fun x => -2 * pi * x * exp (-pi * x * x)) (fun x => 2 * pi * xi * cos (2 * pi * xi * x)) (-R) R V ((2 * pi * xi) * I) hV hJ hF_deriv hG_deriv
+  have hrhs : exp (-pi * R * R) * sin (2 * pi * xi * R) - exp (-pi * (-R) * (-R)) * sin (2 * pi * xi * (-R)) = 2 * exp (-pi * R * R) * sin (2 * pi * xi * R)
+    have h1 : -pi * (-R) * (-R) = -pi * R * R := by ring
+    have h2 : 2 * pi * xi * (-R) = -(2 * pi * xi * R) := by ring
+    rw [h1, h2, sin_neg]; ring
+  linarith
+
+-- Step C: THEOREM 1 (UNIFORM EXPONENTIAL GAUSSIAN FOURIER SELF-DUALITY BOUND — 0 AXIOMS!):
+-- For ANY R >= 0 and ANY real xi:
+--   |g_hat_R(xi) - e^(-pi * xi^2) * g_hat_R(0)| <= 2 * |xi| * e^(-pi * R^2) !
++ gaussian.fourier_self_duality_bound (J : ℝ → ℝ) (R xi : ℝ) (hR : 0 ≤ R)
+    (hslices : ∀ s : ℝ, darboux.has_integral (gauss_cos s) (-R) R (J s))
+    (hrates : ∀ s : ℝ, ∃ V : ℝ, darboux.has_integral (gauss_sin_deriv s) (-R) R V) :
+    |J xi - exp (-pi * xi * xi) * J 0| ≤ 2 * |xi| * exp (-pi * R * R)
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  -- Exact derivative of integrating-factor product H(s) = e^(pi * s^2) * J(s):
+  --   H'(s) = 2 * e^(pi * s^2) * e^(-pi * R^2) * sin(2 * pi * s * R) !
+  have hH_deriv : ∀ (a b : ℝ), a ≤ b → ∀ s, a ≤ s → s ≤ b →
+      has_deriv_within (fun u => exp (pi * u * u) * J u) (fun z => a ≤ z ∧ z ≤ b) s (2 * exp (pi * s * s) * exp (-pi * R * R) * sin (2 * pi * s * R))
+    intro a b hab s has hsb
+    obtain ⟨V, hV⟩ := hrates s
+    have hJd : has_deriv_within J (fun z => a ≤ z ∧ z ≤ b) s V :=
+      gaussian.fourier_deriv J (fun z => a ≤ z ∧ z ≤ b) R s V hR ⟨has, hsb⟩ (by intro u _; exact hslices u) hV
+    have hode := gaussian.fourier_ibp R s (J s) V hR (hslices s) hV
+    have hsq : has_deriv_within (fun u => u * u) (fun z => a ≤ z ∧ z ≤ b) s (s + s)
+      have h := has_deriv_within.mul (fun u => u) (fun u => u) (fun z => a ≤ z ∧ z ≤ b) s 1 1 (has_deriv_within.id (fun z => a ≤ z ∧ z ≤ b) s) (has_deriv_within.id (fun z => a ≤ z ∧ z ≤ b) s)
+      have hv : 1 * s + s * 1 = s + s := by ring
+      rw [hv] at h; exact h
+    have hsc := has_deriv_within.scale pi (fun u => u * u) (fun z => a ≤ z ∧ z ≤ b) s (s + s) hsq
+    have hf : (fun u => pi * (u * u)) = (fun u => pi * u * u) := by funext u; ring
+    rw [hf] at hsc
+    have hexp_d := has_deriv_within.exp_comp (fun u => pi * u * u) (fun z => a ≤ z ∧ z ≤ b) s (pi * (s + s)) hsc
+    have hprod := has_deriv_within.mul (fun u => exp (pi * u * u)) J (fun z => a ≤ z ∧ z ≤ b) s (exp (pi * s * s) * (pi * (s + s))) V hexp_d hJd
+    have hveq : exp (pi * s * s) * (pi * (s + s)) * J s + exp (pi * s * s) * V = 2 * exp (pi * s * s) * exp (-pi * R * R) * sin (2 * pi * s * R) := by linear_combination exp (pi * s * s) * hode
+    rw [hveq] at hprod; exact hprod
+  -- On the interval between 0 and xi, |H'(s)| <= 2 * e^(pi * xi^2) * e^(-pi * R^2)!
+  set M := 2 * exp (pi * xi * xi) * exp (-pi * R * R) with hM
+  have hbound_deriv : ∀ s, s * s ≤ xi * xi →
+      -(M) ≤ 2 * exp (pi * s * s) * exp (-pi * R * R) * sin (2 * pi * s * R) ∧
+      2 * exp (pi * s * s) * exp (-pi * R * R) * sin (2 * pi * s * R) ≤ M
+    intro s hss
+    have hexp_le : exp (pi * s * s) ≤ exp (pi * xi * xi) :=
+      (exp_le_exp (pi * s * s) (pi * xi * xi)).mpr (by nlinarith)
+    have hsin_bd := sin_abs_le_one (2 * pi * s * R)
+    have hsin_lo : -1 ≤ sin (2 * pi * s * R) := by linarith [neg_le_abs.real (sin (2 * pi * s * R))]
+    have hsin_hi : sin (2 * pi * s * R) ≤ 1 := by linarith [le_abs_self.real (sin (2 * pi * s * R))]
+    have hcoeff_pos : 0 < 2 * exp (pi * s * s) * exp (-pi * R * R) :=
+      mul_pos.real (2 * exp (pi * s * s)) (exp (-pi * R * R)) (by linarith [exp_pos (pi * s * s)]) (exp_pos (-pi * R * R))
+    have hcoeff_le : 2 * exp (pi * s * s) * exp (-pi * R * R) ≤ M := by rw [hM]; nlinarith [exp_pos (-pi * R * R)]
+    constructor <;> nlinarith
+  have hH_inc : |exp (pi * xi * xi) * J xi - J 0| ≤ M * |xi|
+    have h0 : exp (pi * 0 * 0) * J 0 = J 0
+      have hz : pi * 0 * 0 = 0 := by ring
+      rw [hz, exp_zero]; ring
+    by_cases hxi_nn : 0 ≤ xi
+    · have hup := interval.increment_le_of_deriv_le (fun u => exp (pi * u * u) * J u) (fun s => 2 * exp (pi * s * s) * exp (-pi * R * R) * sin (2 * pi * s * R)) 0 xi M hxi_nn (hH_deriv 0 xi hxi_nn) (by intro s hs1 hs2; exact (hbound_deriv s (by nlinarith)).2)
+      have hlo := interval.increment_ge_of_deriv_ge (fun u => exp (pi * u * u) * J u) (fun s => 2 * exp (pi * s * s) * exp (-pi * R * R) * sin (2 * pi * s * R)) 0 xi (-M) hxi_nn (hH_deriv 0 xi hxi_nn) (by intro s hs1 hs2; exact (hbound_deriv s (by nlinarith)).1)
+      rw [h0] at hup hlo
+      rw [abs_of_nonneg.real xi hxi_nn]
+      exact abs_le_of.real (exp (pi * xi * xi) * J xi - J 0) (M * xi) (by linarith) (by linarith)
+    · have hxi_le : xi ≤ 0 := by linarith
+      have hup := interval.increment_le_of_deriv_le (fun u => exp (pi * u * u) * J u) (fun s => 2 * exp (pi * s * s) * exp (-pi * R * R) * sin (2 * pi * s * R)) xi 0 M hxi_le (hH_deriv xi 0 hxi_le) (by intro s hs1 hs2; exact (hbound_deriv s (by nlinarith)).2)
+      have hlo := interval.increment_ge_of_deriv_ge (fun u => exp (pi * u * u) * J u) (fun s => 2 * exp (pi * s * s) * exp (-pi * R * R) * sin (2 * pi * s * R)) xi 0 (-M) hxi_le (hH_deriv xi 0 hxi_le) (by intro s hs1 hs2; exact (hbound_deriv s (by nlinarith)).1)
+      rw [h0] at hup hlo
+      rw [abs_of_nonpos.real xi hxi_le]
+      exact abs_le_of.real (exp (pi * xi * xi) * J xi - J 0) (M * (0 - xi)) (by linarith) (by linarith)
+  -- Multiply both sides by e^(-pi * xi^2) > 0: e^(pi * xi^2) CANCELS COMPLETELY!
+  have hcancel : exp (-pi * xi * xi) * (exp (pi * xi * xi) * J xi - J 0) = J xi - exp (-pi * xi * xi) * J 0
+    have h1 : exp (-pi * xi * xi) * exp (pi * xi * xi) = 1
+      rw [← exp_add]
+      have h0 : -pi * xi * xi + pi * xi * xi = 0 := by ring
+      rw [h0, exp_zero]
+    linear_combination J xi * h1
+  have hcancel_M : exp (-pi * xi * xi) * (M * |xi|) = 2 * |xi| * exp (-pi * R * R)
+    rw [hM]
+    have h1 : exp (-pi * xi * xi) * exp (pi * xi * xi) = 1
+      rw [← exp_add]
+      have h0 : -pi * xi * xi + pi * xi * xi = 0 := by ring
+      rw [h0, exp_zero]
+    linear_combination (2 * |xi| * exp (-pi * R * R)) * h1
+  have hexp_pos : 0 < exp (-pi * xi * xi) := exp_pos (-pi * xi * xi)
+  have hm := mul_le_mul_of_nonneg_left.real (|exp (pi * xi * xi) * J xi - J 0|) (M * |xi|) (exp (-pi * xi * xi)) hH_inc (by linarith)
+  rw [← abs_of_pos.real (exp (-pi * xi * xi)) hexp_pos, ← abs_mul.real, hcancel] at hm
+  rw [abs_of_pos.real (exp (-pi * xi * xi)) hexp_pos, hcancel_M] at hm
+  exact hm
+
+-- Step D: EXACT GAUSSIAN FOURIER SELF-DUALITY LIMIT (R -> infty, 0 AXIOMS!):
+-- If g_hat_N(0) -> C as N -> infty, then g_hat_N(xi) -> C * e^(-pi * xi^2) for EVERY xi in R!
++ gaussian.fourier_self_duality_limit (J : ℕ → ℝ → ℝ) (C xi : ℝ)
+    (hslices : ∀ (N : ℕ) (s : ℝ), darboux.has_integral (gauss_cos s) (-(N : ℝ)) (N : ℝ) (J N s))
+    (hrates : ∀ (N : ℕ) (s : ℝ), ∃ V : ℝ, darboux.has_integral (gauss_sin_deriv s) (-(N : ℝ)) (N : ℝ) V)
+    (h0 : tends_to (fun (N : ℕ) => J N 0) C) :
+    tends_to (fun (N : ℕ) => J N xi) (exp (-pi * xi * xi) * C)
+  have hscaled := tends_to.const_mul (fun (N : ℕ) => J N 0) C (exp (-pi * xi * xi)) h0
+  unfold tends_to at hscaled ⊢
+  intro e he
+  obtain ⟨N1, hN1⟩ := hscaled (e / 2) (by linarith)
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  -- Pick N2 large enough that 2 * |xi| * exp(-pi * N^2) < e / 2 (using exp(u) >= 1 + u > u):
+  obtain ⟨N2, hN2⟩ := exists_nat_gt.real (4 * |xi| / (pi * e) + 1)
+  use N1 + N2; intro N hN
+  have h1 := hN1 N (by omega)
+  have hbd := gaussian.fourier_self_duality_bound (J N) (N : ℝ) xi (cast_nonneg.real N) (hslices N) (hrates N)
+  have hN_ge : (N2 : ℝ) ≤ (N : ℝ) := (cast_le.real N2 N).mpr (by omega)
+  have hN_pos : 1 < (N : ℝ)
+    have hnn : 0 ≤ 4 * |xi| / (pi * e) := div_nonneg.real (4 * |xi|) (pi * e) (by linarith [abs_nonneg.real xi]) (by nlinarith)
+    linarith
+  have htail : 2 * |xi| * exp (-pi * (N : ℝ) * (N : ℝ)) < e / 2
+    have hge := exp_ge_one_add (pi * (N : ℝ) * (N : ℝ))
+    have hprod1 : exp (-pi * (N : ℝ) * (N : ℝ)) * exp (pi * (N : ℝ) * (N : ℝ)) = 1
+      rw [← exp_add]
+      have h0 : -pi * (N : ℝ) * (N : ℝ) + pi * (N : ℝ) * (N : ℝ) = 0 := by ring
+      rw [h0, exp_zero]
+    have hNsq : (N : ℝ) ≤ (N : ℝ) * (N : ℝ) := by nlinarith
+    have hgt_xi : 4 * |xi| < (pi * e) * (N : ℝ)
+      have h := (div_lt_iff.real (4 * |xi|) ((N : ℝ) - 1) (pi * e) (by nlinarith)).mp (by linarith)
+      nlinarith
+    have hmul : 2 * |xi| * exp (-pi * (N : ℝ) * (N : ℝ)) * exp (pi * (N : ℝ) * (N : ℝ)) < (e / 2) * exp (pi * (N : ℝ) * (N : ℝ))
+      have hl : 2 * |xi| * exp (-pi * (N : ℝ) * (N : ℝ)) * exp (pi * (N : ℝ) * (N : ℝ)) = 2 * |xi| := by linear_combination (2 * |xi|) * hprod1
+      rw [hl]
+      have hpN : pi * (N : ℝ) ≤ pi * (N : ℝ) * (N : ℝ) := by nlinarith
+      have he_exp : (e / 2) * (pi * (N : ℝ)) ≤ (e / 2) * exp (pi * (N : ℝ) * (N : ℝ)) := by nlinarith
+      linarith
+    have hexp_pos : 0 < exp (pi * (N : ℝ) * (N : ℝ)) := exp_pos (pi * (N : ℝ) * (N : ℝ))
+    nlinarith
+  have htri : |J N xi - exp (-pi * xi * xi) * C| ≤ |J N xi - exp (-pi * xi * xi) * J N 0| + |exp (-pi * xi * xi) * J N 0 - exp (-pi * xi * xi) * C|
+    have hlo : 0 - (|J N xi - exp (-pi * xi * xi) * J N 0| + |exp (-pi * xi * xi) * J N 0 - exp (-pi * xi * xi) * C|) ≤ J N xi - exp (-pi * xi * xi) * C := by linarith [neg_le_abs.real (J N xi - exp (-pi * xi * xi) * J N 0), neg_le_abs.real (exp (-pi * xi * xi) * J N 0 - exp (-pi * xi * xi) * C)]
+    have hhi : J N xi - exp (-pi * xi * xi) * C ≤ |J N xi - exp (-pi * xi * xi) * J N 0| + |exp (-pi * xi * xi) * J N 0 - exp (-pi * xi * xi) * C| := by linarith [le_abs_self.real (J N xi - exp (-pi * xi * xi) * J N 0), le_abs_self.real (exp (-pi * xi * xi) * J N 0 - exp (-pi * xi * xi) * C)]
+    exact abs_le_of.real (J N xi - exp (-pi * xi * xi) * C) (|J N xi - exp (-pi * xi * xi) * J N 0| + |exp (-pi * xi * xi) * J N 0 - exp (-pi * xi * xi) * C|) hlo hhi
+  linarith
+
+-- ====================================================================================
+-- 2. COMPLEX HOLOMORPHY OF e^z AND EVERY DIRICHLET TERM x^(-s) (0 AXIOMS!)
+-- ====================================================================================
+
+-- Helper: |e^h - 1 - h| <= 6 * |h|^2 whenever |h| <= 1!
++ cexp.sub_one_sub_le (h : ℂ) (hh : complex.abs h ≤ 1) :
+    complex.abs (complex.sub (complex.sub (complex.exp h) complex.one) h) ≤ 6 * (complex.abs h * complex.abs h)
+  set a := complex.re h with ha
+  set b := complex.im h with hb
+  have ha_le : |a| ≤ complex.abs h := by rw [ha]; exact complex.re_abs_le h
+  have hb_le : |b| ≤ complex.abs h := by rw [hb]; exact complex.im_abs_le h
+  have ha1 : |a| ≤ 1 := by linarith
+  have hexp_rem : |exp a - 1 - a| ≤ a * a
+    have h1 := abs_exp_sub_one_sub_id_le a ha1
+    have hsq : a ^ 2 = a * a := by ring
+    rw [hsq] at h1; exact h1
+  have hexp_a_le : exp a ≤ 3
+    have hlo : -1 ≤ a := by linarith [neg_le_abs.real a]
+    have hhi : a ≤ 1 := by linarith [le_abs_self.real a]
+    have h1 : exp a - 1 - a ≤ a * a := by linarith [le_abs_self.real (exp a - 1 - a)]
+    nlinarith
+  have hexp_sub1 : |exp a - 1| ≤ 2 * |a|
+    have h1 : |exp a - 1| ≤ |exp a - 1 - a| + |a|
+      have hlo : 0 - (|exp a - 1 - a| + |a|) ≤ exp a - 1 := by linarith [neg_le_abs.real (exp a - 1 - a), neg_le_abs.real a]
+      have hhi : exp a - 1 ≤ |exp a - 1 - a| + |a| := by linarith [le_abs_self.real (exp a - 1 - a), le_abs_self.real a]
+      exact abs_le_of.real (exp a - 1) (|exp a - 1 - a| + |a|) hlo hhi
+    have hasq : a * a ≤ |a|
+      have hsq : a * a = |a| * |a| := (sq_abs.real a).symm
+      rw [hsq]; nlinarith [abs_nonneg.real a]
+    linarith
+  have hcos_bd := one_sub_cos_le b
+  have hsin_bd := sin_sub_abs_le b
+  have hsin_le := sin_abs_le b
+  -- Real part: exp(a)*cos(b) - 1 - a = (exp(a) - 1 - a) - exp(a)*(1 - cos(b))
+  have hre_bd : |complex.re (complex.sub (complex.sub (complex.exp h) complex.one) h)| ≤ a * a + 3 * (b * b / 2)
+    simp; rw [← ha, ← hb]
+    have hdecomp : exp a * cos b - 1 - a = (exp a - 1 - a) - exp a * (1 - cos b) := by ring
+    rw [hdecomp]
+    have ht2 : |exp a * (1 - cos b)| ≤ 3 * (b * b / 2)
+      rw [abs_mul.real, abs_of_pos.real (exp a) (exp_pos a), abs_of_nonneg.real (1 - cos b) hcos_bd.1]
+      nlinarith [exp_pos a]
+    have hlo : 0 - (a * a + 3 * (b * b / 2)) ≤ (exp a - 1 - a) - exp a * (1 - cos b) := by linarith [neg_le_abs.real (exp a - 1 - a), le_abs_self.real (exp a * (1 - cos b))]
+    have hhi : (exp a - 1 - a) - exp a * (1 - cos b) ≤ a * a + 3 * (b * b / 2) := by linarith [le_abs_self.real (exp a - 1 - a), neg_le_abs.real (exp a * (1 - cos b))]
+    exact abs_le_of.real ((exp a - 1 - a) - exp a * (1 - cos b)) (a * a + 3 * (b * b / 2)) hlo hhi
+  -- Imag part: exp(a)*sin(b) - 0 - b = (exp(a) - 1)*sin(b) + (sin(b) - b)
+  have him_bd : |complex.im (complex.sub (complex.sub (complex.exp h) complex.one) h)| ≤ 2 * |a| * |b| + b * b / 6
+    simp; rw [← ha, ← hb]
+    have hdecomp : exp a * sin b - 0 - b = (exp a - 1) * sin b + (sin b - b) := by ring
+    rw [hdecomp]
+    have ht1 : |(exp a - 1) * sin b| ≤ 2 * |a| * |b|
+      rw [abs_mul.real]
+      have h1 := mul_le_mul_of_nonneg_left.real (|sin b|) (|b|) (|exp a - 1|) hsin_le (abs_nonneg.real (exp a - 1))
+      have h2 := mul_le_mul_of_nonneg_right.real (|exp a - 1|) (2 * |a|) (|b|) hexp_sub1 (abs_nonneg.real b)
+      linarith
+    have hcube : |b| * |b| * |b| ≤ b * b
+      have hsq : b * b = |b| * |b| := (sq_abs.real b).symm
+      rw [hsq]; nlinarith [abs_nonneg.real b]
+    have hlo : 0 - (2 * |a| * |b| + b * b / 6) ≤ (exp a - 1) * sin b + (sin b - b) := by linarith [neg_le_abs.real ((exp a - 1) * sin b), neg_le_abs.real (sin b - b)]
+    have hhi : (exp a - 1) * sin b + (sin b - b) ≤ 2 * |a| * |b| + b * b / 6 := by linarith [le_abs_self.real ((exp a - 1) * sin b), le_abs_self.real (sin b - b)]
+    exact abs_le_of.real ((exp a - 1) * sin b + (sin b - b)) (2 * |a| * |b| + b * b / 6) hlo hhi
+  have htri := complex.abs_le_re_im (complex.sub (complex.sub (complex.exp h) complex.one) h)
+  have ha2 : a * a ≤ complex.abs h * complex.abs h
+    have hsq : a * a = |a| * |a| := (sq_abs.real a).symm
+    rw [hsq]; nlinarith [abs_nonneg.real a, complex.abs_nonneg h]
+  have hb2 : b * b ≤ complex.abs h * complex.abs h
+    have hsq : b * b = |b| * |b| := (sq_abs.real b).symm
+    rw [hsq]; nlinarith [abs_nonneg.real b, complex.abs_nonneg h]
+  have hab2 : |a| * |b| ≤ complex.abs h * complex.abs h := by nlinarith [abs_nonneg.real a, abs_nonneg.real b, complex.abs_nonneg h]
+  linarith
+
+-- THEOREM 2A (COMPLEX HOLOMORPHY OF e^z ON ALL OF C: d/dz (e^z) = e^z — 0 AXIOMS!):
++ has_cderiv_at.cexp (z0 : ℂ) : has_cderiv_at complex.exp z0 (complex.exp z0)
+  unfold has_cderiv_at
+  intro e he
+  have hpos : 0 < 6 * complex.abs (complex.exp z0) + 1 := by linarith [complex.abs_nonneg (complex.exp z0)]
+  set d := min 1 (e / (6 * complex.abs (complex.exp z0) + 1)) with hd
+  have hd_pos : 0 < d := by rw [hd]; exact lt_min.real 1 (e / (6 * complex.abs (complex.exp z0) + 1)) 0 (by decide) (div_pos.real e (6 * complex.abs (complex.exp z0) + 1) he hpos)
+  use d; constructor
+  · exact hd_pos
+  · intro z hz
+    set h := complex.sub z z0 with hh
+    have hz_eq : z = complex.add z0 h
+      rw [hh]; apply complex.ext <;> simp <;> ring
+    have hfac : complex.sub (complex.sub (complex.exp z) (complex.exp z0)) (complex.mul (complex.exp z0) h) = complex.mul (complex.exp z0) (complex.sub (complex.sub (complex.exp h) complex.one) h)
+      rw [hz_eq, complex.exp_add]
+      apply complex.ext <;> simp <;> ring
+    rw [hfac, complex.abs_mul]
+    have hh1 : complex.abs h ≤ 1 := by linarith [min_le_left.real 1 (e / (6 * complex.abs (complex.exp z0) + 1))]
+    have hhe : complex.abs h < e / (6 * complex.abs (complex.exp z0) + 1) := by linarith [min_le_right.real 1 (e / (6 * complex.abs (complex.exp z0) + 1))]
+    have hrem := cexp.sub_one_sub_le h hh1
+    have h1 := mul_le_mul_of_nonneg_left.real (complex.abs (complex.sub (complex.sub (complex.exp h) complex.one) h)) (6 * (complex.abs h * complex.abs h)) (complex.abs (complex.exp z0)) hrem (complex.abs_nonneg (complex.exp z0))
+    have h2 : (6 * complex.abs (complex.exp z0) + 1) * complex.abs h < e
+      have h := (lt_div_iff.real (complex.abs h) e (6 * complex.abs (complex.exp z0) + 1) hpos).mp hhe
+      linarith
+    have h3 : (6 * complex.abs (complex.exp z0)) * complex.abs h ≤ e := by linarith [complex.abs_nonneg h]
+    have h4 := mul_le_mul_of_nonneg_right.real ((6 * complex.abs (complex.exp z0)) * complex.abs h) e (complex.abs h) h3 (complex.abs_nonneg h)
+    linarith
+
+-- THEOREM 2B (COMPLEX HOLOMORPHY OF EVERY DIRICHLET TERM x^(-s) ON ALL OF C — 0 AXIOMS!):
+--   d/ds (x^(-s)) = -(log x) * x^(-s)  for ALL x > 0 and ALL s in C!
++ has_cderiv_at.cpow_real_neg (x : ℝ) (hx : 0 < x) (s0 : ℂ) :
+    has_cderiv_at (fun s => cpow_real x (complex.neg s)) s0 (complex.mul (complex.of_real (-log x)) (cpow_real x (complex.neg s0)))
+  unfold has_cderiv_at
+  intro e he
+  set c := complex.of_real (-log x) with hc
+  have hpow_eq : ∀ s : ℂ, cpow_real x (complex.neg s) = complex.exp (complex.mul c s)
+    intro s; unfold cpow_real; rw [hc]
+    have harg : complex.smul (log x) (complex.neg s) = complex.mul (complex.of_real (-log x)) s
+      apply complex.ext <;> simp <;> ring
+    rw [harg]
+  have hexp := has_cderiv_at.cexp (complex.mul c s0)
+  unfold has_cderiv_at at hexp
+  have hpos : 0 < complex.abs c + 1 := by linarith [complex.abs_nonneg c]
+  obtain ⟨d0, hd0, h0⟩ := hexp (e / (complex.abs c + 1)) (div_pos.real e (complex.abs c + 1) he hpos)
+  set d := d0 / (complex.abs c + 1) with hd
+  have hd_pos : 0 < d := by rw [hd]; exact div_pos.real d0 (complex.abs c + 1) hd0 hpos
+  use d; constructor
+  · exact hd_pos
+  · intro s hs
+    rw [hpow_eq s, hpow_eq s0]
+    have hcs_sub : complex.sub (complex.mul c s) (complex.mul c s0) = complex.mul c (complex.sub s s0) := by ring
+    have hcs_near : complex.abs (complex.sub (complex.mul c s) (complex.mul c s0)) < d0
+      rw [hcs_sub, complex.abs_mul]
+      have h1 : (complex.abs c + 1) * complex.abs (complex.sub s s0) < d0
+        rw [hd] at hs
+        have h := (lt_div_iff.real (complex.abs (complex.sub s s0)) d0 (complex.abs c + 1) hpos).mp hs
+        linarith
+      nlinarith [complex.abs_nonneg (complex.sub s s0)]
+    have hbound := h0 (complex.mul c s) hcs_near
+    have hreassoc : complex.mul (complex.mul c (complex.exp (complex.mul c s0))) (complex.sub s s0) = complex.mul (complex.exp (complex.mul c s0)) (complex.sub (complex.mul c s) (complex.mul c s0)) := by ring
+    rw [hreassoc, hcs_sub]
+    rw [hcs_sub, complex.abs_mul] at hbound
+    have hfrac : (e / (complex.abs c + 1)) * complex.abs c ≤ e
+      have hmul : (e / (complex.abs c + 1)) * (complex.abs c + 1) = e := mul_div_cancel.real e (complex.abs c + 1) (by linarith)
+      have hnn : 0 ≤ e / (complex.abs c + 1) := by linarith [div_pos.real e (complex.abs c + 1) he hpos]
+      nlinarith
+    have hfin := mul_le_mul_of_nonneg_right.real ((e / (complex.abs c + 1)) * complex.abs c) e (complex.abs (complex.sub s s0)) hfrac (complex.abs_nonneg (complex.sub s s0))
+    linarith

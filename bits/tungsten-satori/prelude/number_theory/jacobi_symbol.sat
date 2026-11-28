@@ -1,0 +1,450 @@
+-- Jacobi Symbol, Multiplicative Characters, and Quadratic Character-Sum Bounds (0 custom axioms)
+
+import number_theory.polya_vinogradov
+import number_theory.dirichlet_twists
+import padic.product_formula
+
+-> jacobi_int_prod : ℕ → (ℕ → ℤ) → ℤ
+  | 0 => fun _ => 1
+  | k + 1 => fun f => jacobi_int_prod k f * f k
+
++ jacobi_int_prod.zero (f : ℕ → ℤ) : jacobi_int_prod 0 f = 1 := by rfl
++ jacobi_int_prod.succ (k : ℕ) (f : ℕ → ℤ) : jacobi_int_prod (k + 1) f = jacobi_int_prod k f * f k := by rfl
+
++ jacobi_int_prod.congr (n : ℕ) (f g : ℕ → ℤ) (h : ∀ i < n, f i = g i) : jacobi_int_prod n f = jacobi_int_prod n g
+  have hrec : ∀ m : ℕ, (∀ i < m, f i = g i) → jacobi_int_prod m f = jacobi_int_prod m g
+    intro m; induction m with h0 k ihk hk; rw [jacobi_int_prod.zero, jacobi_int_prod.zero]
+    rw [succ_eq_add_one.nat] at hk ⊢; rw [jacobi_int_prod.succ, jacobi_int_prod.succ, ihk (by intro i hi; exact hk i (by omega)), hk k (by omega)]
+  exact hrec n h
+
++ jacobi_int_prod.ones (n : ℕ) : jacobi_int_prod n (fun _ => 1) = 1
+  have hrec : ∀ m : ℕ, jacobi_int_prod m (fun _ => 1) = 1
+    intro m; induction m with k ihk; rw [jacobi_int_prod.zero]; (rw [succ_eq_add_one.nat, jacobi_int_prod.succ, ihk]; ring)
+  exact hrec n
+
++ jacobi_int_prod.mul (n : ℕ) (f g : ℕ → ℤ) : jacobi_int_prod n (fun i => f i * g i) = jacobi_int_prod n f * jacobi_int_prod n g
+  have hrec : ∀ m : ℕ, jacobi_int_prod m (fun i => f i * g i) = jacobi_int_prod m f * jacobi_int_prod m g
+    intro m; induction m with k ihk
+    · rw [jacobi_int_prod.zero, jacobi_int_prod.zero, jacobi_int_prod.zero]; ring
+    · rw [succ_eq_add_one.nat, jacobi_int_prod.succ, jacobi_int_prod.succ, jacobi_int_prod.succ, ihk]; ring
+  exact hrec n
+
++ jacobi_int_prod.extend_ones (A B : ℕ) (f : ℕ → ℤ) (hAB : A ≤ B) (h1 : ∀ p : ℕ, A ≤ p → p < B → f p = 1) :
+    jacobi_int_prod B f = jacobi_int_prod A f
+  have hrec : ∀ g : ℕ, (∀ p : ℕ, A ≤ p → p < A + g → f p = 1) → jacobi_int_prod (A + g) f = jacobi_int_prod A f
+    intro g; induction g with h0 k ihk hk; (have ha0 : A + 0 = A := by omega; rw [ha0])
+    rw [succ_eq_add_one.nat] at hk ⊢; have hs : A + (k + 1) = (A + k) + 1 := by omega
+    rw [hs, jacobi_int_prod.succ, ihk (by intro p p1 p2; exact hk p p1 (by omega)), hk (A + k) (by omega) (by omega)]; ring
+  have hdiff : B = A + (B - A) := by omega
+  rw [hdiff]; exact hrec (B - A) (by intro p p1 p2; exact h1 p p1 (by omega))
+
++ jacobi_int_prod.eq_zero_of_mem (B p : ℕ) (f : ℕ → ℤ) (hp : p < B) (hz : f p = 0) : jacobi_int_prod B f = 0
+  have hrec : ∀ m : ℕ, p < m → jacobi_int_prod m f = 0
+    intro m; induction m with h0 k ihk hk; omega
+    rw [succ_eq_add_one.nat] at hk ⊢; rw [jacobi_int_prod.succ]
+    by_cases hpk : p = k; (rw [← hpk, hz]; ring); (rw [ihk (by omega)]; ring)
+  exact hrec B hp
+
++ jacobi_int_prod.single (B q : ℕ) (f : ℕ → ℤ) (hq : q < B) (h1 : ∀ p < B, p ≠ q → f p = 1) : jacobi_int_prod B f = f q
+  have hrec : ∀ m : ℕ, q < m → (∀ p < m, p ≠ q → f p = 1) → jacobi_int_prod m f = f q
+    intro m; induction m with h0 _ k ihk hk hall; omega
+    rw [succ_eq_add_one.nat] at hk hall ⊢; rw [jacobi_int_prod.succ]
+    by_cases hqk : q = k
+    · rw [jacobi_int_prod.congr k f (fun _ => 1) (by intro p hp; exact hall p (by omega) (by omega)), jacobi_int_prod.ones, ← hqk]; ring
+    · rw [ihk (by omega) (by intro p hp hne; exact hall p (by omega) hne), hall k (by omega) (by omega)]; ring
+  exact hrec B hq h1
+
+-> sernau.prime_jacobi (p a : ℕ) : ℤ := if p = 2 then (if a % 2 = 1 then 1 else 0) else legendre_sym p a
+-> sernau.jacobi_factor (a m p : ℕ) : ℤ := if is_prime_nat p then (sernau.prime_jacobi p a) ^ (vp p m) else 1
+-> sernau.jacobi_sym (a m : ℕ) : ℤ := if m = 0 then 0 else jacobi_int_prod (m + 1) (sernau.jacobi_factor a m)
+-> sernau.jacobi_dchar (m : ℕ) : DChar := if m = 0 then dchar.trivial_one else DChar.mk m (fun a => c_of_int (sernau.jacobi_sym a m))
+
++ int_pow_one_all (n : ℕ) : (1 : ℤ) ^ n = 1
+  have hrec : ∀ m : ℕ, (1 : ℤ) ^ m = 1
+    intro m; induction m with k ihk; rw [pow_zero.int]; (rw [succ_eq_add_one.nat, pow_succ.int, ihk]; ring)
+  exact hrec n
+
++ int_mul_pow_eq (x y : ℤ) (n : ℕ) : (x * y) ^ n = x ^ n * y ^ n
+  have hrec : ∀ m : ℕ, (x * y) ^ m = x ^ m * y ^ m
+    intro m; induction m with k ihk; (rw [pow_zero.int, pow_zero.int, pow_zero.int]; ring); (rw [succ_eq_add_one.nat, pow_succ.int, pow_succ.int, pow_succ.int, ihk]; ring)
+  exact hrec n
+
++ sernau.jacobi_sym_pos (a m : ℕ) (hm : 1 ≤ m) : sernau.jacobi_sym a m = jacobi_int_prod (m + 1) (sernau.jacobi_factor a m)
+  have hm0 : m ≠ 0 := by omega
+  unfold sernau.jacobi_sym; exact if_neg hm0
+
++ sernau.jacobi_sym_eq_prod_ge (a m B : ℕ) (hm : 1 ≤ m) (hB : m + 1 ≤ B) : jacobi_int_prod B (sernau.jacobi_factor a m) = sernau.jacobi_sym a m
+  rw [sernau.jacobi_sym_pos a m hm]
+  apply jacobi_int_prod.extend_ones (m + 1) B (sernau.jacobi_factor a m) hB; intro p hp_lo _
+  unfold sernau.jacobi_factor; by_cases hp : is_prime_nat p
+  · rw [if_pos hp, vp.eq_zero_of_not_dvd p m hp.1 (by omega) (not_dvd_of_pos_lt p m (by omega) (by omega)), pow_zero.int]
+  · rw [if_neg hp]
+
++ sernau.jacobi_sym_mul_right (a m1 m2 : ℕ) (hm1 : 1 ≤ m1) (hm2 : 1 ≤ m2) :
+    sernau.jacobi_sym a (m1 * m2) = sernau.jacobi_sym a m1 * sernau.jacobi_sym a m2
+  have hm12_pos := mul_pos.nat m1 m2 (by omega) (by omega); have hm12 : 1 ≤ m1 * m2 := by omega
+  set B := m1 * m2 + 1 with hB_def
+  rw [← sernau.jacobi_sym_eq_prod_ge a (m1 * m2) B hm12 (by omega),
+      ← sernau.jacobi_sym_eq_prod_ge a m1 B hm1 (by rw [hB_def]; nlinarith),
+      ← sernau.jacobi_sym_eq_prod_ge a m2 B hm2 (by rw [hB_def]; nlinarith),
+      ← jacobi_int_prod.mul B (sernau.jacobi_factor a m1) (sernau.jacobi_factor a m2)]
+  apply jacobi_int_prod.congr B; intro p _; unfold sernau.jacobi_factor
+  by_cases hp : is_prime_nat p
+  · rw [if_pos hp, if_pos hp, if_pos hp, vp.mul p m1 m2 hp (by omega) (by omega), pow_add.int]
+  · rw [if_neg hp, if_neg hp, if_neg hp]; ring
+
++ sernau.jacobi_sym_one (a : ℕ) : sernau.jacobi_sym a 1 = 1
+  rw [sernau.jacobi_sym_pos a 1 (by decide)]
+  have h11 : 1 + 1 = 2 := by decide
+  have hcon : jacobi_int_prod 2 (sernau.jacobi_factor a 1) = jacobi_int_prod 2 (fun _ => 1) := by
+    apply jacobi_int_prod.congr 2; intro p hp; unfold sernau.jacobi_factor
+    have hnp : ¬ is_prime_nat p := by intro h; have h2 := h.1; omega
+    rw [if_neg hnp]
+  rw [h11, hcon, jacobi_int_prod.ones]
+
++ sernau.jacobi_sym_odd_prime (a q : ℕ) (hq_pr : is_prime_nat q) (hq_odd : q % 2 = 1) : sernau.jacobi_sym a q = legendre_sym q a
+  have hq2 : 2 ≤ q := hq_pr.1; have hq_ne2 : q ≠ 2 := by omega
+  rw [sernau.jacobi_sym_pos a q (by omega)]
+  have hrest : ∀ p < q + 1, p ≠ q → sernau.jacobi_factor a q p = 1
+    intro p _ hne; unfold sernau.jacobi_factor; by_cases hp : is_prime_nat p
+    · rw [if_pos hp, vp.eq_zero_of_not_dvd p q hp.1 (by omega) (distinct_primes_not_dvd p q hp hq_pr hne), pow_zero.int]
+    · rw [if_neg hp]
+  rw [jacobi_int_prod.single (q + 1) q (sernau.jacobi_factor a q) (by omega) hrest]
+  unfold sernau.jacobi_factor sernau.prime_jacobi; rw [if_pos hq_pr, if_neg hq_ne2]
+  have hvp1 : vp q q = 1 := by
+    have h1 : q = q * 1 := by ring; have hm := vp.mul_p q 1 hq2 (by decide); rw [← h1] at hm
+    have hv0 := vp.eq_zero_of_not_dvd q 1 hq2 (by decide) (not_dvd_one_of_ge_two q hq2); omega
+  rw [hvp1]; have h10 : (1 : ℕ) = 0 + 1 := rfl; rw [h10, pow_succ.int, pow_zero.int]; ring
+
++ sernau.jacobi_sym_odd_prime_pow (a q e : ℕ) (hq_pr : is_prime_nat q) (hq_odd : q % 2 = 1) :
+    sernau.jacobi_sym a (q ^ e) = (legendre_sym q a) ^ e
+  have hq2 : 2 ≤ q := hq_pr.1
+  have hrec : ∀ k : ℕ, sernau.jacobi_sym a (q ^ k) = (legendre_sym q a) ^ k
+    intro k; induction k with r ihr; rw [pow_zero.nat, pow_zero.int, sernau.jacobi_sym_one]
+    rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.int]; have hpos0 := pow_pos.nat q r (by omega)
+    rw [sernau.jacobi_sym_mul_right a (q ^ r) q (by omega) (by omega), ihr, sernau.jacobi_sym_odd_prime a q hq_pr hq_odd]
+  exact hrec e
+
++ sernau.jacobi_dchar_valid (m : ℕ) : dchar.valid (sernau.jacobi_dchar m)
+  by_cases hm0 : m = 0
+  · unfold sernau.jacobi_dchar; rw [if_pos hm0]; exact dchar.trivial_one_valid
+  · have hm1 : 1 ≤ m := by omega
+    unfold sernau.jacobi_dchar; rw [if_neg hm0]; unfold dchar.valid is_dirichlet_char; simp
+    constructor; exact hm1; constructor
+    · intro a; rw [sernau.jacobi_sym_pos (a + m) m hm1, sernau.jacobi_sym_pos a m hm1]
+      have hcon : jacobi_int_prod (m + 1) (sernau.jacobi_factor (a + m) m) = jacobi_int_prod (m + 1) (sernau.jacobi_factor a m)
+        apply jacobi_int_prod.congr (m + 1); intro p _; unfold sernau.jacobi_factor
+        by_cases hp : is_prime_nat p
+        · rw [if_pos hp, if_pos hp]; by_cases hvp0 : vp p m = 0; (rw [hvp0, pow_zero.int, pow_zero.int])
+          have hp2 : 2 ≤ p := hp.1
+          have hp_dvd : p ∣ m := by
+            have h1 := (vp.le_iff_pow_dvd p m 1 hp2 (by omega)).mp (by omega)
+            have hp1 : p ^ 1 = p := by have e0 : (1 : ℕ) = 0 + 1 := rfl; rw [e0, pow_succ.nat, pow_zero.nat]; ring
+            rw [hp1] at h1; exact h1
+          obtain ⟨k, hk⟩ := (dvd.iff_exists p m (by omega)).mp hp_dvd
+          unfold sernau.prime_jacobi; by_cases hp_eq2 : p = 2
+          · rw [if_pos hp_eq2, if_pos hp_eq2]; have hmod2 : (a + m) % 2 = a % 2 := by rw [hk, hp_eq2, add_mul_mod.nat]
+            rw [hmod2]
+          · rw [if_neg hp_eq2, if_neg hp_eq2]; have hmodp : (a + m) % p = a % p := by rw [hk, add_mul_mod.nat]
+            rw [← legendre_sym.mod p (a + m), hmodp, legendre_sym.mod p a]
+        · rw [if_neg hp, if_neg hp]
+      rw [hcon]
+    · constructor
+      · rw [sernau.jacobi_sym_pos 1 m hm1]
+        have hcon : jacobi_int_prod (m + 1) (sernau.jacobi_factor 1 m) = jacobi_int_prod (m + 1) (fun _ => 1)
+          apply jacobi_int_prod.congr (m + 1); intro p _; unfold sernau.jacobi_factor
+          by_cases hp : is_prime_nat p
+          · rw [if_pos hp]
+            have hpj1 : sernau.prime_jacobi p 1 = 1 := by
+              unfold sernau.prime_jacobi; by_cases hp2_eq : p = 2; rw [if_pos hp2_eq]
+              rw [if_neg hp2_eq]; have hp2 : 2 ≤ p := hp.1; have hqr1 : is_qr p 1 := ⟨1, by omega, rfl⟩
+              unfold legendre_sym; rw [if_neg (not_dvd_one_of_ge_two p hp2), if_pos hqr1]
+            rw [hpj1, int_pow_one_all]
+          · rw [if_neg hp]
+        rw [hcon, jacobi_int_prod.ones, c_of_int.one]
+      · constructor
+        · intro a hnu
+          have hex_p : ∃ p : ℕ, prime p ∧ p ∣ m ∧ p ∣ a := by
+            by_contra hno; apply hnu; rw [zmod.is_unit_iff_no_common_prime m a (by omega)]
+            intro p hp hpm hpa; exact hno ⟨p, hp, hpm, hpa⟩
+          obtain ⟨p, hp_pr0, hpm, hpa⟩ := hex_p
+          have hp_pr : is_prime_nat p := (prime_iff_is_prime_nat p).mp hp_pr0
+          have hp2 : 2 ≤ p := hp_pr.1; have hp_le : p ≤ m := le_of_dvd.nat m p (by omega) hpm
+          have hvp_ge1 : 1 ≤ vp p m := by
+            apply (vp.le_iff_pow_dvd p m 1 hp2 (by omega)).mpr
+            have hp1 : p ^ 1 = p := by have e0 : (1 : ℕ) = 0 + 1 := rfl; rw [e0, pow_succ.nat, pow_zero.nat]; ring
+            rw [hp1]; exact hpm
+          have hfac0 : sernau.jacobi_factor a m p = 0 := by
+            unfold sernau.jacobi_factor; rw [if_pos hp_pr]
+            have hpj0 : sernau.prime_jacobi p a = 0 := by
+              unfold sernau.prime_jacobi; by_cases hp_eq2 : p = 2
+              · rw [if_pos hp_eq2]; rw [hp_eq2] at hpa; unfold dvd at hpa; have hne1 : a % 2 ≠ 1 := by omega
+                rw [if_neg hne1]
+              · rw [if_neg hp_eq2]; unfold legendre_sym; rw [if_pos hpa]
+            have he_eq : vp p m = (vp p m - 1) + 1 := by omega
+            rw [hpj0, he_eq, pow_succ.int]; ring
+          rw [sernau.jacobi_sym_pos a m hm1, jacobi_int_prod.eq_zero_of_mem (m + 1) p (sernau.jacobi_factor a m) (by omega) hfac0, c_of_int.zero]
+        · intro a b
+          rw [← c_of_int.mul, sernau.jacobi_sym_pos (a * b) m hm1, sernau.jacobi_sym_pos a m hm1, sernau.jacobi_sym_pos b m hm1, ← jacobi_int_prod.mul]
+          have hcon : jacobi_int_prod (m + 1) (sernau.jacobi_factor (a * b) m) = jacobi_int_prod (m + 1) (fun p => sernau.jacobi_factor a m p * sernau.jacobi_factor b m p)
+            apply jacobi_int_prod.congr (m + 1); intro p _; unfold sernau.jacobi_factor
+            by_cases hp : is_prime_nat p
+            · rw [if_pos hp, if_pos hp, if_pos hp, ← int_mul_pow_eq]
+              have hpj_mul : sernau.prime_jacobi p (a * b) = sernau.prime_jacobi p a * sernau.prime_jacobi p b := by
+                unfold sernau.prime_jacobi; by_cases hp_eq2 : p = 2
+                · rw [if_pos hp_eq2, if_pos hp_eq2, if_pos hp_eq2, mul_mod.nat a b 2]
+                  obtain ha0 | ha1 := mod_two_cases.nat a; (rw [ha0]; simp)
+                  rw [ha1]; obtain hb0 | hb1 := mod_two_cases.nat b; (rw [hb0]; simp); (rw [hb1]; decide)
+                · rw [if_neg hp_eq2, if_neg hp_eq2, if_neg hp_eq2]; exact legendre_sym.mul p a b hp (odd_of_prime_ne_two p hp hp_eq2)
+              rw [hpj_mul]
+            · rw [if_neg hp, if_neg hp, if_neg hp]; ring
+          rw [hcon]
+
++ sernau.jacobi_dchar_nontrivial_of_odd_vp (m q : ℕ)
+    (hm : 1 ≤ m) (hq_pr : is_prime_nat q) (hq_odd : q % 2 = 1) (hvp_odd : vp q m % 2 = 1) :
+    ¬ dchar.is_trivial (sernau.jacobi_dchar m)
+  intro htriv
+  have hq2 : 2 ≤ q := hq_pr.1; set e := vp q m with he_def; have he_ge1 : 1 ≤ e := by omega
+  have hsp := vp.spec q m hq2 (by omega); rw [← he_def] at hsp
+  have hqe_pos : 0 < q ^ e := pow_pos.nat q e (by omega)
+  obtain ⟨R, hR_eq⟩ := (dvd.iff_exists (q ^ e) m hqe_pos).mp hsp.1
+  have hR_pos : 1 ≤ R := by by_contra h0; have hz : R = 0 := by omega; rw [hz] at hR_eq; omega
+  have hnq_R : ¬ (q ∣ R) := by
+    intro hqR; obtain ⟨t, ht⟩ := (dvd.iff_exists q R (by omega)).mp hqR; apply hsp.2
+    exact (dvd.iff_exists (q ^ (e + 1)) m (pow_pos.nat q (e + 1) (by omega))).mpr ⟨t, by rw [hR_eq, ht, pow_succ.nat]; ring⟩
+  obtain ⟨b, hb_lt, hb1, hnq_b⟩ := qr.exists_nonresidue q hq_pr hq_odd
+  obtain ⟨n, hn_R, hn_q⟩ := crt_coprime_prime R q 1 b (by omega) hq_pr hnq_R
+  rw [(div_mod_of_lt.nat b q hb_lt).2] at hn_q
+  have hnd_qn : ¬ (q ∣ n) := by unfold dvd; omega
+  have hu_R : zmod.is_unit R n := (zmod.is_unit_mod R n).mp (by rw [hn_R]; exact (zmod.is_unit_mod R 1).mpr (zmod.unit_one_all R hR_pos))
+  have hu_qe : zmod.is_unit (q ^ e) n := by
+    rw [zmod.is_unit_iff_no_common_prime (q ^ e) n hqe_pos]; intro p hp hp_qe hpn
+    obtain hp1 | hp_eq := is_prime_nat.dvd_cases q p hq_pr (by linarith [hp.1]) (prime_dvd_of_dvd_pow.nat p q e hp hp_qe)
+    · have hp2' := hp.1; omega
+    · rw [hp_eq] at hpn; exact hnd_qn hpn
+  have hu_m : zmod.is_unit m n := by rw [hR_eq]; exact (zmod.is_unit_mul_moduli (q ^ e) R n hqe_pos (by omega)).mpr ⟨hu_qe, hu_R⟩
+  have hval_R : 1 ≤ (sernau.jacobi_dchar R).level ∧ is_dirichlet_char (sernau.jacobi_dchar R).level (sernau.jacobi_dchar R).val := sernau.jacobi_dchar_valid R
+  have hlvl_R : (sernau.jacobi_dchar R).level = R := by unfold sernau.jacobi_dchar; rw [if_neg (by omega)]; simp
+  have hjac_R_c : (sernau.jacobi_dchar R).val n = complex.one := by
+    have hmR := dchar.mod_eq_m39 (sernau.jacobi_dchar R).level (sernau.jacobi_dchar R).val hval_R.2.1 n
+    have hm1 := dchar.mod_eq_m39 (sernau.jacobi_dchar R).level (sernau.jacobi_dchar R).val hval_R.2.1 1
+    rw [hlvl_R] at hmR hm1; rw [← hmR, hn_R, hm1]; exact hval_R.2.2.1
+  have hjac_R : sernau.jacobi_sym n R = 1 := by
+    have hc : c_of_int (sernau.jacobi_sym n R) = complex.one := by
+      unfold sernau.jacobi_dchar at hjac_R_c; rw [if_neg (by omega)] at hjac_R_c; simp at hjac_R_c; exact hjac_R_c
+    have hre : complex.re (c_of_int (sernau.jacobi_sym n R)) = complex.re complex.one := by rw [hc]
+    unfold c_of_int at hre; simp at hre; exact (int_cast_inj.real (sernau.jacobi_sym n R) 1).mp (by rw [int_cast_one.real]; exact hre)
+  have hleg_n : legendre_sym q n = -1 := by
+    rw [← legendre_sym.mod q n, hn_q]; unfold legendre_sym; rw [if_neg (not_dvd_of_pos_lt q b (by omega) hb_lt), if_neg hnq_b]
+  have hneg_pow : (-1 : ℤ) ^ e = -1 := by
+    have hrec_ev : ∀ k : ℕ, (-1 : ℤ) ^ (2 * k + 1) = -1
+      intro k; induction k with r ihr; (have h01 : 2 * 0 + 1 = 0 + 1 := by decide; rw [h01, pow_succ.int, pow_zero.int]; ring)
+      rw [succ_eq_add_one.nat]; have hs : 2 * (r + 1) + 1 = ((2 * r + 1) + 1) + 1 := by omega
+      rw [hs, pow_succ.int, pow_succ.int, ihr]; ring
+    have he_eq : e = 2 * (e / 2) + 1 := by have hdm := div_add_mod.nat e 2; omega
+    rw [he_eq]; exact hrec_ev (e / 2)
+  have hjac_m : sernau.jacobi_sym n m = -1 := by
+    rw [hR_eq, sernau.jacobi_sym_mul_right n (q ^ e) R (by omega) hR_pos,
+        sernau.jacobi_sym_odd_prime_pow n q e hq_pr hq_odd, hleg_n, hneg_pow, hjac_R]; ring
+  unfold dchar.is_trivial at htriv
+  have hlvl_m : (sernau.jacobi_dchar m).level = m := by unfold sernau.jacobi_dchar; rw [if_neg (by omega)]; simp
+  have hv1 := htriv n (by rw [hlvl_m]; exact hu_m)
+  have hv2 : (sernau.jacobi_dchar m).val n = c_of_int (-1) := by
+    have hjm_eq : (sernau.jacobi_dchar m).val n = c_of_int (sernau.jacobi_sym n m) := by unfold sernau.jacobi_dchar; rw [if_neg (by omega)]; simp
+    rw [hjm_eq, hjac_m]
+  have hr1 : complex.re ((sernau.jacobi_dchar m).val n) = 1 := by rw [hv1]; simp
+  have hr2 : complex.re ((sernau.jacobi_dchar m).val n) = -1 := by rw [hv2]; unfold c_of_int; simp
+  linarith
+
++ not_sq_two_mul_of_odd (R : ℕ) (hodd : R % 2 = 1) : ¬ (∃ u : ℕ, u * u = 2 * R)
+  intro ⟨u, hu⟩; obtain hu0 | hu1 := mod_two_cases.nat u
+  · obtain ⟨w, hw⟩ := (dvd.iff_exists 2 u (by decide)).mp hu0
+    have h4 : 2 * R = 2 * (2 * (w * w)) := by rw [← hu, hw]; ring
+    have hm : R % 2 = 0 := (div_mod_unique.nat R 2 (w * w) 0 (by omega) (by decide)).2.symm; omega
+  · have hmod : (u * u) % 2 = 1 := by rw [mul_mod.nat u u 2, hu1]; decide
+    have hmod2 : (2 * R) % 2 = 0 := (div_mod_unique.nat (2 * R) 2 R 0 (by ring) (by decide)).2.symm; omega
+
++ sernau.exists_odd_vp_of_nonsquare (m : ℕ) (hm : 1 ≤ m)
+    (hsq1 : ¬ ∃ s : ℕ, s * s = m) (hsq2 : ¬ ∃ s : ℕ, s * s = 2 * m) :
+    ∃ q : ℕ, is_prime_nat q ∧ q % 2 = 1 ∧ vp q m % 2 = 1
+  have hall : ∀ n : ℕ, 1 ≤ n → (¬ ∃ s : ℕ, s * s = n) → (¬ ∃ s : ℕ, s * s = 2 * n) → ∃ q : ℕ, is_prime_nat q ∧ q % 2 = 1 ∧ vp q n % 2 = 1
+    apply nat.strong_induct (fun n => 1 ≤ n → (¬ ∃ s : ℕ, s * s = n) → (¬ ∃ s : ℕ, s * s = 2 * n) → ∃ q : ℕ, is_prime_nat q ∧ q % 2 = 1 ∧ vp q n % 2 = 1)
+    intro n ihn hn1 hnsq1 hnsq2; by_cases hn_eq1 : n = 1; (exfalso; exact hnsq1 ⟨1, by omega⟩)
+    have hn2 : 2 ≤ n := by omega; set p := min_fac n with hp_def
+    have hp_pr : is_prime_nat p := (prime_iff_is_prime_nat p).mp (by rw [hp_def]; exact min_fac.prime n hn2)
+    have hp2 : 2 ≤ p := hp_pr.1; have hpn : p ∣ n := by rw [hp_def]; exact (min_fac.spec n hn2).2.2.1
+    have hvp_ge1 : 1 ≤ vp p n := by
+      apply (vp.le_iff_pow_dvd p n 1 hp2 (by omega)).mpr
+      have hp1 : p ^ 1 = p := by have e0 : (1 : ℕ) = 0 + 1 := rfl; rw [e0, pow_succ.nat, pow_zero.nat]; ring
+      rw [hp1]; exact hpn
+    by_cases hp_eq2 : p = 2
+    · by_cases hvp2_ev : vp 2 n % 2 = 0
+      · have h4_dvd : 4 ∣ n := by
+          have hd := (vp.le_iff_pow_dvd 2 n 2 (by decide) (by omega)).mp (by rw [hp_eq2] at hvp_ge1; omega)
+          have h22 : 2 ^ 2 = 4 := by decide; rw [h22] at hd; exact hd
+        obtain ⟨k, hk⟩ := (dvd.iff_exists 4 n (by decide)).mp h4_dvd
+        have hk_pos : 1 ≤ k := by by_contra h0; have hz : k = 0 := by omega; rw [hz] at hk; omega
+        have hk_sq1 : ¬ ∃ s : ℕ, s * s = k := by intro ⟨s, hs⟩; exact hnsq1 ⟨2 * s, by rw [hk, ← hs]; ring⟩
+        have hk_sq2 : ¬ ∃ s : ℕ, s * s = 2 * k := by intro ⟨s, hs⟩; exact hnsq2 ⟨2 * s, by rw [hk]; linarith⟩
+        obtain ⟨q, hq_pr, hq_odd, hq_vp⟩ := ihn k (by omega) hk_pos hk_sq1 hk_sq2
+        have hq_nd4 : ¬ (q ∣ 4) := by
+          intro hd4; have h4_eq : (4 : ℕ) = 2 * 2 := by decide; have h20 : 2 % 2 = 0 := by decide
+          rw [h4_eq] at hd4; obtain hd2 | hd2 := hq_pr.2 2 2 hd4
+          · have hle := le_of_dvd.nat 2 q (by decide) hd2; have hq2' := hq_pr.1; have hqe2 : q = 2 := by omega; rw [hqe2] at hq_odd; omega
+          · have hle := le_of_dvd.nat 2 q (by decide) hd2; have hq2' := hq_pr.1; have hqe2 : q = 2 := by omega; rw [hqe2] at hq_odd; omega
+        have hvp_4k : vp q n = vp q k := by rw [hk, vp.mul q 4 k hq_pr (by decide) (by omega), vp.eq_zero_of_not_dvd q 4 hq_pr.1 (by decide) hq_nd4]; omega
+        exact ⟨q, hq_pr, hq_odd, by rw [hvp_4k]; exact hq_vp⟩
+      · set e2 := vp 2 n with he2_def
+        have he2_odd : e2 % 2 = 1 := by obtain h0 | h1 := mod_two_cases.nat e2; omega; exact h1
+        have hsp2 := vp.spec 2 n (by decide) (by omega); rw [← he2_def] at hsp2
+        have h2e_pos : 0 < 2 ^ e2 := pow_pos.nat 2 e2 (by decide)
+        obtain ⟨R, hR_eq⟩ := (dvd.iff_exists (2 ^ e2) n h2e_pos).mp hsp2.1
+        have hR_pos : 1 ≤ R := by by_contra h0; have hz : R = 0 := by omega; rw [hz] at hR_eq; omega
+        have h2e_ge2 : 2 ≤ 2 ^ e2 := by
+          have he2_s : e2 = (e2 - 1) + 1 := by omega; have hp_pos0 := pow_pos.nat 2 (e2 - 1) (by decide); rw [he2_s, pow_succ.nat]; omega
+        have hn2_R : ¬ (2 ∣ R) := by
+          intro h2R; obtain ⟨t, ht⟩ := (dvd.iff_exists 2 R (by decide)).mp h2R; apply hsp2.2
+          exact (dvd.iff_exists (2 ^ (e2 + 1)) n (pow_pos.nat 2 (e2 + 1) (by decide))).mpr ⟨t, by rw [hR_eq, ht, pow_succ.nat]; ring⟩
+        have hR_odd : R % 2 = 1 := by obtain h0 | h1 := mod_two_cases.nat R; (exfalso; exact hn2_R h0); exact h1
+        have hR_sq1 : ¬ ∃ s : ℕ, s * s = R := by
+          intro ⟨s, hs⟩; apply hnsq2; set u := e2 / 2 with hu_def
+          have he2_u : e2 = 2 * u + 1 := by have hdm := div_add_mod.nat e2 2; omega
+          have hpow_sq : ∀ k : ℕ, 2 ^ (2 * k) = (2 ^ k) * (2 ^ k)
+            intro k; induction k with r ihr; (have z0 : 2 * 0 = 0 := by decide; rw [z0, pow_zero.nat]; decide)
+            rw [succ_eq_add_one.nat]; have hs2 : 2 * (r + 1) = (2 * r + 1) + 1 := by omega
+            rw [hs2, pow_succ.nat, pow_succ.nat, pow_succ.nat, ihr]; ring
+          use (2 ^ (u + 1)) * s; rw [hR_eq, ← hs, he2_u, pow_succ.nat 2 (2 * u), hpow_sq u, pow_succ.nat 2 u]; ring
+        obtain ⟨q, hq_pr, hq_odd, hq_vp⟩ := ihn R (by nlinarith) hR_pos hR_sq1 (not_sq_two_mul_of_odd R hR_odd)
+        have hq_nd2 : ¬ (q ∣ 2) := by
+          intro hd2; have h20 : 2 % 2 = 0 := by decide; have hle := le_of_dvd.nat 2 q (by decide) hd2; have hq2' := hq_pr.1; have hqe2 : q = 2 := by omega; rw [hqe2] at hq_odd; omega
+        have hvp_n : vp q n = vp q R := by
+          rw [hR_eq, vp.mul q (2 ^ e2) R hq_pr h2e_pos (by omega), vp.pow q 2 e2 hq_pr (by decide), vp.eq_zero_of_not_dvd q 2 hq_pr.1 (by decide) hq_nd2]; ring
+        exact ⟨q, hq_pr, hq_odd, by rw [hvp_n]; exact hq_vp⟩
+    · have hp_odd : p % 2 = 1 := odd_of_prime_ne_two p hp_pr hp_eq2
+      by_cases hvpp_odd : vp p n % 2 = 1; exact ⟨p, hp_pr, hp_odd, hvpp_odd⟩
+      have hvpp_ev : vp p n % 2 = 0 := by obtain h0 | h1 := mod_two_cases.nat (vp p n); exact h0; omega
+      have hp2_dvd : (p * p) ∣ n := by
+        have hd := (vp.le_iff_pow_dvd p n 2 hp2 (by omega)).mp (by omega)
+        have hpp : p ^ 2 = p * p := by have e2 : (2 : ℕ) = (0 + 1) + 1 := rfl; rw [e2, pow_succ.nat, pow_succ.nat, pow_zero.nat]; ring
+        rw [hpp] at hd; exact hd
+      obtain ⟨k, hk⟩ := (dvd.iff_exists (p * p) n (by nlinarith)).mp hp2_dvd
+      have hk_pos : 1 ≤ k := by by_contra h0; have hz : k = 0 := by omega; rw [hz] at hk; omega
+      have hk_sq1 : ¬ ∃ s : ℕ, s * s = k := by intro ⟨s, hs⟩; exact hnsq1 ⟨p * s, by rw [hk, ← hs]; ring⟩
+      have hk_sq2 : ¬ ∃ s : ℕ, s * s = 2 * k := by
+        intro ⟨s, hs⟩; apply hnsq2; use p * s; have hre : p * s * (p * s) = p * p * (s * s) := by ring; rw [hre, hs, hk]; ring
+      have h4k : 4 * k ≤ p * p * k := mul_le_mul_of_nonneg_right.nat 4 (p * p) k (by nlinarith) (by omega)
+      obtain ⟨q, hq_pr, hq_odd, hq_vp⟩ := ihn k (by omega) hk_pos hk_sq1 hk_sq2
+      have hvp_n : vp q n % 2 = 1 := by
+        rw [hk, vp.mul q (p * p) k hq_pr (by nlinarith) (by omega), vp.mul q p p hq_pr (by omega) (by omega)]
+        have hadd : vp q p + vp q p + vp q k = vp q k + 2 * vp q p := by ring
+        rw [hadd, add_mul_mod.nat]; exact hq_vp
+      exact ⟨q, hq_pr, hq_odd, hvp_n⟩
+  exact hall m hm hsq1 hsq2
+
++ sernau.jacobi_dchar_nontrivial (m : ℕ) (hm : 1 ≤ m)
+    (hsq1 : ¬ ∃ s : ℕ, s * s = m) (hsq2 : ¬ ∃ s : ℕ, s * s = 2 * m) :
+    ¬ dchar.is_trivial (sernau.jacobi_dchar m)
+  obtain ⟨q, hq_pr, hq_odd, hq_vp⟩ := sernau.exists_odd_vp_of_nonsquare m hm hsq1 hsq2
+  exact sernau.jacobi_dchar_nontrivial_of_odd_vp m q hm hq_pr hq_odd hq_vp
+
++ sernau.jacobi_dchar_odd_nontrivial (m : ℕ) (hm : 1 ≤ m) (hodd : m % 2 = 1) (hsq : ¬ ∃ s : ℕ, s * s = m) :
+    ¬ dchar.is_trivial (sernau.jacobi_dchar m)
+  exact sernau.jacobi_dchar_nontrivial m hm hsq (not_sq_two_mul_of_odd m hodd)
+
++ sernau.sum_jacobi_le (m X : ℕ) (hm : 1 ≤ m)
+    (hsq1 : ¬ ∃ s : ℕ, s * s = m) (hsq2 : ¬ ∃ s : ℕ, s * s = 2 * m) :
+    complex.abs (csum X (fun v => (sernau.jacobi_dchar m).val (v + 1))) ≤ 2 * sqrt (m : ℝ) * (1 + log (m : ℝ))
+  have hpv := polya_vinogradov.general (sernau.jacobi_dchar m) (sernau.jacobi_dchar_valid m) (sernau.jacobi_dchar_nontrivial m hm hsq1 hsq2) X
+  have hlvl : (sernau.jacobi_dchar m).level = m := by unfold sernau.jacobi_dchar; rw [if_neg (by omega)]; simp
+  rw [hlvl] at hpv; exact hpv
+
++ sernau.sum_jacobi_odd_le (m X : ℕ) (hm : 1 ≤ m) (hodd : m % 2 = 1) (hsq : ¬ ∃ s : ℕ, s * s = m) :
+    complex.abs (csum X (fun v => (sernau.jacobi_dchar m).val (v + 1))) ≤ 2 * sqrt (m : ℝ) * (1 + log (m : ℝ))
+  exact sernau.sum_jacobi_le m X hm hsq (not_sq_two_mul_of_odd m hodd)
+
+-- 3. Real-Twist Dirichlet Polynomial Mean-Square Bound (`sernau.sum_sq_jacobi_poly_odd_le`)
+
++ sernau.jacobi_dchar_conj_pos (m a : ℕ) (hm : 1 ≤ m) :
+    complex.conj ((sernau.jacobi_dchar m).val a) = (sernau.jacobi_dchar m).val a
+  unfold sernau.jacobi_dchar; rw [if_neg (by omega)]; simp; unfold c_of_int; exact complex.conj_of_real (sernau.jacobi_sym a m : ℝ)
+
++ sernau.jacobi_dchar_mul_pos (m1 m2 a : ℕ) (hm1 : 1 ≤ m1) (hm2 : 1 ≤ m2) :
+    complex.mul ((sernau.jacobi_dchar m1).val a) ((sernau.jacobi_dchar m2).val a) = (sernau.jacobi_dchar (m1 * m2)).val a
+  have hm12 : m1 * m2 ≠ 0 := by have hp := mul_pos.nat m1 m2 (by omega) (by omega); omega
+  unfold sernau.jacobi_dchar; rw [if_neg (by omega), if_neg (by omega), if_neg hm12]; simp
+  rw [← c_of_int.mul, ← sernau.jacobi_sym_mul_right a m1 m2 hm1 hm2]
+
++ sernau.sum_sq_jacobi_poly_odd_le (N X : ℕ) (c : ℕ → ℂ) :
+    (∑ v < X, complex.norm_sq (csum N (fun n => complex.mul (c n) ((sernau.jacobi_dchar (2 * n + 1)).val (v + 1))))) ≤
+    (X : ℝ) * (∑ n1 < N, ∑ n2 < N,
+      if (∃ s : ℕ, s * s = (2 * n1 + 1) * (2 * n2 + 1))
+      then complex.abs (c n1) * complex.abs (c n2) else 0) +
+    (∑ n1 < N, ∑ n2 < N,
+      if (∃ s : ℕ, s * s = (2 * n1 + 1) * (2 * n2 + 1))
+      then 0
+      else complex.abs (c n1) * complex.abs (c n2) *
+        (2 * sqrt (((2 * n1 + 1) * (2 * n2 + 1) : ℕ) : ℝ) * (1 + log (((2 * n1 + 1) * (2 * n2 + 1) : ℕ) : ℝ))))
+  set P := (fun v : ℕ => csum N (fun n => complex.mul (c n) ((sernau.jacobi_dchar (2 * n + 1)).val (v + 1)))) with hP_def
+  set K := (fun n1 n2 : ℕ => complex.mul (complex.mul (complex.conj (c n1)) (c n2))
+    (csum X (fun v => (sernau.jacobi_dchar ((2 * n1 + 1) * (2 * n2 + 1))).val (v + 1)))) with hK_def
+  set A := (fun n1 n2 : ℕ => if (∃ s : ℕ, s * s = (2 * n1 + 1) * (2 * n2 + 1)) then complex.abs (c n1) * complex.abs (c n2) else 0) with hA_def
+  set B := (fun n1 n2 : ℕ => if (∃ s : ℕ, s * s = (2 * n1 + 1) * (2 * n2 + 1)) then 0
+    else complex.abs (c n1) * complex.abs (c n2) *
+      (2 * sqrt (((2 * n1 + 1) * (2 * n2 + 1) : ℕ) : ℝ) * (1 + log (((2 * n1 + 1) * (2 * n2 + 1) : ℕ) : ℝ)))) with hB_def
+  have hgoal_P : (∑ v < X, complex.norm_sq (csum N (fun n => complex.mul (c n) ((sernau.jacobi_dchar (2 * n + 1)).val (v + 1))))) = ∑ v < X, complex.norm_sq (P v) :=
+    by apply sum_below.congr; intro v _; rw [hP_def]
+  have hms_re : (∑ v < X, complex.norm_sq (P v)) = complex.re (cdot X P P) := (cdot.self_re X P).symm
+  have hre_le : complex.re (cdot X P P) ≤ complex.abs (cdot X P P) := by linarith [le_abs_self.real (complex.re (cdot X P P)), complex.re_abs_le (cdot X P P)]
+  have hcdot_exp : cdot X P P = csum N (fun n1 => csum N (fun n2 => K n1 n2))
+    unfold cdot
+    have hpt : ∀ v < X, complex.mul (complex.conj (P v)) (P v) =
+        csum N (fun n1 => csum N (fun n2 => complex.mul (complex.mul (complex.conj (c n1)) (c n2)) ((sernau.jacobi_dchar ((2 * n1 + 1) * (2 * n2 + 1))).val (v + 1))))
+      intro v _; rw [hP_def, csum.conj, ← csum.scale_right]; apply csum.congr; intro n1 _
+      rw [complex.conj_mul, sernau.jacobi_dchar_conj_pos (2 * n1 + 1) (v + 1) (by omega), ← csum.scale_left]; apply csum.congr; intro n2 _
+      rw [← sernau.jacobi_dchar_mul_pos (2 * n1 + 1) (2 * n2 + 1) (v + 1) (by omega) (by omega)]; apply complex.ext <;> simp <;> ring
+    rw [csum.congr X _ _ hpt, csum.swap]; apply csum.congr; intro n1 _; rw [csum.swap]; apply csum.congr; intro n2 _; rw [hK_def]
+    exact (csum.scale_left X (complex.mul (complex.conj (c n1)) (c n2)) (fun v => (sernau.jacobi_dchar ((2 * n1 + 1) * (2 * n2 + 1))).val (v + 1)))
+  have habs_eq : complex.abs (cdot X P P) = complex.abs (csum N (fun n1 => csum N (fun n2 => K n1 n2))) := by rw [hcdot_exp]
+  have htri1 := csum.abs_le N (fun n1 => csum N (fun n2 => K n1 n2))
+  have htri1_b : (∑ i < N, complex.abs ((fun n1 => csum N (fun n2 => K n1 n2)) i)) = ∑ n1 < N, complex.abs (csum N (fun n2 => K n1 n2)) :=
+    by apply sum_below.congr; intro n1 _; rfl
+  rw [htri1_b] at htri1
+  have htri2 : (∑ n1 < N, complex.abs (csum N (fun n2 => K n1 n2))) ≤ ∑ n1 < N, ∑ n2 < N, ((X : ℝ) * A n1 n2 + B n1 n2)
+    apply sum_le.real; intro n1 _; have hinner := csum.abs_le N (fun n2 => K n1 n2)
+    have hinner_b : (∑ i < N, complex.abs ((fun n2 => K n1 n2) i)) = ∑ n2 < N, complex.abs (K n1 n2) := by apply sum_below.congr; intro n2 _; rfl
+    rw [hinner_b] at hinner
+    have hterm : (∑ n2 < N, complex.abs (K n1 n2)) ≤ ∑ n2 < N, ((X : ℝ) * A n1 n2 + B n1 n2)
+      apply sum_le.real; intro n2 _; rw [hK_def, hA_def, hB_def, complex.abs_mul, complex.abs_mul, complex.abs_conj]
+      set m := (2 * n1 + 1) * (2 * n2 + 1) with hm_def
+      set S_m := csum X (fun v => (sernau.jacobi_dchar m).val (v + 1)) with hSm_def
+      have hc_nn := mul_nonneg.real (complex.abs (c n1)) (complex.abs (c n2)) (complex.abs_nonneg (c n1)) (complex.abs_nonneg (c n2))
+      by_cases hsq : ∃ s : ℕ, s * s = m
+      · rw [if_pos hsq, if_pos hsq]
+        have h1 := csum.abs_le X (fun v => (sernau.jacobi_dchar m).val (v + 1))
+        have h2 : (∑ v < X, complex.abs ((sernau.jacobi_dchar m).val (v + 1))) ≤ ∑ v < X, (1 : ℝ) :=
+          by apply sum_le.real; intro v _; exact dchar.abs_le_one (sernau.jacobi_dchar m) (sernau.jacobi_dchar_valid m) (v + 1)
+        rw [sum_const.real (1 : ℝ) X] at h2; rw [← hSm_def] at h1
+        linarith [mul_le_mul_of_nonneg_left.real (complex.abs S_m) (X : ℝ) (complex.abs (c n1) * complex.abs (c n2)) (by linarith) hc_nn]
+      · rw [if_neg hsq, if_neg hsq]
+        have hm_odd : m % 2 = 1 := by
+          have hexp : m = 1 + 2 * (2 * n1 * n2 + n1 + n2) := by rw [hm_def]; ring
+          rw [hexp, add_mul_mod.nat]; decide
+        have hpv := sernau.sum_jacobi_odd_le m X (by rw [hm_def]; nlinarith) hm_odd hsq; rw [← hSm_def] at hpv
+        linarith [mul_le_mul_of_nonneg_left.real (complex.abs S_m) (2 * sqrt (m : ℝ) * (1 + log (m : ℝ))) (complex.abs (c n1) * complex.abs (c n2)) hpv hc_nn]
+    linarith
+  have hrhs : (∑ n1 < N, ∑ n2 < N, ((X : ℝ) * A n1 n2 + B n1 n2)) = (X : ℝ) * (∑ n1 < N, ∑ n2 < N, A n1 n2) + (∑ n1 < N, ∑ n2 < N, B n1 n2) := by
+    have hin : ∀ n1 < N, (∑ n2 < N, ((X : ℝ) * A n1 n2 + B n1 n2)) = (X : ℝ) * (∑ n2 < N, A n1 n2) + (∑ n2 < N, B n1 n2) :=
+      by intro n1 _; rw [sum_add.real, sum_const_mul.real]
+    rw [sum_below.congr _ _ N hin, sum_add.real, sum_const_mul.real]
+  have hA_sum : (∑ n1 < N, ∑ n2 < N, A n1 n2) = (∑ n1 < N, ∑ n2 < N,
+      if (∃ s : ℕ, s * s = (2 * n1 + 1) * (2 * n2 + 1)) then complex.abs (c n1) * complex.abs (c n2) else 0) :=
+    by apply sum_below.congr; intro n1 _; apply sum_below.congr; intro n2 _; rw [hA_def]
+  have hB_sum : (∑ n1 < N, ∑ n2 < N, B n1 n2) = (∑ n1 < N, ∑ n2 < N,
+      if (∃ s : ℕ, s * s = (2 * n1 + 1) * (2 * n2 + 1)) then 0
+      else complex.abs (c n1) * complex.abs (c n2) *
+        (2 * sqrt (((2 * n1 + 1) * (2 * n2 + 1) : ℕ) : ℝ) * (1 + log (((2 * n1 + 1) * (2 * n2 + 1) : ℕ) : ℝ)))) :=
+    by apply sum_below.congr; intro n1 _; apply sum_below.congr; intro n2 _; rw [hB_def]
+  rw [hgoal_P, hms_re, ← hA_sum, ← hB_sum]; rw [hrhs] at htri2; linarith
+
+-- 4. Induced Level Passage to `N0 = 18480 * q` & Quadratic-Twist Endgame Bridge
+

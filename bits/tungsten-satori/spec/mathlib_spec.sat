@@ -1,0 +1,83 @@
+-- Satori Core Mathlib Regression Spec
+-- Verifies cross-domain imports and ZERO custom axioms across all 6 promoted prelude libraries:
+-- algebra, analysis, combinatorics, modular, number_theory, padic.
+
+import algebra.behrend_arakelov_seesaw
+import algebra.bourbaki_witt
+import algebra.char_p_frobenius
+import algebra.cholesky_hadamard
+import algebra.finite_fourier
+import algebra.finite_weil
+import algebra.gram_legendre
+import algebra.polynomial_fermat
+import algebra.spectral_det
+import algebra.vandermonde_siegel
+
+import analysis.abel_siegel_mass
+import analysis.cauchy_circle
+import analysis.classical_landau_osc
+import analysis.darboux_euler_logcos
+import analysis.hadamard_three_lines
+import analysis.stirling_robbins
+import analysis.weierstrass_gamma
+
+import combinatorics.behrend_cohomology
+import combinatorics.path_quadric
+import combinatorics.stepanov_fourier
+
+import modular.cm_unitary_theta
+import modular.gamma0_hecke
+import modular.hecke_euler_li
+import modular.kronecker_limit
+import modular.sl2z_chebyshev
+
+import number_theory.classical_L
+import number_theory.classical_L_log_deriv
+import number_theory.dirichlet_nonvanishing
+import number_theory.minkowski_lattice
+import number_theory.polya_vinogradov
+import number_theory.dirichlet_L_deriv_bound
+import number_theory.dirichlet_primes_ap
+import number_theory.jacobi_symbol
+import number_theory.quadratic_reciprocity
+
+import padic.formal_group
+import padic.kummer_artin_hasse
+import padic.mvps_pderiv_ult
+
+-- Flagship zero-custom-axiom audit across all 6 domains
+#axioms qr.quadratic_reciprocity
+#axioms fermat.two_squares_product
+#axioms fock.gramZ_core
+#axioms spectral.weyl_perturbation
+#axioms bost.orthonormal_slope_ineq
+#axioms genus.theta_rallis_doubling
+#axioms sernau.bourbaki_witt
+#axioms sernau.cpadic_abs_props
+#axioms sernau.coeff_sum_frob_ne_zero_iff
+#axioms log_factorial.robbins_upper
+#axioms gamma.at_one
+#axioms jacobi_theta.modular_inversion_unconditional
+#axioms zeta.em2_ne_zero_re_ge_one_unconditional
+#axioms classical_L_laws
+#axioms classical_L_reg.at_one_ne_zero_all
+#axioms classical_landau_osc
+#axioms polya_vinogradov.general
+#axioms sernau.exists_norm_classical_L_le
+#axioms dseries.mul_moebius_eq_one_re_gt_one
+#axioms sernau.int_log_cos_eq
+#axioms path_quadric.solution_exists_of_density
+#axioms chebyshev.psi_lower_bound
+#axioms hecke.fricke_slash_invariant
+#axioms sernau.kronecker_first_limit
+#axioms hilbert_samuel.volume_ratio_bounds
+#axioms padic_exp.odd_prime_valuation_growth
+#axioms multinomial_power_bound
+#axioms sernau.log_add_sum_log_padic_abs_eq_zero
+#axioms sernau.index_dvd_mod_prime_pow_functional
+#axioms sernau.formal_param_three_term_normal_form
+#axioms sernau.katz_divisibility_limit
+#axioms sernau.ult_lowest_term_mul_and_add
+#axioms sernau.sum_sq_jacobi_poly_odd_le
+#axioms sernau.eventually_mul_norm_deriv_entireL_lt
+#axioms sernau.residue_prime_log_diverges

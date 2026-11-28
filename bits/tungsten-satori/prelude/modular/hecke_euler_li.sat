@@ -1,0 +1,475 @@
+-- Milestone 3.54: Hecke Prime-Power Recursion & Degree-2 Euler Factor Factorization,
+--                 Ramanujan-Petersson Satake Discriminant Equivalence, Primitive Mod-4
+--                 Character chi_4 & Deuring-Hecke Q(i) Dedekind Zeta Critical-Line Transfer,
+--                 Li's Positivity Criterion Core Equivalence, and Stepanov Finite-Field
+--                 Height-vs-Vanishing Rigidity (0 CUSTOM AXIOMS!)
+--
+-- Aligned with `tungsten/core/algebra/hecke.w`, `dirichlet.w`, `finite_field.w`, and
+-- `upstream/remark.pdf` (items 2-5, 8, 12, 16), all proved unconditionally on Satori's
+-- untouched HOL kernel (ZERO custom axioms!).
+
+import number_theory.classical_L_log_deriv
+import modular.cm_unitary_theta
+
+-- ====================================================================================
+-- 1. Hecke Prime-Power Recursion, Degree-2 Euler Factor, Satake Binet, & Ramanujan-Petersson
+-- ====================================================================================
+
+-> hecke.ppow_pair (lam qp : ℂ) (r : ℕ) : ℂ × ℂ :=
+  nat_rec (complex.one, lam) (fun _ p => (p.2, complex.sub (complex.mul lam p.2) (complex.mul qp p.1))) r
+
+-> hecke.ppow (lam qp : ℂ) (r : ℕ) : ℂ := (hecke.ppow_pair lam qp r).1
+
+-> hecke.euler_poly (lam qp X : ℂ) : ℂ :=
+  complex.add (complex.sub complex.one (complex.mul lam X)) (complex.mul qp (cpow_nat X 2))
+
++ hecke.ppow_pair_succ (lam qp : ℂ) (r : ℕ) :
+    hecke.ppow_pair lam qp (r + 1) =
+    ((hecke.ppow_pair lam qp r).2, complex.sub (complex.mul lam (hecke.ppow_pair lam qp r).2) (complex.mul qp (hecke.ppow_pair lam qp r).1))
+  unfold hecke.ppow_pair; rfl
+
++ hecke.ppow_zero (lam qp : ℂ) : hecke.ppow lam qp 0 = complex.one
+  have hp0 : hecke.ppow_pair lam qp 0 = (complex.one, lam) := rfl
+  unfold hecke.ppow; rw [hp0]; simp
+
++ hecke.ppow_one (lam qp : ℂ) : hecke.ppow lam qp 1 = lam
+  have hp1 : hecke.ppow_pair lam qp 1 = (lam, complex.sub (complex.mul lam lam) (complex.mul qp complex.one)) := rfl
+  unfold hecke.ppow; rw [hp1]; simp
+
++ hecke.ppow_rec (lam qp : ℂ) (r : ℕ) :
+    hecke.ppow lam qp (r + 2) =
+    complex.sub (complex.mul lam (hecke.ppow lam qp (r + 1))) (complex.mul qp (hecke.ppow lam qp r))
+  have h2 : r + 2 = (r + 1) + 1 := by omega
+  rw [h2]; unfold hecke.ppow; rw [hecke.ppow_pair_succ, hecke.ppow_pair_succ]; simp
+
+-- THEOREM 1A: Exact Degree-2 Hecke Euler-Factor Polynomial Inverse Identity!
+-- (1 - lam * X + qp * X^2) * sum_{r < N + 1} lam_{p^r} X^r = 1 - lam_{p^{N+1}} X^{N+1} + qp * lam_{p^N} X^{N+2}
++ hecke.euler_factor_partial_inv (lam qp X : ℂ) (N : ℕ) :
+    complex.mul (hecke.euler_poly lam qp X) (csum (N + 1) (fun r => complex.mul (hecke.ppow lam qp r) (cpow_nat X r))) =
+    complex.add (complex.sub complex.one (complex.mul (hecke.ppow lam qp (N + 1)) (cpow_nat X (N + 1)))) (complex.mul qp (complex.mul (hecke.ppow lam qp N) (cpow_nat X (N + 2))))
+  have hx2 : cpow_nat X 2 = complex.mul X X
+    have h2 : cpow_nat X 2 = complex.mul (complex.mul complex.one X) X := by rfl
+    rw [h2]; ring
+  induction N with m ihm
+  · have h01 : (0 + 1 : ℕ) = 1 := by decide
+    have h02 : (0 + 2 : ℕ) = 2 := by decide
+    have hx0 : cpow_nat X 0 = complex.one := by rfl
+    have hx1 : cpow_nat X 1 = complex.mul complex.one X := by rfl
+    rw [csum.succ 0, csum.zero, h01, h02, hecke.ppow_zero, hecke.ppow_one, hx0, hx1]
+    unfold hecke.euler_poly; rw [hx2]; ring
+  · rw [succ_eq_add_one.nat]
+    have h12 : (m + 1) + 1 = m + 2 := by omega
+    have h23 : (m + 1) + 2 = m + 3 := by omega
+    rw [csum.succ (m + 1), h12, h23]
+    have hdist : complex.mul (hecke.euler_poly lam qp X) (complex.add (csum (m + 1) (fun r => complex.mul (hecke.ppow lam qp r) (cpow_nat X r))) (complex.mul (hecke.ppow lam qp (m + 1)) (cpow_nat X (m + 1)))) =
+        complex.add (complex.mul (hecke.euler_poly lam qp X) (csum (m + 1) (fun r => complex.mul (hecke.ppow lam qp r) (cpow_nat X r)))) (complex.mul (hecke.euler_poly lam qp X) (complex.mul (hecke.ppow lam qp (m + 1)) (cpow_nat X (m + 1)))) := by ring
+    have hxm2 : cpow_nat X (m + 2) = complex.mul (cpow_nat X (m + 1)) X
+      have hs : m + 2 = (m + 1) + 1 := by omega
+      rw [hs]; rfl
+    have hxm3 : cpow_nat X (m + 3) = complex.mul (complex.mul (cpow_nat X (m + 1)) X) X
+      have hs : m + 3 = (m + 2) + 1 := by omega
+      have hp : cpow_nat X ((m + 2) + 1) = complex.mul (cpow_nat X (m + 2)) X := by rfl
+      rw [hs, hp, hxm2]
+    rw [hdist, ihm, hecke.ppow_rec lam qp m]; unfold hecke.euler_poly
+    rw [hx2, hxm2, hxm3]; ring
+
+-- THEOREM 1B: Satake Root Factorization & Exact Binet Formula (a - b) * lam_{p^r} = a^{r+1} - b^{r+1}!
++ hecke.satake_binet_and_euler (a b lam qp X : ℂ)
+    (hsum : complex.add a b = lam) (hprod : complex.mul a b = qp) :
+    complex.mul (complex.sub complex.one (complex.mul a X)) (complex.sub complex.one (complex.mul b X)) = hecke.euler_poly lam qp X ∧
+    (∀ r : ℕ, complex.mul (complex.sub a b) (hecke.ppow lam qp r) = complex.sub (cpow_nat a (r + 1)) (cpow_nat b (r + 1)))
+  constructor
+  · unfold hecke.euler_poly
+    have hx2 : cpow_nat X 2 = complex.mul (complex.mul complex.one X) X := by rfl
+    rw [← hsum, ← hprod, hx2]; ring
+  · have hpair : ∀ r : ℕ,
+        complex.mul (complex.sub a b) (hecke.ppow lam qp r) = complex.sub (cpow_nat a (r + 1)) (cpow_nat b (r + 1)) ∧
+        complex.mul (complex.sub a b) (hecke.ppow lam qp (r + 1)) = complex.sub (cpow_nat a (r + 2)) (cpow_nat b (r + 2))
+      intro r; induction r with m ihm
+      · have h01 : (0 + 1 : ℕ) = 1 := by decide
+        have h02 : (0 + 2 : ℕ) = 2 := by decide
+        have ha1 : cpow_nat a 1 = complex.mul complex.one a := by rfl
+        have hb1 : cpow_nat b 1 = complex.mul complex.one b := by rfl
+        have ha2 : cpow_nat a 2 = complex.mul (complex.mul complex.one a) a := by rfl
+        have hb2 : cpow_nat b 2 = complex.mul (complex.mul complex.one b) b := by rfl
+        rw [h01, h02, hecke.ppow_zero, hecke.ppow_one, ← hsum, ha1, hb1, ha2, hb2]
+        exact ⟨by ring, by ring⟩
+      · rw [succ_eq_add_one.nat]
+        constructor; exact ihm.2
+        have h12 : (m + 1) + 1 = m + 2 := by omega
+        have h23 : (m + 1) + 2 = m + 3 := by omega
+        have ham3 : cpow_nat a (m + 3) = complex.mul (cpow_nat a (m + 2)) a
+          have hs : m + 3 = (m + 2) + 1 := by omega
+          rw [hs]; rfl
+        have hbm3 : cpow_nat b (m + 3) = complex.mul (cpow_nat b (m + 2)) b
+          have hs : m + 3 = (m + 2) + 1 := by omega
+          rw [hs]; rfl
+        have ham2 : cpow_nat a (m + 2) = complex.mul (cpow_nat a (m + 1)) a
+          have hs : m + 2 = (m + 1) + 1 := by omega
+          rw [hs]; rfl
+        have hbm2 : cpow_nat b (m + 2) = complex.mul (cpow_nat b (m + 1)) b
+          have hs : m + 2 = (m + 1) + 1 := by omega
+          rw [hs]; rfl
+        have hdist : complex.mul (complex.sub a b) (complex.sub (complex.mul lam (hecke.ppow lam qp (m + 1))) (complex.mul qp (hecke.ppow lam qp m))) =
+            complex.sub (complex.mul lam (complex.mul (complex.sub a b) (hecke.ppow lam qp (m + 1)))) (complex.mul qp (complex.mul (complex.sub a b) (hecke.ppow lam qp m))) := by ring
+        rw [h12, h23, hecke.ppow_rec lam qp m, hdist, ihm.1, ihm.2, ← hsum, ← hprod, ham3, hbm3, ham2, hbm2]; ring
+    intro r; exact (hpair r).1
+
+-- THEOREM 1C: Ramanujan-Petersson / Deligne Satake Conjugate-Pair Equivalence!
+-- |lam| <= 2 * sqrt(qp)  <->  exists Satake root alpha in C with alpha + conj(alpha) = lam and |alpha|^2 = qp!
++ hecke.ramanujan_petersson_iff (lam qp : ℝ) (hqp : 0 ≤ qp) :
+    (|lam| ≤ 2 * sqrt qp) ↔
+    (∃ alpha : ℂ, complex.add alpha (complex.conj alpha) = complex.of_real lam ∧ complex.norm_sq alpha = qp)
+  have hsq_qp := sqrt_spec qp hqp
+  constructor
+  · intro hbd
+    have hlam_sq : lam * lam ≤ 4 * qp
+      by_cases hl : 0 ≤ lam
+      · rw [abs_of_nonneg.real lam hl] at hbd; nlinarith [hsq_qp.1, hsq_qp.2]
+      · rw [abs_of_neg.real lam (by linarith)] at hbd; nlinarith [hsq_qp.1, hsq_qp.2]
+    set disc := qp - lam * lam / 4 with hdisc
+    have hdisc_nn : 0 ≤ disc := by rw [hdisc]; linarith
+    have hsq_d := sqrt_spec disc hdisc_nn
+    use complex.mk (lam / 2) (sqrt disc)
+    constructor
+    · unfold complex.of_real; apply complex.ext <;> simp <;> ring
+    · unfold complex.norm_sq; simp; linarith [hsq_d.2, hdisc]
+  · intro ⟨alpha, hsum, hns⟩
+    have hre : complex.re (complex.add alpha (complex.conj alpha)) = complex.re (complex.of_real lam) := by rw [hsum]
+    unfold complex.of_real at hre; simp at hre
+    unfold complex.norm_sq at hns
+    have hls : lam * lam ≤ 4 * qp := by rw [← hre]; nlinarith
+    have h4q : (2 * sqrt qp) * (2 * sqrt qp) = 4 * qp := by linear_combination 4 * hsq_qp.2
+    by_cases hl : 0 ≤ lam
+    · rw [abs_of_nonneg.real lam hl]; by_contra hgt
+      have hp := mul_pos.real (lam - 2 * sqrt qp) (lam + 2 * sqrt qp) (by linarith) (by linarith [hsq_qp.1])
+      nlinarith
+    · rw [abs_of_neg.real lam (by linarith)]; by_contra hgt
+      have hp := mul_pos.real (-lam - 2 * sqrt qp) (-lam + 2 * sqrt qp) (by linarith) (by linarith [hsq_qp.1])
+      nlinarith
+
+-- ====================================================================================
+-- 2. Primitive Mod-4 Character chi_4 & Deuring-Hecke Q(i) Dedekind Zeta Critical Line
+-- ====================================================================================
+
+-> chi4.dchar : DChar := DChar.mk 4 chi4.val
+
++ chi4.dchar_valid : dchar.valid chi4.dchar
+  unfold dchar.valid chi4.dchar is_dirichlet_char; simp
+  constructor
+  · intro a; unfold chi4.val
+    have h2 : (a + 4) % 2 = a % 2
+      have he : a + 4 = a + 2 * 2 := by ring
+      rw [he, add_mul_mod.nat]
+    have h4 : (a + 4) % 4 = a % 4
+      have he : a + 4 = a + 4 * 1 := by ring
+      rw [he, add_mul_mod.nat]
+    rw [h2, h4]
+  · constructor
+    · unfold chi4.val; ring
+    · constructor
+      · intro a hnu
+        by_cases ha2 : a % 2 = 0
+        · unfold chi4.val; rw [if_pos ha2]
+        · exfalso; apply hnu; unfold zmod.is_unit
+          have hd4 := div_add_mod.nat a 4
+          have hlt4 := mod_lt.nat a 4 (by decide)
+          by_cases hr0 : a % 4 = 0
+          · exfalso
+            have hq : a = 2 * (2 * (a / 4)) + 0 := by omega
+            have hm := (div_mod_unique.nat a 2 (2 * (a / 4)) 0 hq (by decide)).2
+            omega
+          · by_cases hr2 : a % 4 = 2
+            · exfalso
+              have hq : a = 2 * (2 * (a / 4) + 1) + 0 := by omega
+              have hm := (div_mod_unique.nat a 2 (2 * (a / 4) + 1) 0 hq (by decide)).2
+              omega
+            · by_cases hr1 : a % 4 = 1
+              · use 1; constructor; decide
+                have h1 : a * 1 = a := by ring
+                rw [h1, hr1]
+              · have hr3 : a % 4 = 3 := by omega
+                use 3; constructor; decide
+                have hq : a * 3 = 1 + 4 * (2 + 3 * (a / 4)) := by omega
+                rw [hq, add_mul_mod.nat]; decide
+      · intro a b; exact chi4.mul a b
+
+-- THEOREM 2A: Primitivity, Nontriviality, Odd Parity, & Exact Gauss-Sum Norm |tau(chi_4)|^2 = 4!
++ chi4.dchar_is_primitive :
+    dchar.is_primitive chi4.dchar ∧
+    ¬ dchar.is_trivial chi4.dchar ∧
+    dchar.parity chi4.dchar = 1 ∧
+    complex.norm_sq (dchar.tau chi4.dchar) = 4
+  have hu3 : zmod.is_unit 4 3 := ⟨3, by decide, by decide⟩
+  have hv3 : chi4.val 3 = complex.neg complex.one := by unfold chi4.val; ring
+  have hprim : dchar.is_primitive chi4.dchar
+    constructor
+    · exact chi4.dchar_valid
+    · intro psi hvp hind
+      unfold dchar.induced_by at hind
+      have hlvl : chi4.dchar.level = 4 := by unfold chi4.dchar; simp
+      rw [hlvl] at hind ⊢
+      have hd1 : 1 ≤ psi.level := hvp.1
+      by_contra hlt
+      obtain ⟨k, hk⟩ := (dvd.iff_exists psi.level 4 (by omega)).mp hind.1
+      have h1_or_2 : psi.level = 1 ∨ psi.level = 2
+        by_cases heq1 : psi.level = 1
+        · left; exact heq1
+        · by_cases heq2 : psi.level = 2
+          · right; exact heq2
+          · exfalso
+            have heq3 : psi.level = 3 := by omega
+            rw [heq3] at hk
+            by_cases hk0 : k = 0
+            · omega
+            · by_cases hk1 : k = 1
+              · omega
+              · have hge := mul_le_mul_of_nonneg_left.nat 2 k 3 (by omega) (by decide); omega
+      have hpsi3 : psi.val 3 = complex.one
+        obtain hl1 | hl2 := h1_or_2
+        · have hp2 := hvp.2.1 2; rw [hl1] at hp2
+          have hp1 := hvp.2.1 1; rw [hl1] at hp1
+          have h21 : 2 + 1 = 3 := by decide
+          have h11 : 1 + 1 = 2 := by decide
+          rw [h21] at hp2; rw [h11] at hp1
+          rw [hp2, hp1]; exact hvp.2.2.1
+        · have hp1 := hvp.2.1 1; rw [hl2] at hp1
+          have h12 : 1 + 2 = 3 := by decide
+          rw [h12] at hp1; rw [hp1]; exact hvp.2.2.1
+      have hag := hind.2 3 hu3
+      have hre1 : complex.re (chi4.dchar.val 3) = 0 - 1 := by unfold chi4.dchar; simp; rw [hv3]; simp
+      have hre2 : complex.re (chi4.dchar.val 3) = 1 := by rw [hag, hpsi3]; simp
+      linarith
+  have hntriv : ¬ dchar.is_trivial chi4.dchar
+    intro htr; unfold dchar.is_trivial at htr
+    have hlvl : chi4.dchar.level = 4 := by unfold chi4.dchar; simp
+    have h1 := htr 3 (by rw [hlvl]; exact hu3)
+    have hre1 : complex.re (chi4.dchar.val 3) = 0 - 1 := by unfold chi4.dchar; simp; rw [hv3]; simp
+    have hre2 : complex.re (chi4.dchar.val 3) = 1 := by rw [h1]; simp
+    linarith
+  have hpar : dchar.parity chi4.dchar = 1
+    unfold dchar.parity chi4.dchar; simp; exact if_pos hv3
+  have htau : complex.norm_sq (dchar.tau chi4.dchar) = 4
+    have ht := (primitive.tau_norm_sq_eq_q chi4.dchar hprim).1
+    have hlvl : (chi4.dchar.level : ℝ) = 4 := by unfold chi4.dchar; simp
+    rw [hlvl] at ht; exact ht
+  exact ⟨hprim, hntriv, hpar, htau⟩
+
+-> dedekind_qi.zeta (ops : DirichletLOps) (s : ℂ) : ℂ :=
+  complex.mul (ops.zeta_fn s) (ops.l_fn chi4.dchar s)
+
+-- THEOREM 2B: Deuring-Hecke Q(i) Dedekind Zeta Nonvanishing on Re(s) > 1 & Critical-Line Transfer!
++ dedekind_qi.critical_line_and_euler_nonvanishing :
+    (∀ s : ℂ, 1 < complex.re s → dedekind_qi.zeta classical_L s ≠ complex.zero) ∧
+    (∀ (ops : DirichletLOps),
+      SystemRiemannHypothesis ops → SystemPrimitiveLZerosOnLine ops →
+      ∀ s : ℂ, 0 < complex.re s → complex.re s < 1 →
+        dedekind_qi.zeta ops s = complex.zero → complex.re s = 1 / 2)
+  constructor
+  · intro s hs; unfold dedekind_qi.zeta
+    have hne1 : s ≠ complex.one
+      intro heq; have hr : complex.re s = complex.re complex.one := by rw [heq]
+      simp at hr; linarith
+    exact complex.mul_ne_zero (classical_L.zeta_fn s) (classical_L.l_fn chi4.dchar s) (classical_L.zeta_fn_ne_zero_re_ge_one s (by linarith) hne1) (classical_L.l_fn_ne_zero_re_gt_one chi4.dchar chi4.dchar_valid s hs)
+  · intro ops hrh hgrh s hs0 hs1 hz
+    unfold dedekind_qi.zeta at hz
+    by_cases hzeta : ops.zeta_fn s = complex.zero
+    · unfold SystemRiemannHypothesis at hrh
+      have hntriv : ¬ ∃ n : ℕ, s = neg_two_succ n
+        intro ⟨n, hn⟩
+        have hr : complex.re s = complex.re (neg_two_succ n) := by rw [hn]
+        unfold neg_two_succ complex.of_real at hr; simp at hr
+        linarith [cast_nonneg.real n]
+      have hne1 : s ≠ complex.one
+        intro heq; have hr : complex.re s = complex.re complex.one := by rw [heq]
+        simp at hr; linarith
+      exact hrh s hzeta hntriv hne1
+    · have hl0 : ops.l_fn chi4.dchar s = complex.zero
+        by_contra hl_ne
+        exact complex.mul_ne_zero (ops.zeta_fn s) (ops.l_fn chi4.dchar s) hzeta hl_ne hz
+      unfold SystemPrimitiveLZerosOnLine at hgrh
+      have hc := hgrh chi4.dchar chi4.dchar_is_primitive.1 s hs0 hs1 hl0
+      linarith
+
+-- ====================================================================================
+-- 3. Li's Positivity Criterion Core Equivalence (`li.mobius`, `li.norm_sq_identity_and_crit_iff`)
+-- ====================================================================================
+
+-> li.mobius (rho : ℂ) : ℂ := complex.sub complex.one (complex.inv rho)
+
++ complex.norm_sq_mul_eq (u v : ℂ) :
+    complex.norm_sq (complex.mul u v) = complex.norm_sq u * complex.norm_sq v
+  unfold complex.norm_sq; simp; ring
+
+-- THEOREM 3A: Li's Exact Norm-Squared Identity & Critical-Line Equivalence!
+-- For EVERY rho != 0 in C:
+--   (|1 - 1/rho|^2 - 1) * |rho|^2 = 1 - 2 * Re(rho),
+--   |1 - 1/rho|^2 = 1 <-> Re(rho) = 1/2,
+--   |1 - 1/rho|^2 > 1 <-> Re(rho) < 1/2,  and  |1 - 1/rho|^2 < 1 <-> Re(rho) > 1/2!
++ li.norm_sq_identity_and_crit_iff (rho : ℂ) (hne : rho ≠ complex.zero) :
+    (complex.norm_sq (li.mobius rho) - 1) * complex.norm_sq rho = 1 - 2 * complex.re rho ∧
+    (complex.norm_sq (li.mobius rho) = 1 ↔ complex.re rho = 1 / 2) ∧
+    (1 < complex.norm_sq (li.mobius rho) ↔ complex.re rho < 1 / 2) ∧
+    (complex.norm_sq (li.mobius rho) < 1 ↔ 1 / 2 < complex.re rho)
+  have hns_pos : 0 < complex.norm_sq rho := complex.norm_sq_pos rho hne
+  have hmul : complex.mul (li.mobius rho) rho = complex.sub rho complex.one
+    unfold li.mobius
+    have hd : complex.mul (complex.sub complex.one (complex.inv rho)) rho = complex.sub rho (complex.mul (complex.inv rho) rho) := by ring
+    rw [hd, complex.inv_mul_cancel rho hne]
+  have hns_eq : complex.norm_sq (li.mobius rho) * complex.norm_sq rho = complex.norm_sq (complex.sub rho complex.one)
+    rw [← complex.norm_sq_mul_eq (li.mobius rho) rho, hmul]
+  have hdiff : complex.norm_sq (complex.sub rho complex.one) - complex.norm_sq rho = 1 - 2 * complex.re rho
+    unfold complex.norm_sq; simp; ring
+  have hid : (complex.norm_sq (li.mobius rho) - 1) * complex.norm_sq rho = 1 - 2 * complex.re rho := by linarith
+  constructor; exact hid
+  constructor
+  · constructor
+    · intro h1; rw [h1] at hid; linarith
+    · intro hr; rw [hr] at hid
+      by_contra hne1
+      by_cases hlt : complex.norm_sq (li.mobius rho) < 1
+      · have hm := mul_lt_mul_of_pos_right.real (complex.norm_sq (li.mobius rho) - 1) 0 (complex.norm_sq rho) (by linarith) hns_pos
+        linarith
+      · have hm := mul_lt_mul_of_pos_right.real 0 (complex.norm_sq (li.mobius rho) - 1) (complex.norm_sq rho) (by linarith) hns_pos
+        linarith
+  · constructor
+    · constructor
+      · intro hgt
+        have hm := mul_lt_mul_of_pos_right.real 0 (complex.norm_sq (li.mobius rho) - 1) (complex.norm_sq rho) (by linarith) hns_pos
+        linarith
+      · intro hlt
+        by_contra hle
+        have hm := mul_le_mul_of_nonneg_right.real (complex.norm_sq (li.mobius rho) - 1) 0 (complex.norm_sq rho) (by linarith) (by linarith)
+        linarith
+    · constructor
+      · intro hlt
+        have hm := mul_lt_mul_of_pos_right.real (complex.norm_sq (li.mobius rho) - 1) 0 (complex.norm_sq rho) (by linarith) hns_pos
+        linarith
+      · intro hgt
+        by_contra hge
+        have hm := mul_le_mul_of_nonneg_right.real 0 (complex.norm_sq (li.mobius rho) - 1) (complex.norm_sq rho) (by linarith) (by linarith)
+        linarith
+
+-- THEOREM 3B: Functional-Equation Zero Pair (rho, 1 - conj(rho)) Off-Critical-Line Amplification
+--             & Finite Li Sum Positivity on Re(rho) = 1/2!
++ li.reflection_off_line_and_critical_nonneg :
+    (∀ rho : ℂ, rho ≠ complex.zero → rho ≠ complex.one → complex.re rho ≠ 1 / 2 →
+      1 < complex.norm_sq (li.mobius rho) ∨ 1 < complex.norm_sq (li.mobius (complex.sub complex.one (complex.conj rho)))) ∧
+    (∀ (M n : ℕ) (rho : ℕ → ℂ),
+      (∀ j < M, rho j ≠ complex.zero ∧ complex.re (rho j) = 1 / 2) →
+      0 ≤ ∑ j < M, (1 - complex.re (cpow_nat (li.mobius (rho j)) n)))
+  constructor
+  · intro rho hne0 hne1 hne_half
+    have hli1 := li.norm_sq_identity_and_crit_iff rho hne0
+    by_cases hlt : complex.re rho < 1 / 2
+    · left; exact hli1.2.2.1.mpr hlt
+    · right
+      have hgt : 1 / 2 < complex.re rho := by linarith
+      set rho' := complex.sub complex.one (complex.conj rho) with hrho'
+      have hre' : complex.re rho' < 1 / 2
+        rw [hrho']; simp; linarith
+      have hne0' : rho' ≠ complex.zero
+        intro hz
+        apply hne1
+        have hre0 : complex.re rho' = complex.re complex.zero := by rw [hz]
+        have him0 : complex.im rho' = complex.im complex.zero := by rw [hz]
+        rw [hrho'] at hre0 him0; simp at hre0 him0
+        apply complex.ext <;> simp <;> linarith
+      exact (li.norm_sq_identity_and_crit_iff rho' hne0').2.2.1.mpr hre'
+  · intro M n rho hcrit
+    have hpow_unit : ∀ (w : ℂ) (k : ℕ), complex.norm_sq w = 1 → complex.norm_sq (cpow_nat w k) = 1
+      intro w k h1; induction k with m ihm
+      · have h0 : cpow_nat w 0 = complex.one := by rfl
+        rw [h0]; unfold complex.norm_sq; simp
+      · rw [succ_eq_add_one.nat]
+        have hs : cpow_nat w (m + 1) = complex.mul (cpow_nat w m) w := by rfl
+        rw [hs, complex.norm_sq_mul_eq, ihm, h1]; ring
+    apply sum_nonneg.real
+    intro j hj
+    have hcj := hcrit j hj
+    have hns1 : complex.norm_sq (li.mobius (rho j)) = 1 :=
+      (li.norm_sq_identity_and_crit_iff (rho j) hcj.1).2.1.mpr hcj.2
+    have hnsw : complex.norm_sq (cpow_nat (li.mobius (rho j)) n) = 1 := hpow_unit (li.mobius (rho j)) n hns1
+    unfold complex.norm_sq at hnsw
+    nlinarith
+
+-- ====================================================================================
+-- 4. Stepanov Finite-Field Coefficient Divisibility & Height-vs-Vanishing Rigidity
+-- ====================================================================================
+
++ fp_poly.all_coeffs_dvd_of_roots_gt_deg (p : ℕ) (hprime : is_prime_nat p) :
+    ∀ (d : ℕ) (c : ℕ → ℤ),
+      d < (∑ x < p, if int_dvd p (zpoly.eval d c (x : ℤ)) then (1 : ℕ) else 0) →
+      ∀ k ≤ d, int_dvd p (c k)
+  intro d; induction d with c hgt k hk m ihm c hgt k hk
+  · have hk0 : k = 0 := by omega
+    rw [hk0]
+    by_contra hnd
+    have hle := fp_poly.roots_le_deg p hprime 0 c hnd
+    omega
+  · rw [succ_eq_add_one.nat] at hgt hk
+    have hd_top : int_dvd p (c (m + 1))
+      by_contra hnd
+      have hle := fp_poly.roots_le_deg p hprime (m + 1) c hnd
+      omega
+    by_cases htop : k = m + 1
+    · rw [htop]; exact hd_top
+    · obtain ⟨qc, hqc⟩ := hd_top
+      have hev_iff : ∀ x : ℕ, int_dvd p (zpoly.eval (m + 1) c (x : ℤ)) ↔ int_dvd p (zpoly.eval m c (x : ℤ))
+        intro x
+        have hstep : zpoly.eval (m + 1) c (x : ℤ) = zpoly.eval m c (x : ℤ) + c (m + 1) * (x : ℤ) ^ (m + 1)
+          unfold zpoly.eval; rw [sum_below_succ (m + 1)]
+        constructor
+        · intro ⟨q1, hq1⟩
+          exact ⟨q1 - qc * (x : ℤ) ^ (m + 1), by linear_combination hq1 - hstep - ((x : ℤ) ^ (m + 1)) * hqc⟩
+        · intro ⟨q2, hq2⟩
+          exact ⟨q2 + qc * (x : ℤ) ^ (m + 1), by linear_combination hstep + hq2 + ((x : ℤ) ^ (m + 1)) * hqc⟩
+      have hcon : (∑ x < p, if int_dvd p (zpoly.eval (m + 1) c (x : ℤ)) then (1 : ℕ) else 0) =
+          ∑ x < p, if int_dvd p (zpoly.eval m c (x : ℤ)) then (1 : ℕ) else 0
+        apply sum_congr.nat; intro x hx
+        by_cases hm_dvd : int_dvd p (zpoly.eval m c (x : ℤ))
+        · have hm1 := (hev_iff x).mpr hm_dvd
+          rw [if_pos hm1, if_pos hm_dvd]
+        · have hn1 : ¬ int_dvd p (zpoly.eval (m + 1) c (x : ℤ)) := by intro h; exact hm_dvd ((hev_iff x).mp h)
+          rw [if_neg hn1, if_neg hm_dvd]
+      rw [hcon] at hgt
+      exact ihm c (by omega) k (by omega)
+
+-- THEOREM 4: Stepanov's Height-vs-Mod-p-Vanishing Rigidity Theorem (`remark.pdf` items 2-5)!
+-- Any polynomial F(X) = sum_{k <= d} c_k X^k in Z[X] with |c_k| < p that vanishes modulo p
+-- on a subset S <= {0, ..., p - 1} of cardinality |S| > d must vanish IDENTICALLY in Z[X]!
++ stepanov_fp.identically_zero_of_height_lt_p (p d : ℕ) (hprime : is_prime_nat p)
+    (c : ℕ → ℤ) (in_S : ℕ → Prop)
+    (hcard : d < ∑ x < p, if in_S x then (1 : ℕ) else 0)
+    (hvan : ∀ x < p, in_S x → int_dvd p (zpoly.eval d c (x : ℤ)))
+    (hht : ∀ k ≤ d, |c k| < (p : ℤ)) :
+    ∀ k ≤ d, c k = 0
+  have hp2 : 2 ≤ p := hprime.1
+  have hp_nn : (0 : ℤ) ≤ (p : ℤ) := (cast_le.int 0 p).mpr (by omega)
+  have hle_sum : ∀ t ≤ p,
+      (∑ x < t, if in_S x then (1 : ℕ) else 0) ≤
+      ∑ x < t, if int_dvd p (zpoly.eval d c (x : ℤ)) then (1 : ℕ) else 0
+    intro t ht; induction t with ht r ihr ht
+    · rw [sum_below_zero, sum_below_zero]; omega
+    · rw [succ_eq_add_one.nat] at ht ⊢
+      rw [sum_below_succ, sum_below_succ]
+      have hprev := ihr (by omega)
+      by_cases hs : in_S r
+      · rw [if_pos hs, if_pos (hvan r (by omega) hs)]; omega
+      · rw [if_neg hs]; omega
+  have hgt_roots : d < ∑ x < p, if int_dvd p (zpoly.eval d c (x : ℤ)) then (1 : ℕ) else 0
+    have h1 := hle_sum p (by omega); omega
+  intro k hk
+  obtain ⟨q, hq⟩ := fp_poly.all_coeffs_dvd_of_roots_gt_deg p hprime d c hgt_roots k hk
+  have hbd := hht k hk
+  by_cases hq0 : q = 0
+  · rw [hq, hq0]; ring
+  · exfalso
+    by_cases hq_pos : 0 < q
+    · have hm := mul_le_mul_of_nonneg_left.int 1 q (p : ℤ) (by omega) hp_nn
+      have h1 : (p : ℤ) * 1 = (p : ℤ) := by ring
+      rw [h1, ← hq] at hm; omega
+    · have hm := mul_le_mul_of_nonneg_left.int 1 (-q) (p : ℤ) (by omega) hp_nn
+      have h1 : (p : ℤ) * 1 = (p : ℤ) := by ring
+      have h2 : (p : ℤ) * (-q) = -c k := by rw [hq]; ring
+      rw [h1, h2] at hm; omega

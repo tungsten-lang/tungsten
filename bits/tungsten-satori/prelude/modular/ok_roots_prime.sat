@@ -1,0 +1,254 @@
+-- Milestone 3.81a (Part 1b): Prime `ok_roots` via Quadratic Reciprocity (0 custom axioms!)
+
+import modular.ok_roots_crt
+
++ sernau.prime_sq_mod_eq_or (p x x0 : ℕ) (hp : is_prime_nat p)
+    (hx : x < p) (hx0 : x0 < p) (hsq : (x * x) % p = (x0 * x0) % p) :
+    x = x0 ∨ x = p - x0
+  have hp2 : 2 ≤ p := hp.1
+  by_cases he : x = x0; (left; exact he)
+  by_cases hle : x0 ≤ x
+  · have hle_sq := mul_le_mul.nat x0 x x0 x hle hle (by omega) (by omega)
+    have hdvd0 : p ∣ (x * x - x0 * x0) := (mod_eq_iff_dvd_sub p (x * x) (x0 * x0) (by omega) hle_sq).mp hsq
+    set df := x - x0
+    have hfac : x * x - x0 * x0 = df * (x + x0) := by have hxs : x = df + x0 := (by omega); have hr2 : x * x = df * (x + x0) + x0 * x0 := (by rw [hxs]; ring); omega
+    rw [hfac] at hdvd0
+    obtain h1 | h2 := hp.2 df (x + x0) hdvd0
+    · exfalso; exact not_dvd_of_pos_lt p df (by omega) (by omega) h1
+    · obtain ⟨qsum, hqsum⟩ := (dvd.iff_exists p (x + x0) (by omega)).mp h2
+      have hq1 : qsum = 1 := by by_contra hnq; by_cases h0 : qsum = 0; (rw [h0] at hqsum; omega); (have hm := mul_le_mul_of_nonneg_left.nat 2 qsum p (by omega) (by omega); have hr : p * 2 = p + p := (by ring); rw [hr, ← hqsum] at hm; omega)
+      rw [hq1] at hqsum; right; omega
+  · have hle_sq := mul_le_mul.nat x x0 x x0 (by omega) (by omega) (by omega) (by omega)
+    have hdvd0 : p ∣ (x0 * x0 - x * x) := (mod_eq_iff_dvd_sub p (x0 * x0) (x * x) (by omega) hle_sq).mp hsq.symm
+    set df := x0 - x
+    have hfac : x0 * x0 - x * x = df * (x0 + x) := by have hxs : x0 = df + x := (by omega); have hr2 : x0 * x0 = df * (x0 + x) + x * x := (by rw [hxs]; ring); omega
+    rw [hfac] at hdvd0
+    obtain h1 | h2 := hp.2 df (x0 + x) hdvd0
+    · exfalso; exact not_dvd_of_pos_lt p df (by omega) (by omega) h1
+    · obtain ⟨qsum, hqsum⟩ := (dvd.iff_exists p (x0 + x) (by omega)).mp h2
+      have hq1 : qsum = 1 := by by_contra hnq; by_cases h0 : qsum = 0; (rw [h0] at hqsum; omega); (have hm := mul_le_mul_of_nonneg_left.nat 2 qsum p (by omega) (by omega); have hr : p * 2 = p + p := (by ring); rw [hr, ← hqsum] at hm; omega)
+      rw [hq1] at hqsum; right; omega
+
++ sernau.odd_half_inv_map (p : ℕ) (hp2 : 2 ≤ p) (hp_odd : p % 2 = 1) :
+    (∀ x < p, (2 * ((((p + 1) / 2) * (x + p - 1)) % p) + 1) % p = x) ∧
+    (∀ t < p, (((p + 1) / 2) * (((2 * t + 1) % p) + p - 1)) % p = t)
+  set inv2 := (p + 1) / 2 with hinv2_def
+  have hinv2_eq : inv2 = p / 2 + 1 := by rw [hinv2_def]; exact (div_mod_unique.nat (p + 1) 2 (p / 2 + 1) 0 (by have h := div_add_mod.nat p 2; omega) (by decide)).1.symm
+  have h2inv : 2 * inv2 = p + 1 := by have h := div_add_mod.nat p 2; omega
+  constructor
+  · intro x hx
+    set y := x + p - 1 with hy_def
+    have hy1 : y + 1 = x + p := by omega
+    set tx := (inv2 * y) % p with htx; set qx := (inv2 * y) / p with hqx
+    have hdm := div_add_mod.nat (inv2 * y) p; rw [← htx, ← hqx] at hdm
+    have hexp : 2 * tx + 1 + p * (2 * qx) = x + p * (x + p)
+      calc 2 * tx + 1 + p * (2 * qx) = 2 * (p * qx + tx) + 1 := by ring
+        _ = (2 * inv2) * y + 1 := by rw [hdm]; ring
+        _ = (p + 1) * y + 1 := by rw [h2inv]
+        _ = (y + 1) + p * y := by ring
+        _ = (x + p) + p * y := by rw [hy1]
+        _ = x + p * (y + 1) := by ring
+        _ = x + p * (x + p) := by rw [hy1]
+    have hmd1 : (2 * tx + 1 + p * (2 * qx)) % p = (2 * tx + 1) % p := add_mul_mod.nat (2 * tx + 1) (2 * qx) p
+    have hmd2 : (x + p * (x + p)) % p = x := by rw [add_mul_mod.nat, (div_mod_of_lt.nat x p hx).2]
+    rw [hexp, hmd2] at hmd1; exact hmd1.symm
+  · intro t ht
+    set x := (2 * t + 1) % p with hx_def; set qt := (2 * t + 1) / p with hqt_def
+    have hdm_x := div_add_mod.nat (2 * t + 1) p; rw [← hx_def, ← hqt_def] at hdm_x
+    have hqt_le : qt ≤ 1 := by by_contra hgt; have hm := mul_le_mul_of_nonneg_left.nat 2 qt p (by omega) (by omega); omega
+    have hexp : inv2 * (x + p - 1) = t + p * (inv2 * (1 - qt) + t)
+      by_cases hqt0 : qt = 0
+      · rw [hqt0] at hdm_x ⊢; have hxp : x + p - 1 = 2 * t + p := (by omega)
+        have h10 : 1 - 0 = 1 := by decide
+        calc inv2 * (x + p - 1) = inv2 * (2 * t + p) := by rw [hxp]
+          _ = (2 * inv2) * t + p * inv2 := by ring
+          _ = (p + 1) * t + p * inv2 := by rw [h2inv]
+          _ = t + p * (inv2 * (1 - 0) + t) := by rw [h10]; ring
+      · have hqt1 : qt = 1 := by omega
+        rw [hqt1] at hdm_x ⊢; have hxp : x + p - 1 = 2 * t := (by omega)
+        have h11 : 1 - 1 = 0 := by decide
+        calc inv2 * (x + p - 1) = (2 * inv2) * t := by rw [hxp]; ring
+          _ = (p + 1) * t := by rw [h2inv]
+          _ = t + p * (inv2 * (1 - 1) + t) := by rw [h11]; ring
+    rw [hexp, add_mul_mod.nat, (div_mod_of_lt.nat t p ht).2]
+
++ sernau.ok_poly_mod_iff_sq (d p t : ℕ) (hd8 : d % 8 = 7) (hp : is_prime_nat p)
+    (hp_odd : p % 2 = 1) (hd_p_pos : 1 ≤ d % p) :
+    sernau.ok_poly d t % p = 0 ↔ (((2 * t + 1) % p) * ((2 * t + 1) % p)) % p = p - d % p
+  have hp2 : 2 ≤ p := hp.1
+  have hp_eq2 : p ≠ 2 := by intro h2; rw [h2] at hp_odd; omega
+  have hnd_p2 : ¬ (p ∣ 2) := not_dvd_of_pos_lt p 2 (by decide) (by omega)
+  have h4cd : 4 * ((d + 1) / 4) = d + 1
+    have h := div_add_mod.nat d 8
+    have hm : (d + 1) % 4 = 0 := (div_mod_unique.nat (d + 1) 4 (2 * (d / 8) + 2) 0 (by omega) (by decide)).2.symm
+    have h2 := div_add_mod.nat (d + 1) 4; omega
+  have hok_id : 4 * sernau.ok_poly d t = (2 * t + 1) * (2 * t + 1) + d := by unfold sernau.ok_poly; linear_combination h4cd
+  have h4_iff : sernau.ok_poly d t % p = 0 ↔ (4 * sernau.ok_poly d t) % p = 0
+    constructor
+    · intro hm; obtain ⟨q, hq⟩ := (dvd.iff_exists p (sernau.ok_poly d t) (by omega)).mp hm
+      exact (div_mod_unique.nat (4 * sernau.ok_poly d t) p (4 * q) 0 (by rw [hq]; ring) (by omega)).2.symm
+    · intro hm4; have h22 : 4 * sernau.ok_poly d t = 2 * (2 * sernau.ok_poly d t) := (by ring); rw [h22] at hm4
+      obtain h1 | h2 := hp.2 2 (2 * sernau.ok_poly d t) hm4; exfalso; exact hnd_p2 h1
+      obtain h3 | h4 := hp.2 2 (sernau.ok_poly d t) h2; exfalso; exact hnd_p2 h3; exact h4
+  rw [h4_iff, hok_id]
+  set x := (2 * t + 1) % p with hx_def
+  set rd := d % p with hrd_def
+  have hrd_lt : rd < p := by rw [hrd_def]; exact mod_lt.nat d p (by omega)
+  have hx_sq_mod : ((2 * t + 1) * (2 * t + 1) + d) % p = (x * x + rd) % p
+    have hdm1 := div_add_mod.nat (2 * t + 1) p; rw [← hx_def] at hdm1
+    have hdm2 := div_add_mod.nat d p; rw [← hrd_def] at hdm2
+    have qt_id : (2 * t + 1) * (2 * t + 1) + d = (x * x + rd) + p * (p * ((2 * t + 1) / p) * ((2 * t + 1) / p) + 2 * x * ((2 * t + 1) / p) + d / p)
+      set qt := (2 * t + 1) / p; set qd := d / p; rw [← hdm1, ← hdm2]; ring
+    rw [qt_id, add_mul_mod.nat]
+  rw [hx_sq_mod]
+  set rx := (x * x) % p with hrx_def
+  have hrx_lt : rx < p := by rw [hrx_def]; exact mod_lt.nat (x * x) p (by omega)
+  have hxx_dm := div_add_mod.nat (x * x) p; rw [← hrx_def] at hxx_dm
+  have hsum_mod : (x * x + rd) % p = (rx + rd) % p := by have hr : x * x + rd = (rx + rd) + p * ((x * x) / p) := (by omega); rw [hr, add_mul_mod.nat]
+  rw [hsum_mod]
+  constructor
+  · intro hz
+    by_cases hlt_p : rx + rd < p; (rw [(div_mod_of_lt.nat _ p hlt_p).2] at hz; omega)
+    obtain ⟨qs, hqs⟩ := (dvd.iff_exists p (rx + rd) (by omega)).mp hz
+    have hqs1 : qs = 1 := by by_contra hnq; by_cases h0 : qs = 0; (rw [h0] at hqs; omega); (have hm := mul_le_mul_of_nonneg_left.nat 2 qs p (by omega) (by omega); omega)
+    rw [hqs1] at hqs; omega
+  · intro heqa; rw [heqa]; have h1 : (p - rd) + rd = 0 + p * 1 := (by omega); rw [h1, add_mul_mod.nat, (div_mod_of_lt.nat 0 p (by omega)).2]
+
++ sernau.neg_mod_sq_eq (p x0 : ℕ) (hp2 : 2 ≤ p) (hx0_pos : 1 ≤ x0) (hx0_lt : x0 < p) :
+    ((p - x0) * (p - x0)) % p = (x0 * x0) % p
+  set x1 := p - x0
+  by_cases h2x : 2 * x0 ≤ p
+  · set df2 := p - 2 * x0; have hp_s : p = df2 + 2 * x0 := (by omega); have hx1_s : x1 = df2 + x0 := by omega
+    have hr : x1 * x1 = x0 * x0 + p * df2 := by rw [hx1_s, hp_s]; ring
+    rw [hr, add_mul_mod.nat]
+  · set df2 := 2 * x0 - p; have hx0_s : x0 = x1 + df2 := (by omega); have hp_s : p = 2 * x1 + df2 := by omega
+    have hr : x0 * x0 = x1 * x1 + p * df2 := by rw [hx0_s, hp_s]; ring
+    rw [hr, add_mul_mod.nat]
+
++ sernau.ok_roots_prime_eq (d p : ℕ) (hd_pr : is_prime_nat d) (hd8 : d % 8 = 7)
+    (hp : is_prime_nat p) (hpd : p ≠ d) :
+    (sernau.ok_roots d p : ℤ) = 1 + legendre_sym d p
+  have hp2 : 2 ≤ p := hp.1; have hd2 : 2 ≤ d := hd_pr.1
+  have hd_odd : d % 2 = 1 := by have h := div_add_mod.nat d 8; omega
+  have h4cd : 4 * ((d + 1) / 4) = d + 1
+    have h := div_add_mod.nat d 8
+    have hm : (d + 1) % 4 = 0 := (div_mod_unique.nat (d + 1) 4 (2 * (d / 8) + 2) 0 (by omega) (by decide)).2.symm
+    have h2 := div_add_mod.nat (d + 1) 4; omega
+  have hok_id : ∀ t : ℕ, 4 * sernau.ok_poly d t = (2 * t + 1) * (2 * t + 1) + d := by intro t; unfold sernau.ok_poly; linear_combination h4cd
+  have hzero_fn : ∀ (N : ℕ) (f : ℕ → ℕ), (∀ u < N, f u = 0) → (∑ u < N, f u) = 0 := by intro N f; induction N with _ u ihu hall; (rw [sum_below_zero]); (rw [succ_eq_add_one.nat, sum_below_succ, ihu (by intro j hj; exact hall j (by omega)), hall u (by omega)]; omega)
+  have hsingle : ∀ (N a : ℕ) (f : ℕ → ℕ), a < N → (∀ u < N, u ≠ a → f u = 0) → (∑ u < N, f u) = f a
+    intro N a f; induction N with _ _ u ihu ha hall; omega; rw [succ_eq_add_one.nat] at ha hall ⊢; rw [sum_below_succ]
+    by_cases hlt : a < u; (rw [ihu hlt (by intro j hj hne; exact hall j (by omega) hne), hall u (by omega) (by omega)]; omega)
+    have he0 : u = a := (by omega); rw [he0, hzero_fn a f (by intro j hj; exact hall j (by omega) (by omega))]; omega
+  have hnd_pd : ¬ (p ∣ d) := by intro h; obtain h1 | h2 := sernau.m81a_dvd_cases d p hd_pr (by omega) h; omega; exact hpd h2
+  by_cases hp_eq2 : p = 2
+  · rw [hp_eq2]
+    have hok2 : sernau.ok_roots d 2 = 2
+      unfold sernau.ok_roots
+      have e2 : (2 : ℕ) = (0 + 1) + 1 := (by rfl); rw [e2, sum_below_succ, sum_below_succ, sum_below_zero, ← e2]
+      have e01 : (0 + 1 : ℕ) = 1 := (by rfl); rw [e01]
+      have hc_ev : ((d + 1) / 4) % 2 = 0
+        have h := div_add_mod.nat d 8
+        have hq : (d + 1) / 4 = 2 * (d / 8) + 2 := (div_mod_unique.nat (d + 1) 4 (2 * (d / 8) + 2) 0 (by omega) (by decide)).1.symm
+        rw [hq]; exact (div_mod_unique.nat (2 * (d / 8) + 2) 2 (d / 8 + 1) 0 (by ring) (by decide)).2.symm
+      have hm0 : sernau.ok_poly d 0 % 2 = 0 := by unfold sernau.ok_poly; omega
+      have hm1 : sernau.ok_poly d 1 % 2 = 0 := by unfold sernau.ok_poly; omega
+      rw [if_pos hm0, if_pos hm1]; omega
+    have hleg2 : legendre_sym d 2 = 1
+      rw [qr.second_supplement d hd_pr hd_odd]
+      set q8 := d / 8 with hq8_def
+      have hd_eq : d = 8 * q8 + 7 := by have h := div_add_mod.nat d 8; omega
+      have hdd8 : (d * d - 1) / 8 = 2 * (4 * q8 * q8 + 7 * q8 + 3)
+        have hsq : d * d = 8 * (2 * (4 * q8 * q8 + 7 * q8 + 3)) + 1 := by rw [hd_eq]; ring
+        exact (div_mod_unique.nat (d * d - 1) 8 (2 * (4 * q8 * q8 + 7 * q8 + 3)) 0 (by omega) (by decide)).1.symm
+      have hmod0 : ((d * d - 1) / 8) % 2 = 0 := by rw [hdd8]; exact (div_mod_unique.nat _ 2 (4 * q8 * q8 + 7 * q8 + 3) 0 (by ring) (by decide)).2.symm
+      rw [neg_one_pow.of_mod_eq _ 0 hmod0]; unfold neg_one_pow; decide
+    rw [hok2, hleg2]; decide
+  · have hp_odd : p % 2 = 1
+      by_contra hev; have hr0 : p % 2 = 0 := by have h := mod_lt.nat p 2 (by decide); omega
+      obtain h1 | h2 := sernau.m81a_dvd_cases p 2 hp (by decide) hr0; omega; exact hp_eq2 h2.symm
+    have hd_p_pos : 1 ≤ d % p := by by_contra h0; exact hnd_pd (by unfold dvd; omega)
+    have hd_p_lt : d % p < p := mod_lt.nat d p (by omega)
+    set a := p - d % p with ha_def
+    have ha_ge1 : 1 ≤ a := by omega
+    have ha_lt : a < p := by omega
+    have hnd_pa : ¬ (p ∣ a) := not_dvd_of_pos_lt p a (by omega) ha_lt
+    have ha_mod_eq : ((p - 1) * d) % p = a
+      have hdm := div_add_mod.nat d p
+      have hexp : (p - 1) * d = a + p * ((p - 1) * (d / p) + (d % p - 1))
+        set rm1 := d % p - 1; set qd := d / p
+        have hr1 : d % p = rm1 + 1 := (by omega); have hp1 : p - 1 = a + rm1 := (by omega); have hp_r : p = a + (rm1 + 1) := by omega
+        rw [← hdm, hr1, hp1, hp_r]; ring
+      rw [hexp, add_mul_mod.nat, (div_mod_of_lt.nat a p ha_lt).2]
+    have hleg_pa_eq : legendre_sym p a = legendre_sym d p
+      have h1 : legendre_sym p a = legendre_sym p ((p - 1) * d)
+        have hnd2 : ¬ (p ∣ ((p - 1) * d)) := by unfold dvd; rw [ha_mod_eq]; omega
+        have hq_iff : is_qr p a ↔ is_qr p ((p - 1) * d) := by unfold is_qr; rw [ha_mod_eq, (div_mod_of_lt.nat a p ha_lt).2]
+        unfold legendre_sym; rw [if_neg hnd_pa, if_neg hnd2]; by_cases hq : is_qr p a; (rw [if_pos hq, if_pos (hq_iff.mp hq)]); (rw [if_neg hq, if_neg (by intro h; exact hq (hq_iff.mpr h))])
+      rw [h1, legendre_sym.mul p (p - 1) d hp hp_odd, (qr.first_supplement p hp hp_odd).1]
+      have hqr := qr.quadratic_reciprocity p d hp hd_pr hp_odd hd_odd hpd
+      have hd_half_odd : ((d - 1) / 2) % 2 = 1
+        have h := div_add_mod.nat d 8
+        have hdh : (d - 1) / 2 = 1 + 2 * (2 * (d / 8) + 1) := (div_mod_unique.nat (d - 1) 2 (1 + 2 * (2 * (d / 8) + 1)) 0 (by omega) (by decide)).1.symm
+        rw [hdh, add_mul_mod.nat]; decide
+      have hpar_eq : (((p - 1) / 2) * ((d - 1) / 2)) % 2 = ((p - 1) / 2) % 2
+        rw [mul_mod.nat ((p - 1) / 2) ((d - 1) / 2) 2, hd_half_odd, mul_one.nat, zmod.mod_mod]
+      rw [neg_one_pow.of_mod_eq _ ((p - 1) / 2) hpar_eq] at hqr
+      have hsq1 : legendre_sym p d * legendre_sym p d = 1 := by unfold legendre_sym; rw [if_neg hnd_pd]; by_cases hq : is_qr p d; (rw [if_pos hq]; ring); (rw [if_neg hq]; ring)
+      linear_combination -hqr * legendre_sym p d + legendre_sym d p * hsq1
+    have hok_iff_sq : ∀ t < p, sernau.ok_poly d t % p = 0 ↔ (((2 * t + 1) % p) * ((2 * t + 1) % p)) % p = a
+      intro t _; rw [ha_def]; exact sernau.ok_poly_mod_iff_sq d p t hd8 hp hp_odd hd_p_pos
+    by_cases hqr : is_qr p a
+    · have hleg1 : legendre_sym d p = 1 := by rw [← hleg_pa_eq]; unfold legendre_sym; rw [if_neg hnd_pa, if_pos hqr]
+      rw [hleg1]
+      obtain ⟨x0, hx0_lt, hx0_sq⟩ := hqr; rw [(div_mod_of_lt.nat a p ha_lt).2] at hx0_sq
+      have hx0_pos : 1 ≤ x0 := by by_contra h0; have hz : x0 = 0 := (by omega); rw [hz] at hx0_sq; simp [(div_mod_of_lt.nat 0 p (by omega)).2] at hx0_sq; omega
+      set x1 := p - x0 with hx1_def
+      have hx1_lt : x1 < p := by omega
+      have hx0_ne_x1 : x0 ≠ x1 := by intro he; have h2x : 2 * x0 = p := (by omega); have hm : p % 2 = 0 := (div_mod_unique.nat p 2 x0 0 (by omega) (by decide)).2.symm; omega
+      have hx1_sq : (x1 * x1) % p = a := by rw [hx1_def, sernau.neg_mod_sq_eq p x0 hp2 hx0_pos hx0_lt, hx0_sq]
+      have hinv := sernau.odd_half_inv_map p hp2 hp_odd
+      set t0 := (((p + 1) / 2) * (x0 + p - 1)) % p with ht0_def
+      set t1 := (((p + 1) / 2) * (x1 + p - 1)) % p with ht1_def
+      have ht0_lt : t0 < p := by rw [ht0_def]; exact mod_lt.nat _ p (by omega)
+      have ht1_lt : t1 < p := by rw [ht1_def]; exact mod_lt.nat _ p (by omega)
+      have ht0_x : (2 * t0 + 1) % p = x0 := by rw [ht0_def]; exact hinv.1 x0 hx0_lt
+      have ht1_x : (2 * t1 + 1) % p = x1 := by rw [ht1_def]; exact hinv.1 x1 hx1_lt
+      have ht0_ne_t1 : t0 ≠ t1 := by intro he; rw [he, ht1_x] at ht0_x; exact hx0_ne_x1 ht0_x.symm
+      have ht0_ok : sernau.ok_poly d t0 % p = 0 := (hok_iff_sq t0 ht0_lt).mpr (by rw [ht0_x]; exact hx0_sq)
+      have ht1_ok : sernau.ok_poly d t1 % p = 0 := (hok_iff_sq t1 ht1_lt).mpr (by rw [ht1_x]; exact hx1_sq)
+      have honly_t : ∀ t < p, sernau.ok_poly d t % p = 0 → t = t0 ∨ t = t1
+        intro t ht hok_t
+        have hsq_t := (hok_iff_sq t ht).mp hok_t
+        have hx_lt : (2 * t + 1) % p < p := mod_lt.nat _ p (by omega)
+        have hx_cases := sernau.prime_sq_mod_eq_or p ((2 * t + 1) % p) x0 hp hx_lt hx0_lt (by rw [hsq_t, hx0_sq])
+        have ht_rec := hinv.2 t ht
+        obtain hx0_e | hx1_e := hx_cases
+        · left; rw [ht0_def, ← ht_rec, hx0_e]
+        · right; rw [ht1_def, ← ht_rec, hx1_e, hx1_def]
+      have hok2 : sernau.ok_roots d p = 2
+        unfold sernau.ok_roots
+        have hadd_p : ∀ (M : ℕ) (f1 f2 : ℕ → ℕ), (∑ t < M, f1 t) + (∑ t < M, f2 t) = ∑ t < M, (f1 t + f2 t)
+          intro M f1 f2; induction M with u ihu; (rw [sum_below_zero, sum_below_zero, sum_below_zero]; omega); (rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, ← ihu]; omega)
+        have hcon : (∑ t < p, if sernau.ok_poly d t % p = 0 then 1 else 0) =
+            (∑ t < p, if t = t0 then 1 else 0) + (∑ t < p, if t = t1 then 1 else 0)
+          rw [hadd_p]; apply sum_congr.nat; intro t ht
+          by_cases e0 : t = t0
+          · have er0 : t0 = t0 := by rfl
+            rw [e0, if_pos ht0_ok, if_pos er0, if_neg ht0_ne_t1]; omega
+          · by_cases e1 : t = t1
+            · have er1 : t1 = t1 := by rfl
+              have e1_ne0 : ¬ (t1 = t0) := by intro h; exact ht0_ne_t1 h.symm
+              rw [e1, if_pos ht1_ok, if_neg e1_ne0, if_pos er1]; omega
+            · have hn_ok : ¬ (sernau.ok_poly d t % p = 0) := by intro hok; obtain c0 | c1 := honly_t t ht hok; exact e0 c0; exact e1 c1
+              rw [if_neg hn_ok, if_neg e0, if_neg e1]; omega
+        have er0 : t0 = t0 := by rfl
+        have er1 : t1 = t1 := by rfl
+        rw [hcon, hsingle p t0 (fun t => if t = t0 then (1 : ℕ) else 0) ht0_lt (by intro t _ hne; exact if_neg hne), if_pos er0, hsingle p t1 (fun t => if t = t1 then (1 : ℕ) else 0) ht1_lt (by intro t _ hne; exact if_neg hne), if_pos er1]; omega
+      rw [hok2]; decide
+    · have hleg_m1 : legendre_sym d p = -1 := by rw [← hleg_pa_eq]; unfold legendre_sym; rw [if_neg hnd_pa, if_neg hqr]
+      rw [hleg_m1]
+      have hok0 : sernau.ok_roots d p = 0
+        unfold sernau.ok_roots; apply hzero_fn; intro t ht
+        exact if_neg (by intro hok; exact hqr ⟨(2 * t + 1) % p, mod_lt.nat _ p (by omega), by rw [(hok_iff_sq t ht).mp hok, (div_mod_of_lt.nat a p ha_lt).2]⟩)
+      rw [hok0]; decide

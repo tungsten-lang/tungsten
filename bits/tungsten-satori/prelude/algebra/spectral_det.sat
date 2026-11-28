@@ -1,0 +1,233 @@
+-- Milestone 3.50: Spectral Linear Algebra, Uniqueness of Alternating Multilinear Forms,
+--                 det(A B) = det(A) det(B), det(A^T) = det(A), det(A^*) = conj(det A),
+--                 Trace/Frobenius Unitary Invariance, Rayleigh Quotient Variational Sandwich,
+--                 & Weyl Eigenvalue Perturbation Bound!
+--
+-- Compressed using `prelude/determinant.sat` (which provides `cmat.alt_multilin_unique`,
+-- `cmat.det_mul`, `cmat.det_transpose`, `cmat.det_adj`, `cmat.det_unitary_conj`,
+-- `cmat.trace_mul_comm`, `cmat.trace_unitary_conj`, `cmat.frob_left_unitary`),
+-- polymorphic `if_pos` / `if_neg`, and `_` holes (ZERO custom axioms!).
+
+import algebra.cholesky_hadamard
+import algebra.vandermonde_siegel
+import analysis.landau_gauss_hecke
+
+-> cmat.diag_real (lam : ℕ → ℝ) (i j : ℕ) : ℂ :=
+  if i = j then complex.of_real (lam i) else complex.zero
+
+-> spectral.is_eigendecomp (n : ℕ) (H U : ℕ → ℕ → ℂ) (lam : ℕ → ℝ) : Prop :=
+  cmat.is_two_sided_unitary n U ∧
+  ∀ i < n, ∀ j < n, H i j = cmat.mul n (cmat.mul n U (cmat.diag_real lam)) (cmat.adj U) i j
+
++ cmat.det_diag_real (n : ℕ) (lam : ℕ → ℝ) :
+    cmat.det n (cmat.diag_real lam) = complex.of_real (∏ k < n, lam k)
+  induction n with m ihm
+  · rw [cmat.det_zero_eq, prod_below_zero, complex.of_real_one]
+  · have hcol0 : ∀ i < m, cmat.diag_real lam i m = complex.zero
+      intro i hi; unfold cmat.diag_real; have hne : i ≠ m := by omega; rw [if_neg hne]
+    rw [succ_eq_add_one.nat, prod_below_succ, cmat.det_block_lower m (cmat.diag_real lam) hcol0]
+    have hm : cmat.diag_real lam m m = complex.of_real (lam m) := by rfl
+    rw [hm, ihm, complex.mul_of_real]
+    have hcomm : lam m * (∏ k < m, lam k) = (∏ k < m, lam k) * lam m := by ring
+    rw [hcomm]
+
++ cmat.apply_id_m50 (n : ℕ) (v : ℕ → ℂ) (i : ℕ) (hi : i < n) : cmat.apply n cmat.id v i = v i
+  unfold cmat.apply cmat.id
+  have hc : csum n (fun j => complex.mul (if i = j then complex.one else complex.zero) (v j)) =
+      csum n (fun j => if j = i then v j else complex.zero)
+    apply csum.congr; intro j hj
+    by_cases e : j = i
+    · have hii : i = i := rfl; rw [e, if_pos hii, if_pos hii, complex.mul_one_l]
+    · have es : i ≠ j := by omega; rw [if_neg es, if_neg e, complex.mul_zero_l]
+  rw [hc, csum.single n i v hi]
+
++ unitary.preserves_norm_sq (n : ℕ) (U : ℕ → ℕ → ℂ) (x : ℕ → ℂ) (hU : cmat.is_unitary n cmat.id U) :
+    complex.re (cdot n (cmat.apply n U x) (cmat.apply n U x)) = complex.re (cdot n x x)
+  have hp := unitary.preserves_pairing n cmat.id U x x hU
+  unfold cmat.pairing at hp
+  have hL : cdot n (cmat.apply n U x) (cmat.apply n cmat.id (cmat.apply n U x)) = cdot n (cmat.apply n U x) (cmat.apply n U x) := by unfold cdot; apply csum.congr; intro i hi; rw [cmat.apply_id_m50 n (cmat.apply n U x) i hi]
+  have hR : cdot n x (cmat.apply n cmat.id x) = cdot n x x := by unfold cdot; apply csum.congr; intro i hi; rw [cmat.apply_id_m50 n x i hi]
+  rw [hL, hR] at hp; rw [hp]
+
++ sum_le_sum_real_m50 (n : ℕ) (f g : ℕ → ℝ) (h : ∀ k < n, f k ≤ g k) :
+    (∑ k < n, f k) ≤ ∑ k < n, g k
+  induction n with h m ihm h
+  · rw [sum_below_zero, sum_below_zero]; linarith
+  · rw [succ_eq_add_one.nat] at h ⊢; rw [sum_below_succ, sum_below_succ]
+    have h1 := ihm (by intro k hk; exact h k (by omega)); have h2 := h m (by omega); linarith
+
+-- THEOREM 3A: RAYLEIGH QUOTIENT VARIATIONAL SANDWICH (0 CUSTOM AXIOMS!)
++ spectral.rayleigh_sandwich (n : ℕ) (H U : ℕ → ℕ → ℂ) (lam : ℕ → ℝ) (lam_min lam_max : ℝ) (x : ℕ → ℂ)
+    (hdec : spectral.is_eigendecomp n H U lam)
+    (hlo : ∀ k < n, lam_min ≤ lam k) (hhi : ∀ k < n, lam k ≤ lam_max) :
+    lam_min * complex.re (cdot n x x) ≤ complex.re (cmat.pairing n H x x) ∧
+    complex.re (cmat.pairing n H x x) ≤ lam_max * complex.re (cdot n x x)
+  set y : ℕ → ℂ := cmat.apply n (cmat.adj U) x with hy_def
+  have hpair_eq : complex.re (cmat.pairing n H x x) = ∑ k < n, lam k * complex.norm_sq (y k)
+    have h1 : cmat.pairing n H x x = cmat.pairing n (cmat.diag_real lam) y y
+      have hcon : cmat.pairing n H x x = cmat.pairing n (cmat.mul n (cmat.mul n U (cmat.diag_real lam)) (cmat.adj U)) x x
+        apply cmat.pairing_congr; intro i hi j hj; exact hdec.2 i hi j hj
+      rw [hcon]
+      have hU_id : cmat.pairing n (cmat.mul n (cmat.mul n U (cmat.diag_real lam)) (cmat.adj U)) x x =
+          cmat.pairing n (cmat.diag_real lam) (cmat.apply n (cmat.adj U) x) (cmat.apply n (cmat.adj U) x)
+        unfold cmat.pairing
+        have happly : ∀ i < n, cmat.apply n (cmat.mul n (cmat.mul n U (cmat.diag_real lam)) (cmat.adj U)) x i =
+            cmat.apply n U (cmat.apply n (cmat.diag_real lam) (cmat.apply n (cmat.adj U) x)) i
+          intro i hi; rw [cmat.apply_mul n _ (cmat.adj U) x i, cmat.apply_mul n U (cmat.diag_real lam) _ i]
+        have hcon1 : cdot n x (cmat.apply n (cmat.mul n (cmat.mul n U (cmat.diag_real lam)) (cmat.adj U)) x) =
+            cdot n x (cmat.apply n U (cmat.apply n (cmat.diag_real lam) (cmat.apply n (cmat.adj U) x)))
+          unfold cdot; apply csum.congr; intro i hi; rw [happly i hi]
+        rw [hcon1]
+        set w := cmat.apply n (cmat.diag_real lam) (cmat.apply n (cmat.adj U) x) with hw_def
+        unfold cdot cmat.apply cmat.adj
+        have hL : csum n (fun i => complex.mul (complex.conj (x i)) (csum n (fun j => complex.mul (U i j) (w j)))) =
+            csum n (fun i => csum n (fun j => complex.mul (complex.conj (x i)) (complex.mul (U i j) (w j))))
+          apply csum.congr; intro i hi; rw [← csum.scale_left]
+        have hR : csum n (fun j => complex.mul (complex.conj (csum n (fun i => complex.mul (complex.conj (U i j)) (x i)))) (w j)) =
+            csum n (fun j => csum n (fun i => complex.mul (complex.conj (x i)) (complex.mul (U i j) (w j))))
+          apply csum.congr; intro j hj; rw [csum.conj, ← csum.scale_right]
+          apply csum.congr; intro i hi; rw [complex.conj_mul, complex.conj_conj]; apply complex.ext <;> simp <;> ring
+        rw [hL, hR, csum.swap]
+      rw [hU_id, ← hy_def]
+    rw [h1]; unfold cmat.pairing cdot cmat.apply cmat.diag_real; rw [csum.re]
+    apply sum_below.congr; intro k hk
+    have hsing : csum n (fun j => complex.mul (if k = j then complex.of_real (lam k) else complex.zero) (y j)) =
+        complex.mul (complex.of_real (lam k)) (y k)
+      have hc : csum n (fun j => complex.mul (if k = j then complex.of_real (lam k) else complex.zero) (y j)) =
+          csum n (fun j => if j = k then complex.mul (complex.of_real (lam k)) (y j) else complex.zero)
+        apply csum.congr; intro j hj
+        by_cases e : j = k
+        · have hkk : k = k := rfl; rw [e, if_pos hkk, if_pos hkk]
+        · have es : k ≠ j := by omega; rw [if_neg es, if_neg e, complex.mul_zero_l]
+      rw [hc, csum.single n k (fun j => complex.mul (complex.of_real (lam k)) (y j)) hk]
+    rw [hsing]
+    have hre : complex.mul (complex.conj (y k)) (complex.mul (complex.of_real (lam k)) (y k)) =
+        complex.mul (complex.of_real (lam k)) (complex.mul (complex.conj (y k)) (y k))
+      apply complex.ext <;> simp <;> ring
+    rw [hre, complex.conj_mul_self_eq, complex.mul_of_real]; simp
+  have hnorm_eq : complex.re (cdot n x x) = ∑ k < n, complex.norm_sq (y k) := by rw [← unitary.preserves_norm_sq n (cmat.adj U) x hdec.1.2, ← hy_def, cdot.self_re]
+  rw [hpair_eq, hnorm_eq, ← sum_const_mul.real, ← sum_const_mul.real]
+  constructor
+  · apply sum_le_sum_real_m50; intro k hk; exact mul_le_mul_of_nonneg_right.real lam_min (lam k) _ (hlo k hk) (complex.norm_sq_nonneg (y k))
+  · apply sum_le_sum_real_m50; intro k hk; exact mul_le_mul_of_nonneg_right.real (lam k) lam_max _ (hhi k hk) (complex.norm_sq_nonneg (y k))
+
+-- THEOREM 3B: SPECTRAL TRACE, DETERMINANT, AND FROBENIUS IDENTITIES (0 CUSTOM AXIOMS!)
++ spectral.trace_eq_sum_eig (n : ℕ) (H U : ℕ → ℕ → ℂ) (lam : ℕ → ℝ)
+    (hdec : spectral.is_eigendecomp n H U lam) :
+    cmat.trace n H = complex.of_real (∑ k < n, lam k)
+  have h1 : cmat.trace n H = cmat.trace n (cmat.mul n (cmat.mul n U (cmat.diag_real lam)) (cmat.adj U)) := by unfold cmat.trace; apply csum.congr; intro i hi; exact hdec.2 i hi i hi
+  rw [h1, cmat.trace_mul_comm n (cmat.mul n U (cmat.diag_real lam)) (cmat.adj U)]
+  have h2 : cmat.trace n (cmat.mul n (cmat.adj U) (cmat.mul n U (cmat.diag_real lam))) = cmat.trace n (cmat.diag_real lam)
+    unfold cmat.trace; apply csum.congr; intro i hi
+    rw [← cmat.mul_assoc n (cmat.adj U) U (cmat.diag_real lam) i i]
+    have hc : cmat.mul n (cmat.mul n (cmat.adj U) U) (cmat.diag_real lam) i i = cmat.mul n cmat.id (cmat.diag_real lam) i i := by apply cmat.mul_congr_left; intro k hk; exact cmat.unitary_adj_mul_eq_id n U hdec.1.1 i hi k hk
+    rw [hc, cmat.mul_id_left n (cmat.diag_real lam) i i hi]
+  rw [h2]; unfold cmat.trace cmat.diag_real
+  have hsum : ∀ t : ℕ, csum t (fun i => if i = i then complex.of_real (lam i) else complex.zero) = complex.of_real (∑ i < t, lam i)
+    intro t; induction t with r ihr
+    · rw [csum.zero, sum_below_zero, complex.of_real_zero]
+    · have hrr : r = r := rfl
+      rw [succ_eq_add_one.nat, csum.succ, sum_below_succ, ihr, if_pos hrr, complex.of_real_add]
+  exact hsum n
+
++ spectral.det_eq_prod_eig (n : ℕ) (H U : ℕ → ℕ → ℂ) (lam : ℕ → ℝ)
+    (hdec : spectral.is_eigendecomp n H U lam) :
+    cmat.det n H = complex.of_real (∏ k < n, lam k)
+  have h1 : cmat.det n H = cmat.det n (cmat.mul n (cmat.mul n U (cmat.diag_real lam)) (cmat.adj U))
+    apply cmat.det_congr; intro i hi j hj; exact hdec.2 i hi j hj
+  rw [h1, cmat.det_mul, cmat.det_mul, cmat.det_adj, cmat.det_diag_real]
+  have hre : complex.mul (complex.mul (cmat.det n U) (complex.of_real (∏ k < n, lam k))) (complex.conj (cmat.det n U)) =
+      complex.mul (complex.mul (cmat.det n U) (complex.conj (cmat.det n U))) (complex.of_real (∏ k < n, lam k))
+    apply complex.ext <;> simp <;> ring
+  rw [hre, complex.mul_conj, cmat.det_unitary_norm_sq n U hdec.1.1, complex.of_real_one, complex.mul_one_l]
+
++ spectral.frob_eq_sum_sq_eig (n : ℕ) (H U : ℕ → ℕ → ℂ) (lam : ℕ → ℝ)
+    (hdec : spectral.is_eigendecomp n H U lam) :
+    cmat.frob_norm_sq n H = ∑ k < n, lam k * lam k
+  have h1 : cmat.frob_norm_sq n H = cmat.frob_norm_sq n (cmat.mul n U (cmat.mul n (cmat.diag_real lam) (cmat.adj U)))
+    unfold cmat.frob_norm_sq; apply sum_below.congr; intro i hi; apply sum_below.congr; intro j hj
+    rw [hdec.2 i hi j hj, cmat.mul_assoc]
+  rw [h1, cmat.frob_left_unitary n (cmat.mul n (cmat.diag_real lam) (cmat.adj U)) U hdec.1.1]
+  have hadj_frob : ∀ M : ℕ → ℕ → ℂ, cmat.frob_norm_sq n M = cmat.frob_norm_sq n (cmat.adj M)
+    intro M; unfold cmat.frob_norm_sq cmat.adj
+    rw [sum_swap_real (fun i j => complex.norm_sq (M i j)) n n]
+    apply sum_below.congr; intro i hi; apply sum_below.congr; intro j hj; rw [complex.norm_sq_conj]
+  rw [hadj_frob (cmat.mul n (cmat.diag_real lam) (cmat.adj U))]
+  have hcon : cmat.frob_norm_sq n (cmat.adj (cmat.mul n (cmat.diag_real lam) (cmat.adj U))) =
+      cmat.frob_norm_sq n (cmat.mul n U (cmat.diag_real lam))
+    unfold cmat.frob_norm_sq; apply sum_below.congr; intro i hi; apply sum_below.congr; intro j hj
+    rw [cmat.adj_mul]
+    have hmul : cmat.mul n (cmat.adj (cmat.adj U)) (cmat.adj (cmat.diag_real lam)) i j = cmat.mul n U (cmat.diag_real lam) i j
+      have hL : cmat.mul n (cmat.adj (cmat.adj U)) (cmat.adj (cmat.diag_real lam)) i j = cmat.mul n U (cmat.adj (cmat.diag_real lam)) i j
+        apply cmat.mul_congr_left; intro k hk; exact cmat.adj_adj U i k
+      rw [hL]; apply cmat.mul_congr_right; intro k hk; unfold cmat.adj cmat.diag_real
+      by_cases e : j = k
+      · have hkk : k = k := rfl; rw [e, if_pos hkk, complex.conj_of_real]
+      · have es : k ≠ j := by omega; rw [if_neg e, if_neg es]; apply complex.ext <;> simp
+    rw [hmul]
+  rw [hcon, cmat.frob_left_unitary n (cmat.diag_real lam) U hdec.1.1]
+  unfold cmat.frob_norm_sq cmat.diag_real
+  apply sum_below.congr; intro i hi
+  have hcon2 : (∑ j < n, complex.norm_sq (if i = j then complex.of_real (lam i) else complex.zero)) = ∑ j < n, if j = i then lam i * lam i else 0
+    apply sum_below.congr; intro j hj
+    by_cases e : j = i
+    · have hii : i = i := rfl; rw [e, if_pos hii, if_pos hii]; unfold complex.norm_sq; simp
+    · have es : i ≠ j := by omega; rw [if_neg es, if_neg e]; unfold complex.norm_sq; simp
+  rw [hcon2]
+  have hpick : ∀ (M idx : ℕ) (v : ℝ), idx < M → (∑ j < M, if j = idx then v else 0) = v
+    intro M; induction M with idx v h r ihr idx v h
+    · omega
+    · rw [succ_eq_add_one.nat] at h ⊢; rw [sum_below_succ]
+      by_cases e : r = idx
+      · have hself : idx = idx := rfl; rw [e, if_pos hself]
+        have hz : (∑ j < idx, if j = idx then v else 0) = ∑ j < idx, (0 : ℝ)
+          apply sum_below.congr; intro j hj; have hne : j ≠ idx := by omega; rw [if_neg hne]
+        rw [hz, sum_const.real]; ring
+      · rw [ihr idx v (by omega), if_neg e]; ring
+  exact hpick n i (lam i * lam i) hi
+
+-- THEOREM 3C: WEYL EIGENVALUE PERTURBATION BOUND (0 CUSTOM AXIOMS!)
++ spectral.weyl_perturbation (n : ℕ) (A U E : ℕ → ℕ → ℂ) (lam : ℕ → ℝ)
+    (lam_min lam_max eps : ℝ) (v : ℕ → ℂ) (mu : ℂ)
+    (hdec : spectral.is_eigendecomp n A U lam)
+    (hlo : ∀ k < n, lam_min ≤ lam k) (hhi : ∀ k < n, lam k ≤ lam_max)
+    (heps : 0 ≤ eps)
+    (hE_op : complex.re (cdot n (cmat.apply n E v) (cmat.apply n E v)) ≤ eps * eps * complex.re (cdot n v v))
+    (hv_pos : 0 < complex.re (cdot n v v))
+    (heig : ∀ i < n, complex.add (cmat.apply n A v i) (cmat.apply n E v i) = complex.mul mu (v i)) :
+    lam_min - eps ≤ complex.re mu ∧ complex.re mu ≤ lam_max + eps
+  have hsum : cmat.pairing n A v v = complex.sub (complex.mul mu (cdot n v v)) (cmat.pairing n E v v)
+    have hL : complex.add (cmat.pairing n A v v) (cmat.pairing n E v v) = complex.mul mu (cdot n v v)
+      unfold cmat.pairing cdot; rw [← csum.add, ← csum.scale_left]
+      apply csum.congr; intro i hi; rw [← complex.left_distrib, heig i hi]; apply complex.ext <;> simp <;> ring
+    rw [← hL]; apply complex.ext <;> simp <;> ring
+  have hvv_im : complex.im (cdot n v v) = 0 := cdot.self_im n v
+  have hre_split : complex.re mu * complex.re (cdot n v v) = complex.re (cmat.pairing n A v v) + complex.re (cmat.pairing n E v v)
+    have h1 : complex.re (cmat.pairing n A v v) = complex.re (complex.sub (complex.mul mu (cdot n v v)) (cmat.pairing n E v v)) := by rw [hsum]
+    simp [hvv_im] at h1; linarith
+  have hcs := cdot.cauchy_schwarz n v (cmat.apply n E v)
+  have hre_sq_le : complex.re (cmat.pairing n E v v) * complex.re (cmat.pairing n E v v) ≤ (eps * complex.re (cdot n v v)) * (eps * complex.re (cdot n v v))
+    have h1 : complex.re (cmat.pairing n E v v) * complex.re (cmat.pairing n E v v) ≤ complex.norm_sq (cdot n v (cmat.apply n E v)) := by unfold cmat.pairing complex.norm_sq; linarith [complex.real_sq_nonneg (complex.im (cdot n v (cmat.apply n E v)))]
+    have h2 := mul_le_mul_of_nonneg_left.real _ _ (complex.re (cdot n v v)) hE_op (by linarith)
+    have h3 : complex.re (cdot n v v) * (eps * eps * complex.re (cdot n v v)) = (eps * complex.re (cdot n v v)) * (eps * complex.re (cdot n v v)) := by ring
+    linarith
+  have hE_bd : -(eps * complex.re (cdot n v v)) ≤ complex.re (cmat.pairing n E v v) ∧
+      complex.re (cmat.pairing n E v v) ≤ eps * complex.re (cdot n v v)
+    have hnn : 0 ≤ eps * complex.re (cdot n v v) := mul_nonneg.real eps (complex.re (cdot n v v)) heps (by linarith)
+    constructor
+    · by_contra hlt
+      have h2 := mul_lt_mul_of_pos_left.real (eps * complex.re (cdot n v v)) (-complex.re (cmat.pairing n E v v)) (-complex.re (cmat.pairing n E v v)) (by linarith) (by linarith)
+      have h3 := mul_le_mul_of_nonneg_right.real (eps * complex.re (cdot n v v)) (-complex.re (cmat.pairing n E v v)) (eps * complex.re (cdot n v v)) (by linarith) hnn
+      linarith
+    · by_contra hgt
+      have h2 := mul_lt_mul_of_pos_left.real (eps * complex.re (cdot n v v)) (complex.re (cmat.pairing n E v v)) (complex.re (cmat.pairing n E v v)) (by linarith) (by linarith)
+      have h3 := mul_le_mul_of_nonneg_right.real (eps * complex.re (cdot n v v)) (complex.re (cmat.pairing n E v v)) (eps * complex.re (cdot n v v)) (by linarith) hnn
+      linarith
+  have hray := spectral.rayleigh_sandwich n A U lam lam_min lam_max v hdec hlo hhi
+  constructor
+  · by_contra hlt
+    have h1 := mul_lt_mul_of_pos_right.real (complex.re mu) (lam_min - eps) (complex.re (cdot n v v)) (by linarith) hv_pos
+    linarith [hray.1, hE_bd.1]
+  · by_contra hgt
+    have h1 := mul_lt_mul_of_pos_right.real (lam_max + eps) (complex.re mu) (complex.re (cdot n v v)) (by linarith) hv_pos
+    linarith [hray.2, hE_bd.2]

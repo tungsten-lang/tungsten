@@ -1,0 +1,384 @@
+-- Milestone 3.22: Complex Holomorphy of EVERY Bounded Dirichlet Series F(s) = sum a_n n^(-s)
+--                 on Re(s) > 1 (with Exact Term-by-Term Derivative F'(s) = -sum a_n log(n) n^(-s))
+--                 and Holomorphy of Finite Complex Mellin Transforms (0 CUSTOM AXIOMS!)
+--
+-- Direct, unconditional analytic breakthroughs advancing Frontiers #1 & #2:
+--   1. `cexp.global_quad_remainder_le`:
+--        GLOBAL quadratic Taylor remainder for complex exponential on ALL of C:
+--          |e^h - 1 - h| <= 6 * e^(|h|) * |h|^2   for EVERY h in C!
+--   2. `log_sq_le_rpow`:
+--        Elementary log-vs-power domination for ALL x >= 1 and ALL alpha > 0:
+--          (log x)^2 <= (4 / alpha^2) * x^alpha !
+--   3. `cpow_real.quad_taylor_bound`:
+--        Uniform quadratic complex Taylor remainder for EVERY Dirichlet term n^(-s):
+--          |n^(-s) - n^(-s0) - (-log n) * n^(-s0) * (s - s0)| <= 6 * (log n)^2 * n^(-Re(s0) + delta) * |s - s0|^2
+--        for ALL n >= 1 and ALL |s - s0| <= delta!
+--   4. `has_cderiv_at.of_uniform_quad_limit`:
+--        Weierstrass-style complex differentiation under limits: if S_N(z) -> S(z), V_N -> V, and
+--        |S_N(z) - S_N(z0) - V_N*(z - z0)| <= M * |z - z0|^2 uniformly in N near z0, then
+--          has_cderiv_at S z0 V !
+--   5. `dseries.has_cderiv_at_re_gt_one`:
+--        EXACT COMPLEX HOLOMORPHY OF EVERY BOUNDED DIRICHLET SERIES ON Re(s) > 1 (INCLUDING zeta(s)
+--        AND EVERY L(chi, s)!):
+--          If |a_n| <= B, Re(s0) > 1, sum a_n n^(-s) = F(s), and sum (-a_n log n) n^(-s0) = V, then
+--            has_cderiv_at F s0 V !
+--   6. `mellin.has_cderiv_at_finite`:
+--        EXACT COMPLEX HOLOMORPHY OF EVERY FINITE COMPLEX MELLIN TRANSFORM on ALL of C:
+--          d/ds int_1^B H(x) x^(-s-1) dx = -int_1^B H(x) (log x) x^(-s-1) dx !
+
+import analysis.complex_strip_cauchy
+import analysis.gaussian_fourier
+
+-- ====================================================================================
+-- 1. GLOBAL COMPLEX EXPONENTIAL QUADRATIC REMAINDER & LOG-VS-POWER DOMINATION
+-- ====================================================================================
+
+-- THEOREM 1 (Global Quadratic Taylor Remainder for e^h on ALL of C — 0 AXIOMS!):
+--   |e^h - 1 - h| <= 6 * e^(|h|) * |h|^2   for EVERY h in C!
++ cexp.global_quad_remainder_le (h : ℂ) :
+    complex.abs (complex.sub (complex.sub (complex.exp h) complex.one) h) ≤ 6 * exp (complex.abs h) * (complex.abs h * complex.abs h)
+  have hh_nn := complex.abs_nonneg h
+  have hexp_ge1 : 1 ≤ exp (complex.abs h)
+    have h := exp_ge_one_add (complex.abs h); linarith
+  by_cases hsmall : complex.abs h ≤ 1
+  · have hb := cexp.sub_one_sub_le h hsmall
+    have hm := mul_le_mul_of_nonneg_right.real 1 (exp (complex.abs h)) (6 * (complex.abs h * complex.abs h)) hexp_ge1 (by nlinarith)
+    linarith
+  · have hbig : 1 < complex.abs h := by linarith
+    have habs_sub_le : ∀ a b : ℂ, complex.abs (complex.sub a b) ≤ complex.abs a + complex.abs b
+      intro a b
+      have heq : complex.sub a b = complex.add a (complex.neg b) := by ring
+      have ht := complex.abs_add_le a (complex.neg b)
+      rw [← heq, complex.abs_neg] at ht; exact ht
+    have htri1 := habs_sub_le (complex.sub (complex.exp h) complex.one) h
+    have htri2 := habs_sub_le (complex.exp h) complex.one
+    have habs_one : complex.abs complex.one = 1
+      have hsq : complex.abs complex.one * complex.abs complex.one = 1 := by rw [complex.abs_sq]; unfold complex.norm_sq; simp
+      nlinarith [complex.abs_nonneg complex.one]
+    have habs_exp : complex.abs (complex.exp h) = exp (complex.re h)
+      have hsq : complex.abs (complex.exp h) * complex.abs (complex.exp h) = exp (complex.re h) * exp (complex.re h)
+        rw [complex.abs_sq]; unfold complex.norm_sq; simp
+        linear_combination (exp (complex.re h) * exp (complex.re h)) * sin_sq_add_cos_sq (complex.im h)
+      nlinarith [complex.abs_nonneg (complex.exp h), exp_pos (complex.re h)]
+    have hexp_re : exp (complex.re h) ≤ exp (complex.abs h) := (exp_le_exp (complex.re h) (complex.abs h)).mpr (by linarith [le_abs_self.real (complex.re h), complex.re_abs_le h])
+    nlinarith
+
+-- Helper: (log x)^2 <= (4 / alpha^2) * x^alpha for ALL x >= 1 and ALL alpha > 0!
++ log_sq_le_rpow (x alpha : ℝ) (hx : 1 ≤ x) (ha : 0 < alpha) :
+    log x * log x ≤ (4 / (alpha * alpha)) * rpow x alpha
+  have hlog_nn : 0 ≤ log x
+    have h := (log_le_log 1 x (by decide) (by linarith)).mpr hx
+    rw [log_one] at h; exact h
+  have hu : (alpha / 2) * log x ≤ exp ((alpha / 2) * log x)
+    have h := exp_ge_one_add ((alpha / 2) * log x); linarith
+  have hu_nn : 0 ≤ (alpha / 2) * log x := by nlinarith
+  have hsq : ((alpha / 2) * log x) * ((alpha / 2) * log x) ≤ exp ((alpha / 2) * log x) * exp ((alpha / 2) * log x) := by nlinarith
+  have hexp_sq : exp ((alpha / 2) * log x) * exp ((alpha / 2) * log x) = rpow x alpha
+    unfold rpow; rw [← exp_add]
+    have he : (alpha / 2) * log x + (alpha / 2) * log x = alpha * log x := by ring
+    rw [he]
+  rw [hexp_sq] at hsq
+  have ha2_pos : 0 < alpha * alpha := by nlinarith
+  have hscaled : (4 / (alpha * alpha)) * (((alpha / 2) * log x) * ((alpha / 2) * log x)) = log x * log x := by field_simp
+  have hm := mul_le_mul_of_nonneg_left.real (((alpha / 2) * log x) * ((alpha / 2) * log x)) (rpow x alpha) (4 / (alpha * alpha)) hsq (by linarith [div_pos.real 4 (alpha * alpha) (by decide) ha2_pos])
+  linarith
+
+-- THEOREM 2 (Uniform Quadratic Complex Taylor Remainder for x^(-s) — 0 AXIOMS!):
+-- For ALL x >= 1, ALL s0 in C, and ALL |s - s0| <= delta (delta >= 0):
+--   |x^(-s) - x^(-s0) - (-log x) * x^(-s0) * (s - s0)| <= 6 * (log x)^2 * x^(-Re(s0) + delta) * |s - s0|^2 !
++ cpow_real.quad_taylor_bound (x delta : ℝ) (s s0 : ℂ)
+    (hx : 1 ≤ x) (hd : 0 ≤ delta) (hnear : complex.abs (complex.sub s s0) ≤ delta) :
+    complex.abs (complex.sub (complex.sub (cpow_real x (complex.neg s)) (cpow_real x (complex.neg s0))) (complex.mul (complex.mul (complex.of_real (-log x)) (cpow_real x (complex.neg s0))) (complex.sub s s0))) ≤ 6 * (log x * log x) * rpow x (-complex.re s0 + delta) * (complex.abs (complex.sub s s0) * complex.abs (complex.sub s s0))
+  have hx_pos : 0 < x := by linarith
+  have hlog_nn : 0 ≤ log x
+    have h := (log_le_log 1 x (by decide) hx_pos).mpr hx
+    rw [log_one] at h; exact h
+  set h := complex.mul (complex.of_real (-log x)) (complex.sub s s0) with hh
+  have hfac : complex.sub (complex.sub (cpow_real x (complex.neg s)) (cpow_real x (complex.neg s0))) (complex.mul (complex.mul (complex.of_real (-log x)) (cpow_real x (complex.neg s0))) (complex.sub s s0)) = complex.mul (cpow_real x (complex.neg s0)) (complex.sub (complex.sub (complex.exp h) complex.one) h)
+    have hsplit : cpow_real x (complex.neg s) = complex.mul (cpow_real x (complex.neg s0)) (complex.exp h)
+      unfold cpow_real; rw [← complex.exp_add, hh]
+      have harg : complex.smul (log x) (complex.neg s) = complex.add (complex.smul (log x) (complex.neg s0)) (complex.mul (complex.of_real (-log x)) (complex.sub s s0)) := by ring
+      rw [harg]
+    rw [hsplit, hh]; ring
+  rw [hfac, complex.abs_mul]
+  have hs0_abs : complex.abs (cpow_real x (complex.neg s0)) = rpow x (-complex.re s0)
+    have hsq : complex.abs (cpow_real x (complex.neg s0)) * complex.abs (cpow_real x (complex.neg s0)) = rpow x (-complex.re s0) * rpow x (-complex.re s0)
+      rw [complex.abs_sq]; unfold complex.norm_sq cpow_real rpow; simp
+      have h1 : log x * (0 - complex.re s0) = -complex.re s0 * log x := by ring
+      rw [h1]; linear_combination (exp (-complex.re s0 * log x) * exp (-complex.re s0 * log x)) * sin_sq_add_cos_sq (log x * (0 - complex.im s0))
+    nlinarith [complex.abs_nonneg (cpow_real x (complex.neg s0)), rpow.pos x (-complex.re s0)]
+  have hh_abs : complex.abs h = log x * complex.abs (complex.sub s s0)
+    rw [hh, complex.abs_mul]
+    have hl_abs : complex.abs (complex.of_real (-log x)) = log x
+      have hsq : complex.abs (complex.of_real (-log x)) * complex.abs (complex.of_real (-log x)) = log x * log x := by rw [complex.abs_sq]; unfold complex.norm_sq complex.of_real; simp; ring
+      nlinarith [complex.abs_nonneg (complex.of_real (-log x))]
+    rw [hl_abs]
+  have hrem := cexp.global_quad_remainder_le h
+  rw [hh_abs] at hrem
+  have hexp_le : exp (log x * complex.abs (complex.sub s s0)) ≤ rpow x delta
+    unfold rpow
+    have hle : log x * complex.abs (complex.sub s s0) ≤ delta * log x := by nlinarith
+    exact (exp_le_exp (log x * complex.abs (complex.sub s s0)) (delta * log x)).mpr hle
+  have hprod_rpow : rpow x (-complex.re s0) * rpow x delta = rpow x (-complex.re s0 + delta)
+    unfold rpow; rw [← exp_add]
+    have he : -complex.re s0 * log x + delta * log x = (-complex.re s0 + delta) * log x := by ring
+    rw [he]
+  rw [hs0_abs]
+  have h1 := mul_le_mul_of_nonneg_right.real (exp (log x * complex.abs (complex.sub s s0))) (rpow x delta) (6 * ((log x * complex.abs (complex.sub s s0)) * (log x * complex.abs (complex.sub s s0)))) hexp_le (by nlinarith)
+  have h2 := mul_le_mul_of_nonneg_left.real (complex.abs (complex.sub (complex.sub (complex.exp h) complex.one) h)) (6 * rpow x delta * ((log x * complex.abs (complex.sub s s0)) * (log x * complex.abs (complex.sub s s0)))) (rpow x (-complex.re s0)) (by linarith) (by linarith [rpow.pos x (-complex.re s0)])
+  have hrearr : rpow x (-complex.re s0) * (6 * rpow x delta * ((log x * complex.abs (complex.sub s s0)) * (log x * complex.abs (complex.sub s s0)))) = 6 * (log x * log x) * (rpow x (-complex.re s0) * rpow x delta) * (complex.abs (complex.sub s s0) * complex.abs (complex.sub s s0)) := by ring
+  rw [hrearr, hprod_rpow] at h2
+  exact h2
+
+-- ====================================================================================
+-- 2. WEIERSTRASS COMPLEX DIFFERENTIATION UNDER LIMITS (0 AXIOMS!)
+-- ====================================================================================
+
+-- THEOREM 3 (Complex Differentiation Under Uniform Quadratic-Remainder Limits — 0 AXIOMS!):
++ has_cderiv_at.of_uniform_quad_limit (S_seq : ℕ → ℂ → ℂ) (V_seq : ℕ → ℂ) (S : ℂ → ℂ) (z0 V : ℂ) (r M : ℝ)
+    (hr : 0 < r) (hM : 0 ≤ M)
+    (hS : ∀ z, complex.abs (complex.sub z z0) < r → ctends_to (fun (N : ℕ) => S_seq N z) (S z))
+    (hV : ctends_to V_seq V)
+    (hquad : ∀ (N : ℕ) (z : ℂ), complex.abs (complex.sub z z0) < r → complex.abs (complex.sub (complex.sub (S_seq N z) (S_seq N z0)) (complex.mul (V_seq N) (complex.sub z z0))) ≤ M * (complex.abs (complex.sub z z0) * complex.abs (complex.sub z z0))) :
+    has_cderiv_at S z0 V
+  -- First show |S(z) - S(z0) - V*(z - z0)| <= M * |z - z0|^2 for all |z - z0| < r!
+  have hlim_quad : ∀ z, complex.abs (complex.sub z z0) < r → complex.abs (complex.sub (complex.sub (S z) (S z0)) (complex.mul V (complex.sub z z0))) ≤ M * (complex.abs (complex.sub z z0) * complex.abs (complex.sub z z0))
+    intro z hz
+    have hz0 : complex.abs (complex.sub z0 z0) < r := by rw [complex.sub_self, complex.abs_zero]; exact hr
+    have hSz := hS z hz
+    have hSz0 := hS z0 hz0
+    by_contra hgt
+    set gap := complex.abs (complex.sub (complex.sub (S z) (S z0)) (complex.mul V (complex.sub z z0))) - M * (complex.abs (complex.sub z z0) * complex.abs (complex.sub z z0)) with hgap
+    have hgap_pos : 0 < gap := by linarith
+    have hdz_pos : 0 < complex.abs (complex.sub z z0) + 1 := by linarith [complex.abs_nonneg (complex.sub z z0)]
+    unfold ctends_to at hSz hSz0 hV
+    obtain ⟨N1, hN1⟩ := hSz (gap / 4) (by linarith)
+    obtain ⟨N2, hN2⟩ := hSz0 (gap / 4) (by linarith)
+    obtain ⟨N3, hN3⟩ := hV (gap / (4 * (complex.abs (complex.sub z z0) + 1))) (div_pos.real gap (4 * (complex.abs (complex.sub z z0) + 1)) hgap_pos (by linarith))
+    set N := N1 + N2 + N3 with hN_def
+    have h1 := hN1 N (by omega)
+    have h2 := hN2 N (by omega)
+    have h3 := hN3 N (by omega)
+    have hqN := hquad N z hz
+    set R := complex.sub (complex.sub (S z) (S z0)) (complex.mul V (complex.sub z z0)) with hR
+    set RN := complex.sub (complex.sub (S_seq N z) (S_seq N z0)) (complex.mul (V_seq N) (complex.sub z z0)) with hRN
+    have hdiff_eq : complex.sub R RN = complex.add (complex.add (complex.sub (S z) (S_seq N z)) (complex.sub (S_seq N z0) (S z0))) (complex.mul (complex.sub (V_seq N) V) (complex.sub z z0)) := by rw [hR, hRN]; ring
+    have htri_main : complex.abs R ≤ complex.abs RN + complex.abs (complex.sub R RN)
+      have he : R = complex.add RN (complex.sub R RN) := by ring
+      have ht := complex.abs_add_le RN (complex.sub R RN)
+      rw [← he] at ht; exact ht
+    have htri_d1 := complex.abs_add_le (complex.add (complex.sub (S z) (S_seq N z)) (complex.sub (S_seq N z0) (S z0))) (complex.mul (complex.sub (V_seq N) V) (complex.sub z z0))
+    have htri_d2 := complex.abs_add_le (complex.sub (S z) (S_seq N z)) (complex.sub (S_seq N z0) (S z0))
+    rw [← hdiff_eq] at htri_d1
+    have hcomm := complex.abs_sub_comm (S z) (S_seq N z)
+    have hmul3 : complex.abs (complex.mul (complex.sub (V_seq N) V) (complex.sub z z0)) < gap / 4
+      rw [complex.abs_mul]
+      have h3m : complex.abs (complex.sub (V_seq N) V) * (4 * (complex.abs (complex.sub z z0) + 1)) < gap
+        have h := (lt_div_iff.real (complex.abs (complex.sub (V_seq N) V)) gap (4 * (complex.abs (complex.sub z z0) + 1)) (by linarith)).mp h3
+        linarith
+      nlinarith [complex.abs_nonneg (complex.sub (V_seq N) V), complex.abs_nonneg (complex.sub z z0)]
+    linarith
+  -- Now deduce `has_cderiv_at S z0 V`: choose d = min r (e / (M + 1))!
+  unfold has_cderiv_at
+  intro e he
+  set d := min r (e / (M + 1)) with hd
+  have hd_pos : 0 < d := by rw [hd]; exact lt_min.real r (e / (M + 1)) 0 hr (div_pos.real e (M + 1) he (by linarith))
+  use d; constructor
+  · exact hd_pos
+  · intro z hz
+    have hzr : complex.abs (complex.sub z z0) < r := by linarith [min_le_left.real r (e / (M + 1))]
+    have hze : complex.abs (complex.sub z z0) < e / (M + 1) := by linarith [min_le_right.real r (e / (M + 1))]
+    have hq := hlim_quad z hzr
+    have hm1 : (M + 1) * complex.abs (complex.sub z z0) < e
+      have h := (lt_div_iff.real (complex.abs (complex.sub z z0)) e (M + 1) (by linarith)).mp hze
+      linarith
+    have hm2 : M * complex.abs (complex.sub z z0) ≤ e := by linarith [complex.abs_nonneg (complex.sub z z0)]
+    have hm3 := mul_le_mul_of_nonneg_right.real (M * complex.abs (complex.sub z z0)) e (complex.abs (complex.sub z z0)) hm2 (complex.abs_nonneg (complex.sub z z0))
+    linarith
+
+-- ====================================================================================
+-- 3. ACTUAL HOLOMORPHY OF EVERY BOUNDED DIRICHLET SERIES ON Re(s) > 1 (0 AXIOMS!)
+-- ====================================================================================
+
+-- THEOREM 4 (EXACT HOLOMORPHY OF EVERY BOUNDED DIRICHLET SERIES ON Re(s) > 1 — 0 AXIOMS!):
+-- For ANY Dirichlet series F(s) = sum_{n>=1} a(n) * n^(-s) with |a(n)| <= B:
+--   At EVERY s0 in C with Re(s0) > 1, F is complex-differentiable with derivative
+--   V = sum_{n>=1} (-a(n) * log n) * n^(-s0) !
++ dseries.has_cderiv_at_re_gt_one (a : ℕ → ℂ) (F : ℂ → ℂ) (s0 V : ℂ) (B : ℝ)
+    (hB : 0 ≤ B) (hs0 : 1 < complex.re s0)
+    (hbdd : ∀ n : ℕ, complex.abs (a n) ≤ B)
+    (hF : ∀ s : ℂ, 1 < complex.re s → ctends_to (fun (N : ℕ) => csum N (fun n => complex.mul (a (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) (F s))
+    (hV : ctends_to (fun (N : ℕ) => csum N (fun n => complex.mul (a (n + 1)) (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))))) V) :
+    has_cderiv_at F s0 V
+  set delta := (complex.re s0 - 1) / 3 with hdelta
+  have hdelta_pos : 0 < delta := by rw [hdelta]; linarith
+  -- Majorant constant: 6 * B * (4 / delta^2) * ((1 + delta) / delta) using pseries.partial_sum_le!
+  have hps_ub : ∀ N : ℕ, partial_sum (pseries.term (1 + delta)) (N + 1) ≤ (1 + delta) / delta
+    intro N
+    have h := pseries.partial_sum_le (1 + delta) (by linarith) (N + 1)
+    have hsub : (1 + delta) - 1 = delta := by ring
+    rw [hsub] at h; exact h
+  set M := 6 * B * (4 / (delta * delta)) * ((1 + delta) / delta) with hM
+  have hM_nn : 0 ≤ M
+    rw [hM]
+    have h1 : 0 ≤ 6 * B := by linarith
+    have h2 : 0 ≤ 4 / (delta * delta) := by linarith [div_pos.real 4 (delta * delta) (by decide) (by nlinarith)]
+    have h3 : 0 ≤ (1 + delta) / delta := by linarith [div_pos.real (1 + delta) delta (by linarith) hdelta_pos]
+    have h12 := mul_nonneg.real (6 * B) (4 / (delta * delta)) h1 h2
+    exact mul_nonneg.real (6 * B * (4 / (delta * delta))) ((1 + delta) / delta) h12 h3
+  apply has_cderiv_at.of_uniform_quad_limit (fun (N : ℕ) (s : ℂ) => csum N (fun n => complex.mul (a (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) (fun (N : ℕ) => csum N (fun n => complex.mul (a (n + 1)) (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))))) F s0 V delta M hdelta_pos hM_nn
+  · intro z hz
+    have hre_z : 1 < complex.re z
+      have h1 := complex.re_abs_le (complex.sub z s0)
+      simp at h1
+      have h2 : complex.re s0 - complex.re z ≤ complex.abs (complex.sub z s0) := by linarith [neg_le_abs.real (complex.re z - complex.re s0)]
+      linarith
+    exact hF z hre_z
+  · exact hV
+  · intro N z hz
+    -- Combine the 3 csums into a single csum of term-wise remainders:
+    have hcomb : complex.sub (complex.sub (csum N (fun n => complex.mul (a (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg z)))) (csum N (fun n => complex.mul (a (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))))) (complex.mul (csum N (fun n => complex.mul (a (n + 1)) (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))))) (complex.sub z s0)) = csum N (fun n => complex.mul (a (n + 1)) (complex.sub (complex.sub (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg z)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.mul (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.sub z s0))))
+      induction N with k ih
+      · rw [csum.zero, csum.zero, csum.zero, csum.zero]; ring
+      · rw [succ_eq_add_one.nat, csum.succ, csum.succ, csum.succ, csum.succ, ← ih]; ring
+    rw [hcomb]
+    have htri := csum.abs_le_sum N (fun n => complex.mul (a (n + 1)) (complex.sub (complex.sub (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg z)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.mul (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.sub z s0))))
+    set K := 6 * B * (4 / (delta * delta)) * (complex.abs (complex.sub z s0) * complex.abs (complex.sub z s0)) with hK
+    have hterm_le : ∀ n : ℕ, n < N → complex.abs (complex.mul (a (n + 1)) (complex.sub (complex.sub (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg z)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.mul (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.sub z s0)))) ≤ K * pseries.term (1 + delta) (n + 1)
+      intro n _
+      rw [complex.abs_mul]
+      have hx1 : (1 : ℝ) ≤ ((n + 1 : ℕ) : ℝ) := (cast_le.real 1 (n + 1)).mpr (by omega)
+      have hq := cpow_real.quad_taylor_bound ((n + 1 : ℕ) : ℝ) delta z s0 hx1 (by linarith) (by linarith)
+      have hlog := log_sq_le_rpow ((n + 1 : ℕ) : ℝ) delta hx1 hdelta_pos
+      have hrpow_mul : rpow ((n + 1 : ℕ) : ℝ) delta * rpow ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta) = pseries.term (1 + delta) (n + 1)
+        unfold pseries.term rpow
+        have hne0 : n + 1 ≠ 0 := by omega
+        rw [if_neg hne0, ← exp_add]
+        have he : delta * log ((n + 1 : ℕ) : ℝ) + (-complex.re s0 + delta) * log ((n + 1 : ℕ) : ℝ) = -(1 + delta) * log ((n + 1 : ℕ) : ℝ) := by rw [hdelta]; ring
+        rw [he]
+      have hba := hbdd (n + 1)
+      have hq_nn : 0 ≤ complex.abs (complex.sub (complex.sub (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg z)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.mul (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.sub z s0))) := complex.abs_nonneg (complex.sub (complex.sub (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg z)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.mul (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.sub z s0)))
+      have hm1 := mul_le_mul_of_nonneg_right.real (complex.abs (a (n + 1))) B (complex.abs (complex.sub (complex.sub (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg z)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.mul (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.sub z s0)))) hba hq_nn
+      have hm2 := mul_le_mul_of_nonneg_left.real (complex.abs (complex.sub (complex.sub (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg z)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.mul (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.sub z s0)))) (6 * (log ((n + 1 : ℕ) : ℝ) * log ((n + 1 : ℕ) : ℝ)) * rpow ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta) * (complex.abs (complex.sub z s0) * complex.abs (complex.sub z s0))) B hq hB
+      have hfactor_nn : 0 ≤ 6 * B * rpow ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta) * (complex.abs (complex.sub z s0) * complex.abs (complex.sub z s0))
+        have h1 : 0 ≤ 6 * B := by linarith
+        have h2 := mul_nonneg.real (6 * B) (rpow ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta)) h1 (by linarith [rpow.pos ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta)])
+        exact mul_nonneg.real (6 * B * rpow ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta)) (complex.abs (complex.sub z s0) * complex.abs (complex.sub z s0)) h2 (by nlinarith [complex.abs_nonneg (complex.sub z s0)])
+      have hm3 := mul_le_mul_of_nonneg_right.real (log ((n + 1 : ℕ) : ℝ) * log ((n + 1 : ℕ) : ℝ)) ((4 / (delta * delta)) * rpow ((n + 1 : ℕ) : ℝ) delta) (6 * B * rpow ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta) * (complex.abs (complex.sub z s0) * complex.abs (complex.sub z s0))) hlog hfactor_nn
+      have hl_eq : (log ((n + 1 : ℕ) : ℝ) * log ((n + 1 : ℕ) : ℝ)) * (6 * B * rpow ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta) * (complex.abs (complex.sub z s0) * complex.abs (complex.sub z s0))) = B * (6 * (log ((n + 1 : ℕ) : ℝ) * log ((n + 1 : ℕ) : ℝ)) * rpow ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta) * (complex.abs (complex.sub z s0) * complex.abs (complex.sub z s0))) := by ring
+      have hr_eq : (4 / (delta * delta)) * rpow ((n + 1 : ℕ) : ℝ) delta * (6 * B * rpow ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta) * (complex.abs (complex.sub z s0) * complex.abs (complex.sub z s0))) = K * (rpow ((n + 1 : ℕ) : ℝ) delta * rpow ((n + 1 : ℕ) : ℝ) (-complex.re s0 + delta)) := by rw [hK]; ring
+      rw [hl_eq, hr_eq, hrpow_mul] at hm3
+      linarith
+    have hsum_le := sum_le.real (fun n => complex.abs (complex.mul (a (n + 1)) (complex.sub (complex.sub (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg z)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.mul (complex.mul (complex.of_real (-log ((n + 1 : ℕ) : ℝ))) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s0))) (complex.sub z s0))))) (fun n => K * pseries.term (1 + delta) (n + 1)) N hterm_le
+    rw [sum_const_mul.real] at hsum_le
+    have hshift_eq : (∑ n < N, pseries.term (1 + delta) (n + 1)) = partial_sum (pseries.term (1 + delta)) (N + 1)
+      unfold partial_sum
+      rw [sum_range_succ'.real (pseries.term (1 + delta)) N]
+      have h0 : pseries.term (1 + delta) 0 = 0 := by unfold pseries.term; simp
+      rw [h0]; ring
+    rw [hshift_eq] at hsum_le
+    have hK_nn : 0 ≤ K
+      rw [hK]
+      have h1 : 0 ≤ 6 * B := by linarith
+      have h2 : 0 ≤ 4 / (delta * delta) := by linarith [div_pos.real 4 (delta * delta) (by decide) (by nlinarith)]
+      have h12 := mul_nonneg.real (6 * B) (4 / (delta * delta)) h1 h2
+      exact mul_nonneg.real (6 * B * (4 / (delta * delta))) (complex.abs (complex.sub z s0) * complex.abs (complex.sub z s0)) h12 (by nlinarith [complex.abs_nonneg (complex.sub z s0)])
+    have hps_fin := mul_le_mul_of_nonneg_left.real (partial_sum (pseries.term (1 + delta)) (N + 1)) ((1 + delta) / delta) K (hps_ub N) hK_nn
+    have hKM : K * ((1 + delta) / delta) = M * (complex.abs (complex.sub z s0) * complex.abs (complex.sub z s0)) := by rw [hK, hM]; ring
+    linarith
+
+-- ====================================================================================
+-- 4. COMPLEX HOLOMORPHY OF FINITE COMPLEX MELLIN TRANSFORMS ON ALL OF C (0 AXIOMS!)
+-- ====================================================================================
+
+-- THEOREM 5 (EXACT COMPLEX HOLOMORPHY OF FINITE MELLIN TRANSFORMS ON ALL OF C — 0 AXIOMS!):
+--   d/ds int_1^B H(x) * x^(-s-1) dx = -int_1^B H(x) * (log x) * x^(-s-1) dx
++ mellin.has_cderiv_at_finite (H : ℝ → ℝ) (F : ℂ → ℂ) (s0 V : ℂ) (B MH : ℝ)
+    (hB : 1 ≤ B) (hMH : 0 ≤ MH)
+    (hH : ∀ x, 1 ≤ x → x ≤ B → |H x| ≤ MH)
+    (hF : ∀ s : ℂ, c_has_integral (fun x => complex.mul (complex.of_real (H x)) (cpow_real x (complex.neg (complex.add s complex.one)))) 1 B (F s))
+    (hV : c_has_integral (fun x => complex.mul (complex.of_real (H x * (-log x))) (cpow_real x (complex.neg (complex.add s0 complex.one)))) 1 B V) :
+    has_cderiv_at F s0 V
+  -- Choose radius 1: on |s - s0| < 1, quadratic remainder of integrand is uniformly <= M_int * |s - s0|^2!
+  set M_int := 6 * MH * (log B * log B) * rpow B (|complex.re s0| + 1) * (B - 1) with hM
+  have hM_nn : 0 ≤ M_int
+    rw [hM]
+    have h1 : 0 ≤ 6 * MH * (log B * log B) := by nlinarith
+    have h2 := mul_nonneg.real (6 * MH * (log B * log B)) (rpow B (|complex.re s0| + 1)) h1 (by linarith [rpow.pos B (|complex.re s0| + 1)])
+    exact mul_nonneg.real (6 * MH * (log B * log B) * rpow B (|complex.re s0| + 1)) (B - 1) h2 (by linarith)
+  have hquad : ∀ s : ℂ, complex.abs (complex.sub s s0) < 1 → complex.abs (complex.sub (complex.sub (F s) (F s0)) (complex.mul V (complex.sub s s0))) ≤ M_int * (complex.abs (complex.sub s s0) * complex.abs (complex.sub s s0))
+    intro s hs
+    have hFs := hF s
+    have hFs0 := hF s0
+    have hneg_Fs0 := c_has_integral.scale_complex (fun x => complex.mul (complex.of_real (H x)) (cpow_real x (complex.neg (complex.add s0 complex.one)))) 1 B (complex.neg complex.one) (F s0) hFs0
+    have hsub1 := c_has_integral.add (fun x => complex.mul (complex.of_real (H x)) (cpow_real x (complex.neg (complex.add s complex.one)))) (fun x => complex.mul (complex.neg complex.one) (complex.mul (complex.of_real (H x)) (cpow_real x (complex.neg (complex.add s0 complex.one))))) 1 B (F s) (complex.mul (complex.neg complex.one) (F s0)) hFs hneg_Fs0
+    have hscV := c_has_integral.scale_complex (fun x => complex.mul (complex.of_real (H x * (-log x))) (cpow_real x (complex.neg (complex.add s0 complex.one)))) 1 B (complex.neg (complex.sub s s0)) V hV
+    have htot := c_has_integral.add (fun x => complex.add (complex.mul (complex.of_real (H x)) (cpow_real x (complex.neg (complex.add s complex.one)))) (complex.mul (complex.neg complex.one) (complex.mul (complex.of_real (H x)) (cpow_real x (complex.neg (complex.add s0 complex.one)))))) (fun x => complex.mul (complex.neg (complex.sub s s0)) (complex.mul (complex.of_real (H x * (-log x))) (cpow_real x (complex.neg (complex.add s0 complex.one))))) 1 B (complex.add (F s) (complex.mul (complex.neg complex.one) (F s0))) (complex.mul (complex.neg (complex.sub s s0)) V) hsub1 hscV
+    have hval_eq : complex.add (complex.add (F s) (complex.mul (complex.neg complex.one) (F s0))) (complex.mul (complex.neg (complex.sub s s0)) V) = complex.sub (complex.sub (F s) (F s0)) (complex.mul V (complex.sub s s0)) := by ring
+    rw [hval_eq] at htot
+    set Cpt := 6 * MH * (log B * log B) * rpow B (|complex.re s0| + 1) * (complex.abs (complex.sub s s0) * complex.abs (complex.sub s s0)) with hCpt
+    have hCpt_nn : 0 ≤ Cpt
+      rw [hCpt]
+      have h2 := mul_nonneg.real (6 * MH * (log B * log B)) (rpow B (|complex.re s0| + 1)) (by nlinarith) (by linarith [rpow.pos B (|complex.re s0| + 1)])
+      exact mul_nonneg.real (6 * MH * (log B * log B) * rpow B (|complex.re s0| + 1)) (complex.abs (complex.sub s s0) * complex.abs (complex.sub s s0)) h2 (by nlinarith [complex.abs_nonneg (complex.sub s s0)])
+    have hml := c_has_integral.abs_le _ 1 B Cpt (complex.sub (complex.sub (F s) (F s0)) (complex.mul V (complex.sub s s0))) hB hCpt_nn htot
+    have hpt : ∀ x, 1 ≤ x → x ≤ B → complex.abs (complex.add (complex.add (complex.mul (complex.of_real (H x)) (cpow_real x (complex.neg (complex.add s complex.one)))) (complex.mul (complex.neg complex.one) (complex.mul (complex.of_real (H x)) (cpow_real x (complex.neg (complex.add s0 complex.one)))))) (complex.mul (complex.neg (complex.sub s s0)) (complex.mul (complex.of_real (H x * (-log x))) (cpow_real x (complex.neg (complex.add s0 complex.one)))))) ≤ Cpt
+      intro x hx1 hxB
+      set s1 := complex.add s complex.one with hs1
+      set s01 := complex.add s0 complex.one with hs01
+      have hsub_s1 : complex.sub s1 s01 = complex.sub s s0 := by rw [hs1, hs01]; ring
+      have hrearr : complex.add (complex.add (complex.mul (complex.of_real (H x)) (cpow_real x (complex.neg s1))) (complex.mul (complex.neg complex.one) (complex.mul (complex.of_real (H x)) (cpow_real x (complex.neg s01))))) (complex.mul (complex.neg (complex.sub s s0)) (complex.mul (complex.of_real (H x * (-log x))) (cpow_real x (complex.neg s01)))) = complex.mul (complex.of_real (H x)) (complex.sub (complex.sub (cpow_real x (complex.neg s1)) (cpow_real x (complex.neg s01))) (complex.mul (complex.mul (complex.of_real (-log x)) (cpow_real x (complex.neg s01))) (complex.sub s1 s01))) := by rw [hsub_s1]; ring
+      rw [hrearr, hsub_s1, complex.abs_mul]
+      have hH_abs : complex.abs (complex.of_real (H x)) = |H x|
+        have hsq : complex.abs (complex.of_real (H x)) * complex.abs (complex.of_real (H x)) = |H x| * |H x|
+          have hsqa : |H x| * |H x| = H x * H x := sq_abs.real (H x)
+          rw [complex.abs_sq, hsqa]; unfold complex.norm_sq complex.of_real; simp
+        have h1 := complex.abs_nonneg (complex.of_real (H x))
+        have h2 := abs_nonneg.real (H x)
+        nlinarith
+      rw [hH_abs]
+      have hq := cpow_real.quad_taylor_bound x 1 s1 s01 hx1 (by decide) (by rw [hsub_s1]; linarith)
+      rw [hsub_s1] at hq
+      have hre_s01 : -complex.re s01 + 1 = -complex.re s0
+        rw [hs01]; simp; ring
+      rw [hre_s01] at hq
+      have hlog_nn : 0 ≤ log x
+        have h := (log_le_log 1 x (by decide) (by linarith)).mpr hx1
+        rw [log_one] at h; exact h
+      have hlog_le : log x ≤ log B := (log_le_log x B (by linarith) (by linarith)).mpr hxB
+      have hlog_sq : log x * log x ≤ log B * log B := by nlinarith
+      have hrpow_le : rpow x (-complex.re s0) ≤ rpow B (|complex.re s0| + 1)
+        unfold rpow
+        have h1 : (-complex.re s0) * log x ≤ (|complex.re s0| + 1) * log B
+          have ha : -complex.re s0 ≤ |complex.re s0| + 1 := by linarith [neg_le_abs.real (complex.re s0)]
+          have h2 : (-complex.re s0) * log x ≤ (|complex.re s0| + 1) * log x := mul_le_mul_of_nonneg_right.real (-complex.re s0) (|complex.re s0| + 1) (log x) ha hlog_nn
+          have h3 : (|complex.re s0| + 1) * log x ≤ (|complex.re s0| + 1) * log B := mul_le_mul_of_nonneg_left.real (log x) (log B) (|complex.re s0| + 1) hlog_le (by linarith [abs_nonneg.real (complex.re s0)])
+          linarith
+        exact (exp_le_exp ((-complex.re s0) * log x) ((|complex.re s0| + 1) * log B)).mpr h1
+      have hm1 := mul_le_mul_of_nonneg_right.real (|H x|) MH (complex.abs (complex.sub (complex.sub (cpow_real x (complex.neg s1)) (cpow_real x (complex.neg s01))) (complex.mul (complex.mul (complex.of_real (-log x)) (cpow_real x (complex.neg s01))) (complex.sub s s0)))) (hH x hx1 hxB) (complex.abs_nonneg (complex.sub (complex.sub (cpow_real x (complex.neg s1)) (cpow_real x (complex.neg s01))) (complex.mul (complex.mul (complex.of_real (-log x)) (cpow_real x (complex.neg s01))) (complex.sub s s0))))
+      have hm2 := mul_le_mul_of_nonneg_left.real (complex.abs (complex.sub (complex.sub (cpow_real x (complex.neg s1)) (cpow_real x (complex.neg s01))) (complex.mul (complex.mul (complex.of_real (-log x)) (cpow_real x (complex.neg s01))) (complex.sub s s0)))) (6 * (log x * log x) * rpow x (-complex.re s0) * (complex.abs (complex.sub s s0) * complex.abs (complex.sub s s0))) MH hq hMH
+      have hm3 := mul_le_mul_of_nonneg_right.real (log x * log x) (log B * log B) (rpow x (-complex.re s0)) hlog_sq (by linarith [rpow.pos x (-complex.re s0)])
+      have hm4 := mul_le_mul_of_nonneg_left.real (rpow x (-complex.re s0)) (rpow B (|complex.re s0| + 1)) (log B * log B) hrpow_le (by nlinarith)
+      have hm5 := mul_le_mul_of_nonneg_left.real ((log x * log x) * rpow x (-complex.re s0)) ((log B * log B) * rpow B (|complex.re s0| + 1)) (6 * MH * (complex.abs (complex.sub s s0) * complex.abs (complex.sub s s0))) (by linarith) (by nlinarith [complex.abs_nonneg (complex.sub s s0)])
+      rw [hCpt]; linarith
+    have hres := hml hpt
+    have hCM : Cpt * (B - 1) = M_int * (complex.abs (complex.sub s s0) * complex.abs (complex.sub s s0))
+      rw [hCpt, hM]; ring
+    linarith
+  -- Conclude `has_cderiv_at F s0 V` from uniform quadratic bound!
+  unfold has_cderiv_at
+  intro e he
+  set d := min 1 (e / (M_int + 1)) with hd
+  have hd_pos : 0 < d := by rw [hd]; exact lt_min.real 1 (e / (M_int + 1)) 0 (by decide) (div_pos.real e (M_int + 1) he (by linarith))
+  use d; constructor
+  · exact hd_pos
+  · intro s hs
+    have hs1 : complex.abs (complex.sub s s0) < 1 := by linarith [min_le_left.real 1 (e / (M_int + 1))]
+    have hse : complex.abs (complex.sub s s0) < e / (M_int + 1) := by linarith [min_le_right.real 1 (e / (M_int + 1))]
+    have hq := hquad s hs1
+    have hm1 : (M_int + 1) * complex.abs (complex.sub s s0) < e
+      have h := (lt_div_iff.real (complex.abs (complex.sub s s0)) e (M_int + 1) (by linarith)).mp hse
+      linarith
+    have hm2 : M_int * complex.abs (complex.sub s s0) ≤ e := by linarith [complex.abs_nonneg (complex.sub s s0)]
+    have hm3 := mul_le_mul_of_nonneg_right.real (M_int * complex.abs (complex.sub s s0)) e (complex.abs (complex.sub s s0)) hm2 (complex.abs_nonneg (complex.sub s s0))
+    linarith

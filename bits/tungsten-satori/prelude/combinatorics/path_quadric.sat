@@ -1,0 +1,166 @@
+-- Milestone 3.18: Alpöge's Arbitrary-Length k-Step Path-Quadric Fourier Identity
+--                 q * N_k = M^k + R_k  (Footnote 3 of `remark.pdf`, 0 CUSTOM AXIOMS!)
+--
+-- Formalizes the exact toy-model breakthrough described in Footnote 3 & Item 3 of
+-- Alpöge's `remark.pdf`:
+--   For ANY path length k >= 1, modulus q >= 1, primitive q-th root zeta, and arbitrary
+--   complex weights t : N -> C, the path-quadric exponential sum
+--     S_k(t) = sum_{h < q} sum_{x_1, ..., x_k < q} t(x_1)...t(x_k) * zeta^(h * (x_1*x_2 + ... + x_{k-1}*x_k))
+--   satisfies TWO exact dual evaluations:
+--     1. Summing over h first gives  q * N_k(t)  where N_k(t) is the weighted count of
+--        solutions to x_1*x_2 + ... + x_{k-1}*x_k == 0 (mod q)!
+--     2. Separating the h = 0 mode gives  M^k + R_k  where M = sum_{x < q} t(x) is the
+--        zero-mode and R_k is the sum over nonzero frequencies h = 1..q-1!
+--   Hence  q * N_k(t) = M^k + R_k  UNCONDITIONALLY for ALL k >= 1!
+--
+-- ALL theorems proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import combinatorics.stepanov_fourier
+
+-- ====================================================================================
+-- 1. Recursive Definition of the k-Step Path-Quadric Sum (Arbitrary k >= 1!)
+-- ====================================================================================
+
+-- `path_sum q zeta t h k x_prev` computes the weighted path-quadric exponential sum
+-- over the remaining k variables (y_1, ..., y_k), starting with edge `x_prev * y_1`:
+--   sum_{y_1,...,y_k < q} t(y_1)...t(y_k) * zeta^(h * (x_prev*y_1 + y_1*y_2 + ... + y_{k-1}*y_k))
+-> path_tail (q : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (h : ℕ) : ℕ → ℕ → ℂ
+  | 0 => fun _ => complex.one
+  | k + 1 => fun x_prev =>
+      csum q (fun y => complex.mul (complex.mul (t y) (cpow_nat zeta (h * (x_prev * y)))) (path_tail q zeta t h k y))
+
+-- Full k-step path-quadric sum at frequency h (with k + 1 variables x_0, x_1, ..., x_k):
+--   P(h, k) = sum_{x_0 < q} t(x_0) * path_tail q zeta t h k x_0
+-> path_freq (q : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (h k : ℕ) : ℂ :=
+  csum q (fun x0 => complex.mul (t x0) (path_tail q zeta t h k x0))
+
+-- Zero-frequency evaluation: when h = 0, EVERY exponential factor zeta^0 = 1,
+-- so path_tail(h=0, k, x_prev) = (csum q t)^k  and  path_freq(h=0, k) = (csum q t)^(k + 1)!
++ path_tail.zero_freq (q : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (k : ℕ) :
+    ∀ x_prev : ℕ, path_tail q zeta t 0 k x_prev = cpow_nat (csum q t) k
+  induction k with x_prev j ih x_prev
+  · rfl
+  · rw [succ_eq_add_one.nat]
+    simp only [path_tail, cpow_nat]
+    have hcon : csum q (fun y => complex.mul (complex.mul (t y) (cpow_nat zeta (0 * (x_prev * y)))) (path_tail q zeta t 0 j y)) = csum q (fun y => complex.mul (t y) (cpow_nat (csum q t) j))
+      apply csum.congr; intro y hy
+      have h0 : 0 * (x_prev * y) = 0 := by ring
+      have hz0 : cpow_nat zeta 0 = complex.one := by rfl
+      rw [h0, hz0, complex.mul_one, ih y]
+    rw [hcon, csum.scale_right, complex.mul_comm]
+
++ path_freq.zero_eq_pow (q : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (k : ℕ) :
+    path_freq q zeta t 0 k = cpow_nat (csum q t) (k + 1)
+  unfold path_freq
+  have hcon : csum q (fun x0 => complex.mul (t x0) (path_tail q zeta t 0 k x0)) = csum q (fun x0 => complex.mul (t x0) (cpow_nat (csum q t) k)) := by apply csum.congr; intro x0 hx0; rw [path_tail.zero_freq q zeta t k x0]
+  rw [hcon, csum.scale_right]
+  have hpow : cpow_nat (csum q t) (k + 1) = complex.mul (cpow_nat (csum q t) k) (csum q t) := by rfl
+  rw [hpow, complex.mul_comm]
+
+-- ====================================================================================
+-- 2. Exact Weighted Solution Count N_k(t) of x_0*x_1 + ... + x_{k-1}*x_k == 0 (mod q)
+-- ====================================================================================
+
+-- `path_sol_tail q t acc k x_prev` counts weighted completions (y_1, ..., y_k) such that
+--   (acc + x_prev*y_1 + y_1*y_2 + ... + y_{k-1}*y_k) % q = 0!
+-> path_sol_tail (q : ℕ) (t : ℕ → ℂ) : ℕ → ℕ → ℕ → ℂ
+  | 0 => fun acc _ => if acc % q = 0 then complex.one else complex.zero
+  | k + 1 => fun acc x_prev =>
+      csum q (fun y => complex.mul (t y) (path_sol_tail q t k (acc + x_prev * y) y))
+
+-> path_sol_count (q : ℕ) (t : ℕ → ℂ) (k : ℕ) : ℂ :=
+  csum q (fun x0 => complex.mul (t x0) (path_sol_tail q t k 0 x0))
+
+-- Core inductive lemma: summing zeta^(h * acc) * path_tail(h, k, x_prev) over h < q
+-- equals q * path_sol_tail(k, acc, x_prev)!
++ path_tail.sum_over_h (q : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (hq : 0 < q)
+    (hprim : is_primitive_root q zeta) (k : ℕ) :
+    ∀ acc x_prev : ℕ,
+      csum q (fun h => complex.mul (cpow_nat zeta (h * acc)) (path_tail q zeta t h k x_prev)) = complex.smul (q : ℝ) (path_sol_tail q t k acc x_prev)
+  induction k with acc x_prev j ih acc x_prev
+  · have hstep1 : ∀ h, path_tail q zeta t h 0 x_prev = complex.one := by intro h; rfl
+    have hcon : csum q (fun h => complex.mul (cpow_nat zeta (h * acc)) (path_tail q zeta t h 0 x_prev)) = csum q (fun h => cpow_nat zeta (h * acc)) := by apply csum.congr; intro h hh; rw [hstep1 h, complex.mul_one]
+    rw [hcon]
+    have horth := root.orthogonality q zeta hprim acc
+    have hsol0 : path_sol_tail q t 0 acc x_prev = (if acc % q = 0 then complex.one else complex.zero) := by rfl
+    rw [hsol0, horth]
+    by_cases hdvd : acc % q = 0
+    · rw [if_pos hdvd, if_pos hdvd]
+      ring
+    · rw [if_neg hdvd, if_neg hdvd]
+      ring
+  · rw [succ_eq_add_one.nat]
+    simp only [path_tail, path_sol_tail]
+    have hexp : csum q (fun h => complex.mul (cpow_nat zeta (h * acc)) (csum q (fun y => complex.mul (complex.mul (t y) (cpow_nat zeta (h * (x_prev * y)))) (path_tail q zeta t h j y)))) = csum q (fun h => csum q (fun y => complex.mul (t y) (complex.mul (cpow_nat zeta (h * (acc + x_prev * y))) (path_tail q zeta t h j y))))
+      apply csum.congr; intro h hh
+      rw [← csum.scale_left]
+      apply csum.congr; intro y hy
+      have hpow_add : complex.mul (cpow_nat zeta (h * acc)) (cpow_nat zeta (h * (x_prev * y))) = cpow_nat zeta (h * (acc + x_prev * y))
+        rw [← cpow_nat.add]
+        have he : h * acc + h * (x_prev * y) = h * (acc + x_prev * y) := by ring
+        rw [he]
+      have hrearr : complex.mul (cpow_nat zeta (h * acc)) (complex.mul (complex.mul (t y) (cpow_nat zeta (h * (x_prev * y)))) (path_tail q zeta t h j y)) = complex.mul (t y) (complex.mul (complex.mul (cpow_nat zeta (h * acc)) (cpow_nat zeta (h * (x_prev * y)))) (path_tail q zeta t h j y))
+        apply complex.ext <;> simp <;> ring
+      calc complex.mul (cpow_nat zeta (h * acc)) (complex.mul (complex.mul (t y) (cpow_nat zeta (h * (x_prev * y)))) (path_tail q zeta t h j y))
+        = complex.mul (t y) (complex.mul (complex.mul (cpow_nat zeta (h * acc)) (cpow_nat zeta (h * (x_prev * y)))) (path_tail q zeta t h j y)) := hrearr
+        _ = complex.mul (t y) (complex.mul (cpow_nat zeta (h * (acc + x_prev * y))) (path_tail q zeta t h j y)) := by rw [hpow_add]
+    rw [hexp, csum.swap]
+    have hinner : csum q (fun y => csum q (fun h => complex.mul (t y) (complex.mul (cpow_nat zeta (h * (acc + x_prev * y))) (path_tail q zeta t h j y)))) = csum q (fun y => complex.mul (t y) (complex.smul (q : ℝ) (path_sol_tail q t j (acc + x_prev * y) y)))
+      apply csum.congr; intro y hy
+      rw [csum.scale_left, ih (acc + x_prev * y) y]
+    rw [hinner]
+    have hpull : csum q (fun y => complex.mul (t y) (complex.smul (q : ℝ) (path_sol_tail q t j (acc + x_prev * y) y))) = csum q (fun y => complex.mul (complex.of_real (q : ℝ)) (complex.mul (t y) (path_sol_tail q t j (acc + x_prev * y) y))) := by ring
+    rw [hpull, csum.scale_left]
+    ring
+
+-- ====================================================================================
+-- 3. MASTER THEOREM (Footnote 3 of `remark.pdf` — Arbitrary-Length q * N_k = M^k + R_k!)
+-- ====================================================================================
+
+-> path_remainder (q : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (k : ℕ) : ℂ :=
+  csum (q - 1) (fun h => path_freq q zeta t (h + 1) k)
+
+-- For EVERY modulus q >= 1, primitive root zeta, arbitrary weights t, and ANY path length k + 1:
+--   q * N_{k+1}(t) = (sum t)^(k+1) + R_{k+1}(t) !
++ path_quadric.master_identity (q : ℕ) (zeta : ℂ) (t : ℕ → ℂ) (k : ℕ)
+    (hq : 0 < q) (hprim : is_primitive_root q zeta) :
+    complex.smul (q : ℝ) (path_sol_count q t k) = complex.add (cpow_nat (csum q t) (k + 1)) (path_remainder q zeta t k)
+  -- LHS = sum_{h < q} path_freq q zeta t h k
+  have hlhs : csum q (fun h => path_freq q zeta t h k) = complex.smul (q : ℝ) (path_sol_count q t k)
+    unfold path_freq path_sol_count
+    rw [csum.swap]
+    have hcon : csum q (fun x0 => csum q (fun h => complex.mul (t x0) (path_tail q zeta t h k x0))) = csum q (fun x0 => complex.mul (t x0) (complex.smul (q : ℝ) (path_sol_tail q t k 0 x0)))
+      apply csum.congr; intro x0 hx0
+      rw [csum.scale_left]
+      have h0eq : csum q (fun h => path_tail q zeta t h k x0) = csum q (fun h => complex.mul (cpow_nat zeta (h * 0)) (path_tail q zeta t h k x0))
+        apply csum.congr; intro h hh
+        have h0 : h * 0 = 0 := by ring
+        have hz0 : cpow_nat zeta 0 = complex.one := by rfl
+        rw [h0, hz0, complex.one_mul]
+      rw [h0eq, path_tail.sum_over_h q zeta t hq hprim k 0 x0]
+    rw [hcon]
+    have hpull : csum q (fun x0 => complex.mul (t x0) (complex.smul (q : ℝ) (path_sol_tail q t k 0 x0))) = csum q (fun x0 => complex.mul (complex.of_real (q : ℝ)) (complex.mul (t x0) (path_sol_tail q t k 0 x0)))
+      apply csum.congr; intro x0 hx0
+      apply complex.ext <;> simp <;> ring
+    rw [hpull, csum.scale_left]
+    apply complex.ext <;> simp <;> ring
+  -- RHS = split h = 0 and h = 1..q-1
+  have hrhs : csum q (fun h => path_freq q zeta t h k) = complex.add (path_freq q zeta t 0 k) (path_remainder q zeta t k)
+    unfold path_remainder
+    have hq1 : q = (q - 1) + 1 := by omega
+    -- Split csum (m + 1) f = f 0 + csum m (fun h => f (h + 1)):
+    have hsplit : ∀ (m : ℕ) (f : ℕ → ℂ), csum (m + 1) f = complex.add (f 0) (csum m (fun h => f (h + 1)))
+      intro m f
+      induction m with j ih
+      · have h1 : csum (0 + 1) f = complex.add (csum 0 f) (f 0) := by rfl
+        have h0a : csum 0 f = complex.zero := by rfl
+        have h0b : csum 0 (fun h => f (h + 1)) = complex.zero := by rfl
+        rw [h1, h0a, h0b, complex.zero_add, complex.add_zero]
+      · rw [succ_eq_add_one.nat]
+        have hs1 : csum ((j + 1) + 1) f = complex.add (csum (j + 1) f) (f (j + 1)) := by rfl
+        have hs2 : csum (j + 1) (fun h => f (h + 1)) = complex.add (csum j (fun h => f (h + 1))) (f (j + 1)) := by rfl
+        rw [hs1, hs2, ih, complex.add_assoc]
+    have hs := hsplit (q - 1) (fun h => path_freq q zeta t h k)
+    rw [← hq1] at hs
+    exact hs
+  rw [← hlhs, hrhs, path_freq.zero_eq_pow q zeta t k]

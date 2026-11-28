@@ -1,0 +1,424 @@
+-- Milestone 3.52: Hecke Congruence Subgroups Gamma_0(N), Atkin-Lehner-Li Oldform
+--                 Level-Raising Operator B_d : M_k(Gamma_0(M)) -> M_k(Gamma_0(d*M)),
+--                 Primitive Quadratic Legendre Characters chi_p, Exact QR/NQR Equidistribution,
+--                 Quadratic Gauss Sum Formula tau(chi_p)^2 = (-1)^((p-1)/2) * p,
+--                 and Quadratic Root-Number Involution W(chi_p)^2 = 1 (0 CUSTOM AXIOMS!)
+--
+-- Aligned with `tungsten/core/algebra/modular_forms.w`, `hecke.w`, and `dirichlet.w`,
+-- using Satori's bundled law-bearing `SL2Z` (`prelude/modular_group.sat`) and `Subgroup`
+-- (`prelude/algebra.sat`) on Satori's untouched HOL kernel (ZERO custom axioms!).
+
+import algebra
+import modular_group
+import number_theory.dirichlet_conductor
+import number_theory.quadratic_reciprocity
+import modular.sl2z_chebyshev
+
+-- ====================================================================================
+-- 1. Hecke Congruence Subgroup Gamma_0(N) <= SL_2(Z) (`tungsten/core/algebra/modular_forms.w`)
+-- ====================================================================================
+
+-> gamma0.mem (N : ℕ) (g : SL2Z) : Prop := int_dvd N g.c
+
++ gamma0.one_mem (N : ℕ) : gamma0.mem N sl2z.I
+  unfold gamma0.mem int_dvd sl2z.I; simp
+  exact ⟨0, by ring⟩
+
++ gamma0.mul_mem (N : ℕ) (g h : SL2Z) (hg : gamma0.mem N g) (hh : gamma0.mem N h) :
+    gamma0.mem N (sl2z.mul g h)
+  obtain ⟨qg, hqg⟩ := hg
+  obtain ⟨qh, hqh⟩ := hh
+  unfold gamma0.mem int_dvd sl2z.mul; simp
+  exact ⟨qg * h.a + g.d * qh, by rw [hqg, hqh]; ring⟩
+
++ gamma0.inv_mem (N : ℕ) (g : SL2Z) (hg : gamma0.mem N g) :
+    gamma0.mem N (sl2z.inv g)
+  obtain ⟨qg, hqg⟩ := hg
+  unfold gamma0.mem int_dvd sl2z.inv; simp
+  exact ⟨-qg, by rw [hqg]; ring⟩
+
+-> gamma0.subgroup (N : ℕ) : Subgroup SL2Z :=
+  Subgroup.mk sl2z.mul sl2z.I sl2z.inv (gamma0.mem N)
+
++ gamma0.subgroup_valid (N : ℕ) : Subgroup.Valid (gamma0.subgroup N)
+  unfold Subgroup.Valid gamma0.subgroup gamma0.mem int_dvd sl2z.I sl2z.mul sl2z.inv; simp
+  constructor
+  · exact ⟨0, by ring⟩
+  · constructor
+    · intro x y ⟨qx, hqx⟩ ⟨qy, hqy⟩
+      exact ⟨qx * y.a + x.d * qy, by rw [hqx, hqy]; ring⟩
+    · intro x ⟨qx, hqx⟩
+      exact ⟨-qx, by rw [hqx]; ring⟩
+
++ gamma0.T_pow_mem (N : ℕ) (k : ℤ) : gamma0.mem N (sl2z.T_pow k)
+  unfold gamma0.mem int_dvd sl2z.T_pow; simp
+  exact ⟨0, by ring⟩
+
++ gamma0.mono_of_dvd (M N : ℕ) (g : SL2Z) (hM : 0 < M) (hdvd : M ∣ N) (hg : gamma0.mem N g) :
+    gamma0.mem M g
+  obtain ⟨k, hk⟩ := (dvd.iff_exists M N hM).mp hdvd
+  obtain ⟨q, hq⟩ := hg
+  unfold gamma0.mem int_dvd
+  exact ⟨(k : ℤ) * q, by rw [hq, hk, cast_mul.int]; ring⟩
+
+-- ====================================================================================
+-- 2. Atkin-Lehner-Li Oldform Level-Raising Operator B_d : M_k(Gamma_0(M)) -> M_k(Gamma_0(d*M))
+-- ====================================================================================
+
+-> gamma0.is_slash_invariant (k N : ℕ) (f : ℂ → ℂ) : Prop :=
+  ∀ g : SL2Z, gamma0.mem N g → ∀ z : ℂ, 0 < complex.im z → modular.slash k f g z = f z
+
+-> hecke.B_op (d : ℕ) (f : ℂ → ℂ) (z : ℂ) : ℂ :=
+  f (complex.mul (c_of_int (d : ℤ)) z)
+
++ hecke.B_op_comp (d1 d2 : ℕ) (f : ℂ → ℂ) (z : ℂ) :
+    hecke.B_op d2 (hecke.B_op d1 f) z = hecke.B_op (d1 * d2) f z
+  unfold hecke.B_op
+  rw [cast_mul.int d1 d2, c_of_int.mul, complex.mul_assoc]
+
++ gamma0.slash_mono_of_dvd (k M N : ℕ) (hM : 0 < M) (hdvd : M ∣ N)
+    (f : ℂ → ℂ) (hf : gamma0.is_slash_invariant k M f) :
+    gamma0.is_slash_invariant k N f
+  unfold gamma0.is_slash_invariant at hf
+  intro g hg_val hg z hz
+  exact hf g (gamma0.mono_of_dvd M N g hM hdvd hg) z hz
+
+-- ATKIN-LEHNER-LI OLDFORM LEVEL-RAISING THEOREM (`tungsten/core/algebra/hecke.w`):
+-- For every d >= 1, if f is weight-k slash-invariant under Gamma_0(M),
+-- then (B_d f)(z) = f(d * z) is weight-k slash-invariant under Gamma_0(d * M)!
++ hecke.B_op_slash_invariant (k M d : ℕ) (hd : 1 ≤ d)
+    (f : ℂ → ℂ) (hf : gamma0.is_slash_invariant k M f) :
+    gamma0.is_slash_invariant k (d * M) (hecke.B_op d f)
+  unfold gamma0.is_slash_invariant at hf
+  intro g hg_val ⟨q, hq⟩ z hz
+  have hgc : g.c = (d : ℤ) * ((M : ℤ) * q) := by rw [hq, cast_mul.int d M]; ring
+  set gd := SL2Z.mk g.a ((d : ℤ) * g.b) ((M : ℤ) * q) g.d with hgd_def
+  have hgd_valid : SL2Z.Valid gd
+    have hdet : g.a * g.d - g.b * g.c = 1 := by unfold SL2Z.Valid at hg_val; exact hg_val
+    rw [hgd_def]; unfold SL2Z.Valid; simp
+    linear_combination hdet + g.b * hgc
+  have hgd_mem : gamma0.mem M gd
+    rw [hgd_def]; unfold gamma0.mem int_dvd; simp
+    exact ⟨q, rfl⟩
+  set w := complex.mul (c_of_int (d : ℤ)) z with hw_def
+  have hd_rpos : (0 : ℝ) < ((d : ℤ) : ℝ) := by linarith
+  have hw_im : 0 < complex.im w
+    rw [hw_def]; unfold c_of_int; simp
+    exact mul_pos.real ((d : ℤ) : ℝ) (complex.im z) hd_rpos hz
+  have hj_eq : uhp.j gd w = uhp.j g z
+    rw [hgd_def, hw_def]; unfold uhp.j; simp
+    rw [hgc, c_of_int.mul (d : ℤ) ((M : ℤ) * q)]
+    apply complex.ext <;> simp <;> ring
+  have hnum_eq : uhp.num gd w = complex.mul (c_of_int (d : ℤ)) (uhp.num g z)
+    rw [hgd_def, hw_def]; unfold uhp.num; simp
+    rw [c_of_int.mul (d : ℤ) g.b]
+    apply complex.ext <;> simp <;> ring
+  have hmob_eq : uhp.mobius gd w = complex.mul (c_of_int (d : ℤ)) (uhp.mobius g z)
+    unfold uhp.mobius complex.div
+    rw [hnum_eq, hj_eq, complex.mul_assoc]
+  have hstep := hf gd hgd_mem w hw_im
+  unfold modular.slash hecke.B_op at hstep ⊢
+  rw [← hj_eq, ← hmob_eq, ← hw_def]
+  exact hstep
+
+-- ====================================================================================
+-- 3. Exact QR/NQR Equidistribution & Primitive Quadratic Legendre Character chi_p
+-- ====================================================================================
+
++ qr.exact_count (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    (∑ y < p, if (1 ≤ y ∧ is_qr p y) then (1 : ℕ) else 0) = (p - 1) / 2
+  have hp : 2 ≤ p := hprime.1
+  have hodd_p := odd_prime_ge_three p hp hodd
+  set m := (p - 1) / 2 with hm_def
+  have hge : m ≤ ∑ y < p, if (1 ≤ y ∧ is_qr p y) then (1 : ℕ) else 0 := by rw [hm_def]; exact qr_count_ge_half p hprime hodd
+  set f : ℕ → ℕ := fun i => ((i + 1) * (i + 1)) % p with hf_def
+  have hf_lt : ∀ i < m, f i < p := by intro i hi; rw [hf_def]; exact mod_lt.nat ((i + 1) * (i + 1)) p (by omega)
+  have hsum_m := fiber_count.sum_eq p m f hf_lt
+  have hpt : ∀ y < p, (if (1 ≤ y ∧ is_qr p y) then (1 : ℕ) else 0) ≤ fiber_count m f y
+    intro y hy
+    by_cases hqr : 1 ≤ y ∧ is_qr p y
+    · rw [if_pos hqr]
+      obtain ⟨x, hx, hxy⟩ := hqr.2
+      have hym : y % p = y := (div_mod_of_lt.nat y p hy).2
+      rw [hym] at hxy
+      have hx_pos : 1 ≤ x
+        by_contra hx0; have h0 : x = 0 := by omega
+        rw [h0] at hxy; have h0m : (0 * 0) % p = 0 := (div_mod_of_lt.nat 0 p (by omega)).2
+        omega
+      have hex_i : ∃ i < m, f i = y
+        by_cases hxm : x ≤ m
+        · use x - 1; constructor; omega
+          rw [hf_def]; have hx1 : (x - 1) + 1 = x := by omega
+          rw [hx1]; exact hxy
+        · set u := p - x with hu_def
+          set v := x - u with hv_def
+          have hsq : x * x = u * u + p * v
+            have hp_ux : p = 2 * u + v := by omega
+            have hx_uv : x = u + v := by omega
+            rw [hp_ux, hx_uv]; ring
+          use u - 1; constructor; omega
+          rw [hf_def]; have hu1 : (u - 1) + 1 = u := by omega
+          rw [hu1, ← hxy, hsq, add_mul_mod.nat]
+      obtain ⟨i0, hi0, hfi0⟩ := hex_i
+      unfold fiber_count
+      have hge1 : ∀ t : ℕ, i0 < t → 1 ≤ ∑ i < t, if f i = y then (1 : ℕ) else 0
+        intro t; induction t with hi r ihr hi
+        · omega
+        · rw [succ_eq_add_one.nat] at hi ⊢; rw [sum_below_succ]
+          by_cases he : r = i0
+          · rw [he, if_pos hfi0]; omega
+          · have h1 := ihr (by omega); omega
+      exact hge1 m hi0
+    · rw [if_neg hqr]; omega
+  have hle_tot : ∀ t ≤ p, (∑ y < t, if (1 ≤ y ∧ is_qr p y) then (1 : ℕ) else 0) ≤ ∑ y < t, fiber_count m f y
+    intro t ht; induction t with ht r ihr ht
+    · rw [sum_below_zero, sum_below_zero]; omega
+    · rw [succ_eq_add_one.nat] at ht ⊢; rw [sum_below_succ, sum_below_succ]
+      have h1 := ihr (by omega); have h2 := hpt r (by omega); omega
+  have hle := hle_tot p (by omega)
+  omega
+
++ qr.exists_nonresidue (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    ∃ b < p, 1 ≤ b ∧ ¬ is_qr p b
+  have hp : 2 ≤ p := hprime.1
+  have hodd_p := odd_prime_ge_three p hp hodd
+  have hcnt := qr.exact_count p hprime hodd
+  by_contra hnone
+  have hall : ∀ y < p, (if (1 ≤ y ∧ is_qr p y) then (1 : ℕ) else 0) = if 1 ≤ y then 1 else 0
+    intro y hy
+    by_cases hy1 : 1 ≤ y
+    · have hqr : is_qr p y
+        by_contra hnq; exact hnone ⟨y, hy, hy1, hnq⟩
+      have hboth : 1 ≤ y ∧ is_qr p y := ⟨hy1, hqr⟩
+      rw [if_pos hboth, if_pos hy1]
+    · have hnb : ¬ (1 ≤ y ∧ is_qr p y) := by intro h; exact hy1 h.1
+      rw [if_neg hnb, if_neg hy1]
+  have hcon : (∑ y < p, if (1 ≤ y ∧ is_qr p y) then (1 : ℕ) else 0) = ∑ y < p, if 1 ≤ y then (1 : ℕ) else 0 := by apply sum_congr.nat; intro y hy; exact hall y hy
+  have hsum_pos : ∀ t : ℕ, 1 ≤ t → (∑ y < t, if 1 ≤ y then (1 : ℕ) else 0) = t - 1
+    intro t; induction t with h1 r ihr h1
+    · omega
+    · rw [succ_eq_add_one.nat] at h1 ⊢; rw [sum_below_succ]
+      by_cases hr0 : r = 0
+      · rw [hr0, sum_below_zero]
+        have hn1 : ¬ (1 ≤ 0) := by omega
+        rw [if_neg hn1]; omega
+      · have hr1 : 1 ≤ r := by omega
+        rw [ihr hr1, if_pos hr1]; omega
+  rw [hcon, hsum_pos p (by omega)] at hcnt
+  omega
+
++ fp.is_unit_iff_not_dvd (p a : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    zmod.is_unit p a ↔ ¬ (p ∣ a)
+  have hp : 2 ≤ p := hprime.1
+  have hodd_p := odd_prime_ge_three p hp hodd
+  set m := (p - 1) / 2 with hm_def
+  constructor
+  · intro ⟨b, hb, heq⟩ hd
+    obtain ⟨k, hk⟩ := (dvd.iff_exists p a (by omega)).mp hd
+    have hab : a * b = 0 + p * (k * b) := by rw [hk]; ring
+    rw [hab, add_mul_mod.nat, (div_mod_of_lt.nat 0 p (by omega)).2, (div_mod_of_lt.nat 1 p (by omega)).2] at heq
+    omega
+  · intro hnd
+    have hec := euler.criterion p a hprime hodd hnd
+    rw [← hm_def] at hec
+    have hm1 : m = (m - 1) + 1 := by omega
+    by_cases hqr : is_qr p a
+    · have h1 := hec.1.mpr hqr
+      use (a ^ (m - 1)) % p
+      constructor; exact mod_lt.nat (a ^ (m - 1)) p (by omega)
+      rw [mul_mod.nat a ((a ^ (m - 1)) % p) p, zmod.mod_mod, ← mul_mod.nat a (a ^ (m - 1)) p]
+      have hpow : a * a ^ (m - 1) = a ^ m
+        have hs := pow_succ.nat a (m - 1); rw [← hm1] at hs; rw [hs]; ring
+      rw [hpow, h1, (div_mod_of_lt.nat 1 p (by omega)).2]
+    · have hpm1 := hec.2.1.mpr hqr
+      use (a ^ (m - 1) * a ^ m) % p
+      constructor; exact mod_lt.nat (a ^ (m - 1) * a ^ m) p (by omega)
+      rw [mul_mod.nat a ((a ^ (m - 1) * a ^ m) % p) p, zmod.mod_mod, ← mul_mod.nat a (a ^ (m - 1) * a ^ m) p]
+      have hpow : a * (a ^ (m - 1) * a ^ m) = a ^ m * a ^ m
+        have hs := pow_succ.nat a (m - 1); rw [← hm1] at hs; rw [hs]; ring
+      have hsq : ((p - 1) * (p - 1)) % p = 1 % p
+        have he : (p - 1) * (p - 1) = 1 + p * (p - 2)
+          set u := p - 2; have hp_eq : p = u + 2 := by omega
+          have hp1_eq : p - 1 = u + 1 := by omega
+          rw [hp1_eq, hp_eq]; ring
+        rw [he, add_mul_mod.nat]
+      rw [hpow, mul_mod.nat (a ^ m) (a ^ m) p, hpm1, hsq]
+
++ legendre_sym.mod (p a : ℕ) : legendre_sym p (a % p) = legendre_sym p a
+  have hd : (p ∣ (a % p)) ↔ (p ∣ a) := by unfold dvd; rw [zmod.mod_mod a p]
+  have hq : is_qr p (a % p) ↔ is_qr p a
+    unfold is_qr
+    constructor
+    · intro ⟨x, hx, he⟩; rw [zmod.mod_mod a p] at he; exact ⟨x, hx, he⟩
+    · intro ⟨x, hx, he⟩; exact ⟨x, hx, by rw [zmod.mod_mod a p]; exact he⟩
+  unfold legendre_sym
+  by_cases h1 : p ∣ a
+  · rw [if_pos (hd.mpr h1), if_pos h1]
+  · have hn1 : ¬ (p ∣ (a % p)) := by intro h; exact h1 (hd.mp h)
+    rw [if_neg hn1, if_neg h1]
+    by_cases h2 : is_qr p a
+    · rw [if_pos (hq.mpr h2), if_pos h2]
+    · have hn2 : ¬ is_qr p (a % p) := by intro h; exact h2 (hq.mp h)
+      rw [if_neg hn2, if_neg h2]
+
++ legendre_sym.add_p (p a : ℕ) : legendre_sym p (a + p) = legendre_sym p a
+  rw [← legendre_sym.mod p (a + p), ← legendre_sym.mod p a]
+  have h1 : a + p = a + p * 1 := by ring
+  rw [h1, add_mul_mod.nat]
+
+-> legendre.dchar (p : ℕ) : DChar :=
+  DChar.mk p (fun a => c_of_int (legendre_sym p a))
+
++ legendre.dchar_valid (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    dchar.valid (legendre.dchar p)
+  have hp : 2 ≤ p := hprime.1
+  unfold dchar.valid legendre.dchar is_dirichlet_char; simp
+  constructor; omega
+  constructor
+  · intro a; rw [legendre_sym.add_p p a]
+  · constructor
+    · have hnd1 : ¬ (p ∣ 1) := not_dvd_one_of_ge_two p hp
+      have hqr1 : is_qr p 1 := ⟨1, by omega, rfl⟩
+      unfold legendre_sym; rw [if_neg hnd1, if_pos hqr1, c_of_int.one]
+    · constructor
+      · intro a hnu
+        have hd : p ∣ a
+          by_contra hnd
+          exact hnu ((fp.is_unit_iff_not_dvd p a hprime hodd).mpr hnd)
+        unfold legendre_sym; rw [if_pos hd, c_of_int.zero]
+      · intro a b
+        rw [legendre_sym.mul p a b hprime hodd, c_of_int.mul]
+
++ legendre.dchar_self_dual (p : ℕ) : dchar.inv (legendre.dchar p) = legendre.dchar p
+  apply dchar.ext
+  · unfold dchar.inv legendre.dchar; simp
+  · intro a; unfold dchar.inv legendre.dchar c_of_int complex.of_real complex.conj; simp
+
++ legendre.dchar_nontrivial (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    ¬ dchar.is_trivial (legendre.dchar p)
+  intro htriv
+  unfold dchar.is_trivial at htriv
+  obtain ⟨b, hbp, hb1, hnq⟩ := qr.exists_nonresidue p hprime hodd
+  have hnd : ¬ (p ∣ b) := not_dvd_of_pos_lt p b (by omega) hbp
+  have hu : zmod.is_unit p b := (fp.is_unit_iff_not_dvd p b hprime hodd).mpr hnd
+  have hlvl : (legendre.dchar p).level = p := by unfold legendre.dchar; simp
+  have hv := htriv b (by rw [hlvl]; exact hu)
+  have h1 : complex.re ((legendre.dchar p).val b) = 0 - 1 := by unfold legendre.dchar legendre_sym; simp; rw [if_neg hnd, if_neg hnq]; unfold c_of_int; simp
+  have h2 : complex.re ((legendre.dchar p).val b) = 1 := by rw [hv]; simp
+  linarith
+
+-- PRIMITIVITY OF THE QUADRATIC LEGENDRE CHARACTER chi_p (0 CUSTOM AXIOMS!):
++ legendre.dchar_is_primitive (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    dchar.is_primitive (legendre.dchar p)
+  constructor
+  · exact legendre.dchar_valid p hprime hodd
+  · intro psi hvp hind
+    have hlvl_p : (legendre.dchar p).level = p := by unfold legendre.dchar; simp
+    unfold dchar.induced_by at hind
+    rw [hlvl_p] at hind ⊢
+    have hd_pos : 1 ≤ psi.level := hvp.1
+    by_contra hlt
+    have hd_lt : psi.level < p := by omega
+    have hd_eq1 : psi.level = 1
+      by_contra hne1
+      have hd2 : 2 ≤ psi.level := by omega
+      obtain ⟨k, hk⟩ := (dvd.iff_exists psi.level p (by omega)).mp hind.1
+      have hk_lt : k < p
+        by_cases hk0 : k = 0
+        · rw [hk0] at hk; omega
+        · have h2k := mul_le_mul_of_nonneg_right.nat 2 psi.level k hd2 (by omega)
+          omega
+      have hk_pos : 0 < k
+        by_contra hk0; have hz : k = 0 := by omega; rw [hz] at hk; omega
+      have hprod_dvd : p ∣ (psi.level * k) := (dvd.iff_exists p (psi.level * k) (by omega)).mpr ⟨1, by omega⟩
+      obtain h1 | h2 := hprime.2 psi.level k hprod_dvd
+      · exact not_dvd_of_pos_lt p psi.level (by omega) hd_lt h1
+      · exact not_dvd_of_pos_lt p k hk_pos hk_lt h2
+    obtain ⟨b, hbp, hb1, hnq⟩ := qr.exists_nonresidue p hprime hodd
+    have hnd : ¬ (p ∣ b) := not_dvd_of_pos_lt p b (by omega) hbp
+    have hu : zmod.is_unit p b := (fp.is_unit_iff_not_dvd p b hprime hodd).mpr hnd
+    have hag := hind.2 b hu
+    have hpsi_b : psi.val b = complex.one
+      have h01 : psi.val 0 = psi.val 1
+        have hp0 := hvp.2.1 0; rw [hd_eq1] at hp0
+        have hz : 0 + 1 = 1 := by decide
+        rw [hz] at hp0; exact hp0.symm
+      have hb0 : b % 1 = 0 := by have h := mod_lt.nat b 1 (by decide); omega
+      rw [← dchar.mod_eq_m39 psi.level psi.val hvp.2.1 b, hd_eq1, hb0, h01]
+      exact hvp.2.2.1
+    have h1 : complex.re ((legendre.dchar p).val b) = 0 - 1 := by unfold legendre.dchar legendre_sym; simp; rw [if_neg hnd, if_neg hnq]; unfold c_of_int; simp
+    have h2 : complex.re ((legendre.dchar p).val b) = 1 := by rw [hag, hpsi_b]; simp
+    linarith
+
+-- ====================================================================================
+-- 4. Exact Quadratic Gauss Sum Squared tau(chi_p)^2 = (-1)^((p-1)/2) * p & Root Number
+-- ====================================================================================
+
++ legendre.gauss_sum_norm_sq (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    complex.norm_sq (dchar.tau (legendre.dchar p)) = (p : ℝ) ∧
+    dchar.tau (legendre.dchar p) ≠ complex.zero
+  have h := primitive.tau_norm_sq_eq_q (legendre.dchar p) (legendre.dchar_is_primitive p hprime hodd)
+  have hlvl : (legendre.dchar p).level = p := by unfold legendre.dchar; simp
+  rw [hlvl] at h; exact h
+
++ legendre.root_num_involution (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    complex.norm_sq (dchar.root_num (legendre.dchar p)) = 1 ∧
+    complex.mul (dchar.root_num (legendre.dchar p)) (dchar.root_num (legendre.dchar p)) = complex.one
+  have hprim := legendre.dchar_is_primitive p hprime hodd
+  have hu := primitive.root_num_unit_and_ne_zero (legendre.dchar p) hprim
+  have hsq := primitive.root_num_mul_inv (legendre.dchar p) hprim
+  rw [legendre.dchar_self_dual p] at hsq
+  exact ⟨hu.1, hsq⟩
+
+-- GAUSS'S QUADRATIC GAUSS SUM SQUARED THEOREM:
+-- For every odd prime p, tau(chi_p)^2 = (-1)^((p-1)/2) * p!
++ legendre.gauss_sum_sq (p : ℕ) (hprime : is_prime_nat p) (hodd : p % 2 = 1) :
+    complex.mul (dchar.tau (legendre.dchar p)) (dchar.tau (legendre.dchar p)) =
+    complex.mul (c_of_int (neg_one_pow ((p - 1) / 2))) (complex.of_real (p : ℝ))
+  have hp : 2 ≤ p := hprime.1
+  set chi := legendre.dchar p with hchi_def
+  have hprim := legendre.dchar_is_primitive p hprime hodd
+  have hns := (legendre.gauss_sum_norm_sq p hprime hodd).1
+  have hinv_tau := primitive.tau_inv_eq chi (by rw [hchi_def]; exact hprim)
+  rw [hchi_def, legendre.dchar_self_dual p, ← hchi_def] at hinv_tau
+  have hprod : complex.mul (complex.conj (dchar.tau chi)) (dchar.tau chi) = complex.of_real (p : ℝ)
+    have h1 := complex.mul_conj (dchar.tau chi)
+    rw [hchi_def, hns, ← hchi_def] at h1
+    have hcomm : complex.mul (complex.conj (dchar.tau chi)) (dchar.tau chi) = complex.mul (dchar.tau chi) (complex.conj (dchar.tau chi))
+      apply complex.ext <;> simp <;> ring
+    rw [hcomm]; exact h1
+  have hsq_step : complex.mul (dchar.tau chi) (dchar.tau chi) =
+      complex.mul (if dchar.parity chi = 1 then complex.neg complex.one else complex.one) (complex.of_real (p : ℝ))
+    have hmul_l : complex.mul (complex.mul (if dchar.parity chi = 1 then complex.neg complex.one else complex.one) (complex.conj (dchar.tau chi))) (dchar.tau chi) =
+        complex.mul (dchar.tau chi) (dchar.tau chi) := by rw [← hinv_tau]
+    rw [← hmul_l, complex.mul_assoc, hprod]
+  rw [hsq_step]
+  have hfs := (qr.first_supplement p hprime hodd).1
+  have hval_pm1 : chi.val (chi.level - 1) = c_of_int (neg_one_pow ((p - 1) / 2)) := by rw [hchi_def]; unfold legendre.dchar; simp; rw [hfs]
+  have hlvl_ge2 : 2 ≤ chi.level := by rw [hchi_def]; unfold legendre.dchar; simp [hp]
+  by_cases hmod : ((p - 1) / 2) % 2 = 0
+  · have hnp : neg_one_pow ((p - 1) / 2) = 1 := by unfold neg_one_pow; rw [if_pos hmod]
+    have hpar0 : dchar.parity chi = 0
+      unfold dchar.parity
+      have hnot : ¬ (2 ≤ chi.level ∧ chi.val (chi.level - 1) = complex.neg complex.one)
+        intro hc; rw [hval_pm1, hnp, c_of_int.one] at hc
+        have hre1 : complex.re complex.one = 1 := by simp
+        have hre2 : complex.re complex.one = 0 - 1 := by rw [hc.2]; simp
+        linarith
+      exact if_neg hnot
+    have hne1 : dchar.parity chi ≠ 1 := by omega
+    rw [if_neg hne1, hnp, c_of_int.one]
+  · have hnp : neg_one_pow ((p - 1) / 2) = -1 := by unfold neg_one_pow; rw [if_neg hmod]
+    have hc_neg : c_of_int (-1) = complex.neg complex.one := by ring
+    have hpar1 : dchar.parity chi = 1
+      unfold dchar.parity
+      have hcond : 2 ≤ chi.level ∧ chi.val (chi.level - 1) = complex.neg complex.one := ⟨hlvl_ge2, by rw [hval_pm1, hnp, hc_neg]⟩
+      exact if_pos hcond
+    rw [if_pos hpar1, hnp, hc_neg]
+
++ legendre.dchar_reciprocity (p q : ℕ) (hp_pr : is_prime_nat p) (hq_pr : is_prime_nat q)
+    (hp_odd : p % 2 = 1) (hq_odd : q % 2 = 1) (hne : p ≠ q) :
+    complex.mul ((legendre.dchar q).val p) ((legendre.dchar p).val q) =
+    c_of_int (neg_one_pow (((p - 1) / 2) * ((q - 1) / 2)))
+  unfold legendre.dchar; simp
+  rw [← c_of_int.mul, qr.quadratic_reciprocity p q hp_pr hq_pr hp_odd hq_odd hne]

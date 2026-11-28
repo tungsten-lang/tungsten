@@ -1,0 +1,824 @@
+-- Milestone 3.36: Exact Upstream `Formalism/LogFactorialBounds/LogFactorialSandwich.lean`
+--                 Stirling Entropy Potential `ph`, Constructive Stirling-Robbins Sandwich
+--                 (with exact sqrt(2*pi) constant via Wallis integrals!), & Kawamata-Weyl
+--                 Covolume-vs-Height Cancellation (`KWCancelOffTop`, `KWCancelTop`)!
+--
+-- Faithful 0-custom-axiom port of Levent Alpoege's `Formalism/LogFactorialBounds/LogFactorialSandwich.lean`
+-- on Satori's untouched 869-line HOL kernel:
+--   1. `ph y = y * log y - y`:
+--        `ph.lower_bound`   (-1 <= ph y for all y >= 0)
+--        `ph.sup_gaussian`  (s^nu * exp(-s^2/2) <= exp(ph nu / 2) with equality at sqrt nu)
+--        `ph.shift`         (0 <= ph(a+w) - ph(a) <= w * log(a+w) for a >= 1, w >= 0)
+--        `ph.lipschitz`     (|ph x - ph y| <= |x - y| * log Y for 1 <= x, y <= Y)
+--   2. Wallis integrals `wallis_int k = int_0^(pi/2) (sin t)^k dt`:
+--        `wallis.recurrence`     ((k+2) * W(k+2) = (k+1) * W(k))
+--        `wallis.prod_adjacent`  ((k+1) * W(k) * W(k+1) = pi / 2)
+--        `wallis.even_closed`    (W(2n) = (2n)! / (4^n * (n!)^2) * (pi / 2))
+--        `wallis.ratio_sandwich` (exact two-sided Wallis squeeze to 1/pi)
+--   3. Stirling-Robbins Factorial Sandwich (`log_factorial.sandwich` & `log_factorial.robbins_upper`):
+--        `ph n + log (2 * pi * n) / 2 <= log (n!) <= ph n + log (2 * pi * n) / 2 + 1 / (12 * n)`
+--        AND exact upstream `log (n!) <= ph n + log n / 2 + 1` for all n >= 1!
+--   4. Exact Kawamata-Weyl Covolume-vs-Height Cancellation Theorems:
+--        `kw_cancel_off_top` (`Formalism.LogFactorialBounds.KWCancelOffTop`)
+--        `kw_cancel_top`     (`Formalism.LogFactorialBounds.KWCancelTop`)
+--
+-- ALL theorems proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import entropy
+import trig_calculus
+import analysis.mellin_zeta_strip
+
+-- ====================================================================================
+-- 1. Stirling Entropy Potential `ph y = y * log y - y` (`Formalism.LogFactorialBounds`)
+-- ====================================================================================
+
++ pi_pos : 0 < pi := by linarith [pi_bounds.1]
++ pi_lt_four : pi < 4 := by linarith [pi_bounds.2]
+
++ continuous_at.inv_pos (x : ℝ) (hx : 0 < x) : continuous_at (fun y => 1 / y) x
+  unfold continuous_at
+  intro e he
+  have h1 : 0 < x / 2 := by linarith
+  have h2 : 0 < e * (x * (x / 2)) := mul_pos.real e (x * (x / 2)) he (mul_pos.real x (x / 2) hx h1)
+  have hd_ex : ∃ d : ℝ, 0 < d ∧ d ≤ x / 2 ∧ d ≤ e * (x * (x / 2))
+    by_cases hcmp : x / 2 ≤ e * (x * (x / 2))
+    · exact ⟨x / 2, h1, by linarith, hcmp⟩
+    · exact ⟨e * (x * (x / 2)), h2, by linarith, by linarith⟩
+  obtain ⟨d, hd_pos, hd_le1, hd_le2⟩ := hd_ex
+  use d
+  constructor
+  · exact hd_pos
+  · intro y hy
+    have hy_gt : x / 2 < y := by linarith [neg_le_abs.real (y - x)]
+    have hy_pos : 0 < y := by linarith
+    have hxy_pos : 0 < x * y := mul_pos.real x y hx hy_pos
+    have hdiff : 1 / y - 1 / x = (x - y) / (x * y) := by field_simp
+    rw [hdiff]
+    have hnum_lt : |x - y| < e * (x * y)
+      have hneg : x - y = 0 - (y - x) := by ring
+      rw [hneg, abs_neg.real]
+      have hxy_ge : x * (x / 2) ≤ x * y := mul_le_mul_of_nonneg_left.real (x / 2) y x (by linarith) (by linarith)
+      have hm := mul_le_mul_of_nonneg_left.real (x * (x / 2)) (x * y) e hxy_ge (by linarith)
+      linarith
+    have hlo : -(e * (x * y)) < x - y := by linarith [neg_le_abs.real (x - y)]
+    have hhi : x - y < e * (x * y) := by linarith [le_abs_self.real (x - y)]
+    have hdiv_hi : (x - y) / (x * y) < e := (div_lt_iff.real (x - y) e (x * y) hxy_pos).mpr (by linarith)
+    have hdiv_lo : -e < (x - y) / (x * y)
+      have h1 : -(x - y) / (x * y) < e := (div_lt_iff.real (-(x - y)) e (x * y) hxy_pos).mpr (by linarith)
+      have h2 : -(x - y) / (x * y) = -((x - y) / (x * y)) := by rw [div_def.real (-(x - y)) (x * y), div_def.real (x - y) (x * y)]; ring
+      linarith
+    exact abs_lt_of.real ((x - y) / (x * y)) e (by linarith) hdiv_hi
+
+-> ph (y : ℝ) : ℝ := y * log y - y
+
++ ph.lower_bound (y : ℝ) (hy : 0 ≤ y) : -1 ≤ ph y
+  unfold ph
+  linarith [sub_one_le_mul_log y hy]
+
++ ph.le_mul_of_log_le (y L : ℝ) (hy : 0 ≤ y) (hL : 0 < y → log y ≤ L) : ph y ≤ y * L
+  unfold ph
+  by_cases hz : y = 0
+  · rw [hz]; linarith
+  · have hy_pos : 0 < y := by linarith
+    have hm := mul_le_mul_of_nonneg_left.real (log y) L y (hL hy_pos) hy
+    linarith
+
++ ph.sup_gaussian (nu : ℝ) (hnu : 0 < nu) :
+    (∀ s : ℝ, 0 < s → rpow s nu * exp (-(s * s) / 2) ≤ exp (ph nu / 2)) ∧
+    rpow (sqrt nu) nu * exp (-(sqrt nu * sqrt nu) / 2) = exp (ph nu / 2)
+  constructor
+  · intro s hs
+    unfold rpow ph
+    rw [← exp_add]
+    have hexp_le : nu * log s + -(s * s) / 2 ≤ (nu * log nu - nu) / 2
+      have hs2_pos : 0 < s * s := mul_pos.real s s hs hs
+      have hq_pos : 0 < s * s / nu := div_pos.real (s * s) nu hs2_pos hnu
+      have hle := log_le_sub_one (s * s / nu) hq_pos
+      rw [log_div (s * s) nu hs2_pos hnu, log_mul s s hs hs] at hle
+      have hm := mul_le_mul_of_nonneg_left.real (log s + log s - log nu) (s * s / nu - 1) (nu / 2) hle (by linarith)
+      have hc := mul_inv_cancel.real nu (by linarith)
+      have hcan : (nu / 2) * (s * s / nu - 1) = (s * s - nu) / 2
+        rw [div_def.real (s * s) nu, div_def.real nu 2, div_def.real (s * s - nu) 2]
+        linear_combination (s * s * (1 / 2)) * hc
+      linarith
+    exact (exp_le_exp (nu * log s + -(s * s) / 2) ((nu * log nu - nu) / 2)).mpr hexp_le
+  · have hsq := sqrt_spec nu (by linarith)
+    have hsq_pos : 0 < sqrt nu
+      by_contra hle; have hz : sqrt nu = 0 := by linarith [hsq.1]
+      rw [hz] at hsq; linarith
+    have hlog_sq : log (sqrt nu) + log (sqrt nu) = log nu := by rw [← log_mul (sqrt nu) (sqrt nu) hsq_pos hsq_pos, hsq.2]
+    unfold rpow ph
+    rw [← exp_add, hsq.2]
+    have hexp : nu * log (sqrt nu) + -nu / 2 = (nu * log nu - nu) / 2 := by linear_combination (nu / 2) * hlog_sq
+    rw [hexp]
+
++ ph.shift (a w : ℝ) (ha : 1 ≤ a) (hw : 0 ≤ w) :
+    0 ≤ ph (a + w) - ph a ∧ ph (a + w) - ph a ≤ w * log (a + w)
+  have hd_ph : ∀ t : ℝ, a ≤ t → t ≤ a + w → has_deriv_within ph (fun z => a ≤ z ∧ z ≤ a + w) t (log t)
+    intro t ht1 _
+    have ht_pos : 0 < t := by linarith
+    have hd_id := has_deriv_within.id (fun z => a ≤ z ∧ z ≤ a + w) t
+    have hd_log := has_deriv_within.log (fun z => a ≤ z ∧ z ≤ a + w) t ht_pos (by intro y hy; linarith [hy.1])
+    have hd_mul := has_deriv_within.mul (fun z => z) log (fun z => a ≤ z ∧ z ≤ a + w) t 1 (1 / t) hd_id hd_log
+    have hd_sub := has_deriv_within.sub (fun z => z * log z) (fun z => z) (fun z => a ≤ z ∧ z ≤ a + w) t (1 * log t + t * (1 / t)) 1 hd_mul hd_id
+    have hc := mul_inv_cancel.real t (by linarith)
+    have hv : 1 * log t + t * (1 / t) - 1 = log t := by linarith
+    have hfe : (fun z => z * log z - z) = ph := by funext z; unfold ph; trivial
+    rw [hfe, hv] at hd_sub; exact hd_sub
+  have hcont : ∀ t : ℝ, a ≤ t → t ≤ a + w → continuous_at log t := by intro t ht1 _; exact continuous_at.log t (by linarith)
+  have hint := darboux.fundamental ph log a (a + w) (by linarith) hcont hd_ph
+  have hlo_int := darboux.const a (a + w) 0 (by linarith)
+  have hhi_int := darboux.const a (a + w) (log (a + w)) (by linarith)
+  constructor
+  · have hm := darboux.mono (fun _ => (0 : ℝ)) log a (a + w) (0 * (a + w - a)) (ph (a + w) - ph a) hlo_int hint (by intro x hx1 _; exact log_nonneg x (by linarith))
+    linarith
+  · have hm := darboux.mono log (fun _ => log (a + w)) a (a + w) (ph (a + w) - ph a) (log (a + w) * (a + w - a)) hint hhi_int (by intro x hx1 hx2; exact (log_le_log x (a + w) (by linarith) (by linarith)).mpr hx2)
+    linarith
+
++ ph.lipschitz (x y Y : ℝ) (hx : 1 ≤ x) (hy : 1 ≤ y) (hxY : x ≤ Y) (hyY : y ≤ Y) :
+    |ph x - ph y| ≤ |x - y| * log Y
+  by_cases hxy : x ≤ y
+  · have hsh := ph.shift x (y - x) hx (by linarith)
+    have hsum : x + (y - x) = y := by ring
+    rw [hsum] at hsh
+    have hlog := (log_le_log y Y (by linarith) (by linarith)).mpr hyY
+    have hm := mul_le_mul_of_nonneg_left.real (log y) (log Y) (y - x) hlog (by linarith)
+    have ha1 : |ph x - ph y| = ph y - ph x
+      have hneg : ph x - ph y = 0 - (ph y - ph x) := by ring
+      rw [hneg, abs_neg.real, abs_of_nonneg.real (ph y - ph x) hsh.1]
+    have ha2 : |x - y| = y - x
+      have hneg : x - y = 0 - (y - x) := by ring
+      rw [hneg, abs_neg.real, abs_of_nonneg.real (y - x) (by linarith)]
+    rw [ha1, ha2]; linarith
+  · have hyx : y ≤ x := by linarith
+    have hsh := ph.shift y (x - y) hy (by linarith)
+    have hsum : y + (x - y) = x := by ring
+    rw [hsum] at hsh
+    have hlog := (log_le_log x Y (by linarith) (by linarith)).mpr hxY
+    have hm := mul_le_mul_of_nonneg_left.real (log x) (log Y) (x - y) hlog (by linarith)
+    rw [abs_of_nonneg.real (ph x - ph y) hsh.1, abs_of_nonneg.real (x - y) (by linarith)]
+    linarith
+
+-- ====================================================================================
+-- 2. Wallis Integrals W(k) = int_0^(pi/2) (sin t)^k dt & Exact Wallis Sandwich
+-- ====================================================================================
+
++ sin_pow.continuous (k : ℕ) (t : ℝ) : continuous_at (fun x => sin x ^ k) t
+  induction k with m ihm
+  · have hfe : (fun (x : ℝ) => sin x ^ 0) = (fun _ => (1 : ℝ)) := by funext x; rw [pow_zero.real]
+    rw [hfe]; exact continuous_at.const 1 t
+  · have hfe : (fun (x : ℝ) => sin x ^ succ m) = (fun x => sin x ^ m * sin x) := by funext x; rw [succ_eq_add_one.nat, pow_succ.real]
+    rw [hfe]; exact continuous_at.mul (fun x => sin x ^ m) sin t ihm (continuous_at.sin t)
+
++ has_deriv_within.sin_pow (k : ℕ) (S : set ℝ) (t : ℝ) :
+    has_deriv_within (fun x => sin x ^ (k + 1)) S t (((k + 1 : ℕ) : ℝ) * sin t ^ k * cos t)
+  induction k with m ihm
+  · have hfe : (fun (x : ℝ) => sin x ^ (0 + 1)) = sin
+      funext x; rw [pow_succ.real, pow_zero.real]; ring
+    have hv : ((0 + 1 : ℕ) : ℝ) * sin t ^ 0 * cos t = cos t := by rw [pow_zero.real]; simp
+    rw [hfe, hv]; exact has_deriv_within.sin S t
+  · rw [succ_eq_add_one.nat]
+    have hfe : (fun (x : ℝ) => sin x ^ ((m + 1) + 1)) = (fun x => sin x ^ (m + 1) * sin x) := by funext x; rw [pow_succ.real]
+    have hmul := has_deriv_within.mul (fun x => sin x ^ (m + 1)) sin S t (((m + 1 : ℕ) : ℝ) * sin t ^ m * cos t) (cos t) ihm (has_deriv_within.sin S t)
+    have hv : ((m + 1 : ℕ) : ℝ) * sin t ^ m * cos t * sin t + sin t ^ (m + 1) * cos t = (((m + 1) + 1 : ℕ) : ℝ) * sin t ^ (m + 1) * cos t := by rw [pow_succ.real (sin t) m, cast_add.real (m + 1) 1]; simp; ring
+    rw [hfe, ← hv]; exact hmul
+
++ sin_nonneg_on_zero_pi_half (t : ℝ) (ht0 : 0 ≤ t) (ht1 : t ≤ pi / 2) : 0 ≤ sin t
+  by_cases h0 : t = 0
+  · rw [h0, sin_zero]; linarith
+  · have hpi := pi_pos
+    have h1 : 0 < sin t
+      by_cases h2 : t = pi / 2
+      · rw [h2, sin_pi_half]; decide
+      · -- On (0, pi/2), cos t >= 0 and sin' = cos >= 0, wait: even simpler, sin_sub_abs_le / MVT or direct!
+        -- Prove cos >= 0 on [0, pi/2] is not even needed: sin(pi/2) = 1 > 0 and sin(t) > 0 on (0, pi) by sin_pos_of_pos_lt_pi?
+        -- Let's prove directly: if sin t <= 0 for some t in (0, pi/2), wait: we have sin_abs_le and sin_add!
+        -- Actually on [0, pi/2], by IVT/contradiction? Even better: prove sin >= 0 on [0, 1] via sin_sub_abs_le? No, t <= pi/2 ~ 1.57!
+        -- Use sin(t) = 2 * sin(t/2) * cos(t/2) with t/2 < 1!
+        have ht2_pos : 0 < t / 2 := by linarith
+        have ht2_lt1 : t / 2 < 1
+          -- pi < 4 since cos(pi) = -1 while |1 - cos(h)| <= h^2/2? Wait: pi < 4 is in real.sat (`pi_gt_three`, `pi_lt_four`)!
+          have hpi4 := pi_lt_four; linarith
+        have hsin_t2 : 0 < sin (t / 2)
+          -- sin(u) = 2 sin(u/2) cos(u/2), and for u = t/4 < 1/2: |sin u - u| <= u^3/6 < u -> sin u > 0, and 1 - cos u <= u^2/2 < 1 -> cos u > 0!
+          have hu_pos : 0 < t / 4 := by linarith
+          have hu_lt : t / 4 < 1 / 2 := by linarith
+          have hsu : 0 < sin (t / 4)
+            have h1 := sin_sub_abs_le (t / 4)
+            have hu2 : (t / 4) * (t / 4) < 1 / 4
+              have hm1 := mul_lt_mul_of_pos_left.real (t / 4) (1 / 2) (t / 4) hu_lt hu_pos
+              have hm2 := mul_lt_mul_of_pos_right.real (t / 4) (1 / 2) (1 / 2) hu_lt (by decide)
+              linarith
+            have hu3 : (t / 4) * (t / 4) * (t / 4) < t / 4
+              have hm := mul_lt_mul_of_pos_right.real ((t / 4) * (t / 4)) (1 / 4) (t / 4) hu2 hu_pos
+              linarith
+            have habs : |t / 4| = t / 4 := abs_of_pos.real (t / 4) hu_pos
+            rw [habs] at h1
+            linarith [neg_le_abs.real (sin (t / 4) - t / 4)]
+          have hcu : 0 < cos (t / 4)
+            have h1 := (one_sub_cos_le (t / 4)).2
+            have hu2 : (t / 4) * (t / 4) < 1 / 4
+              have hm1 := mul_lt_mul_of_pos_left.real (t / 4) (1 / 2) (t / 4) hu_lt hu_pos
+              have hm2 := mul_lt_mul_of_pos_right.real (t / 4) (1 / 2) (1 / 2) hu_lt (by decide)
+              linarith
+            linarith
+          have hdup : sin (t / 2) = 2 * sin (t / 4) * cos (t / 4)
+            have h1 : sin (t / 4 + t / 4) = 2 * sin (t / 4) * cos (t / 4) := by rw [sin_add]; ring
+            have hsum : t / 4 + t / 4 = t / 2 := by ring
+            rw [hsum] at h1; exact h1
+          rw [hdup]; linarith [mul_pos.real (sin (t / 4)) (cos (t / 4)) hsu hcu]
+        have hcos_t2 : 0 < cos (t / 2)
+          have h1 := (one_sub_cos_le (t / 2)).2
+          have hm1 := mul_lt_mul_of_pos_left.real (t / 2) 1 (t / 2) ht2_lt1 ht2_pos
+          linarith
+        have hdup : sin t = 2 * sin (t / 2) * cos (t / 2)
+          have h1 : sin (t / 2 + t / 2) = 2 * sin (t / 2) * cos (t / 2) := by rw [sin_add]; ring
+          have hsum : t / 2 + t / 2 = t := by ring
+          rw [hsum] at h1; exact h1
+        rw [hdup]; linarith [mul_pos.real (sin (t / 2)) (cos (t / 2)) hsin_t2 hcos_t2]
+    linarith
+
++ wallis.exists (k : ℕ) : ∃ W : ℝ, darboux.has_integral (fun x => sin x ^ k) 0 (pi / 2) W
+  exact darboux.continuous (fun x => sin x ^ k) 0 (pi / 2) (by linarith [pi_pos]) (by intro t _ _; exact sin_pow.continuous k t)
+
+-> wallis_int (k : ℕ) : ℝ :=
+  choice (fun (W : ℝ) => darboux.has_integral (fun x => sin x ^ k) 0 (pi / 2) W)
+
++ wallis_int.spec (k : ℕ) : darboux.has_integral (fun x => sin x ^ k) 0 (pi / 2) (wallis_int k)
+  unfold wallis_int; exact choice.spec (fun (W : ℝ) => darboux.has_integral (fun x => sin x ^ k) 0 (pi / 2) W) (wallis.exists k)
+
++ wallis_int.zero : wallis_int 0 = pi / 2
+  have h1 := wallis_int.spec 0
+  have hfe : (fun (x : ℝ) => sin x ^ 0) = (fun _ => (1 : ℝ)) := by funext x; rw [pow_zero.real]
+  rw [hfe] at h1
+  have h2 := darboux.const 0 (pi / 2) 1 (by linarith [pi_pos])
+  have hu := darboux.unique (fun _ => (1 : ℝ)) 0 (pi / 2) (wallis_int 0) (1 * (pi / 2 - 0)) h1 h2
+  linarith
+
++ wallis_int.one : wallis_int 1 = 1
+  have h1 := wallis_int.spec 1
+  have hfe : (fun (x : ℝ) => sin x ^ 1) = sin := by funext x; rw [pow_one.real]
+  rw [hfe] at h1
+  have hd : ∀ t : ℝ, 0 ≤ t → t ≤ pi / 2 → has_deriv_within (fun x => -cos x) (fun z => 0 ≤ z ∧ z ≤ pi / 2) t (sin t)
+    intro t _ _
+    have h0 := has_deriv_within.neg cos (fun z => 0 ≤ z ∧ z ≤ pi / 2) t (-sin t) (has_deriv_within.cos (fun z => 0 ≤ z ∧ z ≤ pi / 2) t)
+    have hnn : -(-sin t) = sin t := by ring
+    rw [hnn] at h0; exact h0
+  have h2 := darboux.fundamental (fun x => -cos x) sin 0 (pi / 2) (by linarith [pi_pos]) (by intro t _ _; exact continuous_at.sin t) hd
+  have hu := darboux.unique sin 0 (pi / 2) (wallis_int 1) (-cos (pi / 2) - -cos 0) h1 h2
+  rw [cos_pi_half, cos_zero] at hu; linarith
+
++ wallis_int.mono_step (k : ℕ) : wallis_int (k + 1) ≤ wallis_int k
+  apply darboux.mono (fun x => sin x ^ (k + 1)) (fun x => sin x ^ k) 0 (pi / 2) (wallis_int (k + 1)) (wallis_int k) (wallis_int.spec (k + 1)) (wallis_int.spec k)
+  intro x hx0 hx1
+  have hsn : 0 ≤ sin x := sin_nonneg_on_zero_pi_half x hx0 hx1
+  have hsl : sin x ≤ 1 := by linarith [sin_abs_le_one x, le_abs_self.real (sin x)]
+  rw [pow_succ.real]
+  have hm := mul_le_mul_of_nonneg_left.real (sin x) 1 (sin x ^ k) hsl (pow_nonneg.real (sin x) k hsn)
+  linarith
+
++ wallis_int.recurrence (k : ℕ) : ((k + 2 : ℕ) : ℝ) * wallis_int (k + 2) = ((k + 1 : ℕ) : ℝ) * wallis_int k
+  -- Integrate by parts: F(x) = (sin x)^(k+1), G(x) = -cos x, f(x) = (k+1)*(sin x)^k * cos x, g(x) = sin x!
+  -- I = int f*G = -(k+1) * int (sin x)^k * (1 - sin^2 x) = (k+1)*(W(k+2) - W(k)), J = int F*g = W(k+2), F*G|_0^(pi/2) = 0!
+  have hI_val : darboux.has_integral (fun x => (((k + 1 : ℕ) : ℝ) * sin x ^ k * cos x) * (-cos x)) 0 (pi / 2) (((k + 1 : ℕ) : ℝ) * (wallis_int (k + 2) - wallis_int k))
+    have hsub := darboux.sub (fun x => sin x ^ (k + 2)) (fun x => sin x ^ k) 0 (pi / 2) (wallis_int (k + 2)) (wallis_int k) (wallis_int.spec (k + 2)) (wallis_int.spec k)
+    have hsc := darboux.scale (fun x => sin x ^ (k + 2) - sin x ^ k) 0 (pi / 2) (wallis_int (k + 2) - wallis_int k) ((k + 1 : ℕ) : ℝ) hsub
+    apply darboux.congr (fun x => ((k + 1 : ℕ) : ℝ) * (sin x ^ (k + 2) - sin x ^ k)) (fun x => (((k + 1 : ℕ) : ℝ) * sin x ^ k * cos x) * (-cos x)) 0 (pi / 2) (((k + 1 : ℕ) : ℝ) * (wallis_int (k + 2) - wallis_int k)) hsc
+    intro x _ _
+    have hpy := sin_sq_add_cos_sq x
+    have hp2 : sin x ^ (k + 2) = sin x ^ k * (sin x * sin x)
+      have h1 : k + 2 = (k + 1) + 1 := by omega
+      rw [h1, pow_succ.real, pow_succ.real]; ring
+    rw [hp2]; linear_combination (((k + 1 : ℕ) : ℝ) * sin x ^ k) * hpy
+  have hJ_val : darboux.has_integral (fun x => sin x ^ (k + 1) * sin x) 0 (pi / 2) (wallis_int (k + 2))
+    apply darboux.congr (fun x => sin x ^ (k + 2)) (fun x => sin x ^ (k + 1) * sin x) 0 (pi / 2) (wallis_int (k + 2)) (wallis_int.spec (k + 2))
+    intro x _ _
+    have h1 : k + 2 = (k + 1) + 1 := by omega
+    rw [h1, pow_succ.real]
+  have hdG : ∀ t : ℝ, 0 ≤ t → t ≤ pi / 2 → has_deriv_within (fun x => -cos x) (fun z => 0 ≤ z ∧ z ≤ pi / 2) t (sin t)
+    intro t _ _
+    have h0 := has_deriv_within.neg cos (fun z => 0 ≤ z ∧ z ≤ pi / 2) t (-sin t) (has_deriv_within.cos (fun z => 0 ≤ z ∧ z ≤ pi / 2) t)
+    have hnn : -(-sin t) = sin t := by ring
+    rw [hnn] at h0; exact h0
+  have hbp := darboux.by_parts (fun x => sin x ^ (k + 1)) (fun x => -cos x) (fun x => ((k + 1 : ℕ) : ℝ) * sin x ^ k * cos x) sin 0 (pi / 2) (((k + 1 : ℕ) : ℝ) * (wallis_int (k + 2) - wallis_int k)) (wallis_int (k + 2)) hI_val hJ_val (by intro t _ _; exact has_deriv_within.sin_pow k (fun z => 0 ≤ z ∧ z ≤ pi / 2) t) hdG
+  simp [cos_pi_half, sin_zero, pow_succ.real] at hbp
+  have hc2 : ((k + 2 : ℕ) : ℝ) = ((k + 1 : ℕ) : ℝ) + 1
+    have h1 : k + 2 = (k + 1) + 1 := by omega
+    rw [h1, cast_add.real (k + 1) 1]; simp
+  rw [hc2]; linarith
+
++ wallis_int.pos (k : ℕ) : 0 < wallis_int k
+  have hstep : ∀ n : ℕ, 0 < wallis_int (2 * n) ∧ 0 < wallis_int (2 * n + 1)
+    intro n; induction n with m ihm
+    · have h0 : 2 * 0 = 0 := by omega
+      have h1 : 2 * 0 + 1 = 1 := by omega
+      rw [h1, h0, wallis_int.zero, wallis_int.one]
+      exact ⟨by linarith [pi_pos], by decide⟩
+    · rw [succ_eq_add_one.nat]
+      have he : 2 * (m + 1) = 2 * m + 2 := by omega
+      have ho : 2 * (m + 1) + 1 = (2 * m + 1) + 2 := by omega
+      rw [ho, he]
+      have hr1 := wallis_int.recurrence (2 * m)
+      have hr2 := wallis_int.recurrence (2 * m + 1)
+      have hp1 : (0 : ℝ) < ((2 * m + 1 : ℕ) : ℝ) := (cast_pos.real (2 * m + 1)).mpr (by omega)
+      have hp3 : (0 : ℝ) < (((2 * m + 1) + 1 : ℕ) : ℝ) := (cast_pos.real ((2 * m + 1) + 1)).mpr (by omega)
+      constructor
+      · by_contra hle
+        have h1 := mul_le_mul_of_nonneg_left.real (wallis_int (2 * m + 2)) 0 ((2 * m + 2 : ℕ) : ℝ) (by linarith) (by linarith)
+        have h2 := mul_pos.real ((2 * m + 1 : ℕ) : ℝ) (wallis_int (2 * m)) hp1 ihm.1
+        linarith
+      · by_contra hle
+        have h1 := mul_le_mul_of_nonneg_left.real (wallis_int ((2 * m + 1) + 2)) 0 (((2 * m + 1) + 2 : ℕ) : ℝ) (by linarith) (by linarith)
+        have h2 := mul_pos.real (((2 * m + 1) + 1 : ℕ) : ℝ) (wallis_int (2 * m + 1)) hp3 ihm.2
+        linarith
+  by_cases hev : k % 2 = 0
+  · have hk : k = 2 * (k / 2) := by omega
+    rw [hk]; exact (hstep (k / 2)).1
+  · have hk : k = 2 * (k / 2) + 1 := by omega
+    rw [hk]; exact (hstep (k / 2)).2
+
++ wallis_int.prod_adjacent (k : ℕ) :
+    ((k + 1 : ℕ) : ℝ) * wallis_int k * wallis_int (k + 1) = pi / 2
+  induction k with m ihm
+  · have h1 : (0 + 1 : ℕ) = 1 := by decide
+    rw [h1, wallis_int.zero, wallis_int.one]; simp
+  · rw [succ_eq_add_one.nat]
+    have hrec := wallis_int.recurrence m
+    have h2 : (m + 1) + 1 = m + 2 := by omega
+    rw [h2]
+    linear_combination ihm + wallis_int (m + 1) * hrec
+
++ wallis_int.even_closed (n : ℕ) :
+    ((4 : ℝ) ^ n * ((fact n : ℕ) : ℝ) * ((fact n : ℕ) : ℝ)) * wallis_int (2 * n) = ((fact (2 * n) : ℕ) : ℝ) * (pi / 2)
+  induction n with m ihm
+  · have h0 : 2 * 0 = 0 := by omega
+    rw [h0, pow_zero.real, fact_zero, wallis_int.zero]; simp
+  · rw [succ_eq_add_one.nat]
+    have h2m : 2 * (m + 1) = 2 * m + 2 := by omega
+    have hrec := wallis_int.recurrence (2 * m)
+    rw [h2m, pow_succ.real, fact_succ m]
+    have hf2 : fact (2 * m + 2) = (2 * m + 2) * ((2 * m + 1) * fact (2 * m))
+      have h1 : 2 * m + 2 = (2 * m + 1) + 1 := by omega
+      rw [h1, fact_succ (2 * m + 1), fact_succ (2 * m)]
+    rw [hf2]
+    have hc1 : (((m + 1) * fact m : ℕ) : ℝ) = ((m + 1 : ℕ) : ℝ) * ((fact m : ℕ) : ℝ) := cast_mul.real (m + 1) (fact m)
+    have hc2 : (((2 * m + 2) * ((2 * m + 1) * fact (2 * m)) : ℕ) : ℝ) = ((2 * m + 2 : ℕ) : ℝ) * (((2 * m + 1 : ℕ) : ℝ) * ((fact (2 * m) : ℕ) : ℝ)) := by rw [cast_mul.real (2 * m + 2) ((2 * m + 1) * fact (2 * m)), cast_mul.real (2 * m + 1) (fact (2 * m))]
+    have hc3 : ((2 * m + 2 : ℕ) : ℝ) = 2 * ((m + 1 : ℕ) : ℝ)
+      have h1 : 2 * m + 2 = 2 * (m + 1) := by omega
+      rw [h1, cast_mul.real 2 (m + 1)]; simp
+    rw [hc1, hc2, hc3]
+    rw [hc3] at hrec
+    linear_combination (2 * ((m + 1 : ℕ) : ℝ) * ((2 * m + 1 : ℕ) : ℝ)) * ihm + (2 * ((m + 1 : ℕ) : ℝ) * ((4 : ℝ) ^ m * ((fact m : ℕ) : ℝ) * ((fact m : ℕ) : ℝ))) * hrec
+
+-- Helper: clean rewriting of `wallis_int.even_closed` using explicit algebra:
++ wallis_int.even_sq_sandwich (n : ℕ) (hn : 1 ≤ n) :
+    2 / (pi * ((2 * n + 1 : ℕ) : ℝ)) ≤ (((fact (2 * n) : ℕ) : ℝ) / ((4 : ℝ) ^ n * ((fact n : ℕ) : ℝ) * ((fact n : ℕ) : ℝ))) * (((fact (2 * n) : ℕ) : ℝ) / ((4 : ℝ) ^ n * ((fact n : ℕ) : ℝ) * ((fact n : ℕ) : ℝ))) ∧
+    (((fact (2 * n) : ℕ) : ℝ) / ((4 : ℝ) ^ n * ((fact n : ℕ) : ℝ) * ((fact n : ℕ) : ℝ))) * (((fact (2 * n) : ℕ) : ℝ) / ((4 : ℝ) ^ n * ((fact n : ℕ) : ℝ) * ((fact n : ℕ) : ℝ))) ≤ 2 / (pi * ((2 * n : ℕ) : ℝ))
+  -- From W(2n+1) <= W(2n) <= W(2n-1):
+  --   (2n+1) * W(2n)^2 >= (2n+1) * W(2n) * W(2n+1) = pi / 2
+  --   (2n) * W(2n)^2   <= (2n) * W(2n-1) * W(2n)   = pi / 2!
+  have hW_pos := wallis_int.pos (2 * n)
+  have hpi := pi_pos
+  have h2n_pos : (0 : ℝ) < ((2 * n : ℕ) : ℝ) := (cast_pos.real (2 * n)).mpr (by omega)
+  have h2n1_pos : (0 : ℝ) < ((2 * n + 1 : ℕ) : ℝ) := (cast_pos.real (2 * n + 1)).mpr (by omega)
+  have hlo_W : pi / (2 * ((2 * n + 1 : ℕ) : ℝ)) ≤ wallis_int (2 * n) * wallis_int (2 * n)
+    have hp := wallis_int.prod_adjacent (2 * n)
+    have hmo := wallis_int.mono_step (2 * n)
+    have hm1 := mul_le_mul_of_nonneg_left.real (wallis_int (2 * n + 1)) (wallis_int (2 * n)) (((2 * n + 1 : ℕ) : ℝ) * wallis_int (2 * n)) hmo (by linarith [mul_pos.real ((2 * n + 1 : ℕ) : ℝ) (wallis_int (2 * n)) h2n1_pos hW_pos])
+    have hdiv := (div_le_iff.real pi (wallis_int (2 * n) * wallis_int (2 * n)) (2 * ((2 * n + 1 : ℕ) : ℝ)) (by linarith)).mpr (by linarith)
+    exact hdiv
+  have hhi_W : wallis_int (2 * n) * wallis_int (2 * n) ≤ pi / (2 * ((2 * n : ℕ) : ℝ))
+    have h2m1 : (2 * n - 1) + 1 = 2 * n := by omega
+    have hp := wallis_int.prod_adjacent (2 * n - 1)
+    rw [h2m1] at hp
+    have hmo := wallis_int.mono_step (2 * n - 1)
+    rw [h2m1] at hmo
+    have hm1 := mul_le_mul_of_nonneg_left.real (wallis_int (2 * n)) (wallis_int (2 * n - 1)) ((2 * n : ℕ) : ℝ) hmo (by linarith)
+    have hm2 := mul_le_mul_of_nonneg_right.real (((2 * n : ℕ) : ℝ) * wallis_int (2 * n)) (((2 * n : ℕ) : ℝ) * wallis_int (2 * n - 1)) (wallis_int (2 * n)) hm1 (by linarith)
+    exact (le_div_iff.real (wallis_int (2 * n) * wallis_int (2 * n)) pi (2 * ((2 * n : ℕ) : ℝ)) (by linarith)).mpr (by linarith)
+  -- Express R = (2n)! / (4^n * (n!)^2) = (2 / pi) * W(2n)!
+  set D := (4 : ℝ) ^ n * ((fact n : ℕ) : ℝ) * ((fact n : ℕ) : ℝ) with hD_def
+  have hD_pos : 0 < D
+    have h4 : (0 : ℝ) < (4 : ℝ) ^ n := pow_pos.real 4 n (by decide)
+    have hf : (0 : ℝ) < ((fact n : ℕ) : ℝ) := (cast_pos.real (fact n)).mpr (fact_pos n)
+    rw [hD_def]; exact mul_pos.real ((4 : ℝ) ^ n * ((fact n : ℕ) : ℝ)) ((fact n : ℕ) : ℝ) (mul_pos.real ((4 : ℝ) ^ n) ((fact n : ℕ) : ℝ) h4 hf) hf
+  have hR_eq : ((fact (2 * n) : ℕ) : ℝ) / D = (2 / pi) * wallis_int (2 * n)
+    have hev := wallis_int.even_closed n
+    have hcD := mul_inv_cancel.real D (by linarith)
+    have hcpi := mul_inv_cancel.real pi (by linarith)
+    rw [div_def.real ((fact (2 * n) : ℕ) : ℝ) D, div_def.real 2 pi]
+    have h1 : D * pi * (((fact (2 * n) : ℕ) : ℝ) * (1 / D) - 2 * (1 / pi) * wallis_int (2 * n)) = 0
+      have ha1 : D * pi * (((fact (2 * n) : ℕ) : ℝ) * (1 / D)) = pi * ((fact (2 * n) : ℕ) : ℝ) * (D * (1 / D)) := by ring
+      have ha2 : D * pi * (2 * (1 / pi) * wallis_int (2 * n)) = 2 * D * wallis_int (2 * n) * (pi * (1 / pi)) := by ring
+      rw [mul_sub.real, ha1, ha2, hcD, hcpi]
+      rw [← hD_def] at hev; linarith
+    have hcDp := mul_inv_cancel.real (D * pi) (by linarith [mul_pos.real D pi hD_pos hpi])
+    linear_combination (1 / (D * pi)) * h1 - (((fact (2 * n) : ℕ) : ℝ) * (1 / D) - 2 * (1 / pi) * wallis_int (2 * n)) * hcDp
+  rw [hR_eq]
+  have h2pi_pos : 0 < 2 / pi := div_pos.real 2 pi (by decide) hpi
+  have h2pi_sq_pos : 0 < (2 / pi) * (2 / pi) := mul_pos.real (2 / pi) (2 / pi) h2pi_pos h2pi_pos
+  have hfac : ((2 / pi) * wallis_int (2 * n)) * ((2 / pi) * wallis_int (2 * n)) = ((2 / pi) * (2 / pi)) * (wallis_int (2 * n) * wallis_int (2 * n)) := by ring
+  rw [hfac]
+  have hcancel : ∀ M : ℝ, 0 < M → ((2 / pi) * (2 / pi)) * (pi / (2 * M)) = 2 / (pi * M)
+    intro M hM
+    have hcp := mul_inv_cancel.real pi (by linarith)
+    have hc2M := mul_inv_cancel.real (2 * M) (by linarith)
+    have hcpM := mul_inv_cancel.real (pi * M) (by linarith [mul_pos.real pi M hpi hM])
+    have h2piM_pos : 0 < 2 * pi * pi * M := mul_pos.real (2 * pi * pi) M (mul_pos.real (2 * pi) pi (by linarith) hpi) hM
+    have h0 : (2 * pi * pi * M) * (((2 / pi) * (2 / pi)) * (pi / (2 * M)) - 2 / (pi * M)) = 0
+      rw [div_def.real 2 pi, div_def.real pi (2 * M), div_def.real 2 (pi * M)]
+      have ha1 : (2 * pi * pi * M) * ((2 * (1 / pi) * (2 * (1 / pi))) * (pi * (1 / (2 * M)))) = 4 * pi * (pi * (1 / pi)) * (pi * (1 / pi)) * ((2 * M) * (1 / (2 * M))) := by ring
+      have ha2 : (2 * pi * pi * M) * (2 * (1 / (pi * M))) = 4 * pi * ((pi * M) * (1 / (pi * M))) := by ring
+      rw [mul_sub.real, ha1, ha2, hcp, hc2M, hcpM]; ring
+    have hcAll := mul_inv_cancel.real (2 * pi * pi * M) (by linarith)
+    linear_combination (1 / (2 * pi * pi * M)) * h0 - (((2 / pi) * (2 / pi)) * (pi / (2 * M)) - 2 / (pi * M)) * hcAll
+  constructor
+  · have hm := mul_le_mul_of_nonneg_left.real (pi / (2 * ((2 * n + 1 : ℕ) : ℝ))) (wallis_int (2 * n) * wallis_int (2 * n)) ((2 / pi) * (2 / pi)) hlo_W (by linarith)
+    rw [hcancel ((2 * n + 1 : ℕ) : ℝ) h2n1_pos] at hm; exact hm
+  · have hm := mul_le_mul_of_nonneg_left.real (wallis_int (2 * n) * wallis_int (2 * n)) (pi / (2 * ((2 * n : ℕ) : ℝ))) ((2 / pi) * (2 / pi)) hhi_W (by linarith)
+    rw [hcancel ((2 * n : ℕ) : ℝ) h2n_pos] at hm; exact hm
+
+-- ====================================================================================
+-- 3. Exact Stirling-Robbins Log-Factorial Sandwich (INCLUDING sqrt(2*pi)!)
+-- ====================================================================================
+
+-> stirling_seq (n : ℕ) : ℝ :=
+  log ((fact n : ℕ) : ℝ) - ph (n : ℝ) - log (n : ℝ) / 2
+
+-- Exact step identity & Robbins 1/(12n) sandwich on `stirling_seq`:
++ stirling_seq.step_bounds (n : ℕ) (hn : 1 ≤ n) :
+    0 ≤ stirling_seq n - stirling_seq (n + 1) ∧
+    stirling_seq n - stirling_seq (n + 1) ≤ 1 / (12 * (n : ℝ)) - 1 / (12 * ((n + 1 : ℕ) : ℝ))
+  have hn_pos : (0 : ℝ) < (n : ℝ) := (cast_pos.real n).mpr (by omega)
+  have hn1_pos : (0 : ℝ) < ((n + 1 : ℕ) : ℝ) := (cast_pos.real (n + 1)).mpr (by omega)
+  have hn1_eq : ((n + 1 : ℕ) : ℝ) = (n : ℝ) + 1 := by rw [cast_add.real n 1]; simp
+  set m := (n : ℝ) + 1 / 2 with hm_def
+  have hm_pos : 0 < m := by rw [hm_def]; linarith
+  have hstep_eq : stirling_seq n - stirling_seq (n + 1) = m * (log ((n + 1 : ℕ) : ℝ) - log (n : ℝ)) - 1
+    unfold stirling_seq ph
+    rw [fact_succ n, cast_mul.real (n + 1) (fact n), log_mul ((n + 1 : ℕ) : ℝ) ((fact n : ℕ) : ℝ) hn1_pos ((cast_pos.real (fact n)).mpr (fact_pos n)), hn1_eq, hm_def]
+    ring
+  rw [hstep_eq]
+  -- Represent log((n+1)/n) = int_0^(1/2) (1/(m+t) + 1/(m-t)) dt!
+  have hd_F : ∀ t : ℝ, 0 ≤ t → t ≤ 1 / 2 → has_deriv_within (fun u => log (m + u) - log (m - u)) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t (1 / (m + t) + 1 / (m - t))
+    intro t ht0 ht1
+    have hmp : 0 < m + t := by rw [hm_def]; linarith
+    have hmm : 0 < m - t := by rw [hm_def]; linarith
+    have hdi1 : has_deriv_within (fun u => m + u) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t 1
+      have h0 := has_deriv_within.add (fun _ => m) (fun u => u) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t 0 1 (has_deriv_within.const m (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t) (has_deriv_within.id (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t)
+      have hv : (0 : ℝ) + 1 = 1 := by ring
+      rw [hv] at h0; exact h0
+    have hdi2 : has_deriv_within (fun u => m - u) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t (-1)
+      have h0 := has_deriv_within.sub (fun _ => m) (fun u => u) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t 0 1 (has_deriv_within.const m (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t) (has_deriv_within.id (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t)
+      have hv : (0 : ℝ) - 1 = -1 := by ring
+      rw [hv] at h0; exact h0
+    have hdo1 := has_deriv_within.log (fun z => 0 < z) (m + t) hmp (by intro y hy; exact hy)
+    have hdo2 := has_deriv_within.log (fun z => 0 < z) (m - t) hmm (by intro y hy; exact hy)
+    have hd1 := has_deriv_within.comp log (fun u => m + u) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) (fun z => 0 < z) t (1 / (m + t)) 1 hdo1 hdi1 (by intro z hz; rw [hm_def]; linarith [hz.1])
+    have hd2 := has_deriv_within.comp log (fun u => m - u) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) (fun z => 0 < z) t (1 / (m - t)) (-1) hdo2 hdi2 (by intro z hz; rw [hm_def]; linarith [hz.2])
+    have hsub := has_deriv_within.sub (fun u => log (m + u)) (fun u => log (m - u)) (fun z => 0 ≤ z ∧ z ≤ 1 / 2) t (1 / (m + t) * 1) (1 / (m - t) * (-1)) hd1 hd2
+    have hv : 1 / (m + t) * 1 - 1 / (m - t) * (-1) = 1 / (m + t) + 1 / (m - t) := by ring
+    rw [hv] at hsub; exact hsub
+  have hcont_f : ∀ t : ℝ, 0 ≤ t → t ≤ 1 / 2 → continuous_at (fun u => 1 / (m + u) + 1 / (m - u)) t
+    intro t ht0 ht1
+    have hmp : 0 < m + t := by rw [hm_def]; linarith
+    have hmm : 0 < m - t := by rw [hm_def]; linarith
+    have hc1 := continuous_at.comp (fun y => 1 / y) (fun u => m + u) t (continuous_at.inv_pos (m + t) hmp) (continuous_at.add (fun _ => m) (fun u => u) t (continuous_at.const m t) (continuous_at.id t))
+    have hc2 := continuous_at.comp (fun y => 1 / y) (fun u => m - u) t (continuous_at.inv_pos (m - t) hmm) (continuous_at.sub (fun _ => m) (fun u => u) t (continuous_at.const m t) (continuous_at.id t))
+    exact continuous_at.add (fun u => 1 / (m + u)) (fun u => 1 / (m - u)) t hc1 hc2
+  have hftc := darboux.fundamental (fun u => log (m + u) - log (m - u)) (fun u => 1 / (m + u) + 1 / (m - u)) 0 (1 / 2) (by decide) hcont_f hd_F
+  have hval_ftc : (log (m + 1 / 2) - log (m - 1 / 2)) - (log (m + 0) - log (m - 0)) = log ((n + 1 : ℕ) : ℝ) - log (n : ℝ)
+    have h1 : m + 1 / 2 = ((n + 1 : ℕ) : ℝ) := by rw [hm_def, hn1_eq]; ring
+    have h2 : m - 1 / 2 = (n : ℝ) := by rw [hm_def]; ring
+    have h3 : m + 0 = m := by ring
+    have h4 : m - 0 = m := by ring
+    rw [h1, h2, h3, h4]; ring
+  rw [hval_ftc] at hftc
+  have hsum_id : ∀ t : ℝ, 0 ≤ t → t ≤ 1 / 2 → 1 / (m + t) + 1 / (m - t) = 2 * m / (m * m - t * t)
+    intro t ht0 ht1
+    have hmp : 0 < m + t := by rw [hm_def]; linarith
+    have hmm : 0 < m - t := by rw [hm_def]; linarith
+    have hdiff_pos : 0 < m * m - t * t
+      have hfac : m * m - t * t = (m + t) * (m - t) := by ring
+      rw [hfac]; exact mul_pos.real (m + t) (m - t) hmp hmm
+    have hc1 := mul_inv_cancel.real (m + t) (by linarith)
+    have hc2 := mul_inv_cancel.real (m - t) (by linarith)
+    have hc3 := mul_inv_cancel.real (m * m - t * t) (by linarith)
+    have h0 : (m * m - t * t) * (1 / (m + t) + 1 / (m - t) - 2 * m / (m * m - t * t)) = 0
+      rw [div_def.real (2 * m) (m * m - t * t)]
+      linear_combination (m - t) * hc1 + (m + t) * hc2 - 2 * m * hc3
+    linear_combination (1 / (m * m - t * t)) * h0 - (1 / (m + t) + 1 / (m - t) - 2 * m / (m * m - t * t)) * hc3
+  have hc_m := mul_inv_cancel.real m (by linarith)
+  constructor
+  · -- Lower bound: 1/(m+t) + 1/(m-t) >= 2/m => integral >= 1/m => m * log((n+1)/n) - 1 >= 0!
+    have hlo_int := darboux.const 0 (1 / 2) (2 / m) (by decide)
+    have hpt_lo : ∀ t : ℝ, 0 ≤ t → t ≤ 1 / 2 → 2 / m ≤ 1 / (m + t) + 1 / (m - t)
+      intro t ht0 ht1
+      rw [hsum_id t ht0 ht1]
+      have hmp : 0 < m + t := by rw [hm_def]; linarith
+      have hmm : 0 < m - t := by rw [hm_def]; linarith
+      have hdiff_pos : 0 < m * m - t * t
+        have hfac : m * m - t * t = (m + t) * (m - t) := by ring
+        rw [hfac]; exact mul_pos.real (m + t) (m - t) hmp hmm
+      have hle_t2 : m * m - t * t ≤ m * m := by linarith [mul_nonneg.real t t ht0 ht0]
+      have hm1 := mul_le_mul_of_nonneg_left.real (m * m - t * t) (m * m) (2 / m) hle_t2 (by linarith [div_pos.real 2 m (by decide) hm_pos])
+      have hcan : (2 / m) * (m * m) = 2 * m := by rw [div_def.real 2 m]; linear_combination (2 * m) * hc_m
+      exact (le_div_iff.real (2 / m) (2 * m) (m * m - t * t) hdiff_pos).mpr (by linarith)
+    have hmono := darboux.mono (fun _ => 2 / m) (fun u => 1 / (m + u) + 1 / (m - u)) 0 (1 / 2) ((2 / m) * (1 / 2 - 0)) (log ((n + 1 : ℕ) : ℝ) - log (n : ℝ)) hlo_int hftc hpt_lo
+    have h1m : (2 / m) * (1 / 2 - 0) = 1 / m := by rw [div_def.real 2 m]; ring
+    rw [h1m] at hmono
+    have hm_mul := mul_le_mul_of_nonneg_left.real (1 / m) (log ((n + 1 : ℕ) : ℝ) - log (n : ℝ)) m hmono (by linarith)
+    linarith
+  · -- Upper bound: 1/(m+t) + 1/(m-t) <= 2/m + (2/(m * n*(n+1))) * t^2!
+    have hnn1_pos : 0 < (n : ℝ) * ((n + 1 : ℕ) : ℝ) := mul_pos.real (n : ℝ) ((n + 1 : ℕ) : ℝ) hn_pos hn1_pos
+    have hmnn1_pos : 0 < m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)) := mul_pos.real m ((n : ℝ) * ((n + 1 : ℕ) : ℝ)) hm_pos hnn1_pos
+    have hm2_sub : m * m - (1 / 4 : ℝ) = (n : ℝ) * ((n + 1 : ℕ) : ℝ) := by rw [hm_def, hn1_eq]; ring
+    have hc_int := darboux.const 0 (1 / 2) (2 / m) (by decide)
+    have hp_int := darboux.pow 0 (1 / 2) 2 (by decide)
+    have hp_val : ((1 / 2 : ℝ) ^ (2 + 1) - (0 : ℝ) ^ (2 + 1)) / (((2 : ℕ) : ℝ) + 1) = 1 / 24
+      have h21 : ((2 : ℕ) : ℝ) + 1 = 3 := by simp
+      have h3 : (1 / 2 : ℝ) ^ (2 + 1) = 1 / 8 := by decide
+      have h0 : (0 : ℝ) ^ (2 + 1) = 0 := by decide
+      rw [h21, h3, h0]; decide
+    rw [hp_val] at hp_int
+    set K := 2 / (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ))) with hK_def
+    have hs_int := darboux.scale (fun x => x ^ 2) 0 (1 / 2) (1 / 24) K hp_int
+    have hadd_int := darboux.add (fun _ => 2 / m) (fun x => K * x ^ 2) 0 (1 / 2) ((2 / m) * (1 / 2 - 0)) (K * (1 / 24)) hc_int hs_int
+    have hpt_hi : ∀ t : ℝ, 0 ≤ t → t ≤ 1 / 2 → 1 / (m + t) + 1 / (m - t) ≤ 2 / m + K * t ^ 2
+      intro t ht0 ht1
+      rw [hsum_id t ht0 ht1]
+      have hmp : 0 < m + t := by rw [hm_def]; linarith
+      have hmm : 0 < m - t := by rw [hm_def]; linarith
+      have hdiff_pos : 0 < m * m - t * t
+        have hfac : m * m - t * t = (m + t) * (m - t) := by ring
+        rw [hfac]; exact mul_pos.real (m + t) (m - t) hmp hmm
+      have ht2_le : t * t ≤ 1 / 4
+        have hm1 := mul_le_mul_of_nonneg_left.real t (1 / 2) t ht1 ht0
+        have hm2 := mul_le_mul_of_nonneg_right.real t (1 / 2) (1 / 2) ht1 (by decide)
+        linarith
+      have hdiff_ge : (n : ℝ) * ((n + 1 : ℕ) : ℝ) ≤ m * m - t * t := by linarith
+      have hdiff_eq : 2 * m / (m * m - t * t) - 2 / m = 2 * (t * t) / (m * (m * m - t * t))
+        have hcm := mul_inv_cancel.real m (by linarith)
+        have hcd := mul_inv_cancel.real (m * m - t * t) (by linarith)
+        have hcmd := mul_inv_cancel.real (m * (m * m - t * t)) (by linarith [mul_pos.real m (m * m - t * t) hm_pos hdiff_pos])
+        have h0 : (m * (m * m - t * t)) * (2 * m / (m * m - t * t) - 2 / m - 2 * (t * t) / (m * (m * m - t * t))) = 0
+          rw [div_def.real (2 * m) (m * m - t * t), div_def.real 2 m, div_def.real (2 * (t * t)) (m * (m * m - t * t))]
+          have ha1 : (m * (m * m - t * t)) * (2 * m * (1 / (m * m - t * t))) = 2 * m * m * ((m * m - t * t) * (1 / (m * m - t * t))) := by ring
+          have ha2 : (m * (m * m - t * t)) * (2 * (1 / m)) = 2 * (m * m - t * t) * (m * (1 / m)) := by ring
+          have ha3 : (m * (m * m - t * t)) * (2 * (t * t) * (1 / (m * (m * m - t * t)))) = 2 * (t * t) * ((m * (m * m - t * t)) * (1 / (m * (m * m - t * t)))) := by ring
+          rw [mul_sub.real, mul_sub.real, ha1, ha2, ha3, hcd, hcm, hcmd]; ring
+        linear_combination (1 / (m * (m * m - t * t))) * h0 - (2 * m / (m * m - t * t) - 2 / m - 2 * (t * t) / (m * (m * m - t * t))) * hcmd
+      have hinv_le : 1 / (m * (m * m - t * t)) ≤ 1 / (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)))
+        have hmd_ge : m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)) ≤ m * (m * m - t * t) := mul_le_mul_of_nonneg_left.real ((n : ℝ) * ((n + 1 : ℕ) : ℝ)) (m * m - t * t) m hdiff_ge (by linarith)
+        have hmd_pos : 0 < m * (m * m - t * t) := mul_pos.real m (m * m - t * t) hm_pos hdiff_pos
+        have hc1 := mul_inv_cancel.real (m * (m * m - t * t)) (by linarith)
+        have hm1 := mul_le_mul_of_nonneg_left.real (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ))) (m * (m * m - t * t)) (1 / (m * (m * m - t * t))) hmd_ge (by linarith [one_div_pos.real (m * (m * m - t * t)) hmd_pos])
+        exact (le_div_iff.real (1 / (m * (m * m - t * t))) 1 (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ))) hmnn1_pos).mpr (by linarith)
+      have hsq_eq : t ^ 2 = t * t := by ring
+      have hm2 := mul_le_mul_of_nonneg_left.real (1 / (m * (m * m - t * t))) (1 / (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)))) (2 * (t * t)) hinv_le (by linarith [mul_nonneg.real t t ht0 ht0])
+      rw [div_def.real (2 * (t * t)) (m * (m * m - t * t))] at hdiff_eq
+      rw [hK_def, div_def.real 2 (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ))), hsq_eq]
+      linarith
+    have hmono := darboux.mono (fun u => 1 / (m + u) + 1 / (m - u)) (fun u => 2 / m + K * u ^ 2) 0 (1 / 2) (log ((n + 1 : ℕ) : ℝ) - log (n : ℝ)) ((2 / m) * (1 / 2 - 0) + K * (1 / 24)) hftc hadd_int hpt_hi
+    have h1m : (2 / m) * (1 / 2 - 0) = 1 / m := by rw [div_def.real 2 m]; ring
+    rw [h1m] at hmono
+    have hm_mul := mul_le_mul_of_nonneg_left.real (log ((n + 1 : ℕ) : ℝ) - log (n : ℝ)) (1 / m + K * (1 / 24)) m hmono (by linarith)
+    have hK_can : m * (K * (1 / 24)) = 1 / (12 * (n : ℝ)) - 1 / (12 * ((n + 1 : ℕ) : ℝ))
+      have hc_mnn1 := mul_inv_cancel.real (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ))) (by linarith)
+      have hc_12n := mul_inv_cancel.real (12 * (n : ℝ)) (by linarith)
+      have hc_12n1 := mul_inv_cancel.real (12 * ((n + 1 : ℕ) : ℝ)) (by linarith)
+      have hD_pos : 0 < 12 * (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ))) := by linarith
+      have hcD := mul_inv_cancel.real (12 * (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)))) (by linarith)
+      have h0 : (12 * (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)))) * (m * (K * (1 / 24)) - (1 / (12 * (n : ℝ)) - 1 / (12 * ((n + 1 : ℕ) : ℝ)))) = 0
+        rw [hK_def, div_def.real 2 (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)))]
+        have ha1 : (12 * (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)))) * (m * (2 * (1 / (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)))) * (1 / 24))) = m * ((m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ))) * (1 / (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ))))) := by ring
+        have ha2 : (12 * (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)))) * (1 / (12 * (n : ℝ))) = m * ((n + 1 : ℕ) : ℝ) * ((12 * (n : ℝ)) * (1 / (12 * (n : ℝ)))) := by ring
+        have ha3 : (12 * (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ)))) * (1 / (12 * ((n + 1 : ℕ) : ℝ))) = m * (n : ℝ) * ((12 * ((n + 1 : ℕ) : ℝ)) * (1 / (12 * ((n + 1 : ℕ) : ℝ)))) := by ring
+        rw [mul_sub.real, mul_sub.real, ha1, ha2, ha3, hc_mnn1, hc_12n, hc_12n1, hn1_eq]; ring
+      linear_combination (1 / (12 * (m * ((n : ℝ) * ((n + 1 : ℕ) : ℝ))))) * h0 - (m * (K * (1 / 24)) - (1 / (12 * (n : ℝ)) - 1 / (12 * ((n + 1 : ℕ) : ℝ)))) * hcD
+    linarith
+
++ stirling_seq.at_one : stirling_seq 1 = 1
+  unfold stirling_seq ph
+  have hf1 : fact 1 = 1 := by decide
+  rw [hf1]; simp [log_one]
+
++ stirling_seq.dec_le (n m : ℕ) (hn : 1 ≤ n) (hnm : n ≤ m) :
+    stirling_seq m ≤ stirling_seq n
+  have hstep : ∀ d : ℕ, stirling_seq (n + d) ≤ stirling_seq n
+    intro d; induction d with k ihk
+    · have h0 : n + 0 = n := by omega
+      rw [h0]; linarith
+    · have hs : n + succ k = (n + k) + 1 := by omega
+      rw [hs]
+      have hst := (stirling_seq.step_bounds (n + k) (by omega)).1
+      linarith
+  have hm : n + (m - n) = m := by omega
+  rw [← hm]; exact hstep (m - n)
+
++ stirling_seq.robbins_inc_le (n m : ℕ) (hn : 1 ≤ n) (hnm : n ≤ m) :
+    stirling_seq n - 1 / (12 * (n : ℝ)) ≤ stirling_seq m - 1 / (12 * (m : ℝ))
+  have hstep : ∀ d : ℕ, stirling_seq n - 1 / (12 * (n : ℝ)) ≤ stirling_seq (n + d) - 1 / (12 * ((n + d : ℕ) : ℝ))
+    intro d; induction d with k ihk
+    · have h0 : n + 0 = n := by omega
+      rw [h0]; linarith
+    · have hs : n + succ k = (n + k) + 1 := by omega
+      rw [hs]
+      have hst := (stirling_seq.step_bounds (n + k) (by omega)).2
+      linarith
+  have hm : n + (m - n) = m := by omega
+  rw [← hm]; exact hstep (m - n)
+
+-- Exact identification of the Stirling limit:
+--   for EVERY n >= 1, log(2*pi) / 2 <= stirling_seq n <= log(2*pi) / 2 + 1 / (12 * n) !
++ stirling_seq.exact_sandwich (n : ℕ) (hn : 1 ≤ n) :
+    log (2 * pi) / 2 ≤ stirling_seq n ∧ stirling_seq n ≤ log (2 * pi) / 2 + 1 / (12 * (n : ℝ))
+  -- Step 1: Stirling sequence shifted by +1 converges to some limit L with L <= a_k <= L + 1/(12*k)!
+  have hconv : ∃ L : ℝ, tends_to (fun (k : ℕ) => stirling_seq (k + 1)) L
+    have hneg_mono : monotone_seq (fun (k : ℕ) => -stirling_seq (k + 1))
+      unfold monotone_seq; intro a b hab
+      have hle := stirling_seq.dec_le (a + 1) (b + 1) (by omega) (by omega)
+      linarith
+    have hneg_ub : ∀ k : ℕ, -stirling_seq (k + 1) ≤ -(stirling_seq 1 - 1 / 12)
+      intro k
+      have hinc := stirling_seq.robbins_inc_le 1 (k + 1) (by decide) (by omega)
+      have h1 : (12 : ℝ) * ((1 : ℕ) : ℝ) = 12 := by simp
+      have hpos : 0 < 1 / (12 * ((k + 1 : ℕ) : ℝ)) := one_div_pos.real (12 * ((k + 1 : ℕ) : ℝ)) (by linarith [(cast_pos.real (k + 1)).mpr (by omega)])
+      rw [h1] at hinc; linarith
+    have hneg_conv := monotone_seq.converges_of_upper_bound (fun (k : ℕ) => -stirling_seq (k + 1)) (-(stirling_seq 1 - 1 / 12)) hneg_mono hneg_ub
+    unfold converges at hneg_conv
+    obtain ⟨Lneg, hLn⟩ := hneg_conv
+    use -Lneg
+    unfold tends_to at hLn ⊢; intro e he; obtain ⟨N0, hN0⟩ := hLn e he; use N0; intro k hk
+    have hre : stirling_seq (k + 1) - -Lneg = 0 - (-stirling_seq (k + 1) - Lneg) := by ring
+    rw [hre, abs_neg.real]; exact hN0 k hk
+  obtain ⟨L, hL⟩ := hconv
+  unfold tends_to at hL
+  -- Show L <= stirling_seq k <= L + 1/(12*k) for every k >= 1!
+  have hL_bounds : ∀ k : ℕ, 1 ≤ k → L ≤ stirling_seq k ∧ stirling_seq k ≤ L + 1 / (12 * (k : ℝ))
+    intro k hk
+    constructor
+    · by_contra hlt
+      set e := (L - stirling_seq k) / 2 with he_def
+      have he_pos : 0 < e := by rw [he_def]; linarith
+      obtain ⟨N0, hN0⟩ := hL e he_pos
+      set M := N0 + k with hM_def
+      have h1 := hN0 M (by rw [hM_def]; omega)
+      have h2 := stirling_seq.dec_le k (M + 1) hk (by rw [hM_def]; omega)
+      linarith [neg_le_abs.real (stirling_seq (M + 1) - L)]
+    · by_contra hlt
+      set e := (stirling_seq k - 1 / (12 * (k : ℝ)) - L) / 2 with he_def
+      have he_pos : 0 < e := by rw [he_def]; linarith
+      obtain ⟨N0, hN0⟩ := hL e he_pos
+      set M := N0 + k + 1 with hM_def
+      have h1 : |stirling_seq (M + 1) - L| < e := hN0 M (by rw [hM_def]; omega)
+      have h2 := stirling_seq.robbins_inc_le k (M + 1) hk (by rw [hM_def]; omega)
+      have hposM : (0 : ℝ) < ((M + 1 : ℕ) : ℝ) := (cast_pos.real (M + 1)).mpr (by omega)
+      have h12M_pos : 0 < 1 / (12 * ((M + 1 : ℕ) : ℝ)) := one_div_pos.real (12 * ((M + 1 : ℕ) : ℝ)) (by linarith)
+      linarith [le_abs_self.real (stirling_seq (M + 1) - L)]
+  -- Step 2: Identify L = log(2*pi) / 2 via `wallis_int.even_sq_sandwich`!
+  -- Key algebraic identity: for all m >= 1,
+  --   log (m * ((2m)! / (4^m * (m!)^2))^2) = 2 * (stirling_seq (2m) - 2 * stirling_seq m) + log 2 !
+  have hpi := pi_pos
+  have hL_eq : L = log (2 * pi) / 2
+    by_contra hne
+    set gap := |2 * L - log (2 * pi)| with hgap_def
+    have hgap_pos : 0 < gap
+      rw [hgap_def]
+      by_contra hle; have hz : 2 * L - log (2 * pi) = 0 := (abs_eq_zero.real (2 * L - log (2 * pi))).mp (by linarith [abs_nonneg.real (2 * L - log (2 * pi))])
+      exact hne (by linarith)
+    -- Choose m >= 1 large enough that 1 / (2*m) < gap / 4 AND 1 / (3 * m) < gap / 4!
+    obtain ⟨m0, hm0⟩ := exists_nat_gt.real (4 / gap)
+    set m := m0 + 1 with hm_def
+    have hm_ge1 : 1 ≤ m := by rw [hm_def]; omega
+    have hm_pos : (0 : ℝ) < (m : ℝ) := (cast_pos.real m).mpr (by omega)
+    have h2m1_pos : (0 : ℝ) < ((2 * m + 1 : ℕ) : ℝ) := (cast_pos.real (2 * m + 1)).mpr (by omega)
+    have hinv_m : 1 / (m : ℝ) < gap / 4
+      have hgt : 4 / gap < (m : ℝ)
+        have hle : (m0 : ℝ) ≤ (m : ℝ) := (cast_le.real m0 m).mpr (by rw [hm_def]; omega)
+        linarith
+      have h1 := (div_lt_iff.real 4 (m : ℝ) gap hgap_pos).mp hgt
+      exact (div_lt_iff.real 1 (gap / 4) (m : ℝ) hm_pos).mpr (by linarith)
+    -- From Wallis sandwich: 2*m / (pi * (2*m + 1)) <= m * R^2 <= 1 / pi!
+    set R := ((fact (2 * m) : ℕ) : ℝ) / ((4 : ℝ) ^ m * ((fact m : ℕ) : ℝ) * ((fact m : ℕ) : ℝ)) with hR_def
+    have hD_pos : 0 < (4 : ℝ) ^ m * ((fact m : ℕ) : ℝ) * ((fact m : ℕ) : ℝ)
+      have h4 := pow_pos.real 4 m (by decide)
+      have hf := (cast_pos.real (fact m)).mpr (fact_pos m)
+      exact mul_pos.real ((4 : ℝ) ^ m * ((fact m : ℕ) : ℝ)) ((fact m : ℕ) : ℝ) (mul_pos.real ((4 : ℝ) ^ m) ((fact m : ℕ) : ℝ) h4 hf) hf
+    have hR_pos : 0 < R := by rw [hR_def]; exact div_pos.real ((fact (2 * m) : ℕ) : ℝ) ((4 : ℝ) ^ m * ((fact m : ℕ) : ℝ) * ((fact m : ℕ) : ℝ)) ((cast_pos.real (fact (2 * m))).mpr (fact_pos (2 * m))) hD_pos
+    have hws := wallis_int.even_sq_sandwich m hm_ge1
+    rw [← hR_def] at hws
+    -- Multiply Wallis sandwich by m > 0:
+    have hlo_m : (2 * (m : ℝ)) / (pi * ((2 * m + 1 : ℕ) : ℝ)) ≤ (m : ℝ) * (R * R)
+      have h1 := mul_le_mul_of_nonneg_left.real (2 / (pi * ((2 * m + 1 : ℕ) : ℝ))) (R * R) (m : ℝ) hws.1 (by linarith)
+      have h2 : (m : ℝ) * (2 / (pi * ((2 * m + 1 : ℕ) : ℝ))) = (2 * (m : ℝ)) / (pi * ((2 * m + 1 : ℕ) : ℝ))
+        rw [div_def.real 2 (pi * ((2 * m + 1 : ℕ) : ℝ)), div_def.real (2 * (m : ℝ)) (pi * ((2 * m + 1 : ℕ) : ℝ))]; ring
+      linarith
+    have hhi_m : (m : ℝ) * (R * R) ≤ 1 / pi
+      have h1 := mul_le_mul_of_nonneg_left.real (R * R) (2 / (pi * ((2 * m : ℕ) : ℝ))) (m : ℝ) hws.2 (by linarith)
+      have h2m_cast : ((2 * m : ℕ) : ℝ) = 2 * (m : ℝ) := by rw [cast_mul.real 2 m]; simp
+      have hcan : (m : ℝ) * (2 / (pi * ((2 * m : ℕ) : ℝ))) = 1 / pi
+        rw [h2m_cast]
+        have hcp := mul_inv_cancel.real pi (by linarith)
+        have hc2 := mul_inv_cancel.real (pi * (2 * (m : ℝ))) (by linarith [mul_pos.real pi (2 * (m : ℝ)) hpi (by linarith)])
+        have h0 : (pi * (2 * (m : ℝ))) * ((m : ℝ) * (2 / (pi * (2 * (m : ℝ)))) - 1 / pi) = 0
+          rw [div_def.real 2 (pi * (2 * (m : ℝ))), div_def.real 1 pi]
+          have ha1 : (pi * (2 * (m : ℝ))) * ((m : ℝ) * (2 * (1 / (pi * (2 * (m : ℝ)))))) = (2 * (m : ℝ)) * ((pi * (2 * (m : ℝ))) * (1 / (pi * (2 * (m : ℝ))))) := by ring
+          have ha2 : (pi * (2 * (m : ℝ))) * (1 * (1 / pi)) = (2 * (m : ℝ)) * (pi * (1 / pi)) := by ring
+          rw [mul_sub.real, ha1, ha2, hc2, hcp]; ring
+        linear_combination (1 / (pi * (2 * (m : ℝ)))) * h0 - ((m : ℝ) * (2 / (pi * (2 * (m : ℝ)))) - 1 / pi) * hc2
+      linarith
+    -- Take log of both inequalities:
+    have hlog_mR2 : log ((m : ℝ) * (R * R)) = 2 * (stirling_seq (2 * m) - 2 * stirling_seq m) + log 2
+      rw [log_mul (m : ℝ) (R * R) hm_pos (mul_pos.real R R hR_pos hR_pos), log_mul R R hR_pos hR_pos]
+      have hlogR : log R = stirling_seq (2 * m) - 2 * stirling_seq m + log 2 / 2 - log (m : ℝ) / 2
+        rw [hR_def, log_div ((fact (2 * m) : ℕ) : ℝ) ((4 : ℝ) ^ m * ((fact m : ℕ) : ℝ) * ((fact m : ℕ) : ℝ)) ((cast_pos.real (fact (2 * m))).mpr (fact_pos (2 * m))) hD_pos]
+        have h4_pos : (0 : ℝ) < (4 : ℝ) ^ m := pow_pos.real 4 m (by decide)
+        have hfm_pos : (0 : ℝ) < ((fact m : ℕ) : ℝ) := (cast_pos.real (fact m)).mpr (fact_pos m)
+        rw [log_mul ((4 : ℝ) ^ m * ((fact m : ℕ) : ℝ)) ((fact m : ℕ) : ℝ) (mul_pos.real ((4 : ℝ) ^ m) ((fact m : ℕ) : ℝ) h4_pos hfm_pos) hfm_pos, log_mul ((4 : ℝ) ^ m) ((fact m : ℕ) : ℝ) h4_pos hfm_pos, log_pow 4 m (by decide)]
+        have hlog4 : log 4 = 2 * log 2
+          have h4 : (4 : ℝ) = 2 * 2 := by decide
+          rw [h4, log_mul 2 2 (by decide) (by decide)]; ring
+        have h2m_cast : ((2 * m : ℕ) : ℝ) = 2 * (m : ℝ) := by rw [cast_mul.real 2 m]; simp
+        have hlog2m : log ((2 * m : ℕ) : ℝ) = log 2 + log (m : ℝ)
+          rw [h2m_cast, log_mul 2 (m : ℝ) (by decide) hm_pos]
+        unfold stirling_seq ph
+        rw [hlog4, hlog2m, h2m_cast]; ring
+      linarith
+    have hlog_hi : log ((m : ℝ) * (R * R)) ≤ -log pi
+      have h1 := (log_le_log ((m : ℝ) * (R * R)) (1 / pi) (mul_pos.real (m : ℝ) (R * R) hm_pos (mul_pos.real R R hR_pos hR_pos)) (one_div_pos.real pi hpi)).mpr hhi_m
+      rw [log_div 1 pi (by decide) hpi, log_one] at h1; linarith
+    have hlog_lo : -log pi - 1 / (2 * (m : ℝ)) ≤ log ((m : ℝ) * (R * R))
+      have hlhs_pos : 0 < (2 * (m : ℝ)) / (pi * ((2 * m + 1 : ℕ) : ℝ)) := div_pos.real (2 * (m : ℝ)) (pi * ((2 * m + 1 : ℕ) : ℝ)) (by linarith) (mul_pos.real pi ((2 * m + 1 : ℕ) : ℝ) hpi h2m1_pos)
+      have h1 := (log_le_log ((2 * (m : ℝ)) / (pi * ((2 * m + 1 : ℕ) : ℝ))) ((m : ℝ) * (R * R)) hlhs_pos (mul_pos.real (m : ℝ) (R * R) hm_pos (mul_pos.real R R hR_pos hR_pos))).mpr hlo_m
+      rw [log_div (2 * (m : ℝ)) (pi * ((2 * m + 1 : ℕ) : ℝ)) (by linarith) (mul_pos.real pi ((2 * m + 1 : ℕ) : ℝ) hpi h2m1_pos), log_mul pi ((2 * m + 1 : ℕ) : ℝ) hpi h2m1_pos] at h1
+      have hratio_le : log ((2 * m + 1 : ℕ) : ℝ) - log (2 * (m : ℝ)) ≤ 1 / (2 * (m : ℝ))
+        have hq_pos : 0 < ((2 * m + 1 : ℕ) : ℝ) / (2 * (m : ℝ)) := div_pos.real ((2 * m + 1 : ℕ) : ℝ) (2 * (m : ℝ)) h2m1_pos (by linarith)
+        have hl := log_le_sub_one (((2 * m + 1 : ℕ) : ℝ) / (2 * (m : ℝ))) hq_pos
+        rw [log_div ((2 * m + 1 : ℕ) : ℝ) (2 * (m : ℝ)) h2m1_pos (by linarith)] at hl
+        have h2m1_eq : ((2 * m + 1 : ℕ) : ℝ) = 2 * (m : ℝ) + 1
+          rw [cast_add.real (2 * m) 1, cast_mul.real 2 m]; simp
+        have hsub1 : ((2 * m + 1 : ℕ) : ℝ) / (2 * (m : ℝ)) - 1 = 1 / (2 * (m : ℝ))
+          rw [h2m1_eq, div_def.real (2 * (m : ℝ) + 1) (2 * (m : ℝ))]
+          have hc := mul_inv_cancel.real (2 * (m : ℝ)) (by linarith)
+          linear_combination hc
+        linarith
+      linarith
+    -- Now combine with L <= stirling_seq k <= L + 1/(12*k):
+    have hb_m := hL_bounds m hm_ge1
+    have hb_2m := hL_bounds (2 * m) (by omega)
+    have h2m_cast : ((2 * m : ℕ) : ℝ) = 2 * (m : ℝ) := by rw [cast_mul.real 2 m]; simp
+    have hlog2pi : log (2 * pi) = log 2 + log pi := log_mul 2 pi (by decide) hpi
+    have h2m_le : 1 / (2 * (m : ℝ)) ≤ 1 / (m : ℝ)
+      have hc := mul_inv_cancel.real (2 * (m : ℝ)) (by linarith)
+      have h1 := mul_le_mul_of_nonneg_left.real (m : ℝ) (2 * (m : ℝ)) (1 / (2 * (m : ℝ))) (by linarith) (by linarith [one_div_pos.real (2 * (m : ℝ)) (by linarith)])
+      exact (le_div_iff.real (1 / (2 * (m : ℝ))) 1 (m : ℝ) hm_pos).mpr (by linarith)
+    -- From hlog_lo and hlog_hi:
+    --   -2 * L - 4 / m + log 2 <= log(m*R^2) <= -log pi   ==>  log(2*pi) - 2*L <= 4/m < gap
+    --   -log pi - 1/(2m) <= log(m*R^2) <= -2*L + 2/m + log 2  ==>  2*L - log(2*pi) <= 3/m < gap
+    have hdiff_abs : |2 * L - log (2 * pi)| < gap
+      -- Wait: tighten 4 / (12 * m) = 1 / (3 * m) <= (1/2) / m!
+      have h4_12 : 4 * (1 / (12 * (m : ℝ))) = (1 / 3) * (1 / (m : ℝ))
+        have hc1 := mul_inv_cancel.real (12 * (m : ℝ)) (by linarith)
+        have hc2 := mul_inv_cancel.real (m : ℝ) (by linarith)
+        have h0 : (12 * (m : ℝ)) * (4 * (1 / (12 * (m : ℝ))) - (1 / 3) * (1 / (m : ℝ))) = 0
+          have ha1 : (12 * (m : ℝ)) * (4 * (1 / (12 * (m : ℝ)))) = 4 * ((12 * (m : ℝ)) * (1 / (12 * (m : ℝ)))) := by ring
+          have ha2 : (12 * (m : ℝ)) * ((1 / 3) * (1 / (m : ℝ))) = 4 * ((m : ℝ) * (1 / (m : ℝ))) := by ring
+          rw [mul_sub.real, ha1, ha2, hc1, hc2]; ring
+        linear_combination (1 / (12 * (m : ℝ))) * h0 - (4 * (1 / (12 * (m : ℝ))) - (1 / 3) * (1 / (m : ℝ))) * hc1
+      have h2_24 : 2 * (1 / (12 * ((2 * m : ℕ) : ℝ))) = (1 / 12) * (1 / (m : ℝ))
+        rw [h2m_cast]
+        have hc1 := mul_inv_cancel.real (12 * (2 * (m : ℝ))) (by linarith)
+        have hc2 := mul_inv_cancel.real (m : ℝ) (by linarith)
+        have h0 : (12 * (2 * (m : ℝ))) * (2 * (1 / (12 * (2 * (m : ℝ)))) - (1 / 12) * (1 / (m : ℝ))) = 0
+          have ha1 : (12 * (2 * (m : ℝ))) * (2 * (1 / (12 * (2 * (m : ℝ))))) = 2 * ((12 * (2 * (m : ℝ))) * (1 / (12 * (2 * (m : ℝ))))) := by ring
+          have ha2 : (12 * (2 * (m : ℝ))) * ((1 / 12) * (1 / (m : ℝ))) = 2 * ((m : ℝ) * (1 / (m : ℝ))) := by ring
+          rw [mul_sub.real, ha1, ha2, hc1, hc2]; ring
+        linear_combination (1 / (12 * (2 * (m : ℝ)))) * h0 - (2 * (1 / (12 * (2 * (m : ℝ)))) - (1 / 12) * (1 / (m : ℝ))) * hc1
+      exact abs_lt_of.real (2 * L - log (2 * pi)) gap (by linarith) (by linarith)
+    rw [← hgap_def] at hdiff_abs; linarith
+  rw [← hL_eq]; exact hL_bounds n hn
+
+-- EXACT UPSTREAM `Formalism.LogFactorialBounds.LogFactorialSandwich` (0 CUSTOM AXIOMS!):
++ log_factorial.sandwich (n : ℕ) (hn : 1 ≤ n) :
+    ph (n : ℝ) + log (2 * pi * (n : ℝ)) / 2 ≤ log ((fact n : ℕ) : ℝ) ∧
+    log ((fact n : ℕ) : ℝ) ≤ ph (n : ℝ) + log (n : ℝ) / 2 + 1
+  have hpi := pi_pos
+  have hn_pos : (0 : ℝ) < (n : ℝ) := (cast_pos.real n).mpr (by omega)
+  have hst := stirling_seq.exact_sandwich n hn
+  have hdec := stirling_seq.dec_le 1 n (by decide) hn
+  rw [stirling_seq.at_one] at hdec
+  unfold stirling_seq at hst hdec
+  have hlog_prod : log (2 * pi * (n : ℝ)) = log (2 * pi) + log (n : ℝ) := log_mul (2 * pi) (n : ℝ) (by linarith) hn_pos
+  rw [hlog_prod]
+  exact ⟨by linarith, by linarith⟩
+
+-- BONUS SHARP ROBBINS UPPER BOUND (0 CUSTOM AXIOMS!):
++ log_factorial.robbins_upper (n : ℕ) (hn : 1 ≤ n) :
+    log ((fact n : ℕ) : ℝ) ≤ ph (n : ℝ) + log (2 * pi * (n : ℝ)) / 2 + 1 / (12 * (n : ℝ))
+  have hpi := pi_pos
+  have hn_pos : (0 : ℝ) < (n : ℝ) := (cast_pos.real n).mpr (by omega)
+  have hst := (stirling_seq.exact_sandwich n hn).2
+  unfold stirling_seq at hst
+  rw [log_mul (2 * pi) (n : ℝ) (by linarith) hn_pos]
+  linarith

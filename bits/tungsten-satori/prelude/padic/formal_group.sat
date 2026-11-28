@@ -1,0 +1,915 @@
+-- Milestone 3.45: Formal Power-Series Composition & Chain Rule, Multiplicative Formal
+--                 Group Law G_m^ & Lubin-Tate Frobenius Congruence, Cyclotomic Wach
+--                 Height-h Filtration p-adic Divisibility, & p-adic Exponential exp_p(pT)!
+--
+-- Directly formalizes core upstream `GroundTheory/` p-adic Hodge theory, `Formalism/` Wach
+-- modules, & `remark.pdf` items 15, 17, 19 on top of M3.37 `is_p_int`/`fps`/`kummer` (ZERO axioms!):
+--   1. Formal Power Series Composition `fps.comp`, Formal Derivative `fps.deriv`, & Chain Rule:
+--        `fps.pow_vanish_lt`         (g 0 = 0 => for k > n, (g^k)_n = 0)
+--        `fps.comp_p_int`            (f, g in Z_(p)[[T]], g 0 = 0 => f(g(T)) in Z_(p)[[T]]!)
+--        `fps.comp_add`              ((f1 + f2) o g = f1 o g + f2 o g)
+--        `fps.comp_mul`              (g 0 = 0 => (f1 * f2) o g = (f1 o g) * (f2 o g)!)
+--        `fps.deriv_mul`             (Leibniz product rule (f*g)' = f'*g + f*g' in Q[[T]]!)
+--        `fps.deriv_comp`            (g 0 = 0 => exact formal Chain Rule (f o g)' = (f' o g) * g'!)
+--   2. Multiplicative Formal Group Law G_m^ & Lubin-Tate Frobenius Congruence:
+--        `fgl.gm_one_plus_pow`       ((1 + T)^m = sum choose(m, n) T^n in Q[[T]])
+--        `fgl.gm_end_comp`           (Lubin-Tate composition law [a]([b](T)) = [a * b](T)!)
+--        `fgl.gm_frobenius_congruence`
+--                                    ([p](T) = T^p (mod p * Z_(p)[[T]]) for every prime p!)
+--        `fgl.gm_formal_log_hom`     (formal logarithm hom: log_Gm([m](T)) = m * log_Gm(T)!)
+--   3. Cyclotomic Wach Polynomial q(T) = ((1 + T)^p - 1) / T & Fontaine-Laffaille Filtration:
+--        `wach.q_poly_mul_T`         (T * q(T) = [p](T) = (1 + T)^p - 1)
+--        `wach.q_poly_eisenstein`    (q(0) = p, p | q_n for n < p-1, q_{p-1} = 1, deg q = p - 1!)
+--        `wach.phi_ring_hom_mod_p`   (Frobenius phi(f) = f o [p] is a Z_(p)-algebra endomorphism
+--                                     satisfying phi(f) = f(T^p) (mod p * Z_(p)[[T]])!)
+--        `wach.height_filtration_divisibility`
+--                                    (Fontaine-Laffaille / Wach height-h filtration:
+--                                     p^(h - min(h, n / (p - 1))) divides [T^n] q(T)^h in Z_(p)!)
+--   4. p-adic Exponential exp_p(p T) Integrality & Odd-Prime Valuation Growth:
+--        `padic_exp.coeff_p_int`     (for every prime p and k >= 1, (p^k / k!) / p in Z_(p)!)
+--        `padic_exp.odd_prime_valuation_growth`
+--                                    (for odd prime p >= 3 and k >= 1, 2 * vp p (k!) <= k - 1,
+--                                     so p^((k + 1) / 2) divides p^k / k! in Z_(p)!)
+--
+-- ALL theorems proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import padic.kummer_artin_hasse
+
+-- ====================================================================================
+-- 1. Formal Power Series Composition `fps.comp`, Derivative `fps.deriv`, & Chain Rule
+-- ====================================================================================
+
+-> fps.comp (f g : ℕ → ℚ) (n : ℕ) : ℚ :=
+  ∑ k < n + 1, f k * fps.pow g k n
+
+-> fps.deriv (f : ℕ → ℚ) (n : ℕ) : ℚ :=
+  ((n + 1 : ℕ) : ℚ) * f (n + 1)
+
+-> fps.sub (f g : ℕ → ℚ) (n : ℕ) : ℚ := f n - g n
+
+-- Helper: fps.pow g (m + 1) = fps.mul (fps.pow g m) g.
++ fps.pow_zero_fun (g : ℕ → ℚ) : fps.pow g 0 = fps.one := by rfl
++ fps.pow_zero_eq (g : ℕ → ℚ) (n : ℕ) : fps.pow g 0 n = fps.one n := by rfl
+
++ fps.pow_succ_eq (g : ℕ → ℚ) (m n : ℕ) :
+    fps.pow g (m + 1) n = fps.mul (fps.pow g m) g n := by rfl
+
++ fps.pow_add_eq (g : ℕ → ℚ) (a b : ℕ) :
+    ∀ n : ℕ, fps.pow g (a + b) n = fps.mul (fps.pow g a) (fps.pow g b) n
+  induction b with n r ihr n
+  · have h0 : a + 0 = a := by omega
+    rw [h0, fps.pow_zero_fun, fps.mul_one]
+  · rw [succ_eq_add_one.nat]
+    have ha : a + (r + 1) = (a + r) + 1 := by omega
+    rw [ha, fps.pow_succ_eq g (a + r) n]
+    have hcon : fps.mul (fps.pow g (a + r)) g n = fps.mul (fps.mul (fps.pow g a) (fps.pow g r)) g n := by exact fps.mul_congr (fps.pow g (a + r)) (fps.mul (fps.pow g a) (fps.pow g r)) g g n (by intro k _; exact ihr k) (by intro k _; rfl)
+    rw [hcon, fps.mul_assoc]; rfl
+
++ fps.pow_congr (g1 g2 : ℕ → ℚ) (h : ∀ n, g1 n = g2 n) (m : ℕ) :
+    ∀ n : ℕ, fps.pow g1 m n = fps.pow g2 m n
+  induction m with n r ihr n
+  · rfl
+  · rw [succ_eq_add_one.nat, fps.pow_succ_eq, fps.pow_succ_eq]
+    exact fps.mul_congr (fps.pow g1 r) (fps.pow g2 r) g1 g2 n (by intro k _; exact ihr k) (by intro k _; exact h k)
+
+-- LEMMA 1A: If g 0 = 0, then (g^k)_n = 0 whenever n < k!
++ fps.pow_vanish_lt (g : ℕ → ℚ) (hg0 : g 0 = 0) (k : ℕ) :
+    ∀ n : ℕ, n < k → fps.pow g k n = 0
+  induction k with n hnk r ihr n hnk
+  · omega
+  · rw [succ_eq_add_one.nat] at hnk ⊢
+    rw [fps.pow_succ_eq]; unfold fps.mul
+    have h0 : (∑ j < n + 1, fps.pow g r j * g (n - j)) = ∑ j < n + 1, (0 : ℚ)
+      apply sum_congr.rat; intro j hj
+      by_cases hjn : j = n
+      · rw [hjn]; have hnn : n - n = 0 := by omega
+        rw [hnn, hg0]; ring
+      · have hlt : j < r := by omega
+        rw [ihr j hlt]; ring
+    rw [h0, sum_const.rat]; ring
+
+-- Extended range invariance for fps.comp when g 0 = 0: summing up to any M >= n gives the same value!
++ fps.comp_range_extend (f g : ℕ → ℚ) (hg0 : g 0 = 0) (n M : ℕ) (hnM : n ≤ M) :
+    (∑ k < M + 1, f k * fps.pow g k n) = fps.comp f g n
+  unfold fps.comp
+  have hgen : ∀ d : ℕ, (∑ k < (n + d) + 1, f k * fps.pow g k n) = ∑ k < n + 1, f k * fps.pow g k n
+    intro d; induction d with r ihr
+    · have h0 : n + 0 = n := by omega
+      rw [h0]
+    · rw [succ_eq_add_one.nat]
+      have ha : n + (r + 1) + 1 = (n + r + 1) + 1 := by omega
+      rw [ha, sum_below_succ, ihr]
+      have hvan := fps.pow_vanish_lt g hg0 (n + r + 1) n (by omega)
+      rw [hvan]; ring
+  have heq : n + (M - n) = M := by omega
+  rw [← heq]; exact hgen (M - n)
+
+-- THEOREM 1A: Composition preserves Z_(p)-integrality!
++ fps.comp_p_int (p : ℕ) (hprime : is_prime_nat p) (f g : ℕ → ℚ)
+    (hf : ∀ k, is_p_int p (f k)) (hg : ∀ k, is_p_int p (g k)) (n : ℕ) :
+    is_p_int p (fps.comp f g n)
+  unfold fps.comp
+  apply is_p_int.sum p hprime
+  intro k hk
+  exact is_p_int.mul p hprime (f k) (fps.pow g k n) (hf k) (fps.pow_is_p_int p hprime g hg k n)
+
++ fps.comp_zero_at_zero (f g : ℕ → ℚ) : fps.comp f g 0 = f 0
+  unfold fps.comp
+  have h01 : (0 + 1 : ℕ) = 1 := by decide
+  rw [← h01, sum_below_succ, sum_below_zero, fps.pow_zero_eq]
+  unfold fps.one; simp
+
++ fps.comp_add (f1 f2 g : ℕ → ℚ) (n : ℕ) :
+    fps.comp (fps.add f1 f2) g n = fps.add (fps.comp f1 g) (fps.comp f2 g) n
+  unfold fps.comp fps.add
+  rw [← sum_add.rat]
+  apply sum_congr.rat; intro k hk; ring
+
++ fps.comp_scale (c : ℚ) (f g : ℕ → ℚ) (n : ℕ) :
+    fps.comp (fps.scale c f) g n = fps.scale c (fps.comp f g) n
+  unfold fps.comp fps.scale
+  rw [← sum_const_mul.rat]
+  apply sum_congr.rat; intro k hk; ring
+
++ fps.comp_one (g : ℕ → ℚ) (n : ℕ) : fps.comp fps.one g n = fps.one n
+  unfold fps.comp
+  rw [sum_range_succ'.rat (fun k => fps.one k * fps.pow g k n) n]
+  have h0 : (∑ i < n, fps.one (i + 1) * fps.pow g (i + 1) n) = ∑ i < n, (0 : ℚ)
+    apply sum_congr.rat; intro i hi
+    unfold fps.one; have hne : i + 1 ≠ 0 := by omega
+    rw [if_neg hne]; ring
+  rw [h0, sum_const.rat, fps.pow_zero_eq]
+  have hone0 : fps.one 0 = 1 := by unfold fps.one; simp
+  rw [hone0]; ring
+
+-- THEOREM 1B: Formal Substitution Is a Ring Homomorphism: (f1 * f2) o g = (f1 o g) * (f2 o g)!
++ fps.comp_mul (f1 f2 g : ℕ → ℚ) (hg0 : g 0 = 0) (n : ℕ) :
+    fps.comp (fps.mul f1 f2) g n = fps.mul (fps.comp f1 g) (fps.comp f2 g) n
+  -- Expand RHS = sum_{r <= n} (f1 o g)_r * (f2 o g)_{n - r}
+  --           = sum_{r <= n} (sum_{a <= n} f1 a (g^a)_r) * (sum_{b <= n} f2 b (g^b)_{n - r})
+  --           = sum_{a <= n} sum_{b <= n} f1 a * f2 b * (g^(a+b))_n!
+  have hR : fps.mul (fps.comp f1 g) (fps.comp f2 g) n = ∑ a < n + 1, ∑ b < n + 1, f1 a * f2 b * fps.pow g (a + b) n
+    unfold fps.mul
+    have h1 : (∑ r < n + 1, fps.comp f1 g r * fps.comp f2 g (n - r)) = ∑ r < n + 1, ∑ a < n + 1, ∑ b < n + 1, f1 a * f2 b * (fps.pow g a r * fps.pow g b (n - r))
+      apply sum_congr.rat; intro r hr
+      rw [← fps.comp_range_extend f1 g hg0 r n (by omega), ← fps.comp_range_extend f2 g hg0 (n - r) n (by omega)]
+      rw [← sum_mul_const.rat]
+      apply sum_congr.rat; intro a ha
+      rw [← sum_const_mul.rat]
+      apply sum_congr.rat; intro b hb; ring
+    rw [h1, sum_swap.rat]
+    apply sum_congr.rat; intro a ha
+    rw [sum_swap.rat]
+    apply sum_congr.rat; intro b hb
+    rw [fps.pow_add_eq g a b n]; unfold fps.mul
+    rw [← sum_const_mul.rat]
+  rw [hR]
+  -- Now re-group sum_{a <= n} sum_{b <= n} by k = a + b: terms with a + b > n vanish since (g^(a+b))_n = 0!
+  have hvan_hi : (∑ a < n + 1, ∑ b < n + 1, f1 a * f2 b * fps.pow g (a + b) n) = ∑ a < n + 1, ∑ b < n - a + 1, f1 a * f2 b * fps.pow g (a + b) n
+    apply sum_congr.rat; intro a ha
+    have hgen : ∀ d : ℕ, (∑ b < (n - a + d) + 1, f1 a * f2 b * fps.pow g (a + b) n) = ∑ b < n - a + 1, f1 a * f2 b * fps.pow g (a + b) n
+      intro d; induction d with r ihr
+      · have h0 : n - a + 0 = n - a := by omega
+        rw [h0]
+      · rw [succ_eq_add_one.nat]
+        have hstep : n - a + (r + 1) + 1 = (n - a + r + 1) + 1 := by omega
+        rw [hstep, sum_below_succ, ihr]
+        have hgt : n < a + (n - a + r + 1) := by omega
+        rw [fps.pow_vanish_lt g hg0 (a + (n - a + r + 1)) n hgt]; ring
+    have heq : (n - a) + a = n := by omega
+    have hres := hgen a
+    rw [heq] at hres; exact hres
+  rw [hvan_hi]
+  have hsw := sum_tri_swap.rat (fun a b => f1 a * f2 b * fps.pow g (a + b) n) n
+  rw [← hsw]
+  unfold fps.comp fps.mul
+  apply sum_congr.rat; intro k hk
+  rw [← sum_mul_const.rat]
+  apply sum_congr.rat; intro a ha
+  have he : a + (k - a) = k := by omega
+  rw [he]
+
+-- THEOREM 1C: Formal Leibniz Product Rule (f * g)' = f' * g + f * g' in Q[[T]]!
++ fps.deriv_mul (f g : ℕ → ℚ) (n : ℕ) :
+    fps.deriv (fps.mul f g) n = fps.add (fps.mul (fps.deriv f) g) (fps.mul f (fps.deriv g)) n
+  unfold fps.deriv fps.mul fps.add
+  rw [← sum_const_mul.rat]
+  have hsplit : (∑ k < (n + 1) + 1, ((n + 1 : ℕ) : ℚ) * (f k * g ((n + 1) - k))) = (∑ k < (n + 1) + 1, (k : ℚ) * f k * g ((n + 1) - k)) + (∑ k < (n + 1) + 1, f k * ((((n + 1) - k : ℕ) : ℚ) * g ((n + 1) - k)))
+    rw [← sum_add.rat]
+    apply sum_congr.rat; intro k hk
+    have hsum_k : k + ((n + 1) - k) = n + 1 := by omega
+    have hcast : (k : ℚ) + (((n + 1) - k : ℕ) : ℚ) = ((n + 1 : ℕ) : ℚ) := by rw [← cast_add.rat, hsum_k]
+    rw [← hcast]; ring
+  rw [hsplit]
+  have hpart1 : (∑ k < (n + 1) + 1, (k : ℚ) * f k * g ((n + 1) - k)) = ∑ j < n + 1, ((j + 1 : ℕ) : ℚ) * f (j + 1) * g (n - j)
+    rw [sum_range_succ'.rat (fun k => (k : ℚ) * f k * g ((n + 1) - k)) (n + 1)]
+    have h0 : ((0 : ℕ) : ℚ) * f 0 * g ((n + 1) - 0) = 0 := by rw [cast_zero.rat]; ring
+    rw [h0]
+    have hcon : (∑ j < n + 1, ((j + 1 : ℕ) : ℚ) * f (j + 1) * g ((n + 1) - (j + 1))) = ∑ j < n + 1, ((j + 1 : ℕ) : ℚ) * f (j + 1) * g (n - j)
+      apply sum_congr.rat; intro j hj
+      have he : (n + 1) - (j + 1) = n - j := by omega
+      rw [he]
+    rw [hcon]; ring
+  have hpart2 : (∑ k < (n + 1) + 1, f k * ((((n + 1) - k : ℕ) : ℚ) * g ((n + 1) - k))) = ∑ k < n + 1, f k * (((n - k + 1 : ℕ) : ℚ) * g (n - k + 1))
+    rw [sum_below_succ]
+    have hlast : (n + 1) - (n + 1) = 0 := by omega
+    rw [hlast, cast_zero.rat]
+    have hcon : (∑ k < n + 1, f k * ((((n + 1) - k : ℕ) : ℚ) * g ((n + 1) - k))) = ∑ k < n + 1, f k * (((n - k + 1 : ℕ) : ℚ) * g (n - k + 1))
+      apply sum_congr.rat; intro k hk
+      have he : (n + 1) - k = n - k + 1 := by omega
+      rw [he]
+    rw [hcon]; ring
+  rw [hpart1, hpart2]
+
++ fps.deriv_pow (g : ℕ → ℚ) (m : ℕ) :
+    ∀ n : ℕ, fps.deriv (fps.pow g (m + 1)) n = ((m + 1 : ℕ) : ℚ) * fps.mul (fps.pow g m) (fps.deriv g) n
+  induction m with n r ihr n
+  · have h1 : fps.pow g (0 + 1) = g
+      funext k; rw [fps.pow_succ_eq, fps.pow_zero_fun, fps.one_mul]
+    rw [h1, fps.pow_zero_fun, fps.one_mul, cast_add.rat, cast_zero.rat, cast_one.rat]; ring
+  · rw [succ_eq_add_one.nat]
+    have hstep : fps.pow g ((r + 1) + 1) = fps.mul (fps.pow g (r + 1)) g := by rfl
+    rw [hstep, fps.deriv_mul]; unfold fps.add
+    have h1 : fps.mul (fps.deriv (fps.pow g (r + 1))) g n = ((r + 1 : ℕ) : ℚ) * fps.mul (fps.pow g (r + 1)) (fps.deriv g) n
+      have hcon : fps.mul (fps.deriv (fps.pow g (r + 1))) g n = ((r + 1 : ℕ) : ℚ) * fps.mul (fps.mul (fps.pow g r) (fps.deriv g)) g n
+        unfold fps.mul; rw [← sum_const_mul.rat]
+        apply sum_congr.rat; intro k hk; rw [ihr k]; ring
+      rw [hcon, fps.mul_assoc, fps.mul_comm_fun (fps.deriv g) g, ← fps.mul_assoc]; rfl
+    rw [h1, cast_add.rat (r + 1) 1, cast_one.rat]; ring
+
+-- THEOREM 1D: Exact Formal Power-Series Chain Rule (f o g)' = (f' o g) * g' (0 CUSTOM AXIOMS!)
++ fps.deriv_comp (f g : ℕ → ℚ) (hg0 : g 0 = 0) (n : ℕ) :
+    fps.deriv (fps.comp f g) n = fps.mul (fps.comp (fps.deriv f) g) (fps.deriv g) n
+  unfold fps.deriv fps.comp
+  rw [← sum_const_mul.rat]
+  rw [sum_range_succ'.rat (fun k => ((n + 1 : ℕ) : ℚ) * (f k * fps.pow g k (n + 1))) (n + 1)]
+  have h0 : fps.pow g 0 (n + 1) = 0
+    rw [fps.pow_zero_eq]; unfold fps.one; have hne : n + 1 ≠ 0 := by omega
+    rw [if_neg hne]
+  rw [h0]
+  have h1 : (∑ j < n + 1, ((n + 1 : ℕ) : ℚ) * (f (j + 1) * fps.pow g (j + 1) (n + 1))) = ∑ j < n + 1, ∑ r < n + 1, (((j + 1 : ℕ) : ℚ) * f (j + 1) * fps.pow g j r) * (((n - r + 1 : ℕ) : ℚ) * g (n - r + 1))
+    apply sum_congr.rat; intro j hj
+    have hd := fps.deriv_pow g j n
+    unfold fps.deriv fps.mul at hd
+    have hre : ((n + 1 : ℕ) : ℚ) * (f (j + 1) * fps.pow g (j + 1) (n + 1)) = f (j + 1) * (((n + 1 : ℕ) : ℚ) * fps.pow g (j + 1) (n + 1)) := by ring
+    rw [hre, hd, ← sum_const_mul.rat, ← sum_const_mul.rat]
+    apply sum_congr.rat; intro r hr; ring
+  rw [h1, sum_swap.rat]
+  unfold fps.mul
+  have hcon : (∑ r < n + 1, ∑ j < n + 1, ((j + 1 : ℕ) : ℚ) * f (j + 1) * fps.pow g j r * (((n - r + 1 : ℕ) : ℚ) * g (n - r + 1))) = ∑ r < n + 1, (∑ j < r + 1, ((j + 1 : ℕ) : ℚ) * f (j + 1) * fps.pow g j r) * (((n - r + 1 : ℕ) : ℚ) * g (n - r + 1))
+    apply sum_congr.rat; intro r hr
+    rw [sum_mul_const.rat]
+    have hext := fps.comp_range_extend (fps.deriv f) g hg0 r n (by omega)
+    unfold fps.comp fps.deriv at hext
+    rw [hext]
+  rw [hcon]; ring
+
+-- Formal integration uniqueness: if f 0 = g 0 and f' = g', then f = g!
++ fps.eq_of_deriv_eq (f g : ℕ → ℚ) (h0 : f 0 = g 0) (hd : ∀ n, fps.deriv f n = fps.deriv g n) :
+    ∀ n : ℕ, f n = g n
+  intro n
+  by_cases hn0 : n = 0
+  · rw [hn0]; exact h0
+  · have hm : n = (n - 1) + 1 := by omega
+    rw [hm]
+    have h1 := hd (n - 1)
+    unfold fps.deriv at h1
+    have hc := mul_inv_cancel.rat (((n - 1) + 1 : ℕ) : ℚ) (by linarith)
+    linear_combination (1 / (((n - 1) + 1 : ℕ) : ℚ)) * h1 - (f ((n - 1) + 1) - g ((n - 1) + 1)) * hc
+
+-- ====================================================================================
+-- 2. Multiplicative Formal Group Law G_m^ & Lubin-Tate Frobenius Congruence
+-- ====================================================================================
+
+-> fgl.one_plus_T (n : ℕ) : ℚ := if n = 0 then 1 else if n = 1 then 1 else 0
+-> fgl.gm_end (m n : ℕ) : ℚ := if n = 0 then 0 else ((choose m n : ℕ) : ℚ)
+
++ fgl.gm_end_zero (m : ℕ) : fgl.gm_end m 0 = 0
+  unfold fgl.gm_end; simp
+
+-- Exact binomial expansion of (1 + T)^m in Q[[T]]!
++ fgl.gm_one_plus_pow (m : ℕ) : ∀ n : ℕ, fps.pow fgl.one_plus_T m n = ((choose m n : ℕ) : ℚ)
+  induction m with n r ihr n
+  · rw [fps.pow_zero_eq]; unfold fps.one
+    by_cases hn0 : n = 0
+    · rw [hn0, choose_zero_zero, cast_one.rat]; simp
+    · rw [choose_eq_zero_of_lt 0 n (by omega), cast_zero.rat]; simp [hn0]
+  · rw [succ_eq_add_one.nat, fps.pow_succ_eq]; unfold fps.mul
+    by_cases hn0 : n = 0
+    · rw [hn0, sum_below_succ, sum_below_zero, ihr 0, choose_zero_right, choose_zero_right]
+      have h00 : 0 - 0 = 0 := by decide
+      rw [h00]; unfold fgl.one_plus_T; simp [cast_one.rat]
+    · have hm : n = (n - 1) + 1 := by omega
+      rw [hm, sum_below_succ, sum_below_succ]
+      have htail : (∑ k < n - 1, fps.pow fgl.one_plus_T r k * fgl.one_plus_T ((n - 1) + 1 - k)) = 0
+        have h0 : (∑ k < n - 1, fps.pow fgl.one_plus_T r k * fgl.one_plus_T ((n - 1) + 1 - k)) = ∑ k < n - 1, (0 : ℚ)
+          apply sum_congr.rat; intro k hk
+          unfold fgl.one_plus_T
+          have hne0 : (n - 1) + 1 - k ≠ 0 := by omega
+          have hne1 : (n - 1) + 1 - k ≠ 1 := by omega
+          rw [if_neg hne0, if_neg hne1]; ring
+        rw [h0, sum_const.rat]; ring
+      rw [htail, ihr (n - 1), ihr ((n - 1) + 1)]
+      have hs1 : (n - 1) + 1 - (n - 1) = 1 := by omega
+      have hs0 : (n - 1) + 1 - ((n - 1) + 1) = 0 := by omega
+      rw [hs1, hs0]
+      have h10 : fgl.one_plus_T 0 = 1 := by unfold fgl.one_plus_T; simp
+      have h11 : fgl.one_plus_T 1 = 1 := by unfold fgl.one_plus_T; simp
+      rw [h10, h11, choose_succ_succ r (n - 1), cast_add.rat]; ring
+
++ fgl.one_plus_gm_end (m n : ℕ) : fps.add fps.one (fgl.gm_end m) n = fps.pow fgl.one_plus_T m n
+  rw [fgl.gm_one_plus_pow]; unfold fps.add fps.one fgl.gm_end
+  by_cases hn0 : n = 0
+  · rw [hn0, choose_zero_right, cast_one.rat]; simp
+  · rw [if_neg hn0, if_neg hn0]; ring
+
+-- Helper: fps.comp (fps.pow f a) g = fps.pow (fps.comp f g) a when g 0 = 0!
++ fps.comp_pow (f g : ℕ → ℚ) (hg0 : g 0 = 0) (a : ℕ) :
+    ∀ n : ℕ, fps.comp (fps.pow f a) g n = fps.pow (fps.comp f g) a n
+  induction a with n r ihr n
+  · rw [fps.pow_zero_fun, fps.pow_zero_fun]; exact fps.comp_one g n
+  · rw [succ_eq_add_one.nat]
+    have h1 : fps.pow f (r + 1) = fps.mul (fps.pow f r) f := by rfl
+    rw [h1, fps.comp_mul (fps.pow f r) f g hg0 n, fps.pow_succ_eq]
+    exact fps.mul_congr (fps.comp (fps.pow f r) g) (fps.pow (fps.comp f g) r) (fps.comp f g) (fps.comp f g) n (by intro k _; exact ihr k) (by intro k _; rfl)
+
++ fps.pow_pow (f : ℕ → ℚ) (b a : ℕ) :
+    ∀ n : ℕ, fps.pow (fps.pow f b) a n = fps.pow f (a * b) n
+  induction a with n r ihr n
+  · have h0 : 0 * b = 0 := by ring
+    rw [h0, fps.pow_zero_eq, fps.pow_zero_eq]
+  · rw [succ_eq_add_one.nat, fps.pow_succ_eq]
+    have hmul : (r + 1) * b = r * b + b := by ring
+    rw [hmul, fps.pow_add_eq f (r * b) b n]
+    exact fps.mul_congr (fps.pow (fps.pow f b) r) (fps.pow f (r * b)) (fps.pow f b) (fps.pow f b) n (by intro k _; exact ihr k) (by intro k _; rfl)
+
++ fgl.comp_one_plus_T (b k : ℕ) :
+    fps.comp fgl.one_plus_T (fgl.gm_end b) k = fps.pow fgl.one_plus_T b k
+  rw [← fgl.one_plus_gm_end b k]
+  unfold fps.comp fps.add fps.one
+  by_cases hk0 : k = 0
+  · rw [hk0, sum_below_succ, sum_below_zero, fps.pow_zero_eq]
+    unfold fgl.one_plus_T fps.one fgl.gm_end; simp
+  · have hm : k = (k - 1) + 1 := by omega
+    rw [hm, sum_range_succ'.rat (fun j => fgl.one_plus_T j * fps.pow (fgl.gm_end b) j ((k - 1) + 1)) ((k - 1) + 1)]
+    rw [sum_range_succ'.rat (fun j => fgl.one_plus_T (j + 1) * fps.pow (fgl.gm_end b) (j + 1) ((k - 1) + 1)) (k - 1)]
+    have htail : (∑ j < k - 1, fgl.one_plus_T ((j + 1) + 1) * fps.pow (fgl.gm_end b) ((j + 1) + 1) ((k - 1) + 1)) = 0
+      have h0 : (∑ j < k - 1, fgl.one_plus_T ((j + 1) + 1) * fps.pow (fgl.gm_end b) ((j + 1) + 1) ((k - 1) + 1)) = ∑ j < k - 1, (0 : ℚ)
+        apply sum_congr.rat; intro j hj
+        unfold fgl.one_plus_T
+        have hne0 : (j + 1) + 1 ≠ 0 := by omega; have hne1 : (j + 1) + 1 ≠ 1 := by omega
+        rw [if_neg hne0, if_neg hne1]; ring
+      rw [h0, sum_const.rat]; ring
+    rw [htail]
+    have h10 : fgl.one_plus_T 0 = 1 := by unfold fgl.one_plus_T; simp
+    have h11 : fgl.one_plus_T 1 = 1 := by unfold fgl.one_plus_T; simp
+    have hp0 : fps.pow (fgl.gm_end b) 0 ((k - 1) + 1) = 0
+      rw [fps.pow_zero_eq]; unfold fps.one; have hne : (k - 1) + 1 ≠ 0 := by omega; rw [if_neg hne]
+    have hp1 : fps.pow (fgl.gm_end b) 1 ((k - 1) + 1) = fgl.gm_end b ((k - 1) + 1)
+      have h1e : (1 : ℕ) = 0 + 1 := by decide
+      rw [h1e, fps.pow_succ_eq, fps.pow_zero_fun, fps.one_mul]
+    have h01 : (0 + 1 : ℕ) = 1 := by decide
+    have hne : (k - 1) + 1 ≠ 0 := by omega
+    rw [h01, h10, h11, hp0, hp1, if_neg hne]; ring
+
+-- THEOREM 2A: Exact Lubin-Tate Endomorphism Composition Law [a]([b](T)) = [a * b](T)!
++ fgl.gm_end_comp (a b n : ℕ) :
+    fps.comp (fgl.gm_end a) (fgl.gm_end b) n = fgl.gm_end (a * b) n
+  have h1 : fps.comp (fps.add fps.one (fgl.gm_end a)) (fgl.gm_end b) n = fps.pow fgl.one_plus_T (a * b) n
+    have hcon : fps.comp (fps.add fps.one (fgl.gm_end a)) (fgl.gm_end b) n = fps.comp (fps.pow fgl.one_plus_T a) (fgl.gm_end b) n := by unfold fps.comp; apply sum_congr.rat; intro k hk; rw [fgl.one_plus_gm_end a k]
+    rw [hcon, fps.comp_pow fgl.one_plus_T (fgl.gm_end b) (fgl.gm_end_zero b) a n]
+    rw [fps.pow_congr (fps.comp fgl.one_plus_T (fgl.gm_end b)) (fps.pow fgl.one_plus_T b) (fgl.comp_one_plus_T b) a n]
+    exact fps.pow_pow fgl.one_plus_T b a n
+  rw [fps.comp_add] at h1
+  unfold fps.add at h1
+  rw [fps.comp_one, ← fgl.one_plus_gm_end (a * b) n] at h1
+  unfold fps.add at h1; linarith
+
++ fgl.gm_end_of_pos (m n : ℕ) (hn : n ≠ 0) : fgl.gm_end m n = ((choose m n : ℕ) : ℚ)
+  unfold fgl.gm_end
+  rw [if_neg hn]
+
+-- THEOREM 2B: Lubin-Tate Frobenius Congruence [p](T) = T^p (mod p * Z_(p)[[T]])!
++ fgl.gm_frobenius_congruence (p : ℕ) (hprime : is_prime_nat p) :
+    fgl.gm_end p 1 = (p : ℚ) ∧
+    fgl.gm_end p p = 1 ∧
+    ∀ n : ℕ, is_p_int p ((fgl.gm_end p n - fps.monomial p 1 n) / (p : ℚ))
+  have hp : 2 ≤ p := hprime.1
+  have hcp := mul_inv_cancel.rat (p : ℚ) (by linarith)
+  constructor
+  · rw [fgl.gm_end_of_pos p 1 (by decide), choose_one_right]
+  · constructor
+    · unfold fgl.gm_end
+      have hp0 : p ≠ 0 := by omega
+      rw [if_neg hp0, choose_self, cast_one.rat]
+    · intro n
+      unfold fgl.gm_end fps.monomial
+      by_cases hn0 : n = 0
+      · have hnp : n ≠ p := by omega
+        rw [if_pos hn0, if_neg hnp]
+        have hz : (0 - 0) / (p : ℚ) = 0 := by rw [div_def.rat]; ring
+        rw [hz]; exact is_p_int.zero p hp
+      · by_cases hnp : n = p
+        · rw [if_neg hn0, if_pos hnp, hnp, choose_self, cast_one.rat]
+          have hz : (1 - 1) / (p : ℚ) = 0 := by rw [div_def.rat]; ring
+          rw [hz]; exact is_p_int.zero p hp
+        · rw [if_neg hn0, if_neg hnp]
+          by_cases hlt : n < p
+          · have hdvd := kummer.prime_dvd_choose p n hprime (by omega) hlt
+            obtain ⟨q, hq⟩ := (dvd.iff_exists p (choose p n) (by omega)).mp hdvd
+            have hq_eq : (((choose p n : ℕ) : ℚ) - 0) / (p : ℚ) = (q : ℚ)
+              rw [hq, cast_mul.rat p q, div_def.rat]
+              have hre : ((p : ℚ) * (q : ℚ) - 0) * (1 / (p : ℚ)) = (q : ℚ) * ((p : ℚ) * (1 / (p : ℚ))) := by ring
+              rw [hre, hcp]; ring
+            rw [hq_eq]; exact is_p_int.of_nat p hp q
+          · rw [choose_eq_zero_of_lt p n (by omega), cast_zero.rat]
+            have hz : (0 - 0) / (p : ℚ) = 0 := by rw [div_def.rat]; ring
+            rw [hz]; exact is_p_int.zero p hp
+
+-- Formal logarithm of G_m^: log_Gm(T) = sum_{n >= 1} (-1)^(n-1) / n * T^n!
+-> fgl.gm_log (n : ℕ) : ℚ :=
+  if n = 0 then 0 else (if n % 2 = 1 then 1 else -1) / (n : ℚ)
+
++ fgl.gm_log_deriv (n : ℕ) : fps.deriv fgl.gm_log n = if n % 2 = 0 then 1 else -1
+  unfold fps.deriv
+  have hne : n + 1 ≠ 0 := by omega
+  have hc := mul_inv_cancel.rat ((n + 1 : ℕ) : ℚ) (by linarith)
+  by_cases hev : n % 2 = 0
+  · have hodd : (n + 1) % 2 = 1
+      have h1 : n + 1 = 2 * (n / 2) + 1 := by omega
+      exact (div_mod_unique.nat (n + 1) 2 (n / 2) 1 h1 (by decide)).2.symm
+    have hval : fgl.gm_log (n + 1) = 1 / ((n + 1 : ℕ) : ℚ) := by unfold fgl.gm_log; simp [hne, hodd]
+    rw [hval, hc]; simp [hev]
+  · have hodd_n : n % 2 = 1 := by omega
+    have hev1 : (n + 1) % 2 = 0
+      have h1 : n + 1 = 2 * (n / 2 + 1) + 0 := by omega
+      exact (div_mod_unique.nat (n + 1) 2 (n / 2 + 1) 0 h1 (by decide)).2.symm
+    have hne1 : (n + 1) % 2 ≠ 1 := by omega
+    have hval : fgl.gm_log (n + 1) = (-1 : ℚ) / ((n + 1 : ℕ) : ℚ) := by unfold fgl.gm_log; simp [hne, hne1]
+    rw [hval, div_def.rat (-1 : ℚ) ((n + 1 : ℕ) : ℚ)]
+    have hre : ((n + 1 : ℕ) : ℚ) * ((-1 : ℚ) * (1 / ((n + 1 : ℕ) : ℚ))) = -(((n + 1 : ℕ) : ℚ) * (1 / ((n + 1 : ℕ) : ℚ))) := by ring
+    rw [hre, hc]; simp [hev]
+
++ fgl.one_plus_T_mul_log_deriv (n : ℕ) :
+    fps.mul fgl.one_plus_T (fps.deriv fgl.gm_log) n = fps.one n
+  rw [fps.mul_comm]; unfold fps.mul fps.one
+  by_cases hn0 : n = 0
+  · rw [hn0, sum_below_succ, sum_below_zero, fgl.gm_log_deriv 0]
+    have h00 : 0 - 0 = 0 := by decide
+    have h0m : 0 % 2 = 0 := by decide
+    rw [h00]; unfold fgl.one_plus_T; simp [h0m]
+  · have hm : n = (n - 1) + 1 := by omega
+    rw [hm, sum_below_succ, sum_below_succ]
+    have htail : (∑ k < n - 1, fps.deriv fgl.gm_log k * fgl.one_plus_T ((n - 1) + 1 - k)) = 0
+      have h0 : (∑ k < n - 1, fps.deriv fgl.gm_log k * fgl.one_plus_T ((n - 1) + 1 - k)) = ∑ k < n - 1, (0 : ℚ)
+        apply sum_congr.rat; intro k hk
+        unfold fgl.one_plus_T
+        have hne0 : (n - 1) + 1 - k ≠ 0 := by omega
+        have hne1 : (n - 1) + 1 - k ≠ 1 := by omega
+        rw [if_neg hne0, if_neg hne1]; ring
+      rw [h0, sum_const.rat]; ring
+    rw [htail, fgl.gm_log_deriv (n - 1), fgl.gm_log_deriv ((n - 1) + 1)]
+    have hs1 : (n - 1) + 1 - (n - 1) = 1 := by omega
+    have hs0 : (n - 1) + 1 - ((n - 1) + 1) = 0 := by omega
+    have hne : (n - 1) + 1 ≠ 0 := by omega
+    have h10 : fgl.one_plus_T 0 = 1 := by unfold fgl.one_plus_T; simp
+    have h11 : fgl.one_plus_T 1 = 1 := by unfold fgl.one_plus_T; simp
+    rw [hs1, hs0, h10, h11, if_neg hne]
+    by_cases hev : (n - 1) % 2 = 0
+    · have hodd : ((n - 1) + 1) % 2 = 1
+        have h1 : (n - 1) + 1 = 2 * ((n - 1) / 2) + 1 := by omega
+        exact (div_mod_unique.nat ((n - 1) + 1) 2 ((n - 1) / 2) 1 h1 (by decide)).2.symm
+      have hne2 : ((n - 1) + 1) % 2 ≠ 0 := by omega
+      rw [if_pos hev, if_neg hne2]; ring
+    · have hodd_p : (n - 1) % 2 = 1 := by omega
+      have hev2 : ((n - 1) + 1) % 2 = 0
+        have h1 : (n - 1) + 1 = 2 * ((n - 1) / 2 + 1) + 0 := by omega
+        exact (div_mod_unique.nat ((n - 1) + 1) 2 ((n - 1) / 2 + 1) 0 h1 (by decide)).2.symm
+      rw [if_neg hev, if_pos hev2]; ring
+
+-- THEOREM 2C: Exact Formal Logarithm Homomorphism log_Gm([m](T)) = m * log_Gm(T) (0 CUSTOM AXIOMS!)
++ fgl.gm_formal_log_hom (m n : ℕ) :
+    fps.comp fgl.gm_log (fgl.gm_end m) n = (m : ℚ) * fgl.gm_log n
+  by_cases hm0 : m = 0
+  · rw [hm0, cast_zero.rat]
+    have hgm0 : ∀ k, fgl.gm_end 0 k = 0
+      intro k; unfold fgl.gm_end
+      by_cases hk0 : k = 0
+      · simp [hk0]
+      · simp [hk0, choose_eq_zero_of_lt 0 k (by omega), cast_zero.rat]
+    have hpow0 : ∀ r, 1 ≤ r → ∀ k, fps.pow (fgl.gm_end 0) r k = 0
+      intro r hr; induction r with hr k s ihs hr k
+      · omega
+      · rw [succ_eq_add_one.nat, fps.pow_succ_eq]; unfold fps.mul
+        have h0 : (∑ j < k + 1, fps.pow (fgl.gm_end 0) s j * fgl.gm_end 0 (k - j)) = ∑ j < k + 1, (0 : ℚ) := by apply sum_congr.rat; intro j hj; rw [hgm0 (k - j)]; ring
+        rw [h0, sum_const.rat]; ring
+    unfold fps.comp
+    rw [sum_range_succ'.rat (fun k => fgl.gm_log k * fps.pow (fgl.gm_end 0) k n) n]
+    have h0 : (∑ i < n, fgl.gm_log (i + 1) * fps.pow (fgl.gm_end 0) (i + 1) n) = ∑ i < n, (0 : ℚ) := by apply sum_congr.rat; intro i hi; rw [hpow0 (i + 1) (by omega) n]; ring
+    rw [h0, sum_const.rat]; unfold fgl.gm_log; simp
+  · have hm_eq : m = (m - 1) + 1 := by omega
+    have h0_eq : fps.comp fgl.gm_log (fgl.gm_end m) 0 = fps.scale (m : ℚ) fgl.gm_log 0 := by rw [fps.comp_zero_at_zero]; unfold fps.scale fgl.gm_log; simp
+    have hd_eq : ∀ k, fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m)) k = fps.deriv (fps.scale (m : ℚ) fgl.gm_log) k
+      intro k
+      -- Show (1 + T) * (log_Gm o [m])' = m * 1 = (1 + T) * (m * log_Gm')!
+      have hcomp_inv : ∀ j, fps.mul (fps.pow fgl.one_plus_T m) (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) j = fps.one j
+        intro j
+        have h1 := fps.comp_mul fgl.one_plus_T (fps.deriv fgl.gm_log) (fgl.gm_end m) (fgl.gm_end_zero m) j
+        have hL : fps.comp (fps.mul fgl.one_plus_T (fps.deriv fgl.gm_log)) (fgl.gm_end m) j = fps.one j
+          have hc : fps.comp (fps.mul fgl.one_plus_T (fps.deriv fgl.gm_log)) (fgl.gm_end m) j = fps.comp fps.one (fgl.gm_end m) j := by unfold fps.comp; apply sum_congr.rat; intro r hr; rw [fgl.one_plus_T_mul_log_deriv r]
+          rw [hc, fps.comp_one]
+        have hcon := fps.mul_congr (fps.pow fgl.one_plus_T m) (fps.comp fgl.one_plus_T (fgl.gm_end m)) (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) j (by intro r _; exact (fgl.comp_one_plus_T m r).symm) (by intro r _; rfl)
+        rw [hcon, ← h1, hL]
+      have hderiv_gm : ∀ j, fps.deriv (fgl.gm_end m) j = (m : ℚ) * fps.pow fgl.one_plus_T (m - 1) j
+        intro j
+        have h1 : fps.deriv (fgl.gm_end m) j = fps.deriv (fps.pow fgl.one_plus_T m) j
+          unfold fps.deriv; rw [← fgl.one_plus_gm_end m (j + 1)]; unfold fps.add fps.one
+          have hne : j + 1 ≠ 0 := by omega
+          rw [if_neg hne]; ring
+        rw [h1, hm_eq, fps.deriv_pow fgl.one_plus_T (m - 1) j]
+        have hd1pT : ∀ r, fps.deriv fgl.one_plus_T r = fps.one r
+          intro r; unfold fps.deriv fgl.one_plus_T fps.one
+          by_cases hr0 : r = 0
+          · rw [hr0]; simp [cast_one.rat]
+          · have hne0 : r + 1 ≠ 0 := by omega
+            have hne1 : r + 1 ≠ 1 := by omega
+            rw [if_neg hne0, if_neg hne1, if_neg hr0]; ring
+        have hc := fps.mul_congr (fps.pow fgl.one_plus_T (m - 1)) (fps.pow fgl.one_plus_T (m - 1)) (fps.deriv fgl.one_plus_T) fps.one j (by intro r _; rfl) (by intro r _; exact hd1pT r)
+        rw [hc, fps.mul_one, ← hm_eq]
+      -- Compute (1 + T) * (log_Gm o [m])' = m * 1!
+      have hmul_1pT : ∀ j, fps.mul fgl.one_plus_T (fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m))) j = (m : ℚ) * fps.one j
+        intro j
+        have hstep1 : fps.mul fgl.one_plus_T (fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m))) j = fps.mul fgl.one_plus_T (fps.mul (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.deriv (fgl.gm_end m))) j := by exact fps.mul_congr fgl.one_plus_T fgl.one_plus_T (fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m))) (fps.mul (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.deriv (fgl.gm_end m))) j (by intro r _; rfl) (by intro r _; exact fps.deriv_comp fgl.gm_log (fgl.gm_end m) (fgl.gm_end_zero m) r)
+        rw [hstep1]
+        have hstep2 : fps.mul fgl.one_plus_T (fps.mul (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.deriv (fgl.gm_end m))) j = (m : ℚ) * fps.mul (fps.pow fgl.one_plus_T m) (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) j
+          have hscale : ∀ r, fps.mul (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.deriv (fgl.gm_end m)) r = (m : ℚ) * fps.mul (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.pow fgl.one_plus_T (m - 1)) r
+            intro r; unfold fps.mul; rw [← sum_const_mul.rat]
+            apply sum_congr.rat; intro t ht; rw [hderiv_gm (r - t)]; ring
+          have ha : fps.mul fgl.one_plus_T (fps.mul (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.deriv (fgl.gm_end m))) j = (m : ℚ) * fps.mul fgl.one_plus_T (fps.mul (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.pow fgl.one_plus_T (m - 1))) j
+            rw [fps.mul_def fgl.one_plus_T (fps.mul (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.deriv (fgl.gm_end m))) j, fps.mul_def fgl.one_plus_T (fps.mul (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.pow fgl.one_plus_T (m - 1))) j, ← sum_const_mul.rat]
+            apply sum_congr.rat; intro t ht; rw [hscale (j - t)]; ring
+          rw [ha, ← fps.mul_assoc, fps.mul_comm_fun fgl.one_plus_T (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)), fps.mul_assoc]
+          have hpm : fps.mul (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) (fps.mul fgl.one_plus_T (fps.pow fgl.one_plus_T (m - 1))) j = fps.mul (fps.pow fgl.one_plus_T m) (fps.comp (fps.deriv fgl.gm_log) (fgl.gm_end m)) j
+            rw [fps.mul_comm]
+            apply fps.mul_congr; intro r _
+            rw [fps.mul_comm, ← fps.pow_succ_eq fgl.one_plus_T (m - 1) r, ← hm_eq]
+            intro r _; rfl
+          rw [hpm]
+        rw [hstep2, hcomp_inv j]
+      -- Multiply both sides by (log_Gm)' = (1 + T)^(-1) to cancel (1 + T)!
+      have hcancel : fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m)) k = (m : ℚ) * fps.deriv fgl.gm_log k
+        have hL := fps.mul_assoc (fps.deriv fgl.gm_log) fgl.one_plus_T (fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m))) k
+        have hinvL : fps.mul (fps.mul (fps.deriv fgl.gm_log) fgl.one_plus_T) (fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m))) k = fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m)) k
+          have hc := fps.mul_congr (fps.mul (fps.deriv fgl.gm_log) fgl.one_plus_T) fps.one (fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m))) (fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m))) k (by intro r _; rw [fps.mul_comm]; exact fgl.one_plus_T_mul_log_deriv r) (by intro r _; rfl)
+          rw [hc, fps.one_mul]
+        have hR : fps.mul (fps.deriv fgl.gm_log) (fps.mul fgl.one_plus_T (fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m)))) k = (m : ℚ) * fps.deriv fgl.gm_log k
+          have hc : fps.mul (fps.deriv fgl.gm_log) (fps.mul fgl.one_plus_T (fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m)))) k = (m : ℚ) * fps.mul (fps.deriv fgl.gm_log) fps.one k
+            rw [fps.mul_def (fps.deriv fgl.gm_log) (fps.mul fgl.one_plus_T (fps.deriv (fps.comp fgl.gm_log (fgl.gm_end m)))) k, fps.mul_def (fps.deriv fgl.gm_log) fps.one k, ← sum_const_mul.rat]
+            apply sum_congr.rat; intro r hr; rw [hmul_1pT (k - r)]; ring
+          rw [hc, fps.mul_one]
+        rw [← hinvL, hL, hR]
+      rw [hcancel]; unfold fps.deriv fps.scale; ring
+    have hmain := fps.eq_of_deriv_eq (fps.comp fgl.gm_log (fgl.gm_end m)) (fps.scale (m : ℚ) fgl.gm_log) h0_eq hd_eq n
+    unfold fps.scale at hmain; exact hmain
+
+-- ====================================================================================
+-- 3. Cyclotomic Wach Polynomial q(T) = ((1 + T)^p - 1) / T & Fontaine-Laffaille
+--    Height-h Filtration Divisibility (`Formalism/` Wach modules, `remark.pdf` 15, 17)
+-- ====================================================================================
+
+-> wach.q_poly (p n : ℕ) : ℚ := ((choose p (n + 1) : ℕ) : ℚ)
+
+-> wach.phi (p : ℕ) (f : ℕ → ℚ) : ℕ → ℚ := fps.comp f (fgl.gm_end p)
+
+-- THEOREM 3A: Exact identity T * q(T) = [p](T) = (1 + T)^p - 1!
++ wach.q_poly_mul_T (p n : ℕ) :
+    fps.mul (fps.monomial 1 1) (wach.q_poly p) n = fgl.gm_end p n
+  unfold fps.mul fps.monomial wach.q_poly fgl.gm_end
+  by_cases hn0 : n = 0
+  · rw [hn0, sum_below_succ, sum_below_zero]; simp
+  · have hm : n = (n - 1) + 1 := by omega
+    rw [hm, sum_range_succ'.rat (fun k => (if k = 1 then 1 else 0) * ((choose p (((n - 1) + 1) - k + 1) : ℕ) : ℚ)) ((n - 1) + 1)]
+    rw [sum_range_succ'.rat (fun k => (if k + 1 = 1 then 1 else 0) * ((choose p (((n - 1) + 1) - (k + 1) + 1) : ℕ) : ℚ)) (n - 1)]
+    have htail : (∑ k < n - 1, (if (k + 1) + 1 = 1 then 1 else 0) * ((choose p (((n - 1) + 1) - ((k + 1) + 1) + 1) : ℕ) : ℚ)) = 0
+      have h0 : (∑ k < n - 1, (if (k + 1) + 1 = 1 then 1 else 0) * ((choose p (((n - 1) + 1) - ((k + 1) + 1) + 1) : ℕ) : ℚ)) = ∑ k < n - 1, (0 : ℚ)
+        apply sum_congr.rat; intro k hk
+        have hne : (k + 1) + 1 ≠ 1 := by omega
+        rw [if_neg hne]; ring
+      rw [h0, sum_const.rat]; ring
+    rw [htail]
+    have hne : (n - 1) + 1 ≠ 0 := by omega
+    have hsub : (n - 1) + 1 - 1 + 1 = (n - 1) + 1 := by omega
+    rw [if_neg hne]
+    simp [hsub]
+
+-- THEOREM 3B: Exact Eisenstein Properties of the Cyclotomic Wach Polynomial q(T)!
++ wach.q_poly_eisenstein (p : ℕ) (hprime : is_prime_nat p) :
+    wach.q_poly p 0 = (p : ℚ) ∧
+    (∀ n < p - 1, is_p_int p (wach.q_poly p n / (p : ℚ))) ∧
+    wach.q_poly p (p - 1) = 1 ∧
+    (∀ n, p ≤ n → wach.q_poly p n = 0)
+  have hp : 2 ≤ p := hprime.1
+  have hcp := mul_inv_cancel.rat (p : ℚ) (by linarith)
+  constructor
+  · unfold wach.q_poly; simp [choose_one_right]
+  · constructor
+    · intro n hn
+      unfold wach.q_poly
+      have hdvd := kummer.prime_dvd_choose p (n + 1) hprime (by omega) (by omega)
+      obtain ⟨q, hq⟩ := (dvd.iff_exists p (choose p (n + 1)) (by omega)).mp hdvd
+      have hq_eq : ((choose p (n + 1) : ℕ) : ℚ) / (p : ℚ) = (q : ℚ)
+        rw [hq, cast_mul.rat p q, div_def.rat]
+        have hre : (p : ℚ) * (q : ℚ) * (1 / (p : ℚ)) = (q : ℚ) * ((p : ℚ) * (1 / (p : ℚ))) := by ring
+        rw [hre, hcp]; ring
+      rw [hq_eq]; exact is_p_int.of_nat p hp q
+    · constructor
+      · unfold wach.q_poly
+        have hpm : (p - 1) + 1 = p := by omega
+        rw [hpm, choose_self, cast_one.rat]
+      · intro n hn; unfold wach.q_poly
+        rw [choose_eq_zero_of_lt p (n + 1) (by omega), cast_zero.rat]
+
+-- Helper: if (g1 - g2) / p in Z_(p)[[T]] and g1, g2 in Z_(p)[[T]], then (g1^k - g2^k) / p in Z_(p)[[T]]!
++ fps.pow_sub_mod_p (p : ℕ) (hprime : is_prime_nat p) (g1 g2 : ℕ → ℚ)
+    (h1 : ∀ n, is_p_int p (g1 n)) (h2 : ∀ n, is_p_int p (g2 n))
+    (hdiff : ∀ n, is_p_int p ((g1 n - g2 n) / (p : ℚ))) (k : ℕ) :
+    ∀ n : ℕ, is_p_int p ((fps.pow g1 k n - fps.pow g2 k n) / (p : ℚ))
+  induction k with n r ihr n
+  · rw [fps.pow_zero_eq, fps.pow_zero_eq]
+    have hz : (fps.one n - fps.one n) / (p : ℚ) = 0 := by rw [div_def.rat]; ring
+    rw [hz]; exact is_p_int.zero p hprime.1
+  · rw [succ_eq_add_one.nat, fps.pow_succ_eq, fps.pow_succ_eq]
+    unfold fps.mul
+    have hrew : ((∑ j < n + 1, fps.pow g1 r j * g1 (n - j)) - (∑ j < n + 1, fps.pow g2 r j * g2 (n - j))) / (p : ℚ) = ∑ j < n + 1, (((fps.pow g1 r j - fps.pow g2 r j) / (p : ℚ)) * g1 (n - j) + fps.pow g2 r j * ((g1 (n - j) - g2 (n - j)) / (p : ℚ)))
+      rw [← sum_sub.rat, div_def.rat, ← sum_mul_const.rat]
+      apply sum_congr.rat; intro j hj
+      rw [div_def.rat (fps.pow g1 r j - fps.pow g2 r j) (p : ℚ), div_def.rat (g1 (n - j) - g2 (n - j)) (p : ℚ)]; ring
+    rw [hrew]
+    apply is_p_int.sum p hprime; intro j hj
+    exact is_p_int.add p hprime (((fps.pow g1 r j - fps.pow g2 r j) / (p : ℚ)) * g1 (n - j)) (fps.pow g2 r j * ((g1 (n - j) - g2 (n - j)) / (p : ℚ))) (is_p_int.mul p hprime ((fps.pow g1 r j - fps.pow g2 r j) / (p : ℚ)) (g1 (n - j)) (ihr j) (h1 (n - j))) (is_p_int.mul p hprime (fps.pow g2 r j) ((g1 (n - j) - g2 (n - j)) / (p : ℚ)) (fps.pow_is_p_int p hprime g2 h2 r j) (hdiff (n - j)))
+
+-- THEOREM 3C: Cyclotomic Frobenius phi(f) = f((1+T)^p - 1) is a Z_(p)-algebra endomorphism
+-- satisfying phi(f) = f(T^p) (mod p * Z_(p)[[T]])!
++ wach.phi_ring_hom_mod_p (p : ℕ) (hprime : is_prime_nat p) (f1 f2 : ℕ → ℚ)
+    (hf1 : ∀ n, is_p_int p (f1 n)) :
+    (∀ n, wach.phi p (fps.add f1 f2) n = fps.add (wach.phi p f1) (wach.phi p f2) n) ∧
+    (∀ n, wach.phi p (fps.mul f1 f2) n = fps.mul (wach.phi p f1) (wach.phi p f2) n) ∧
+    (∀ n, is_p_int p (wach.phi p f1 n)) ∧
+    (∀ n, is_p_int p ((wach.phi p f1 n - fps.subst_pow_p f1 p n) / (p : ℚ)))
+  have hp : 2 ≤ p := hprime.1
+  have hgm_int : ∀ n, is_p_int p (fgl.gm_end p n)
+    intro n; unfold fgl.gm_end
+    by_cases hn0 : n = 0
+    · simp [hn0]; exact is_p_int.zero p hp
+    · simp [hn0]; exact is_p_int.of_nat p hp (choose p n)
+  have hmon_int : ∀ n, is_p_int p (fps.monomial p 1 n)
+    intro n; unfold fps.monomial
+    by_cases hnp : n = p
+    · simp [hnp]; exact is_p_int.one p hp
+    · simp [hnp]; exact is_p_int.zero p hp
+  have hcomp_mon : ∀ n, fps.comp f1 (fps.monomial p 1) n = fps.subst_pow_p f1 p n
+    intro n; unfold fps.comp fps.subst_pow_p
+    have h1p : ∀ k : ℕ, (1 : ℚ) ^ k = 1
+      intro k; induction k with r ihr
+      · rw [pow_zero.rat]
+      · rw [succ_eq_add_one.nat, pow_succ.rat, ihr]; ring
+    have hcon : (∑ k < n + 1, f1 k * fps.pow (fps.monomial p 1) k n) = ∑ k < n + 1, if n = k * p then f1 k else 0
+      apply sum_congr.rat; intro k hk
+      rw [fps.pow_monomial p 1 k n, h1p k]
+      by_cases he : n = k * p
+      · simp [he]
+      · simp [he]
+    rw [hcon]
+    by_cases hd : p ∣ n
+    · rw [if_pos hd]
+      have hdm := div_add_mod.nat n p
+      unfold dvd at hd; rw [hd] at hdm
+      have hq_le : n / p ≤ n := by by_contra hgt; nlinarith
+      have hsing : ∀ M : ℕ, n / p < M → (∑ k < M, if n = k * p then f1 k else 0) = f1 (n / p)
+        intro M hM; induction M with hM r ihr hM
+        · omega
+        · rw [succ_eq_add_one.nat] at hM ⊢
+          rw [sum_below_succ]
+          by_cases hrq : r = n / p
+          · rw [hrq]
+            have hne_all : (∑ k < n / p, if n = k * p then f1 k else 0) = ∑ k < n / p, (0 : ℚ)
+              apply sum_congr.rat; intro k hk
+              have hne : n ≠ k * p := by nlinarith
+              rw [if_neg hne]
+            have heq : n = (n / p) * p := by linarith
+            rw [hne_all, sum_const.rat, if_pos heq]; ring
+          · have hlt : n / p < r := by omega
+            have hne : n ≠ r * p := by nlinarith
+            rw [ihr hlt, if_neg hne]; ring
+      exact hsing (n + 1) (by omega)
+    · rw [if_neg hd]
+      have h0 : (∑ k < n + 1, if n = k * p then f1 k else 0) = ∑ k < n + 1, (0 : ℚ)
+        apply sum_congr.rat; intro k hk
+        have hne : n ≠ k * p
+          intro heq; apply hd
+          exact (dvd.iff_exists p n (by omega)).mpr ⟨k, by linarith⟩
+        rw [if_neg hne]
+      rw [h0, sum_const.rat]; ring
+  constructor
+  · intro n; unfold wach.phi; exact fps.comp_add f1 f2 (fgl.gm_end p) n
+  · constructor
+    · intro n; unfold wach.phi; exact fps.comp_mul f1 f2 (fgl.gm_end p) (fgl.gm_end_zero p) n
+    · constructor
+      · intro n; unfold wach.phi; exact fps.comp_p_int p hprime f1 (fgl.gm_end p) hf1 hgm_int n
+      · intro n; unfold wach.phi
+        rw [← hcomp_mon n]; unfold fps.comp
+        have hrew : ((∑ k < n + 1, f1 k * fps.pow (fgl.gm_end p) k n) - (∑ k < n + 1, f1 k * fps.pow (fps.monomial p 1) k n)) / (p : ℚ) = ∑ k < n + 1, f1 k * ((fps.pow (fgl.gm_end p) k n - fps.pow (fps.monomial p 1) k n) / (p : ℚ))
+          rw [← sum_sub.rat, div_def.rat, ← sum_mul_const.rat]
+          apply sum_congr.rat; intro k hk
+          rw [div_def.rat (fps.pow (fgl.gm_end p) k n - fps.pow (fps.monomial p 1) k n) (p : ℚ)]; ring
+        rw [hrew]
+        have hfrob_all := fgl.gm_frobenius_congruence p hprime
+        have hfrob := hfrob_all.2.2
+        apply is_p_int.sum p hprime; intro k hk
+        exact is_p_int.mul p hprime (f1 k) ((fps.pow (fgl.gm_end p) k n - fps.pow (fps.monomial p 1) k n) / (p : ℚ)) (hf1 k) (fps.pow_sub_mod_p p hprime (fgl.gm_end p) (fps.monomial p 1) hgm_int hmon_int hfrob k n)
+
+-- Helper: fps.pow (fps.scale c u) m n = c^m * fps.pow u m n!
++ fps.pow_scale (c : ℚ) (u : ℕ → ℚ) (m : ℕ) :
+    ∀ n : ℕ, fps.pow (fps.scale c u) m n = c ^ m * fps.pow u m n
+  induction m with n r ihr n
+  · rw [fps.pow_zero_eq, fps.pow_zero_eq, pow_zero.rat]; ring
+  · rw [succ_eq_add_one.nat, pow_succ.rat, fps.pow_succ_eq, fps.pow_succ_eq]
+    unfold fps.mul fps.scale
+    rw [← sum_const_mul.rat]
+    apply sum_congr.rat; intro k hk
+    rw [ihr k]; ring
+
+-- THEOREM 3D: Exact Fontaine-Laffaille / Wach Height-h Filtration Divisibility (0 CUSTOM AXIOMS!):
+-- For EVERY prime p, height h : N, and degree n : N:
+--   p^(h - min(h, n / (p - 1))) divides [T^n] (q(T)^h) in Z_(p)!
++ wach.height_filtration_divisibility (p h n : ℕ) (hprime : is_prime_nat p) :
+    is_p_int p (fps.pow (wach.q_poly p) h n / ((p ^ (h - min h (n / (p - 1))) : ℕ) : ℚ))
+  have hp : 2 ≤ p := hprime.1
+  have hcp := mul_inv_cancel.rat (p : ℚ) (by linarith)
+  -- Split q(T) = T^(p - 1) + p * u(T) where u in Z_(p)[[T]]!
+  set A := fps.monomial (p - 1) 1 with hA_def
+  set u : ℕ → ℚ := fun j => if j < p - 1 then wach.q_poly p j / (p : ℚ) else 0 with hu_def
+  have hu_int : ∀ j, is_p_int p (u j)
+    intro j; rw [hu_def]
+    by_cases hj : j < p - 1
+    · simp [hj]
+      have heis := wach.q_poly_eisenstein p hprime
+      exact heis.2.1 j hj
+    · simp [hj]; exact is_p_int.zero p hp
+  have hq_split : ∀ j, wach.q_poly p j = fps.add A (fps.scale (p : ℚ) u) j
+    intro j; rw [hA_def, hu_def]; unfold fps.add fps.monomial fps.scale
+    have heis := wach.q_poly_eisenstein p hprime
+    by_cases hlt : j < p - 1
+    · have hne : j ≠ p - 1 := by omega
+      rw [if_neg hne, if_pos hlt, div_def.rat]
+      have hre : (p : ℚ) * (wach.q_poly p j * (1 / (p : ℚ))) = wach.q_poly p j * ((p : ℚ) * (1 / (p : ℚ))) := by ring
+      rw [hre, hcp]; ring
+    · by_cases heq : j = p - 1
+      · have hnl : ¬ (j < p - 1) := by omega
+        rw [if_pos heq, if_neg hnl, heq, heis.2.2.1]; ring
+      · have hge : p ≤ j := by omega
+        rw [if_neg heq, if_neg hlt, heis.2.2.2 j hge]; ring
+  rw [fps.pow_congr (wach.q_poly p) (fps.add A (fps.scale (p : ℚ) u)) hq_split h n]
+  rw [fps.add_pow A (fps.scale (p : ℚ) u) h n]
+  set E := h - min h (n / (p - 1)) with hE_def
+  have hrew : (∑ k < h + 1, ((choose h k : ℕ) : ℚ) * fps.mul (fps.pow A k) (fps.pow (fps.scale (p : ℚ) u) (h - k)) n) / ((p ^ E : ℕ) : ℚ) = ∑ k < h + 1, ((choose h k : ℕ) : ℚ) * (fps.mul (fps.pow A k) (fps.pow (fps.scale (p : ℚ) u) (h - k)) n / ((p ^ E : ℕ) : ℚ))
+    rw [div_def.rat (∑ k < h + 1, ((choose h k : ℕ) : ℚ) * fps.mul (fps.pow A k) (fps.pow (fps.scale (p : ℚ) u) (h - k)) n) ((p ^ E : ℕ) : ℚ), ← sum_mul_const.rat]
+    apply sum_congr.rat; intro k hk
+    rw [div_def.rat (fps.mul (fps.pow A k) (fps.pow (fps.scale (p : ℚ) u) (h - k)) n) ((p ^ E : ℕ) : ℚ)]; ring
+  rw [hrew]
+  apply is_p_int.sum p hprime; intro k hk
+  apply is_p_int.mul p hprime ((choose h k : ℕ) : ℚ) (fps.mul (fps.pow A k) (fps.pow (fps.scale (p : ℚ) u) (h - k)) n / ((p ^ E : ℕ) : ℚ)) (is_p_int.of_nat p hp (choose h k))
+  -- Evaluate (A^k * (p*u)^(h-k))_n: vanishes if k * (p - 1) > n; else h - k >= E!
+  by_cases hkn : k * (p - 1) ≤ n
+  · -- Then k <= n / (p - 1) and k <= h, so E = h - min h (n/(p-1)) <= h - k!
+    have hk_le_div : k ≤ n / (p - 1)
+      by_contra hgt
+      have hdm := div_add_mod.nat n (p - 1)
+      have hrem := mod_lt.nat n (p - 1) (by omega)
+      have h1 : n / (p - 1) + 1 ≤ k := by omega
+      have h2 := mul_le_mul_of_nonneg_right.nat (n / (p - 1) + 1) k (p - 1) h1 (by omega)
+      have h3 : (n / (p - 1) + 1) * (p - 1) = (p - 1) * (n / (p - 1)) + (p - 1) := by ring
+      omega
+    have hsplit_pow : (p : ℚ) ^ (h - k) / ((p ^ E : ℕ) : ℚ) = ((p ^ ((h - k) - E) : ℕ) : ℚ)
+      have hadd : E + ((h - k) - E) = h - k := by omega
+      have hmul : p ^ E * p ^ ((h - k) - E) = p ^ (h - k) := by rw [← pow_add.nat, hadd]
+      have hcpE := mul_inv_cancel.rat ((p ^ E : ℕ) : ℚ) (by linarith [(cast_pos.rat (p ^ E)).mpr (pow_pos.nat p E (by omega))])
+      have hcast_p : ((p ^ (h - k) : ℕ) : ℚ) = (p : ℚ) ^ (h - k) := cast_pow.rat p (h - k)
+      rw [← hcast_p, ← hmul, cast_mul.rat, div_def.rat]
+      have hre : ((p ^ E : ℕ) : ℚ) * ((p ^ ((h - k) - E) : ℕ) : ℚ) * (1 / ((p ^ E : ℕ) : ℚ)) = ((p ^ ((h - k) - E) : ℕ) : ℚ) * (((p ^ E : ℕ) : ℚ) * (1 / ((p ^ E : ℕ) : ℚ))) := by ring
+      rw [hre, hcpE]; ring
+    have hmul_eq : fps.mul (fps.pow A k) (fps.pow (fps.scale (p : ℚ) u) (h - k)) n / ((p ^ E : ℕ) : ℚ) = ((p ^ ((h - k) - E) : ℕ) : ℚ) * fps.mul (fps.pow A k) (fps.pow u (h - k)) n
+      unfold fps.mul
+      have h1 : (∑ j < n + 1, fps.pow A k j * fps.pow (fps.scale (p : ℚ) u) (h - k) (n - j)) = (p : ℚ) ^ (h - k) * (∑ j < n + 1, fps.pow A k j * fps.pow u (h - k) (n - j))
+        rw [← sum_const_mul.rat]
+        apply sum_congr.rat; intro j hj; rw [fps.pow_scale (p : ℚ) u (h - k) (n - j)]; ring
+      rw [h1, div_def.rat ((p : ℚ) ^ (h - k) * (∑ j < n + 1, fps.pow A k j * fps.pow u (h - k) (n - j))) ((p ^ E : ℕ) : ℚ), ← hsplit_pow, div_def.rat ((p : ℚ) ^ (h - k)) ((p ^ E : ℕ) : ℚ)]; ring
+    rw [hmul_eq]
+    have hA_int : ∀ j, is_p_int p (A j)
+      intro j; rw [hA_def]; unfold fps.monomial
+      by_cases hje : j = p - 1
+      · simp [hje]; exact is_p_int.one p hp
+      · simp [hje]; exact is_p_int.zero p hp
+    have hmul_int : is_p_int p (fps.mul (fps.pow A k) (fps.pow u (h - k)) n)
+      unfold fps.mul; apply is_p_int.sum p hprime; intro j hj
+      exact is_p_int.mul p hprime (fps.pow A k j) (fps.pow u (h - k) (n - j)) (fps.pow_is_p_int p hprime A hA_int k j) (fps.pow_is_p_int p hprime u hu_int (h - k) (n - j))
+    exact is_p_int.mul p hprime ((p ^ ((h - k) - E) : ℕ) : ℚ) (fps.mul (fps.pow A k) (fps.pow u (h - k)) n) (is_p_int.of_nat p hp (p ^ ((h - k) - E))) hmul_int
+  · -- k * (p - 1) > n => every term in fps.mul (A^k) _ n vanishes!
+    have hzero : fps.mul (fps.pow A k) (fps.pow (fps.scale (p : ℚ) u) (h - k)) n = 0
+      unfold fps.mul
+      have h0 : (∑ j < n + 1, fps.pow A k j * fps.pow (fps.scale (p : ℚ) u) (h - k) (n - j)) = ∑ j < n + 1, (0 : ℚ)
+        apply sum_congr.rat; intro j hj
+        rw [hA_def, fps.pow_monomial (p - 1) 1 k j]
+        have hne : j ≠ k * (p - 1) := by omega
+        rw [if_neg hne]; ring
+      rw [h0, sum_const.rat]; ring
+    rw [hzero]; have hz : 0 / ((p ^ E : ℕ) : ℚ) = 0 := by rw [div_def.rat]; ring
+    rw [hz]; exact is_p_int.zero p hp
+
+-- ====================================================================================
+-- 4. p-adic Exponential exp_p(p T) Integrality & Odd-Prime Valuation Growth
+-- ====================================================================================
+
+-- Helper: if v_p(den) <= e (with den > 0), then (p^e : Q) / (den : Q) is in Z_(p)!
++ is_p_int.pow_div_of_vp_le (p e den : ℕ) (hprime : is_prime_nat p) (hden : 0 < den)
+    (hvp : vp p den ≤ e) :
+    is_p_int p (((p ^ e : ℕ) : ℚ) / (den : ℚ))
+  have hp : 2 ≤ p := hprime.1
+  set v := vp p den with hv_def
+  have hsp := vp.spec p den hp hden
+  rw [← hv_def] at hsp
+  obtain ⟨m, hm_eq⟩ := (dvd.iff_exists (p ^ v) den (pow_pos.nat p v (by omega))).mp hsp.1
+  have hm_pos : 0 < m
+    by_contra h0; have hm0 : m = 0 := by omega
+    rw [hm0] at hm_eq; omega
+  have hm_nd : ¬ (p ∣ m)
+    intro hd; apply hsp.2
+    obtain ⟨q, hq⟩ := (dvd.iff_exists p m (by omega)).mp hd
+    have hmul : den = p ^ (v + 1) * q := by rw [hm_eq, hq, pow_succ.nat]; ring
+    exact (dvd.iff_exists (p ^ (v + 1)) den (pow_pos.nat p (v + 1) (by omega))).mpr ⟨q, hmul⟩
+  have hsplit : p ^ e = p ^ v * p ^ (e - v)
+    rw [← pow_add.nat]; have ha : v + (e - v) = e := by omega
+    rw [ha]
+  have hred : ((p ^ e : ℕ) : ℚ) / (den : ℚ) = ((p ^ (e - v) : ℕ) : ℚ) / (m : ℚ)
+    have hdp := mul_inv_cancel.rat (den : ℚ) (by linarith [(cast_pos.rat den).mpr hden])
+    have hmp := mul_inv_cancel.rat (m : ℚ) (by linarith [(cast_pos.rat m).mpr hm_pos])
+    have hcross : ((p ^ e : ℕ) : ℚ) * (m : ℚ) = ((p ^ (e - v) : ℕ) : ℚ) * (den : ℚ)
+      rw [hsplit, hm_eq, cast_mul.rat (p ^ v) (p ^ (e - v)), cast_mul.rat (p ^ v) m]; ring
+    rw [div_def.rat ((p ^ e : ℕ) : ℚ) (den : ℚ), div_def.rat ((p ^ (e - v) : ℕ) : ℚ) (m : ℚ)]
+    have h1 : ((p ^ e : ℕ) : ℚ) * (1 / (den : ℚ)) * ((den : ℚ) * (m : ℚ)) = ((p ^ e : ℕ) : ℚ) * (m : ℚ) * ((den : ℚ) * (1 / (den : ℚ))) := by ring
+    have h2 : ((p ^ (e - v) : ℕ) : ℚ) * (1 / (m : ℚ)) * ((den : ℚ) * (m : ℚ)) = ((p ^ (e - v) : ℕ) : ℚ) * (den : ℚ) * ((m : ℚ) * (1 / (m : ℚ))) := by ring
+    have hdiff : ((den : ℚ) * (m : ℚ)) * (((p ^ e : ℕ) : ℚ) * (1 / (den : ℚ)) - ((p ^ (e - v) : ℕ) : ℚ) * (1 / (m : ℚ))) = 0
+      linear_combination h1 - h2 + hcross + ((p ^ e : ℕ) : ℚ) * (m : ℚ) * hdp - ((p ^ (e - v) : ℕ) : ℚ) * (den : ℚ) * hmp
+    have hdmp := mul_inv_cancel.rat ((den : ℚ) * (m : ℚ)) (by linarith [mul_pos.rat (den : ℚ) (m : ℚ) ((cast_pos.rat den).mpr hden) ((cast_pos.rat m).mpr hm_pos)])
+    linear_combination (1 / ((den : ℚ) * (m : ℚ))) * hdiff - (((p ^ e : ℕ) : ℚ) * (1 / (den : ℚ)) - ((p ^ (e - v) : ℕ) : ℚ) * (1 / (m : ℚ))) * hdmp
+  rw [hred]
+  exact is_p_int.div_coprime p m hprime hm_pos hm_nd ((p ^ (e - v) : ℕ) : ℚ) (is_p_int.of_nat p hp (p ^ (e - v)))
+
+-- THEOREM 4A: p-adic Exponential exp_p(p T) Integrality for EVERY Prime p >= 2 (0 CUSTOM AXIOMS!):
+-- For every prime p and every k >= 1, (p^k / k!) / p = p^(k - 1) / k! is in Z_(p),
+-- hence exp_p(p T) lies in 1 + p * T * Z_(p)[[T]]!
++ padic_exp.coeff_p_int (p k : ℕ) (hprime : is_prime_nat p) (hk : 1 ≤ k) :
+    is_p_int p ((((p ^ k : ℕ) : ℚ) / ((fact k : ℕ) : ℚ)) / (p : ℚ))
+  have hp : 2 ≤ p := hprime.1
+  have hvp := vp.fact_lt_self p k hprime hk
+  have hcp := mul_inv_cancel.rat (p : ℚ) (by linarith)
+  have hrew : (((p ^ k : ℕ) : ℚ) / ((fact k : ℕ) : ℚ)) / (p : ℚ) = ((p ^ (k - 1) : ℕ) : ℚ) / ((fact k : ℕ) : ℚ)
+    have hk1 : k = (k - 1) + 1 := by omega
+    have hmul : p ^ k = p ^ (k - 1) * p
+      have h1 := pow_succ.nat p (k - 1)
+      rw [← hk1] at h1; exact h1
+    rw [hmul, cast_mul.rat (p ^ (k - 1)) p]
+    rw [div_def.rat (((p ^ (k - 1) : ℕ) : ℚ) * (p : ℚ) / ((fact k : ℕ) : ℚ)) (p : ℚ)]
+    rw [div_def.rat (((p ^ (k - 1) : ℕ) : ℚ) * (p : ℚ)) ((fact k : ℕ) : ℚ)]
+    rw [div_def.rat ((p ^ (k - 1) : ℕ) : ℚ) ((fact k : ℕ) : ℚ)]
+    have hre : ((p ^ (k - 1) : ℕ) : ℚ) * (p : ℚ) * (1 / ((fact k : ℕ) : ℚ)) * (1 / (p : ℚ)) = ((p ^ (k - 1) : ℕ) : ℚ) * (1 / ((fact k : ℕ) : ℚ)) * ((p : ℚ) * (1 / (p : ℚ))) := by ring
+    rw [hre, hcp]; ring
+  rw [hrew]
+  exact is_p_int.pow_div_of_vp_le p (k - 1) (fact k) hprime (fact_pos k) (by omega)
+
+-- THEOREM 4B: Odd-Prime p-adic Exponential Valuation Growth (0 CUSTOM AXIOMS!):
+-- For EVERY odd prime p >= 3 and every k >= 1:
+--   2 * v_p(k!) <= k - 1, hence p^((k + 1) / 2) divides p^k / k! in Z_(p)!
++ padic_exp.odd_prime_valuation_growth (p k : ℕ) (hprime : is_prime_nat p) (hodd : 3 ≤ p) (hk : 1 ≤ k) :
+    2 * vp p (fact k) + 1 ≤ k ∧
+    is_p_int p ((((p ^ k : ℕ) : ℚ) / ((fact k : ℕ) : ℚ)) / ((p ^ ((k + 1) / 2) : ℕ) : ℚ))
+  have hp : 2 ≤ p := hprime.1
+  have hid := legendre.digit_sum_identity p k k hprime (lt_pow_self.nat p k hp)
+  have hds1 := digit_sum.pos_of_pos p k hp hk
+  have h2le : 2 * vp p (fact k) ≤ (p - 1) * vp p (fact k) := by exact mul_le_mul_of_nonneg_right.nat 2 (p - 1) (vp p (fact k)) (by omega) (by omega)
+  have h2vp : 2 * vp p (fact k) + 1 ≤ k := by omega
+  constructor; exact h2vp
+  -- Show vp p (fact k) <= k - (k + 1) / 2!
+  have hvp_le : vp p (fact k) ≤ k - (k + 1) / 2 := by omega
+  have hrew : (((p ^ k : ℕ) : ℚ) / ((fact k : ℕ) : ℚ)) / ((p ^ ((k + 1) / 2) : ℕ) : ℚ) = ((p ^ (k - (k + 1) / 2) : ℕ) : ℚ) / ((fact k : ℕ) : ℚ)
+    have hadd : (k - (k + 1) / 2) + (k + 1) / 2 = k := by omega
+    have hmul : p ^ (k - (k + 1) / 2) * p ^ ((k + 1) / 2) = p ^ k := by rw [← pow_add.nat, hadd]
+    have hcp2 := mul_inv_cancel.rat ((p ^ ((k + 1) / 2) : ℕ) : ℚ) (by linarith [(cast_pos.rat (p ^ ((k + 1) / 2))).mpr (pow_pos.nat p ((k + 1) / 2) (by omega))])
+    rw [← hmul, cast_mul.rat (p ^ (k - (k + 1) / 2)) (p ^ ((k + 1) / 2))]
+    rw [div_def.rat (((p ^ (k - (k + 1) / 2) : ℕ) : ℚ) * ((p ^ ((k + 1) / 2) : ℕ) : ℚ) / ((fact k : ℕ) : ℚ)) ((p ^ ((k + 1) / 2) : ℕ) : ℚ)]
+    rw [div_def.rat (((p ^ (k - (k + 1) / 2) : ℕ) : ℚ) * ((p ^ ((k + 1) / 2) : ℕ) : ℚ)) ((fact k : ℕ) : ℚ)]
+    rw [div_def.rat ((p ^ (k - (k + 1) / 2) : ℕ) : ℚ) ((fact k : ℕ) : ℚ)]
+    have hre : ((p ^ (k - (k + 1) / 2) : ℕ) : ℚ) * ((p ^ ((k + 1) / 2) : ℕ) : ℚ) * (1 / ((fact k : ℕ) : ℚ)) * (1 / ((p ^ ((k + 1) / 2) : ℕ) : ℚ)) = ((p ^ (k - (k + 1) / 2) : ℕ) : ℚ) * (1 / ((fact k : ℕ) : ℚ)) * (((p ^ ((k + 1) / 2) : ℕ) : ℚ) * (1 / ((p ^ ((k + 1) / 2) : ℕ) : ℚ))) := by ring
+    rw [hre, hcp2]; ring
+  rw [hrew]
+  exact is_p_int.pow_div_of_vp_le p (k - (k + 1) / 2) (fact k) hprime (fact_pos k) hvp_le

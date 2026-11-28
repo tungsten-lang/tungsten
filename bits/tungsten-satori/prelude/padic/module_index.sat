@@ -1,0 +1,623 @@
+-- Integer-Matrix p-Adic Module Index, Ultrametric Determinant Law, and Index Divisibility (0 custom axioms)
+
+import algebra.spectral_det
+import padic.product_formula
+import analysis.classical_landau_osc
+
+-- ====================================================================================
+-- SECTION 1: CONCRETE INTEGER-MATRIX p-ADIC VALUATION MODULE INDEX (`sernau.o_det_law`)
+--            & CONSTRUCTIVE UPPER-TRIANGULAR `IndexDvd` (`New/Core/ModuleIndex.lean`)
+-- ====================================================================================
+
++ sernau.padic_abs_eq_one_of_ndvd (p n : ℕ) (hp : 2 ≤ p) (hn : 0 < n) (hnd : ¬ (p ∣ n)) :
+    padic.abs p n = 1
+  have hvp0 : vp p n = 0 := vp.eq_zero_of_not_dvd p n hp hn hnd
+  rw [padic.abs_pos_val p n (by omega), hvp0]; unfold rpow; simp; exact exp_zero
+
+-> sernau.int_of_real_exact (x : ℝ) : ℤ :=
+  if 0 ≤ x then (nat_floor x : ℤ) else -((nat_floor (-x) : ℕ) : ℤ)
+
++ sernau.int_of_real_exact_cast (a : ℤ) :
+    sernau.int_of_real_exact ((a : ℤ) : ℝ) = a
+  unfold sernau.int_of_real_exact
+  by_cases ha : 0 ≤ ((a : ℤ) : ℝ)
+  · rw [if_pos ha]
+    have hfl := nat_floor.spec ((a : ℤ) : ℝ) ha
+    set k := nat_floor ((a : ℤ) : ℝ) with hk_def
+    have hk_eq : ((k : ℕ) : ℝ) = (((k : ℕ) : ℤ) : ℝ) := by ring
+    have hk1_eq : ((k : ℕ) : ℝ) + 1 = ((((k : ℕ) : ℤ) + 1 : ℤ) : ℝ) := by ring
+    have h1 : (((k : ℕ) : ℤ) : ℝ) ≤ ((a : ℤ) : ℝ) := by linarith [hfl.1]
+    have h2 : ((a : ℤ) : ℝ) < ((((k : ℕ) : ℤ) + 1 : ℤ) : ℝ) := by linarith [hfl.2]
+    have hlo : ((k : ℕ) : ℤ) ≤ a := (int_cast_le.real ((k : ℕ) : ℤ) a).mp h1
+    have hhi : a < ((k : ℕ) : ℤ) + 1 := (int_cast_lt.real a (((k : ℕ) : ℤ) + 1)).mp h2
+    omega
+  · rw [if_neg ha]
+    have hneg_nn : 0 ≤ -((a : ℤ) : ℝ) := by linarith
+    have hfl := nat_floor.spec (-((a : ℤ) : ℝ)) hneg_nn
+    set k := nat_floor (-((a : ℤ) : ℝ)) with hk_def
+    have hk_eq : ((k : ℕ) : ℝ) = (((k : ℕ) : ℤ) : ℝ) := by ring
+    have hk1_eq : ((k : ℕ) : ℝ) + 1 = ((((k : ℕ) : ℤ) + 1 : ℤ) : ℝ) := by ring
+    have hna_eq : -((a : ℤ) : ℝ) = ((-a : ℤ) : ℝ) := by ring
+    have h1 : (((k : ℕ) : ℤ) : ℝ) ≤ ((-a : ℤ) : ℝ) := by linarith [hfl.1]
+    have h2 : ((-a : ℤ) : ℝ) < ((((k : ℕ) : ℤ) + 1 : ℤ) : ℝ) := by linarith [hfl.2]
+    have hlo : ((k : ℕ) : ℤ) ≤ -a := (int_cast_le.real ((k : ℕ) : ℤ) (-a)).mp h1
+    have hhi : -a < ((k : ℕ) : ℤ) + 1 := (int_cast_lt.real (-a) (((k : ℕ) : ℤ) + 1)).mp h2
+    omega
+
++ sernau.nat_floor_abs_int_cast (a : ℤ) :
+    ((nat_floor (|((a : ℤ) : ℝ)|) : ℕ) : ℝ) = |((a : ℤ) : ℝ)| ∧
+    (a ≠ 0 → 1 ≤ nat_floor (|((a : ℤ) : ℝ)|))
+  set x := |((a : ℤ) : ℝ)| with hx_def
+  have hx_nn : 0 ≤ x := by rw [hx_def]; exact abs_nonneg.real ((a : ℤ) : ℝ)
+  have hfl := nat_floor.spec x hx_nn
+  set k := nat_floor x with hk_def
+  have hx_int : ∃ b : ℤ, 0 ≤ b ∧ x = ((b : ℤ) : ℝ)
+    by_cases ha0 : 0 ≤ a
+    · have ha_r : 0 ≤ ((a : ℤ) : ℝ) := by have hc := (int_cast_le.real 0 a).mpr ha0; rw [int_cast_zero.real] at hc; exact hc
+      exact ⟨a, ha0, by rw [hx_def, abs_of_nonneg.real ((a : ℤ) : ℝ) ha_r]⟩
+    · have ha_neg : ((a : ℤ) : ℝ) ≤ 0 := by have hc := (int_cast_le.real a 0).mpr (by omega); rw [int_cast_zero.real] at hc; exact hc
+      use -a; constructor; omega
+      rw [hx_def, abs_of_nonpos.real ((a : ℤ) : ℝ) ha_neg]; ring
+  obtain ⟨b, hb0, hxb⟩ := hx_int
+  have hk_eq : ((k : ℕ) : ℝ) = (((k : ℕ) : ℤ) : ℝ) := by ring
+  have hk1_eq : ((k : ℕ) : ℝ) + 1 = ((((k : ℕ) : ℤ) + 1 : ℤ) : ℝ) := by ring
+  have h1 : (((k : ℕ) : ℤ) : ℝ) ≤ ((b : ℤ) : ℝ) := by linarith [hfl.1, hxb]
+  have h2 : ((b : ℤ) : ℝ) < ((((k : ℕ) : ℤ) + 1 : ℤ) : ℝ) := by linarith [hfl.2, hxb]
+  have hlo : ((k : ℕ) : ℤ) ≤ b := (int_cast_le.real ((k : ℕ) : ℤ) b).mp h1
+  have hhi : b < ((k : ℕ) : ℤ) + 1 := (int_cast_lt.real b (((k : ℕ) : ℤ) + 1)).mp h2
+  have hbk : b = ((k : ℕ) : ℤ) := by omega
+  have hx_eq_k : x = ((k : ℕ) : ℝ)
+    rw [hxb, hbk]
+  constructor
+  · exact hx_eq_k.symm
+  · intro hne
+    by_contra hk0
+    have hk_zero : k = 0 := by omega
+    rw [hk_zero, cast_zero.real, hx_def] at hx_eq_k
+    have ha_r0 : ((a : ℤ) : ℝ) = 0
+      by_contra hnr; linarith [abs_pos.real ((a : ℤ) : ℝ) hnr]
+    have ha_z0 : a = 0
+      by_contra hnz
+      by_cases hgt : 0 < a
+      · have hc := (int_cast_lt.real 0 a).mpr hgt; rw [int_cast_zero.real] at hc; linarith
+      · have hc := (int_cast_lt.real a 0).mpr (by omega); rw [int_cast_zero.real] at hc; linarith
+    exact hne ha_z0
+
++ sernau.nat_eq_of_cast_eq (a b : ℕ) (h : (a : ℝ) = (b : ℝ)) : a = b
+  by_contra hne
+  by_cases hlt : a < b
+  · linarith [(cast_lt.real a b).mpr hlt]
+  · have hgt : b < a := by omega
+    linarith [(cast_lt.real b a).mpr hgt]
+
++ sernau.int_eq_of_cast_eq (a b : ℤ) (h : ((a : ℤ) : ℝ) = ((b : ℤ) : ℝ)) : a = b
+  by_contra hne
+  by_cases hlt : a < b
+  · linarith [(int_cast_lt.real a b).mpr hlt]
+  · have hgt : b < a := by omega
+    linarith [(int_cast_lt.real b a).mpr hgt]
+
+-> sernau.is_int_cmat (n : ℕ) (u : ℕ → ℕ → ℂ) : Prop :=
+  ∀ i < n, ∀ j < n, ∃ a : ℤ, u i j = complex.of_real ((a : ℤ) : ℝ)
+
+-> sernau.int_cmat_det_norm (p n : ℕ) (u : ℕ → ℕ → ℂ) : ℝ :=
+  if cmat.det n u = complex.zero then 0 else padic.abs p (nat_floor (|complex.re (cmat.det n u)|))
+
++ sernau.is_int_cmat_det_int (n : ℕ) (u : ℕ → ℕ → ℂ) (hu : sernau.is_int_cmat n u) :
+    ∃ D : ℤ, cmat.det n u = complex.of_real ((D : ℤ) : ℝ)
+  unfold sernau.is_int_cmat at hu
+  set A : ℕ → ℕ → ℤ := fun i j => sernau.int_of_real_exact (complex.re (u i j)) with hA_def
+  have hcon : ∀ i < n, ∀ j < n, u i j = complex.of_real ((A i j : ℤ) : ℝ)
+    intro i hi j hj
+    obtain ⟨a, ha⟩ := hu i hi j hj
+    have hre : complex.re (u i j) = ((a : ℤ) : ℝ) := by rw [ha]; simp
+    have hAij : A i j = a := by rw [hA_def, hre, sernau.int_of_real_exact_cast]
+    rw [hAij]; exact ha
+  rw [cmat.det_congr n u (fun i j => complex.of_real ((A i j : ℤ) : ℝ)) hcon]
+  exact cmat.det_of_int n A
+
++ sernau.int_cmat_det_norm_of_int_eq (p n : ℕ) (u : ℕ → ℕ → ℂ) (D : ℤ)
+    (hd : cmat.det n u = complex.of_real ((D : ℤ) : ℝ)) :
+    sernau.int_cmat_det_norm p n u = (if D = 0 then 0 else padic.abs p (nat_floor (|((D : ℤ) : ℝ)|)))
+  unfold sernau.int_cmat_det_norm
+  by_cases hD0 : D = 0
+  · have hdet0 : cmat.det n u = complex.zero := by rw [hd, hD0, int_cast_zero.real, complex.of_real_zero]
+    rw [if_pos hdet0, if_pos hD0]
+  · have hdet_ne : cmat.det n u ≠ complex.zero
+      intro hz; rw [hd] at hz
+      have hr : complex.re (complex.of_real ((D : ℤ) : ℝ)) = 0 := by rw [hz]; simp
+      simp at hr
+      by_cases hgt : 0 < D
+      · have hc := (int_cast_lt.real 0 D).mpr hgt; rw [int_cast_zero.real] at hc; linarith
+      · have hc := (int_cast_lt.real D 0).mpr (by omega); rw [int_cast_zero.real] at hc; linarith
+    rw [if_neg hdet_ne, if_neg hD0, hd]; simp
+
++ sernau.is_int_cmat_id (n : ℕ) : sernau.is_int_cmat n cmat.id
+  unfold sernau.is_int_cmat; intro i _ j _; unfold cmat.id
+  by_cases hij : i = j
+  · rw [if_pos hij]; exact ⟨1, by rw [int_cast_one.real, complex.of_real_one]⟩
+  · rw [if_neg hij]; exact ⟨0, by rw [int_cast_zero.real, complex.of_real_zero]⟩
+
++ sernau.is_int_cmat_mul (n : ℕ) (u2 u1 : ℕ → ℕ → ℂ)
+    (hu2 : sernau.is_int_cmat n u2) (hu1 : sernau.is_int_cmat n u1) :
+    sernau.is_int_cmat n (cmat.mul n u2 u1)
+  unfold sernau.is_int_cmat at hu2 hu1 ⊢
+  intro i hi j hj; unfold cmat.mul
+  have hrec : ∀ m : ℕ, m ≤ n → ∃ s : ℤ, csum m (fun r => complex.mul (u2 i r) (u1 r j)) = complex.of_real ((s : ℤ) : ℝ)
+    intro m; induction m with _ k ihk hkn
+    · exact ⟨0, by rw [csum.zero, int_cast_zero.real, complex.of_real_zero]⟩
+    · rw [succ_eq_add_one.nat] at hkn ⊢; rw [csum.succ]
+      obtain ⟨sk, hsk⟩ := ihk (by omega)
+      obtain ⟨a2, ha2⟩ := hu2 i hi k (by omega)
+      obtain ⟨a1, ha1⟩ := hu1 k (by omega) j hj
+      exact ⟨sk + a2 * a1, by rw [hsk, ha2, ha1, complex.mul_of_real, ← complex.of_real_add, int_cast_add.real, int_cast_mul.real]⟩
+  exact hrec n (by omega)
+
++ sernau.int_cmat_det_norm_mul (p n : ℕ) (u2 u1 : ℕ → ℕ → ℂ)
+    (hp : is_prime_nat p) (hu2 : sernau.is_int_cmat n u2) (hu1 : sernau.is_int_cmat n u1) :
+    0 ≤ sernau.int_cmat_det_norm p n u2 ∧
+    0 ≤ sernau.int_cmat_det_norm p n u1 ∧
+    sernau.int_cmat_det_norm p n (cmat.mul n u2 u1) = sernau.int_cmat_det_norm p n u2 * sernau.int_cmat_det_norm p n u1
+  have hnn : ∀ v : ℕ → ℕ → ℂ, 0 ≤ sernau.int_cmat_det_norm p n v
+    intro v; unfold sernau.int_cmat_det_norm
+    by_cases hz : cmat.det n v = complex.zero; (rw [if_pos hz]; linarith); (rw [if_neg hz]; exact padic.abs_nonneg p _)
+  constructor; exact hnn u2
+  constructor; exact hnn u1
+  obtain ⟨D2, hD2⟩ := sernau.is_int_cmat_det_int n u2 hu2
+  obtain ⟨D1, hD1⟩ := sernau.is_int_cmat_det_int n u1 hu1
+  have hDm : cmat.det n (cmat.mul n u2 u1) = complex.of_real (((D2 * D1 : ℤ) : ℝ))
+    rw [cmat.det_mul n u2 u1, hD2, hD1, complex.mul_of_real, int_cast_mul.real]
+  rw [sernau.int_cmat_det_norm_of_int_eq p n (cmat.mul n u2 u1) (D2 * D1) hDm]
+  rw [sernau.int_cmat_det_norm_of_int_eq p n u2 D2 hD2]
+  rw [sernau.int_cmat_det_norm_of_int_eq p n u1 D1 hD1]
+  by_cases hz2 : D2 = 0
+  · have hp0 : D2 * D1 = 0 := by rw [hz2]; ring
+    rw [if_pos hp0, if_pos hz2]; ring
+  · by_cases hz1 : D1 = 0
+    · have hp0 : D2 * D1 = 0 := by rw [hz1]; ring
+      rw [if_pos hp0, if_neg hz2, if_pos hz1]; ring
+    · have hp_ne : D2 * D1 ≠ 0
+        intro hp0
+        have hr0 : ((D2 * D1 : ℤ) : ℝ) = 0 := by rw [hp0, int_cast_zero.real]
+        rw [int_cast_mul.real] at hr0
+        have hd2_r : ((D2 : ℤ) : ℝ) ≠ 0
+          intro h0; by_cases hg : 0 < D2; (have hc := (int_cast_lt.real 0 D2).mpr hg; rw [int_cast_zero.real] at hc; linarith); (have hc := (int_cast_lt.real D2 0).mpr (by omega); rw [int_cast_zero.real] at hc; linarith)
+        have hd1_r : ((D1 : ℤ) : ℝ) ≠ 0
+          intro h0; by_cases hg : 0 < D1; (have hc := (int_cast_lt.real 0 D1).mpr hg; rw [int_cast_zero.real] at hc; linarith); (have hc := (int_cast_lt.real D1 0).mpr (by omega); rw [int_cast_zero.real] at hc; linarith)
+        exact mul_ne_zero.real _ _ hd2_r hd1_r hr0
+      rw [if_neg hp_ne, if_neg hz2, if_neg hz1]
+      have hf2 := (sernau.nat_floor_abs_int_cast D2).1
+      have hf1 := (sernau.nat_floor_abs_int_cast D1).1
+      have hfp := (sernau.nat_floor_abs_int_cast (D2 * D1)).1
+      have hfl_mul : nat_floor (|((D2 * D1 : ℤ) : ℝ)|) = nat_floor (|((D2 : ℤ) : ℝ)|) * nat_floor (|((D1 : ℤ) : ℝ)|)
+        have hc : ((nat_floor (|((D2 * D1 : ℤ) : ℝ)|) : ℕ) : ℝ) = ((nat_floor (|((D2 : ℤ) : ℝ)|) * nat_floor (|((D1 : ℤ) : ℝ)|) : ℕ) : ℝ)
+          rw [hfp, cast_mul.real, hf2, hf1, int_cast_mul.real, abs_mul.real]
+        exact sernau.nat_eq_of_cast_eq _ _ hc
+      rw [hfl_mul]; exact padic.abs_mul p _ _ hp
+
++ sernau.ultrametric_int_smul_le (gauge_p : (ℕ → ℂ) → ℝ)
+    (hnn : ∀ w : ℕ → ℂ, 0 ≤ gauge_p w)
+    (hzero : gauge_p (fun _ => complex.zero) = 0)
+    (hadd : ∀ w1 w2 : ℕ → ℂ, gauge_p (fun j => complex.add (w1 j) (w2 j)) ≤ max (gauge_p w1) (gauge_p w2))
+    (hneg : ∀ w : ℕ → ℂ, gauge_p (fun j => complex.neg (w j)) ≤ gauge_p w) :
+    ∀ (a : ℤ) (v : ℕ → ℂ), gauge_p (fun j => complex.mul (complex.of_real ((a : ℤ) : ℝ)) (v j)) ≤ gauge_p v
+  have hmax_le : ∀ x y z : ℝ, x ≤ z → y ≤ z → max x y ≤ z
+    intro x y z hxz hyz; unfold max; by_cases hxy : x ≤ y; (rw [if_pos hxy]; exact hyz); (rw [if_neg hxy]; exact hxz)
+  have hnat : ∀ (m : ℕ) (v : ℕ → ℂ), gauge_p (fun j => complex.mul (complex.of_real ((m : ℕ) : ℝ)) (v j)) ≤ gauge_p v
+    intro m; induction m with v k ihk v
+    · have hz : (fun j : ℕ => complex.mul (complex.of_real ((0 : ℕ) : ℝ)) (v j)) = (fun _ => complex.zero)
+        funext j; rw [cast_zero.real, complex.of_real_zero, complex.mul_zero_l]
+      rw [hz, hzero]; exact hnn v
+    · rw [succ_eq_add_one.nat, cast_add.real k 1, cast_one.real]
+      have hsp : (fun j : ℕ => complex.mul (complex.of_real ((k : ℝ) + 1)) (v j)) =
+          (fun j : ℕ => complex.add (complex.mul (complex.of_real (k : ℝ)) (v j)) (v j))
+        funext j; apply complex.ext <;> simp <;> ring
+      rw [hsp]
+      exact le_trans.real _ _ (gauge_p v) (hadd (fun j => complex.mul (complex.of_real (k : ℝ)) (v j)) v) (hmax_le _ (gauge_p v) (gauge_p v) (ihk v) (by linarith))
+  intro a v
+  set k := nat_floor (|((a : ℤ) : ℝ)|) with hk_def
+  have hfk := (sernau.nat_floor_abs_int_cast a).1; rw [← hk_def] at hfk
+  by_cases ha0 : 0 ≤ ((a : ℤ) : ℝ)
+  · have ha_k : ((a : ℤ) : ℝ) = ((k : ℕ) : ℝ) := by rw [abs_of_nonneg.real _ ha0] at hfk; exact hfk.symm
+    rw [ha_k]; exact hnat k v
+  · have ha_nk : ((a : ℤ) : ℝ) = -((k : ℕ) : ℝ) := by rw [abs_of_nonpos.real _ (by linarith)] at hfk; linarith
+    have hsp : (fun j : ℕ => complex.mul (complex.of_real ((a : ℤ) : ℝ)) (v j)) =
+        (fun j : ℕ => complex.neg (complex.mul (complex.of_real ((k : ℕ) : ℝ)) (v j)))
+      funext j; rw [ha_nk]; apply complex.ext <;> simp <;> ring
+    have hn_le := hneg (fun j => complex.mul (complex.of_real ((k : ℕ) : ℝ)) (v j))
+    rw [hsp]; exact le_trans.real _ _ (gauge_p v) hn_le (hnat k v)
+
+-> sernau.vec_comb (d_vec n : ℕ) (u : ℕ → ℕ → ℂ) (Phi : ℕ → ℕ → ℂ) (i j : ℕ) : ℂ := csum n (fun k => complex.mul (u i k) (Phi k j))
+-> sernau.o_det_law (d_vec : ℕ) (M_mod : (ℕ → ℂ) → Prop) (is_o_mat : ℕ → (ℕ → ℕ → ℂ) → Prop) (det_norm : ℕ → (ℕ → ℕ → ℂ) → ℝ) : Prop := (∀ v1 v2 : ℕ → ℂ, M_mod v1 → M_mod v2 → M_mod (fun j => complex.add (v1 j) (v2 j))) ∧ M_mod (fun _ => complex.zero) ∧ (∀ n : ℕ, is_o_mat n cmat.id ∧ det_norm n cmat.id = 1) ∧ (∀ n : ℕ, ∀ u2 u1 : ℕ → ℕ → ℂ, is_o_mat n u2 → is_o_mat n u1 → is_o_mat n (cmat.mul n u2 u1) ∧ 0 ≤ det_norm n u2 ∧ 0 ≤ det_norm n u1 ∧ det_norm n (cmat.mul n u2 u1) = det_norm n u2 * det_norm n u1) ∧ (∀ n : ℕ, ∀ u : ℕ → ℕ → ℂ, ∀ Psi : ℕ → ℕ → ℂ, is_o_mat n u → (∀ k < n, M_mod (Psi k)) → ∀ i < n, M_mod (sernau.vec_comb d_vec n u Psi i))
+-> sernau.index_dvd_o (d_vec : ℕ) (M_mod N_mod : (ℕ → ℂ) → Prop) (is_o_mat : ℕ → (ℕ → ℕ → ℂ) → Prop) (det_norm : ℕ → (ℕ → ℕ → ℂ) → ℝ) (z_inv : ℝ) : Prop := ∀ (n : ℕ) (Phi : ℕ → ℕ → ℂ), (∀ k < n, M_mod (Phi k)) → ∃ u : ℕ → ℕ → ℂ, is_o_mat n u ∧ z_inv ≤ det_norm n u ∧ ∀ i < n, N_mod (sernau.vec_comb d_vec n u Phi i)
+
++ sernau.vec_comb_id (d_vec n : ℕ) (W : ℕ → ℕ → ℂ) (i : ℕ) (hi : i < n) :
+    sernau.vec_comb d_vec n cmat.id W i = W i
+  funext j; unfold sernau.vec_comb cmat.id
+  have hcon : ∀ r < n, complex.mul (if i = r then complex.one else complex.zero) (W r j) = (if r = i then W r j else complex.zero)
+    intro r _; by_cases hir : i = r
+    · rw [if_pos hir, if_pos hir.symm, complex.mul_one_l]
+    · have hri : r ≠ i := by intro h; exact hir h.symm
+      rw [if_neg hir, if_neg hri, complex.mul_zero_l]
+  rw [csum.congr n _ _ hcon, csum.single n i (fun r => W r j) hi]
+
++ sernau.vec_comb_mul (d_vec n : ℕ) (u2 u1 : ℕ → ℕ → ℂ) (W : ℕ → ℕ → ℂ) (i : ℕ) :
+    sernau.vec_comb d_vec n (cmat.mul n u2 u1) W i =
+    sernau.vec_comb d_vec n u2 (sernau.vec_comb d_vec n u1 W) i
+  funext j; unfold sernau.vec_comb cmat.mul
+  have h1 : csum n (fun k => complex.mul (csum n (fun r => complex.mul (u2 i r) (u1 r k))) (W k j)) =
+      csum n (fun k => csum n (fun r => complex.mul (u2 i r) (complex.mul (u1 r k) (W k j))))
+    apply csum.congr; intro k _; rw [← csum.scale_right]; apply csum.congr; intro r _; exact complex.mul_assoc (u2 i r) (u1 r k) (W k j)
+  rw [h1, csum.swap]; apply csum.congr; intro r _; rw [← csum.scale_left]
+
++ sernau.o_det_law_of_ultrametric_gauge (p d_vec : ℕ) (gauge_p : (ℕ → ℂ) → ℝ)
+    (hp : is_prime_nat p)
+    (hnn : ∀ w : ℕ → ℂ, 0 ≤ gauge_p w)
+    (hzero : gauge_p (fun _ => complex.zero) = 0)
+    (hadd : ∀ w1 w2 : ℕ → ℂ, gauge_p (fun j => complex.add (w1 j) (w2 j)) ≤ max (gauge_p w1) (gauge_p w2))
+    (hneg : ∀ w : ℕ → ℂ, gauge_p (fun j => complex.neg (w j)) ≤ gauge_p w) :
+    sernau.o_det_law d_vec (fun v => gauge_p v ≤ 1) sernau.is_int_cmat (sernau.int_cmat_det_norm p)
+  have hmax_le : ∀ x y z : ℝ, x ≤ z → y ≤ z → max x y ≤ z
+    intro x y z hxz hyz; unfold max; by_cases hxy : x ≤ y; (rw [if_pos hxy]; exact hyz); (rw [if_neg hxy]; exact hxz)
+  unfold sernau.o_det_law
+  constructor
+  · intro v1 v2 hv1 hv2; exact le_trans.real _ _ 1 (hadd v1 v2) (hmax_le _ _ 1 hv1 hv2)
+  · constructor
+    · rw [hzero]; linarith
+    · constructor
+      · intro n; constructor; exact sernau.is_int_cmat_id n
+        have hid_det : cmat.det n cmat.id = complex.of_real ((1 : ℤ) : ℝ)
+          have hcon : ∀ i < n, ∀ j < n, cmat.id i j = cmat.diag_real (fun _ => 1) i j
+            intro i _ j _; unfold cmat.id cmat.diag_real
+            by_cases hij : i = j; (rw [if_pos hij, if_pos hij, complex.of_real_one]); (rw [if_neg hij, if_neg hij])
+          rw [cmat.det_congr n cmat.id _ hcon, cmat.det_diag_real n (fun _ => 1), int_cast_one.real]
+          have hp1 : ∀ m : ℕ, (∏ k < m, (1 : ℝ)) = 1
+            intro m; induction m with r ihr; exact prod_below_zero; (rw [succ_eq_add_one.nat, prod_below_succ, ihr]; ring)
+          rw [hp1 n]
+        rw [sernau.int_cmat_det_norm_of_int_eq p n cmat.id 1 hid_det, if_neg (by omega)]
+        have hf1 := (sernau.nat_floor_abs_int_cast 1).1
+        have ha1 : |((1 : ℤ) : ℝ)| = 1 := by rw [int_cast_one.real]; exact abs_of_pos.real 1 (by decide)
+        have hfc : ((nat_floor (|((1 : ℤ) : ℝ)|) : ℕ) : ℝ) = ((1 : ℕ) : ℝ) := by rw [hf1, ha1, cast_one.real]
+        have hnf1 : nat_floor (|((1 : ℤ) : ℝ)|) = 1 := sernau.nat_eq_of_cast_eq _ 1 hfc
+        rw [hnf1]; exact padic.abs_one_eq p hp.1
+      · constructor
+        · intro n u2 u1 hu2 hu1
+          exact ⟨sernau.is_int_cmat_mul n u2 u1 hu2 hu1, sernau.int_cmat_det_norm_mul p n u2 u1 hp hu2 hu1⟩
+        · intro n u Psi hu hPsi i hi
+          unfold sernau.is_int_cmat at hu
+          have hrec : ∀ m : ℕ, m ≤ n → gauge_p (fun j => csum m (fun k => complex.mul (u i k) (Psi k j))) ≤ 1
+            intro m; induction m with _ r ihr hrn
+            · have hz : (fun j : ℕ => csum 0 (fun k => complex.mul (u i k) (Psi k j))) = (fun _ => complex.zero)
+                funext j; exact csum.zero _
+              rw [hz, hzero]; linarith
+            · rw [succ_eq_add_one.nat] at hrn ⊢
+              have hsp : (fun j : ℕ => csum (r + 1) (fun k => complex.mul (u i k) (Psi k j))) =
+                  (fun j : ℕ => complex.add (csum r (fun k => complex.mul (u i k) (Psi k j))) (complex.mul (u i r) (Psi r j)))
+                funext j; exact csum.succ r _
+              rw [hsp]
+              obtain ⟨ar, har⟩ := hu i hi r (by omega)
+              have hsm : (fun j : ℕ => complex.mul (u i r) (Psi r j)) = (fun j : ℕ => complex.mul (complex.of_real ((ar : ℤ) : ℝ)) (Psi r j))
+                funext j; rw [har]
+              have hsm_le : gauge_p (fun j => complex.mul (u i r) (Psi r j)) ≤ gauge_p (Psi r)
+                rw [hsm]; exact sernau.ultrametric_int_smul_le gauge_p hnn hzero hadd hneg ar (Psi r)
+              have hterm := le_trans.real _ _ 1 hsm_le (hPsi r (by omega))
+              have hadd_r := hadd (fun j => csum r (fun k => complex.mul (u i k) (Psi k j))) (fun j => complex.mul (u i r) (Psi r j))
+              exact le_trans.real _ _ 1 hadd_r (hmax_le _ _ 1 (ihr (by omega)) hterm)
+          unfold sernau.vec_comb; exact hrec n (by omega)
+
+-- `IndexDvd.trans` (`ModuleIndex.lean` L31-33):
++ sernau.index_dvd_o_trans (d_vec : ℕ) (M_mod N_mod P_mod : (ℕ → ℂ) → Prop)
+    (is_o_mat : ℕ → (ℕ → ℕ → ℂ) → Prop) (det_norm : ℕ → (ℕ → ℕ → ℂ) → ℝ) (z1 z2 : ℝ)
+    (hlaw : sernau.o_det_law d_vec M_mod is_o_mat det_norm)
+    (hz1_nn : 0 ≤ z1)
+    (h1 : sernau.index_dvd_o d_vec M_mod N_mod is_o_mat det_norm z1)
+    (h2 : sernau.index_dvd_o d_vec N_mod P_mod is_o_mat det_norm z2) :
+    sernau.index_dvd_o d_vec M_mod P_mod is_o_mat det_norm (z1 * z2)
+  unfold sernau.index_dvd_o at h1 h2 ⊢
+  intro n Phi hPhi
+  obtain ⟨u1, hu1_o, hu1_det, hu1_N⟩ := h1 n Phi hPhi
+  obtain ⟨u2, hu2_o, hu2_det, hu2_P⟩ := h2 n (sernau.vec_comb d_vec n u1 Phi) hu1_N
+  use cmat.mul n u2 u1
+  have hm := hlaw.2.2.2.1 n u2 u1 hu2_o hu1_o
+  have hd1 := mul_le_mul_of_nonneg_left.real z1 (det_norm n u1) (det_norm n u2) hu1_det hm.2.1
+  have hd2 := mul_le_mul_of_nonneg_right.real z2 (det_norm n u2) z1 hu2_det hz1_nn
+  rw [hm.2.2.2]
+  exact ⟨hm.1, by linarith, by intro i hi; rw [sernau.vec_comb_mul d_vec n u2 u1 Phi i]; exact hu2_P i hi⟩
+
+-- Constructive upper-triangular `IndexDvd` clearing one integer linear functional modulo `p` (`ModuleIndex.of_det_dvd`):
++ sernau.index_dvd_mod_prime_functional (p d_vec : ℕ) (M_mod : (ℕ → ℂ) → Prop)
+    (lam : (ℕ → ℂ) → ℤ)
+    (hp : is_prime_nat p)
+    (hM_zero : M_mod (fun _ => complex.zero))
+    (hM_add : ∀ v1 v2 : ℕ → ℂ, M_mod v1 → M_mod v2 → M_mod (fun j => complex.add (v1 j) (v2 j)))
+    (hM_smul : ∀ (a : ℤ) (v : ℕ → ℂ), M_mod v → M_mod (fun j => complex.mul (complex.of_real ((a : ℤ) : ℝ)) (v j)))
+    (hlam_add : ∀ v1 v2 : ℕ → ℂ, M_mod v1 → M_mod v2 → lam (fun j => complex.add (v1 j) (v2 j)) = lam v1 + lam v2)
+    (hlam_smul : ∀ (a : ℤ) (v : ℕ → ℂ), M_mod v → lam (fun j => complex.mul (complex.of_real ((a : ℤ) : ℝ)) (v j)) = a * lam v) :
+    (sernau.index_dvd_o d_vec M_mod (fun v => M_mod v ∧ ∃ q : ℤ, lam v = ((p : ℕ) : ℤ) * q) sernau.is_int_cmat (sernau.int_cmat_det_norm p) (rpow (p : ℝ) (-1)))
+  unfold sernau.index_dvd_o
+  have hp_rpow1 : padic.abs p p = rpow (p : ℝ) (-1)
+    rw [padic.abs_pos_val p p (by have h := hp.1; omega)]
+    have hp1 : p = (p ^ 1) * 1 := by ring
+    have hnd1 : ¬ (p ∣ 1)
+      intro hd; obtain ⟨q0, hq0⟩ := (dvd.iff_exists p 1 (by have h := hp.1; omega)).mp hd
+      by_cases hq0_z : q0 = 0; (rw [hq0_z] at hq0; omega)
+      have hm := mul_le_mul_of_nonneg_left.nat 1 q0 p (by omega) (by omega)
+      have h2 := hp.1; omega
+    have hvp1 : vp p p = 1
+      have hm := vp.mul_p p 1 hp.1 (by omega)
+      have hp1_eq : p * 1 = p := by ring
+      have hz := vp.eq_zero_of_not_dvd p 1 hp.1 (by omega) hnd1
+      rw [hp1_eq, hz] at hm; omega
+    rw [hvp1, cast_one.real]
+  have h1_ge_inv : rpow (p : ℝ) (-1) ≤ 1
+    unfold rpow
+    have hlg_nn : 0 ≤ log (p : ℝ) := log_nonneg (p : ℝ) ((cast_le.real 1 p).mpr (by linarith [hp.1]))
+    have he := (exp_le_exp ((-1 : ℝ) * log (p : ℝ)) 0).mpr (by linarith)
+    rw [exp_zero] at he; exact he
+  have hM_comb : ∀ (m : ℕ) (u : ℕ → ℕ → ℂ) (Phi : ℕ → ℕ → ℂ), sernau.is_int_cmat m u → (∀ k < m, M_mod (Phi k)) → ∀ i < m, M_mod (sernau.vec_comb d_vec m u Phi i)
+    intro m u Phi hu hPhi i hi; unfold sernau.is_int_cmat at hu; unfold sernau.vec_comb
+    have hrec : ∀ r : ℕ, r ≤ m → M_mod (fun j => csum r (fun k => complex.mul (u i k) (Phi k j)))
+      intro r; induction r with _ s ihs hsm
+      · have hz : (fun j : ℕ => csum 0 (fun k => complex.mul (u i k) (Phi k j))) = (fun _ => complex.zero) := by funext j; exact csum.zero _
+        rw [hz]; exact hM_zero
+      · rw [succ_eq_add_one.nat] at hsm ⊢
+        obtain ⟨as, has⟩ := hu i hi s (by omega)
+        have hsp : (fun j : ℕ => csum (s + 1) (fun k => complex.mul (u i k) (Phi k j))) =
+            (fun j : ℕ => complex.add (csum s (fun k => complex.mul (u i k) (Phi k j))) (complex.mul (complex.of_real ((as : ℤ) : ℝ)) (Phi s j))) := by funext j; rw [csum.succ, has]
+        rw [hsp]; exact hM_add _ _ (ihs (by omega)) (hM_smul as (Phi s) (hPhi s (by omega)))
+    exact hrec m (by omega)
+  intro n; induction n with Phi hPhi m ihm Phi hPhi
+  · use cmat.id
+    have hid0 : cmat.det 0 cmat.id = complex.of_real ((1 : ℤ) : ℝ) := by rw [cmat.det_zero_eq, int_cast_one.real, complex.of_real_one]
+    rw [sernau.int_cmat_det_norm_of_int_eq p 0 cmat.id 1 hid0, if_neg (by omega)]
+    have hf1 := (sernau.nat_floor_abs_int_cast 1).1
+    have ha1 : |((1 : ℤ) : ℝ)| = 1 := by rw [int_cast_one.real]; exact abs_of_pos.real 1 (by decide)
+    have hfc : ((nat_floor (|((1 : ℤ) : ℝ)|) : ℕ) : ℝ) = ((1 : ℕ) : ℝ) := by rw [hf1, ha1, cast_one.real]
+    have hnf1 : nat_floor (|((1 : ℤ) : ℝ)|) = 1 := sernau.nat_eq_of_cast_eq _ 1 hfc
+    rw [hnf1, padic.abs_one_eq p hp.1]
+    exact ⟨sernau.is_int_cmat_id 0, h1_ge_inv, by intro i hi; omega⟩
+  · rw [succ_eq_add_one.nat] at hPhi ⊢
+    set xm := lam (Phi m) with hxm_def
+    by_cases hdiv_m : ∃ qm : ℤ, xm = ((p : ℕ) : ℤ) * qm
+    · obtain ⟨u0, hu0_int, hu0_det, hu0_lam⟩ := ihm Phi (by intro k hk; exact hPhi k (by omega))
+      set u : ℕ → ℕ → ℂ := fun i j => if i < m then (if j < m then u0 i j else complex.zero) else (if j = m then complex.one else complex.zero) with hu_def
+      have hu_int : sernau.is_int_cmat (m + 1) u
+        unfold sernau.is_int_cmat; unfold sernau.is_int_cmat at hu0_int
+        intro i hi j hj; rw [hu_def]
+        by_cases him : i < m
+        · rw [if_pos him]
+          by_cases hjm : j < m
+          · rw [if_pos hjm]; exact hu0_int i him j hjm
+          · rw [if_neg hjm]; exact ⟨0, by apply complex.ext <;> simp⟩
+        · rw [if_neg him]
+          by_cases hjm : j = m
+          · rw [if_pos hjm]; exact ⟨1, by apply complex.ext <;> simp⟩
+          · rw [if_neg hjm]; exact ⟨0, by apply complex.ext <;> simp⟩
+      have hdet_eq : cmat.det (m + 1) u = cmat.det m u0
+        rw [cmat.det_succ_eq, csum.succ]
+        have hz_pre : csum m (fun j => complex.mul (csign (m + j)) (complex.mul (u m j) (cmat.det m (minor_mat u m j)))) = complex.zero
+          apply csum.zero_of_all_zero; intro j hj
+          have hnm : ¬ (m < m) := by omega
+          have hjm_ne : j ≠ m := by omega
+          rw [hu_def, if_neg hnm, if_neg hjm_ne, complex.mul_zero_l, complex.mul_zero_r]
+        have hnm : ¬ (m < m) := by omega
+        have hev : (m + m) % 2 = 0 := by have h2m : m + m = 0 + 2 * m := by ring; rw [h2m, add_mul_mod.nat]; decide
+        have hmin : cmat.det m (minor_mat u m m) = cmat.det m u0
+          apply cmat.det_congr; intro i hi k hk; unfold minor_mat; rw [if_pos hi, if_pos hk, hu_def, if_pos hi, if_pos hk]
+        rw [hz_pre, complex.add_zero_l, csign.even (m + m) hev, complex.mul_one_l, hmin, hu_def, if_neg hnm, if_pos (by rfl), complex.mul_one_l]
+      have hdet_norm_eq : sernau.int_cmat_det_norm p (m + 1) u = sernau.int_cmat_det_norm p m u0
+        unfold sernau.int_cmat_det_norm; rw [hdet_eq]
+      use u; constructor; exact hu_int
+      constructor; (rw [hdet_norm_eq]; exact hu0_det)
+      intro i hi; constructor; exact hM_comb (m + 1) u Phi hu_int hPhi i hi
+      by_cases him : i < m
+      · have hvc_eq : sernau.vec_comb d_vec (m + 1) u Phi i = sernau.vec_comb d_vec m u0 Phi i
+          funext j; unfold sernau.vec_comb; rw [csum.succ]
+          have hpre : csum m (fun k => complex.mul (u i k) (Phi k j)) = csum m (fun k => complex.mul (u0 i k) (Phi k j))
+            apply csum.congr; intro k hk; rw [hu_def, if_pos him, if_pos hk]
+          rw [hpre, hu_def, if_pos him, if_neg (by omega), complex.mul_zero_l, complex.add_zero_r]
+        rw [hvc_eq]; exact (hu0_lam i him).2
+      · have hieq : i = m := by omega
+        have hvc_m : sernau.vec_comb d_vec (m + 1) u Phi m = Phi m
+          funext j; unfold sernau.vec_comb; rw [csum.succ]
+          have hz0 : csum m (fun k => complex.mul (u m k) (Phi k j)) = complex.zero
+            apply csum.zero_of_all_zero; intro k hk; rw [hu_def, if_neg (by omega), if_neg (by omega), complex.mul_zero_l]
+          rw [hz0, complex.add_zero_l, hu_def, if_neg (by omega), if_pos (by rfl), complex.mul_one_l]
+        rw [hieq, hvc_m, ← hxm_def]; exact hdiv_m
+    · -- Subcase B: `¬ (p | xm)`, upper-triangular elimination matrix `u`!
+      set u : ℕ → ℕ → ℂ := fun i j => if i < m then (if j = i then complex.of_real ((xm : ℤ) : ℝ) else if j = m then complex.of_real ((-lam (Phi i) : ℤ) : ℝ) else complex.zero) else (if j = m then complex.of_real (((p : ℕ) : ℝ)) else complex.zero) with hu_def
+      have hu_int : sernau.is_int_cmat (m + 1) u
+        unfold sernau.is_int_cmat; intro i hi j hj; rw [hu_def]
+        by_cases him : i < m
+        · rw [if_pos him]
+          by_cases hji : j = i
+          · rw [if_pos hji]; exact ⟨xm, rfl⟩
+          · rw [if_neg hji]
+            by_cases hjm : j = m
+            · rw [if_pos hjm]; exact ⟨-lam (Phi i), rfl⟩
+            · rw [if_neg hjm]; exact ⟨0, by apply complex.ext <;> simp⟩
+        · rw [if_neg him]
+          by_cases hjm : j = m
+          · rw [if_pos hjm]; exact ⟨((p : ℕ) : ℤ), rfl⟩
+          · rw [if_neg hjm]; exact ⟨0, by apply complex.ext <;> simp⟩
+      -- Determinant of `u` is `p * xm^m`:
+      have hmin_det : cmat.det m (minor_mat u m m) = complex.of_real ((((xm : ℤ) : ℝ)) ^ m)
+        have hcon : ∀ i < m, ∀ k < m, minor_mat u m m i k = cmat.diag_real (fun _ => ((xm : ℤ) : ℝ)) i k
+          intro i hi k hk; unfold minor_mat cmat.diag_real
+          rw [if_pos hi, if_pos hk, hu_def, if_pos hi]
+          by_cases hki : k = i
+          · rw [if_pos hki, if_pos hki.symm]
+          · have hik : i ≠ k := by omega
+            have hkm : k ≠ m := by omega
+            rw [if_neg hki, if_neg hkm, if_neg hik]
+        rw [cmat.det_congr m _ _ hcon, cmat.det_diag_real m (fun _ => ((xm : ℤ) : ℝ))]
+        have hp_c : ∀ r : ℕ, (∏ _ < r, ((xm : ℤ) : ℝ)) = (((xm : ℤ) : ℝ)) ^ r
+          intro r; induction r with s ihs; (rw [prod_below_zero, pow_zero.real]); (rw [succ_eq_add_one.nat, prod_below_succ, pow_succ.real, ihs])
+        rw [hp_c m]
+      have hdet_u : cmat.det (m + 1) u = complex.of_real (((((p : ℕ) : ℤ) * (xm ^ m) : ℤ) : ℝ))
+        rw [cmat.det_succ_eq, csum.succ]
+        have hz_pre : csum m (fun j => complex.mul (csign (m + j)) (complex.mul (u m j) (cmat.det m (minor_mat u m j)))) = complex.zero
+          apply csum.zero_of_all_zero; intro j hj
+          rw [hu_def, if_neg (by omega), if_neg (by omega), complex.mul_zero_l, complex.mul_zero_r]
+        have hev : (m + m) % 2 = 0 := by have h2m : m + m = 0 + 2 * m := by ring; rw [h2m, add_mul_mod.nat]; decide
+        have hpow_z : ∀ r : ℕ, (((xm ^ r : ℤ) : ℝ)) = (((xm : ℤ) : ℝ)) ^ r
+          intro r; induction r with s ihs; (rw [pow_zero.int, pow_zero.real, int_cast_one.real]); (rw [succ_eq_add_one.nat, pow_succ.int, pow_succ.real, int_cast_mul.real, ihs])
+        rw [hz_pre, complex.add_zero_l, csign.even (m + m) hev, complex.mul_one_l, hmin_det, hu_def, if_neg (by omega), if_pos (by rfl), complex.mul_of_real, int_cast_mul.real, hpow_z m]
+      -- `nat_floor |xm|` is coprime to `p`, so `|xm^m|_p = 1` and `|det u|_p = |p|_p = p^{-1}`!
+      set km := nat_floor (|((xm : ℤ) : ℝ)|) with hkm_def
+      have hxm_ne0 : xm ≠ 0 := by intro hz; exact hdiv_m ⟨0, by rw [hz]; ring⟩
+      have hf_km := sernau.nat_floor_abs_int_cast xm; rw [← hkm_def] at hf_km
+      have hkm_pos : 1 ≤ km := hf_km.2 hxm_ne0
+      have hp_ndvd_km : ¬ (p ∣ km)
+        intro hdvd; obtain ⟨q0, hq0⟩ := (dvd.iff_exists p km (by linarith [hp.1])).mp hdvd
+        apply hdiv_m
+        by_cases hxm_nn : 0 ≤ ((xm : ℤ) : ℝ)
+        · use (q0 : ℤ)
+          have h1 : ((xm : ℤ) : ℝ) = (((((p : ℕ) : ℤ) * (q0 : ℤ)) : ℤ) : ℝ)
+            have hrw : ((km : ℕ) : ℝ) = |((xm : ℤ) : ℝ)| := hf_km.1
+            rw [abs_of_nonneg.real _ hxm_nn] at hrw
+            rw [← hrw, hq0, cast_mul.real]; ring
+          exact sernau.int_eq_of_cast_eq _ _ h1
+        · use -((q0 : ℤ))
+          have h1 : ((xm : ℤ) : ℝ) = (((((p : ℕ) : ℤ) * (-((q0 : ℤ)))) : ℤ) : ℝ)
+            have hrw : ((km : ℕ) : ℝ) = |((xm : ℤ) : ℝ)| := hf_km.1
+            rw [abs_of_nonpos.real _ (by linarith)] at hrw
+            have hxm_neg : ((xm : ℤ) : ℝ) = -((km : ℕ) : ℝ) := by linarith
+            rw [hxm_neg, hq0, cast_mul.real]; ring
+          exact sernau.int_eq_of_cast_eq _ _ h1
+      have hpow_z_abs : ∀ r : ℕ, |((xm ^ r : ℤ) : ℝ)| = ((km ^ r : ℕ) : ℝ)
+        intro r; induction r with s ihs
+        · rw [pow_zero.int, pow_zero.nat, int_cast_one.real, cast_one.real, abs_of_pos.real 1 (by decide)]
+        · rw [succ_eq_add_one.nat, pow_succ.int, pow_succ.nat, int_cast_mul.real, abs_mul.real, ihs, ← hf_km.1, cast_mul.real]
+      have hp_abs_eq : |(((p : ℕ) : ℤ) : ℝ)| = (p : ℝ)
+        have hc : (((p : ℕ) : ℤ) : ℝ) = (p : ℝ) := by ring
+        have hnn : 0 ≤ (((p : ℕ) : ℤ) : ℝ) := by linarith [cast_nonneg.real p]
+        have ha := abs_of_nonneg.real (((p : ℕ) : ℤ) : ℝ) hnn
+        linarith
+      have hdet_int_ne0 : ((p : ℕ) : ℤ) * (xm ^ m) ≠ 0
+        intro hz
+        have hr0 : ((((p : ℕ) : ℤ) * (xm ^ m) : ℤ) : ℝ) = 0 := by rw [hz, int_cast_zero.real]
+        have ha0 : |((((p : ℕ) : ℤ) * (xm ^ m) : ℤ) : ℝ)| = 0 := by rw [hr0]; exact abs_of_nonneg.real 0 (by decide)
+        rw [int_cast_mul.real, abs_mul.real, hpow_z_abs m, hp_abs_eq] at ha0
+        have hp_pos_r : (0 : ℝ) < (p : ℝ) := (cast_pos.real p).mpr (by linarith [hp.1])
+        have hkm_pos_r : (0 : ℝ) < ((km ^ m : ℕ) : ℝ) := (cast_pos.real (km ^ m)).mpr (pow_pos.nat km m (by omega))
+        linarith [mul_pos.real (p : ℝ) ((km ^ m : ℕ) : ℝ) hp_pos_r hkm_pos_r]
+      have hnf_det : nat_floor (|((((p : ℕ) : ℤ) * (xm ^ m) : ℤ) : ℝ)|) = p * (km ^ m)
+        have hfd := (sernau.nat_floor_abs_int_cast (((p : ℕ) : ℤ) * (xm ^ m))).1
+        have hfc : ((nat_floor (|((((p : ℕ) : ℤ) * (xm ^ m) : ℤ) : ℝ)|) : ℕ) : ℝ) = ((p * (km ^ m) : ℕ) : ℝ)
+          rw [hfd, int_cast_mul.real, abs_mul.real, hp_abs_eq, hpow_z_abs m, cast_mul.real p (km ^ m)]
+        exact sernau.nat_eq_of_cast_eq _ _ hfc
+      have hkm_pow_abs1 : ∀ r : ℕ, padic.abs p (km ^ r) = 1
+        intro r; induction r with s ihs
+        · rw [pow_zero.nat]; exact padic.abs_one_eq p hp.1
+        · rw [succ_eq_add_one.nat, pow_succ.nat, padic.abs_mul p (km ^ s) km hp, ihs, sernau.padic_abs_eq_one_of_ndvd p km hp.1 (by omega) hp_ndvd_km]; ring
+      have hdet_norm_u : sernau.int_cmat_det_norm p (m + 1) u = rpow (p : ℝ) (-1)
+        rw [sernau.int_cmat_det_norm_of_int_eq p (m + 1) u (((p : ℕ) : ℤ) * (xm ^ m)) hdet_u, if_neg hdet_int_ne0, hnf_det, padic.abs_mul p p (km ^ m) hp, hkm_pow_abs1 m, mul_one.real, hp_rpow1]
+      use u; constructor; exact hu_int
+      constructor; (rw [hdet_norm_u]; linarith)
+      intro i hi; constructor; exact hM_comb (m + 1) u Phi hu_int hPhi i hi
+      by_cases him : i < m
+      · -- Row `i < m`: `vec_comb` is `xm * Phi i + (-lam(Phi i)) * Phi m`, so `lam = 0`!
+        have hvc_i : sernau.vec_comb d_vec (m + 1) u Phi i =
+            (fun j => complex.add (complex.mul (complex.of_real ((xm : ℤ) : ℝ)) (Phi i j))
+                                  (complex.mul (complex.of_real ((-lam (Phi i) : ℤ) : ℝ)) (Phi m j)))
+          funext j; unfold sernau.vec_comb; rw [csum.succ]
+          have hcon_m : ∀ k < m, complex.mul (u i k) (Phi k j) = (if k = i then complex.mul (complex.of_real ((xm : ℤ) : ℝ)) (Phi i j) else complex.zero)
+            intro k hk; rw [hu_def, if_pos him]
+            by_cases hki : k = i
+            · rw [if_pos hki, if_pos hki, hki]
+            · rw [if_neg hki, if_neg hki, if_neg (by omega), complex.mul_zero_l]
+          rw [csum.congr m _ _ hcon_m, csum.single m i _ him, hu_def, if_pos him, if_neg (by omega), if_pos (by rfl)]
+        have hs1 := hM_smul xm (Phi i) (hPhi i (by omega))
+        have hs2 := hM_smul (-lam (Phi i)) (Phi m) (hPhi m (by omega))
+        rw [hvc_i, hlam_add _ _ hs1 hs2, hlam_smul xm (Phi i) (hPhi i (by omega)), hlam_smul (-lam (Phi i)) (Phi m) (hPhi m (by omega)), ← hxm_def]
+        exact ⟨0, by ring⟩
+      · -- Row `i = m`: `vec_comb` is `p * Phi m`, so `lam = p * xm`!
+        have hieq : i = m := by omega
+        have hvc_m : sernau.vec_comb d_vec (m + 1) u Phi m = (fun j => complex.mul (complex.of_real ((((p : ℕ) : ℤ) : ℝ))) (Phi m j))
+          funext j; unfold sernau.vec_comb; rw [csum.succ]
+          have hz0 : csum m (fun k => complex.mul (u m k) (Phi k j)) = complex.zero
+            apply csum.zero_of_all_zero; intro k hk; rw [hu_def, if_neg (by omega), if_neg (by omega), complex.mul_zero_l]
+          rw [hz0, complex.add_zero_l, hu_def, if_neg (by omega), if_pos (by rfl)]
+        rw [hieq, hvc_m, hlam_smul ((p : ℕ) : ℤ) (Phi m) (hPhi m (by omega))]; exact ⟨lam (Phi m), rfl⟩
+
+-- Prime-power functional `IndexDvd` (`lam v = p^e * q`) by induction on `e` (`ModuleIndex.of_det_dvd`):
++ sernau.index_dvd_mod_prime_pow_functional (p d_vec e : ℕ) (M_mod : (ℕ → ℂ) → Prop)
+    (lam : (ℕ → ℂ) → ℤ)
+    (hp : is_prime_nat p)
+    (hM_zero : M_mod (fun _ => complex.zero))
+    (hM_add : ∀ v1 v2 : ℕ → ℂ, M_mod v1 → M_mod v2 → M_mod (fun j => complex.add (v1 j) (v2 j)))
+    (hM_smul : ∀ (a : ℤ) (v : ℕ → ℂ), M_mod v → M_mod (fun j => complex.mul (complex.of_real ((a : ℤ) : ℝ)) (v j)))
+    (hlam_add : ∀ v1 v2 : ℕ → ℂ, M_mod v1 → M_mod v2 → lam (fun j => complex.add (v1 j) (v2 j)) = lam v1 + lam v2)
+    (hlam_smul : ∀ (a : ℤ) (v : ℕ → ℂ), M_mod v → lam (fun j => complex.mul (complex.of_real ((a : ℤ) : ℝ)) (v j)) = a * lam v) :
+    (sernau.index_dvd_o d_vec M_mod (fun v => M_mod v ∧ ∃ q : ℤ, lam v = (((p ^ e : ℕ) : ℤ)) * q) sernau.is_int_cmat (sernau.int_cmat_det_norm p) (rpow (p : ℝ) (-(e : ℝ))))
+  have hlaw_M : sernau.o_det_law d_vec M_mod sernau.is_int_cmat (sernau.int_cmat_det_norm p)
+    have hid_law := (sernau.o_det_law_of_ultrametric_gauge p d_vec (fun _ => 0) hp (by intro _; linarith) rfl (by intro _ _; exact le_max_left.real 0 0) (by intro _; linarith))
+    unfold sernau.o_det_law
+    constructor; exact hM_add
+    constructor; exact hM_zero
+    constructor; exact hid_law.2.2.1
+    constructor; exact hid_law.2.2.2.1
+    intro n u Psi hu hPsi i hi; unfold sernau.is_int_cmat at hu; unfold sernau.vec_comb
+    have hrec : ∀ m : ℕ, m ≤ n → M_mod (fun j => csum m (fun k => complex.mul (u i k) (Psi k j)))
+      intro m; induction m with _ r ihr hrn
+      · have hz : (fun j : ℕ => csum 0 (fun k => complex.mul (u i k) (Psi k j))) = (fun _ => complex.zero) := by funext j; exact csum.zero _
+        rw [hz]; exact hM_zero
+      · rw [succ_eq_add_one.nat] at hrn ⊢
+        obtain ⟨ar, har⟩ := hu i hi r (by omega)
+        have hsp : (fun j : ℕ => csum (r + 1) (fun k => complex.mul (u i k) (Psi k j))) =
+            (fun j : ℕ => complex.add (csum r (fun k => complex.mul (u i k) (Psi k j))) (complex.mul (complex.of_real ((ar : ℤ) : ℝ)) (Psi r j))) := by funext j; rw [csum.succ, har]
+        rw [hsp]; exact hM_add _ _ (ihr (by omega)) (hM_smul ar (Psi r) (hPsi r (by omega)))
+    exact hrec n (by omega)
+  induction e with r ihr
+  · intro n Phi hPhi; use cmat.id
+    have hr0 : rpow (p : ℝ) (-((0 : ℕ) : ℝ)) = 1 := by rw [cast_zero.real]; unfold rpow; simp [exp_zero]
+    rw [hr0, (hlaw_M.2.2.1 n).2]
+    exact ⟨(hlaw_M.2.2.1 n).1, by linarith, by intro i hi; rw [sernau.vec_comb_id d_vec n Phi i hi]; exact ⟨hPhi i hi, lam (Phi i), by rw [pow_zero.nat]; ring⟩⟩
+  · rw [succ_eq_add_one.nat]
+    set M_r : (ℕ → ℂ) → Prop := fun v => M_mod v ∧ ∃ q : ℤ, lam v = (((p ^ r : ℕ) : ℤ)) * q with hMr_def
+    set lam_r : (ℕ → ℂ) → ℤ := fun v => sernau.int_of_real_exact (((lam v : ℤ) : ℝ) / ((p ^ r : ℕ) : ℝ)) with hlamr_def
+    have hpr_pos : (0 : ℝ) < ((p ^ r : ℕ) : ℝ) := (cast_pos.real (p ^ r)).mpr (pow_pos.nat p r (by linarith [hp.1]))
+    have hpr_ne : ((p ^ r : ℕ) : ℝ) ≠ 0 := by linarith
+    have hlamr_eval : ∀ (v : ℕ → ℂ) (q : ℤ), lam v = (((p ^ r : ℕ) : ℤ)) * q → lam_r v = q
+      intro v q hvq; rw [hlamr_def, hvq]
+      have hdiv : ((((p ^ r : ℕ) : ℤ) * q : ℤ) : ℝ) / ((p ^ r : ℕ) : ℝ) = ((q : ℤ) : ℝ)
+        exact (div_eq_iff.real ((((p ^ r : ℕ) : ℤ) * q : ℤ) : ℝ) ((q : ℤ) : ℝ) ((p ^ r : ℕ) : ℝ) hpr_ne).mpr (by rw [int_cast_mul.real]; ring)
+      rw [hdiv, sernau.int_of_real_exact_cast]
+    have hlam0 : lam (fun _ => complex.zero) = 0
+      have hz := hlam_smul 0 (fun _ => complex.zero) hM_zero
+      have hz_v : (fun _ : ℕ => complex.mul (complex.of_real ((0 : ℤ) : ℝ)) complex.zero) = (fun _ => complex.zero) := by funext _; rw [int_cast_zero.real, complex.of_real_zero, complex.mul_zero_l]
+      rw [hz_v] at hz; omega
+    have hMr_zero : M_r (fun _ => complex.zero) := by rw [hMr_def]; exact ⟨hM_zero, 0, by rw [hlam0]; ring⟩
+    have hMr_add : ∀ v1 v2 : ℕ → ℂ, M_r v1 → M_r v2 → M_r (fun j => complex.add (v1 j) (v2 j))
+      intro v1 v2 hv1 hv2; rw [hMr_def] at hv1 hv2 ⊢
+      obtain ⟨hm1, q1, hq1⟩ := hv1; obtain ⟨hm2, q2, hq2⟩ := hv2
+      exact ⟨hM_add v1 v2 hm1 hm2, q1 + q2, by rw [hlam_add v1 v2 hm1 hm2, hq1, hq2]; ring⟩
+    have hMr_smul : ∀ (a : ℤ) (v : ℕ → ℂ), M_r v → M_r (fun j => complex.mul (complex.of_real ((a : ℤ) : ℝ)) (v j))
+      intro a v hv; rw [hMr_def] at hv ⊢; obtain ⟨hm, q, hq⟩ := hv
+      exact ⟨hM_smul a v hm, a * q, by rw [hlam_smul a v hm, hq]; ring⟩
+    have hlamr_add : ∀ v1 v2 : ℕ → ℂ, M_r v1 → M_r v2 → lam_r (fun j => complex.add (v1 j) (v2 j)) = lam_r v1 + lam_r v2
+      intro v1 v2 hv1 hv2; rw [hMr_def] at hv1 hv2
+      obtain ⟨hm1, q1, hq1⟩ := hv1; obtain ⟨hm2, q2, hq2⟩ := hv2
+      rw [hlamr_eval v1 q1 hq1, hlamr_eval v2 q2 hq2, hlamr_eval _ (q1 + q2) (by rw [hlam_add v1 v2 hm1 hm2, hq1, hq2]; ring)]
+    have hlamr_smul : ∀ (a : ℤ) (v : ℕ → ℂ), M_r v → lam_r (fun j => complex.mul (complex.of_real ((a : ℤ) : ℝ)) (v j)) = a * lam_r v
+      intro a v hv; rw [hMr_def] at hv; obtain ⟨hm, q, hq⟩ := hv
+      rw [hlamr_eval v q hq, hlamr_eval _ (a * q) (by rw [hlam_smul a v hm, hq]; ring)]
+    have hstep1 := sernau.index_dvd_mod_prime_functional p d_vec M_r lam_r hp hMr_zero hMr_add hMr_smul hlamr_add hlamr_smul
+    have hrp_nn : 0 ≤ rpow (p : ℝ) (-(r : ℝ)) := by linarith [rpow.pos (p : ℝ) (-(r : ℝ))]
+    have hrpow_eq : rpow (p : ℝ) (-(r : ℝ)) * rpow (p : ℝ) (-1) = rpow (p : ℝ) (-((r + 1 : ℕ) : ℝ))
+      rw [← rpow.add, cast_add.real r 1, cast_one.real]; have he : -(r : ℝ) + (-1) = -((r : ℝ) + 1) := by ring
+      rw [he]
+    have hcomb := sernau.index_dvd_o_trans d_vec M_mod M_r (fun v => M_r v ∧ ∃ q : ℤ, lam_r v = ((p : ℕ) : ℤ) * q) sernau.is_int_cmat (sernau.int_cmat_det_norm p) (rpow (p : ℝ) (-(r : ℝ))) (rpow (p : ℝ) (-1)) hlaw_M hrp_nn ihr hstep1
+    rw [hrpow_eq] at hcomb
+    unfold sernau.index_dvd_o at hcomb ⊢
+    intro n Phi hPhi
+    obtain ⟨u, hu_o, hu_det, hu_mem⟩ := hcomb n Phi hPhi
+    use u; constructor; exact hu_o
+    constructor; exact hu_det
+    intro i hi; obtain ⟨hMr_i, q', hq'⟩ := hu_mem i hi
+    rw [hMr_def] at hMr_i; obtain ⟨hM_i, q0, hq0⟩ := hMr_i
+    have hq0_eq : lam_r (sernau.vec_comb d_vec n u Phi i) = q0 := hlamr_eval _ q0 hq0
+    rw [hq0_eq] at hq'
+    exact ⟨hM_i, q', by rw [hq0, hq', pow_succ.nat]; ring⟩
+

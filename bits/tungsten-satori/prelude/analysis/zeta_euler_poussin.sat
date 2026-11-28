@@ -1,0 +1,844 @@
+-- Milestone 3.25: UNCONDITIONAL Euler Product for zeta(s) on Re(s) > 1 (Euler's 1737 Sieve),
+--                 UNCONDITIONAL Mertens 3-4-1 Inequality via Exact SOS Derivative Proof, and
+--                 UNCONDITIONAL Hadamard-de la Vallee Poussin Nonvanishing zeta_EM2(s) != 0
+--                 for ALL Re(s) >= 1, s != 1 (ZERO EXTRA HYPOTHESES, 0 CUSTOM AXIOMS!)
+--
+-- Direct, unconditional completion of the classical Prime Number Theorem nonvanishing core
+-- (`hgt1` and `heq1` of `rh_and_grh_of_minimal_bedrock` in `rh_skeleton.sat`):
+--   1. `mertens.single_factor_341_le_one` & `mertens.single_factor_inv_341_ge_one`:
+--        Purely algebraic SOS derivative proof (ZERO complex logs!) that for all 0 <= r < 1, theta in R:
+--          |1 - r|^3 * |1 - r*e^(i*theta)|^4 * |1 - r*e^(2*i*theta)| <= 1
+--        and hence 1 <= |(1 - r)^(-1)|^3 * |(1 - r*e^(i*theta))^(-1)|^4 * |(1 - r*e^(2*i*theta))^(-1)|!
+--   2. `pseries.tail_sum_le`:
+--        Exact telescoping tail bound sum_{P <= n < N} n^(-sigma) <= (P - 1)^(-(sigma - 1)) / (sigma - 1).
+--   3. `euler_sieve.prod_mul_zeta_bound` & `euler_sieve.prod_mul_zeta_tends_to_one`:
+--        Euler's 1737 sieve theorem via exact finite block induction `csum (P * N)`:
+--          |(prod_{p < P prime} (1 - p^(-s))) * zeta(s) - 1| <= (P - 1)^(-(Re(s) - 1)) / (Re(s) - 1) -> 0!
+--   4. `zeta.dseries_ne_zero_re_gt_one` & `zeta.em2_ne_zero_re_gt_one`:
+--        UNCONDITIONAL nonvanishing zeta(s) != 0 for ALL Re(s) > 1!
+--   5. `zeta.euler_prod_tends_to_em2`:
+--        UNCONDITIONAL Euler product convergence prod_{p < P} (1 - p^(-s))^(-1) -> zeta_EM2(s) on Re(s) > 1!
+--   6. `zeta.em2_mertens_341_unconditional`:
+--        UNCONDITIONAL Mertens 3-4-1: 1 <= |zeta_EM2(sigma)|^3 * |zeta_EM2(sigma+it)|^4 * |zeta_EM2(sigma+2it)|!
+--   7. `zeta.em2_ne_zero_re_ge_one_unconditional`:
+--        UNCONDITIONAL HADAMARD-DE LA VALLEE POUSSIN NONVANISHING FOR ALL Re(s) >= 1, s != 1 (0 AXIOMS!)
+
+import analysis.zeta_continuation
+
+-- ====================================================================================
+-- 1. SINGLE-PRIME MERTENS 3-4-1 VIA EXACT 5-TERM SOS DERIVATIVE (ZERO LOGARITHMS!)
+-- ====================================================================================
+
++ has_deriv_within.mul_eq (f g h : ℝ → ℝ) (S : set ℝ) (t df dg dh : ℝ)
+    (hf : has_deriv_within f S t df) (hg : has_deriv_within g S t dg)
+    (heq : ∀ x, f x * g x = h x) (hveq : df * g t + f t * dg = dh) :
+    has_deriv_within h S t dh
+  have hm := has_deriv_within.mul f g S t df dg hf hg
+  have hfeq : (fun x => f x * g x) = h := by funext x; exact heq x
+  rw [hfeq, hveq] at hm; exact hm
+
++ has_deriv_within.add_eq (f g h : ℝ → ℝ) (S : set ℝ) (t df dg dh : ℝ)
+    (hf : has_deriv_within f S t df) (hg : has_deriv_within g S t dg)
+    (heq : ∀ x, f x + g x = h x) (hveq : df + dg = dh) :
+    has_deriv_within h S t dh
+  have hm := has_deriv_within.add f g S t df dg hf hg
+  have hfeq : (fun x => f x + g x) = h := by funext x; exact heq x
+  rw [hfeq, hveq] at hm; exact hm
+
+-- Exact polynomial inequality: for all 0 <= r < 1 and -1 <= c <= 1,
+--   (1 - r)^6 * (1 - 2*r*c + r^2)^4 * (1 - 4*r*c^2 + 2*r + r^2) <= 1 !
++ mertens.poly_341_le_one (r c : ℝ) (hr0 : 0 ≤ r) (hr1 : r < 1) (hc_lo : -1 ≤ c) (hc_hi : c ≤ 1) :
+    ((1 - r) * (1 - r)) ^ 3 * (1 - 2 * r * c + r * r) ^ 4 * (1 - 2 * r * (2 * (c * c) - 1) + r * r) ≤ 1
+  -- Define F(t) = (1 - t)^6 * A(t)^4 * B(t); we prove F'(t) = -2*(1-t)^5 * A(t)^3 * N(t,c) <= 0 on [0, r]!
+  set F := (fun t => ((1 - t) * (1 - t)) ^ 3 * (1 - 2 * t * c + t * t) ^ 4 * (1 - 2 * t * (2 * (c * c) - 1) + t * t)) with hF
+  set dF := (fun t => -2 * (1 - t) ^ 5 * (1 - 2 * t * c + t * t) ^ 3 * (3 * (1 - 2 * t * c + t * t) * (1 - 2 * t * (2 * (c * c) - 1) + t * t) + 4 * (1 - t) * (c - t) * (1 - 2 * t * (2 * (c * c) - 1) + t * t) + (1 - t) * (1 - 2 * t * c + t * t) * (2 * (c * c) - 1 - t))) with hdF
+  have hderiv : ∀ t, 0 ≤ t → t ≤ r → has_deriv_within F (fun z => 0 ≤ z ∧ z ≤ r) t (dF t)
+    intro t ht0 htr
+    set S := (fun (z : ℝ) => 0 ≤ z ∧ z ≤ r) with hS
+    have hid := has_deriv_within.id S t
+    have h1mt : has_deriv_within (fun x => 1 - x) S t (-1) :=
+      has_deriv_within.add_eq (fun _ => (1 : ℝ)) (fun x => (-1 : ℝ) * x) (fun x => 1 - x) S t 0 ((-1 : ℝ) * 1) (-1) (has_deriv_within.const 1 S t) (has_deriv_within.scale (-1) (fun x => x) S t 1 hid) (by intro x; ring) (by ring)
+    have h1mt2 : has_deriv_within (fun x => (1 - x) * (1 - x)) S t (-2 * (1 - t)) :=
+      has_deriv_within.mul_eq (fun x => 1 - x) (fun x => 1 - x) (fun x => (1 - x) * (1 - x)) S t (-1) (-1) (-2 * (1 - t)) h1mt h1mt (by intro x; ring) (by ring)
+    have h1mt4 : has_deriv_within (fun x => ((1 - x) * (1 - x)) * ((1 - x) * (1 - x))) S t (-4 * (1 - t) ^ 3) :=
+      has_deriv_within.mul_eq (fun x => (1 - x) * (1 - x)) (fun x => (1 - x) * (1 - x)) (fun x => ((1 - x) * (1 - x)) * ((1 - x) * (1 - x))) S t (-2 * (1 - t)) (-2 * (1 - t)) (-4 * (1 - t) ^ 3) h1mt2 h1mt2 (by intro x; ring) (by ring)
+    have h1mt6 : has_deriv_within (fun x => ((1 - x) * (1 - x)) ^ 3) S t (-6 * (1 - t) ^ 5) :=
+      has_deriv_within.mul_eq (fun x => ((1 - x) * (1 - x)) * ((1 - x) * (1 - x))) (fun x => (1 - x) * (1 - x)) (fun x => ((1 - x) * (1 - x)) ^ 3) S t (-4 * (1 - t) ^ 3) (-2 * (1 - t)) (-6 * (1 - t) ^ 5) h1mt4 h1mt2 (by intro x; ring) (by ring)
+    have hx2 : has_deriv_within (fun x => x * x) S t (2 * t) :=
+      has_deriv_within.mul_eq (fun x => x) (fun x => x) (fun x => x * x) S t 1 1 (2 * t) hid hid (by intro x; ring) (by ring)
+    have hA1 : has_deriv_within (fun x => 1 - 2 * x * c) S t (-2 * c) :=
+      has_deriv_within.add_eq (fun _ => (1 : ℝ)) (fun x => (-2 * c) * x) (fun x => 1 - 2 * x * c) S t 0 ((-2 * c) * 1) (-2 * c) (has_deriv_within.const 1 S t) (has_deriv_within.scale (-2 * c) (fun x => x) S t 1 hid) (by intro x; ring) (by ring)
+    have hA : has_deriv_within (fun x => 1 - 2 * x * c + x * x) S t (-2 * c + 2 * t) :=
+      has_deriv_within.add_eq (fun x => 1 - 2 * x * c) (fun x => x * x) (fun x => 1 - 2 * x * c + x * x) S t (-2 * c) (2 * t) (-2 * c + 2 * t) hA1 hx2 (by intro x; ring) (by ring)
+    have hA2 : has_deriv_within (fun x => (1 - 2 * x * c + x * x) ^ 2) S t (2 * (1 - 2 * t * c + t * t) * (-2 * c + 2 * t)) :=
+      has_deriv_within.mul_eq (fun x => 1 - 2 * x * c + x * x) (fun x => 1 - 2 * x * c + x * x) (fun x => (1 - 2 * x * c + x * x) ^ 2) S t (-2 * c + 2 * t) (-2 * c + 2 * t) (2 * (1 - 2 * t * c + t * t) * (-2 * c + 2 * t)) hA hA (by intro x; ring) (by ring)
+    have hA4 : has_deriv_within (fun x => (1 - 2 * x * c + x * x) ^ 4) S t (4 * (1 - 2 * t * c + t * t) ^ 3 * (-2 * c + 2 * t)) :=
+      has_deriv_within.mul_eq (fun x => (1 - 2 * x * c + x * x) ^ 2) (fun x => (1 - 2 * x * c + x * x) ^ 2) (fun x => (1 - 2 * x * c + x * x) ^ 4) S t (2 * (1 - 2 * t * c + t * t) * (-2 * c + 2 * t)) (2 * (1 - 2 * t * c + t * t) * (-2 * c + 2 * t)) (4 * (1 - 2 * t * c + t * t) ^ 3 * (-2 * c + 2 * t)) hA2 hA2 (by intro x; ring) (by ring)
+    have hB1 : has_deriv_within (fun x => 1 - 2 * x * (2 * (c * c) - 1)) S t (-2 * (2 * (c * c) - 1)) :=
+      has_deriv_within.add_eq (fun _ => (1 : ℝ)) (fun x => (-2 * (2 * (c * c) - 1)) * x) (fun x => 1 - 2 * x * (2 * (c * c) - 1)) S t 0 ((-2 * (2 * (c * c) - 1)) * 1) (-2 * (2 * (c * c) - 1)) (has_deriv_within.const 1 S t) (has_deriv_within.scale (-2 * (2 * (c * c) - 1)) (fun x => x) S t 1 hid) (by intro x; ring) (by ring)
+    have hB : has_deriv_within (fun x => 1 - 2 * x * (2 * (c * c) - 1) + x * x) S t (-2 * (2 * (c * c) - 1) + 2 * t) :=
+      has_deriv_within.add_eq (fun x => 1 - 2 * x * (2 * (c * c) - 1)) (fun x => x * x) (fun x => 1 - 2 * x * (2 * (c * c) - 1) + x * x) S t (-2 * (2 * (c * c) - 1)) (2 * t) (-2 * (2 * (c * c) - 1) + 2 * t) hB1 hx2 (by intro x; ring) (by ring)
+    have h12 : has_deriv_within (fun x => ((1 - x) * (1 - x)) ^ 3 * (1 - 2 * x * c + x * x) ^ 4) S t ((-6 * (1 - t) ^ 5) * (1 - 2 * t * c + t * t) ^ 4 + (((1 - t) * (1 - t)) ^ 3) * (4 * (1 - 2 * t * c + t * t) ^ 3 * (-2 * c + 2 * t))) :=
+      has_deriv_within.mul_eq (fun x => ((1 - x) * (1 - x)) ^ 3) (fun x => (1 - 2 * x * c + x * x) ^ 4) (fun x => ((1 - x) * (1 - x)) ^ 3 * (1 - 2 * x * c + x * x) ^ 4) S t (-6 * (1 - t) ^ 5) (4 * (1 - 2 * t * c + t * t) ^ 3 * (-2 * c + 2 * t)) ((-6 * (1 - t) ^ 5) * (1 - 2 * t * c + t * t) ^ 4 + (((1 - t) * (1 - t)) ^ 3) * (4 * (1 - 2 * t * c + t * t) ^ 3 * (-2 * c + 2 * t))) h1mt6 hA4 (by intro x; ring) (by ring)
+    exact has_deriv_within.mul_eq (fun x => ((1 - x) * (1 - x)) ^ 3 * (1 - 2 * x * c + x * x) ^ 4) (fun x => 1 - 2 * x * (2 * (c * c) - 1) + x * x) F S t ((-6 * (1 - t) ^ 5) * (1 - 2 * t * c + t * t) ^ 4 + (((1 - t) * (1 - t)) ^ 3) * (4 * (1 - 2 * t * c + t * t) ^ 3 * (-2 * c + 2 * t))) (-2 * (2 * (c * c) - 1) + 2 * t) (dF t) h12 hB (by intro x; rw [hF]) (by rw [hdF]; ring)
+  -- Exact 5-term SOS non-positivity of dF(t) on [0, r]!
+  have hdF_le0 : ∀ t, 0 ≤ t → t ≤ r → dF t ≤ 0
+    intro t ht0 htr
+    set w := 1 - t with hw
+    set u := 1 + c with hu
+    set v := 1 - c with hv
+    have hw_nn : 0 ≤ w := by rw [hw]; linarith
+    have hu_nn : 0 ≤ u := by rw [hu]; linarith
+    have hv_nn : 0 ≤ v := by rw [hv]; linarith
+    have hA_nn : 0 ≤ 1 - 2 * t * c + t * t
+      have heq : 1 - 2 * t * c + t * t = w * w + 2 * t * v := by rw [hw, hv]; ring
+      rw [heq]
+      have h1 : 0 ≤ w * w := mul_nonneg.real w w hw_nn hw_nn
+      have h2 : 0 ≤ 2 * t * v := mul_nonneg.real (2 * t) v (by linarith) hv_nn
+      linarith
+    have hN_nn : 0 ≤ 3 * (1 - 2 * t * c + t * t) * (1 - 2 * t * (2 * (c * c) - 1) + t * t) + 4 * (1 - t) * (c - t) * (1 - 2 * t * (2 * (c * c) - 1) + t * t) + (1 - t) * (1 - 2 * t * c + t * t) * (2 * (c * c) - 1 - t)
+      have hsos : 3 * (1 - 2 * t * c + t * t) * (1 - 2 * t * (2 * (c * c) - 1) + t * t) + 4 * (1 - t) * (c - t) * (1 - 2 * t * (2 * (c * c) - 1) + t * t) + (1 - t) * (1 - 2 * t * c + t * t) * (2 * (c * c) - 1 - t) = 2 * (u * u) * (w ^ 4) + v * (20 * ((u - 7 / 20) * (u - 7 / 20)) + 31 / 20) * t * (w ^ 3) + 4 * v * (4 * ((u - 1 / 8) * (u - 1 / 8)) + 31 / 16) * (t * t) * (w * w) + 28 * u * (v * v) * (t ^ 3) * w + 24 * u * (v * v) * (t ^ 4) := by rw [hw, hu, hv]; ring
+      rw [hsos]
+      have hw2 : 0 ≤ w * w := mul_nonneg.real w w hw_nn hw_nn
+      have hw3 : 0 ≤ w ^ 3 := pow_nonneg.real w hw_nn 3
+      have hw4 : 0 ≤ w ^ 4 := pow_nonneg.real w hw_nn 4
+      have ht2 : 0 ≤ t * t := mul_nonneg.real t t ht0 ht0
+      have ht3 : 0 ≤ t ^ 3 := pow_nonneg.real t ht0 3
+      have ht4 : 0 ≤ t ^ 4 := pow_nonneg.real t ht0 4
+      have hu2 : 0 ≤ u * u := mul_nonneg.real u u hu_nn hu_nn
+      have hv2 : 0 ≤ v * v := mul_nonneg.real v v hv_nn hv_nn
+      have hq1 : 0 ≤ 20 * ((u - 7 / 20) * (u - 7 / 20)) + 31 / 20 := by nlinarith
+      have hq2 : 0 ≤ 4 * ((u - 1 / 8) * (u - 1 / 8)) + 31 / 16 := by nlinarith
+      have t1 : 0 ≤ 2 * (u * u) * (w ^ 4) := mul_nonneg.real (2 * (u * u)) (w ^ 4) (by linarith) hw4
+      have t2 : 0 ≤ v * (20 * ((u - 7 / 20) * (u - 7 / 20)) + 31 / 20) * t * (w ^ 3) :=
+        mul_nonneg.real (v * (20 * ((u - 7 / 20) * (u - 7 / 20)) + 31 / 20) * t) (w ^ 3) (mul_nonneg.real (v * (20 * ((u - 7 / 20) * (u - 7 / 20)) + 31 / 20)) t (mul_nonneg.real v (20 * ((u - 7 / 20) * (u - 7 / 20)) + 31 / 20) hv_nn hq1) ht0) hw3
+      have t3 : 0 ≤ 4 * v * (4 * ((u - 1 / 8) * (u - 1 / 8)) + 31 / 16) * (t * t) * (w * w) :=
+        mul_nonneg.real (4 * v * (4 * ((u - 1 / 8) * (u - 1 / 8)) + 31 / 16) * (t * t)) (w * w) (mul_nonneg.real (4 * v * (4 * ((u - 1 / 8) * (u - 1 / 8)) + 31 / 16)) (t * t) (mul_nonneg.real (4 * v) (4 * ((u - 1 / 8) * (u - 1 / 8)) + 31 / 16) (by linarith) hq2) ht2) hw2
+      have t4 : 0 ≤ 28 * u * (v * v) * (t ^ 3) * w :=
+        mul_nonneg.real (28 * u * (v * v) * (t ^ 3)) w (mul_nonneg.real (28 * u * (v * v)) (t ^ 3) (mul_nonneg.real (28 * u) (v * v) (by linarith) hv2) ht3) hw_nn
+      have t5 : 0 ≤ 24 * u * (v * v) * (t ^ 4) :=
+        mul_nonneg.real (24 * u * (v * v)) (t ^ 4) (mul_nonneg.real (24 * u) (v * v) (by linarith) hv2) ht4
+      linarith
+    have hpref_nn : 0 ≤ (1 - t) ^ 5 * (1 - 2 * t * c + t * t) ^ 3 :=
+      mul_nonneg.real ((1 - t) ^ 5) ((1 - 2 * t * c + t * t) ^ 3) (pow_nonneg.real (1 - t) (by linarith) 5) (pow_nonneg.real (1 - 2 * t * c + t * t) hA_nn 3)
+    have hprod_nn := mul_nonneg.real ((1 - t) ^ 5 * (1 - 2 * t * c + t * t) ^ 3) (3 * (1 - 2 * t * c + t * t) * (1 - 2 * t * (2 * (c * c) - 1) + t * t) + 4 * (1 - t) * (c - t) * (1 - 2 * t * (2 * (c * c) - 1) + t * t) + (1 - t) * (1 - 2 * t * c + t * t) * (2 * (c * c) - 1 - t)) hpref_nn hN_nn
+    have hre : dF t = -2 * (((1 - t) ^ 5 * (1 - 2 * t * c + t * t) ^ 3) * (3 * (1 - 2 * t * c + t * t) * (1 - 2 * t * (2 * (c * c) - 1) + t * t) + 4 * (1 - t) * (c - t) * (1 - 2 * t * (2 * (c * c) - 1) + t * t) + (1 - t) * (1 - 2 * t * c + t * t) * (2 * (c * c) - 1 - t))) := by rw [hdF]; ring
+    rw [hre]; linarith
+  have hinc := interval.increment_le_of_deriv_le F dF 0 r 0 hr0 hderiv hdF_le0
+  have hF0 : F 0 = 1 := by rw [hF]; ring
+  rw [hF0] at hinc
+  rw [hF] at hinc
+  linarith
+
+-- THEOREM 1 (EXACT SINGLE-PRIME EULER FACTOR MERTENS 3-4-1 INEQUALITY — 0 AXIOMS!):
+-- For EVERY p >= 2, sigma > 1, and t in R:
+--   1 <= |(1 - p^(-sigma))^(-1)|^3 * |(1 - p^(-(sigma + it)))^(-1)|^4 * |(1 - p^(-(sigma + 2it)))^(-1)| !
++ mertens.single_prime_euler_341_ge_one (p : ℕ) (sigma t : ℝ) (hp : 2 ≤ p) (hs : 1 < sigma) :
+    1 ≤ (complex.abs (complex.inv (complex.sub complex.one (cpow_real (p : ℝ) (complex.neg (complex.of_real sigma)))))) ^ 3 *
+        (complex.abs (complex.inv (complex.sub complex.one (cpow_real (p : ℝ) (complex.neg (complex.mk sigma t)))))) ^ 4 *
+        complex.abs (complex.inv (complex.sub complex.one (cpow_real (p : ℝ) (complex.neg (complex.mk sigma (2 * t))))))
+  set r := rpow (p : ℝ) (-sigma) with hr_def
+  set theta := -t * log (p : ℝ) with hth_def
+  have hlog_pos : 0 < log (p : ℝ)
+    have h := (log_lt_log 1 (p : ℝ) (by decide) (by linarith)).mpr (by linarith)
+    rw [log_one] at h; exact h
+  have hr_pos : 0 < r := by rw [hr_def]; exact rpow.pos (p : ℝ) (-sigma)
+  have hr_lt1 : r < 1
+    rw [hr_def]; unfold rpow
+    have h := (exp_lt_exp (-sigma * log (p : ℝ)) 0).mpr (by nlinarith)
+    rw [exp_zero] at h; exact h
+  -- Exact norm_sq of each (1 - p^(-s)) factor:
+  set z0 := complex.sub complex.one (cpow_real (p : ℝ) (complex.neg (complex.of_real sigma))) with hz0
+  set z1 := complex.sub complex.one (cpow_real (p : ℝ) (complex.neg (complex.mk sigma t))) with hz1
+  set z2 := complex.sub complex.one (cpow_real (p : ℝ) (complex.neg (complex.mk sigma (2 * t)))) with hz2
+  have hn0 : complex.norm_sq z0 = (1 - r) * (1 - r)
+    rw [hz0, hr_def]; unfold complex.norm_sq cpow_real rpow complex.of_real; simp
+    have h1 : log (p : ℝ) * (0 - sigma) = -sigma * log (p : ℝ) := by ring
+    rw [h1, cos_zero, sin_zero]; ring
+  have hn1 : complex.norm_sq z1 = 1 - 2 * r * cos theta + r * r
+    rw [hz1, hr_def, hth_def]; unfold complex.norm_sq cpow_real rpow; simp
+    have h1 : log (p : ℝ) * (0 - sigma) = -sigma * log (p : ℝ) := by ring
+    have h2 : log (p : ℝ) * (0 - t) = -t * log (p : ℝ) := by ring
+    rw [h1, h2]
+    have hpy := sin_sq_add_cos_sq (-t * log (p : ℝ))
+    linear_combination (exp (-sigma * log (p : ℝ)) * exp (-sigma * log (p : ℝ))) * hpy
+  have hn2 : complex.norm_sq z2 = 1 - 2 * r * (2 * (cos theta * cos theta) - 1) + r * r
+    rw [hz2, hr_def, hth_def]; unfold complex.norm_sq cpow_real rpow; simp
+    have h1 : log (p : ℝ) * (0 - sigma) = -sigma * log (p : ℝ) := by ring
+    have h2 : log (p : ℝ) * (0 - 2 * t) = 2 * (-t * log (p : ℝ)) := by ring
+    rw [h1, h2]
+    have hpy := sin_sq_add_cos_sq (2 * (-t * log (p : ℝ)))
+    have hcos2 := trig.cos_two_mul (-t * log (p : ℝ))
+    linear_combination (exp (-sigma * log (p : ℝ)) * exp (-sigma * log (p : ℝ))) * hpy - (2 * exp (-sigma * log (p : ℝ))) * hcos2
+  -- Poly inequality gives |z0|^6 * |z1|^8 * |z2|^2 <= 1, hence |z0|^3 * |z1|^4 * |z2| <= 1!
+  have hcos_bd := cos_abs_le_one theta
+  have hcos_lo : -1 ≤ cos theta := by linarith [neg_le_abs.real (cos theta)]
+  have hcos_hi : cos theta ≤ 1 := by linarith [le_abs_self.real (cos theta)]
+  have hpoly := mertens.poly_341_le_one r (cos theta) (by linarith) hr_lt1 hcos_lo hcos_hi
+  rw [← hn0, ← hn1, ← hn2, ← complex.abs_sq z0, ← complex.abs_sq z1, ← complex.abs_sq z2] at hpoly
+  have hsq_eq : (complex.abs z0 * complex.abs z0) ^ 3 * (complex.abs z1 * complex.abs z1) ^ 4 * (complex.abs z2 * complex.abs z2) = ((complex.abs z0) ^ 3 * (complex.abs z1) ^ 4 * complex.abs z2) * ((complex.abs z0) ^ 3 * (complex.abs z1) ^ 4 * complex.abs z2) := by ring
+  rw [hsq_eq] at hpoly
+  -- Show z0, z1, z2 != 0 (since |z_i| >= 1 - r > 0!) and invert!
+  have hz0_pos : 0 < complex.abs z0
+    have hsq : complex.abs z0 * complex.abs z0 = (1 - r) * (1 - r) := by rw [complex.abs_sq, hn0]
+    have h := eq_of_sq_eq_nonneg (complex.abs z0) (1 - r) (complex.abs_nonneg z0) (by linarith) hsq
+    linarith
+  have hz1_pos : 0 < complex.abs z1
+    have hsq : (1 - r) * (1 - r) ≤ complex.abs z1 * complex.abs z1 := by rw [complex.abs_sq, hn1]; nlinarith
+    have hnn := complex.abs_nonneg z1
+    nlinarith
+  have hz2_pos : 0 < complex.abs z2
+    have hsq : (1 - r) * (1 - r) ≤ complex.abs z2 * complex.abs z2
+      rw [complex.abs_sq, hn2]
+      have hcc : 2 * (cos theta * cos theta) - 1 ≤ 1 := by nlinarith
+      nlinarith
+    have hnn := complex.abs_nonneg z2
+    nlinarith
+  have hz0_ne : z0 ≠ complex.zero := by intro h; rw [h, complex.abs_zero] at hz0_pos; linarith
+  have hz1_ne : z1 ≠ complex.zero := by intro h; rw [h, complex.abs_zero] at hz1_pos; linarith
+  have hz2_ne : z2 ≠ complex.zero := by intro h; rw [h, complex.abs_zero] at hz2_pos; linarith
+  rw [complex.abs_inv_eq z0 hz0_ne, complex.abs_inv_eq z1 hz1_ne, complex.abs_inv_eq z2 hz2_ne]
+  set P := (complex.abs z0) ^ 3 * (complex.abs z1) ^ 4 * complex.abs z2 with hP
+  set Q := (1 / complex.abs z0) ^ 3 * (1 / complex.abs z1) ^ 4 * (1 / complex.abs z2) with hQ
+  have hPQ : P * Q = 1 := by rw [hP, hQ]; field_simp
+  have hP_pos : 0 < P
+    rw [hP]
+    exact mul_pos.real _ _ (mul_pos.real _ _ (pow_pos.real _ 3 hz0_pos) (pow_pos.real _ 4 hz1_pos)) hz2_pos
+  have hP_le1 : P ≤ 1 := by nlinarith
+  by_contra hlt; nlinarith
+
+-- ====================================================================================
+-- 2. EXACT p-SERIES TAIL BOUND (ZERO CALCULUS, PURE TELESCOPING!)
+-- ====================================================================================
+
++ pseries.tail_sum_le (sigma : ℝ) (P N : ℕ) (hs : 1 < sigma) (hP : 2 ≤ P) :
+    (∑ n < N, if P ≤ n then pseries.term sigma n else 0) ≤ rpow ((P - 1 : ℕ) : ℝ) (-(sigma - 1)) / (sigma - 1)
+  set alpha := sigma - 1 with halpha
+  have ha : 0 < alpha := by rw [halpha]; linarith
+  have hsum0 : ∀ M : ℕ, (∑ i < M, (0 : ℝ)) = 0
+    intro M
+    induction M with m ihm
+    · simp
+    · rw [succ_eq_add_one.nat]; simp
+  have htel : ∀ M : ℕ, P ≤ M → alpha * (∑ n < M, if P ≤ n then pseries.term sigma n else 0) ≤ rpow ((P - 1 : ℕ) : ℝ) (-alpha) - rpow ((M - 1 : ℕ) : ℝ) (-alpha)
+    intro M
+    induction M with hPM k ih hPM
+    · omega
+    · rw [succ_eq_add_one.nat] at hPM ⊢
+      by_cases hkP : P ≤ k
+      · simp
+        have ihk := ih hkP
+        have hk2 : 2 ≤ k := by omega
+        have hstep := pseries.step_bound k alpha hk2 ha
+        have hk0 : k ≠ 0 := by omega
+        have hterm : pseries.term sigma k = rpow (k : ℝ) (-(1 + alpha))
+          unfold pseries.term
+          rw [if_neg hk0]
+          have hs_eq : -sigma = -(1 + alpha) := by rw [halpha]; ring
+          rw [hs_eq]
+        rw [if_pos hkP, hterm]
+        have hkm : k + 1 - 1 = k := by omega
+        rw [hkm]
+        linarith
+      · have hk_eq : k + 1 = P := by omega
+        have hzero : (∑ n < k + 1, if P ≤ n then pseries.term sigma n else 0) = 0
+          have heq : (∑ n < k + 1, if P ≤ n then pseries.term sigma n else 0) = (∑ n < k + 1, (0 : ℝ))
+            apply sum_below.congr; intro i hi
+            have hnot : ¬ (P ≤ i) := by omega
+            simp [hnot]
+          rw [heq]; exact hsum0 (k + 1)
+        rw [hzero, hk_eq]; linarith
+  have hbound : alpha * (∑ n < N, if P ≤ n then pseries.term sigma n else 0) ≤ rpow ((P - 1 : ℕ) : ℝ) (-alpha)
+    by_cases hPN : P ≤ N
+    · have ht := htel N hPN
+      have hpos := rpow.pos ((N - 1 : ℕ) : ℝ) (-alpha)
+      linarith
+    · have hzero : (∑ n < N, if P ≤ n then pseries.term sigma n else 0) = 0
+        have heq : (∑ n < N, if P ≤ n then pseries.term sigma n else 0) = (∑ n < N, (0 : ℝ))
+          apply sum_below.congr; intro i hi
+          have hnot : ¬ (P ≤ i) := by omega
+          simp [hnot]
+        rw [heq]; exact hsum0 N
+      rw [hzero]; linarith [rpow.pos ((P - 1 : ℕ) : ℝ) (-alpha)]
+  exact (le_div_iff.real (∑ n < N, if P ≤ n then pseries.term sigma n else 0) (rpow ((P - 1 : ℕ) : ℝ) (-alpha)) alpha ha).mpr (by linarith)
+
+-- ====================================================================================
+-- 3. GENERAL BOUNDED-MULTIPLICATIVE EULER SIEVE & ZETA INSTANTIATION (0 AXIOMS!)
+-- ====================================================================================
+
++ cpow_real.abs_eq (u : ℝ) (w : ℂ) : complex.abs (cpow_real u w) = rpow u (complex.re w)
+  have hsq : complex.abs (cpow_real u w) * complex.abs (cpow_real u w) = rpow u (complex.re w) * rpow u (complex.re w)
+    rw [complex.abs_sq]; unfold complex.norm_sq cpow_real rpow; simp
+    have he : log u * complex.re w = complex.re w * log u := by ring
+    rw [he]; linear_combination (exp (complex.re w * log u) * exp (complex.re w * log u)) * sin_sq_add_cos_sq (log u * complex.im w)
+  exact eq_of_sq_eq_nonneg (complex.abs (cpow_real u w)) (rpow u (complex.re w)) (complex.abs_nonneg (cpow_real u w)) (by linarith [rpow.pos u (complex.re w)]) hsq
+
++ cpow_real.abs_neg (u : ℝ) (s : ℂ) : complex.abs (cpow_real u (complex.neg s)) = rpow u (-complex.re s)
+  rw [cpow_real.abs_eq]
+  have hre : complex.re (complex.neg s) = -complex.re s := by simp; ring
+  rw [hre]
+
++ complex.abs_one_eq : complex.abs complex.one = 1
+  have hsq : complex.abs complex.one * complex.abs complex.one = 1 * 1 := by rw [complex.abs_sq]; unfold complex.norm_sq; simp
+  exact eq_of_sq_eq_nonneg (complex.abs complex.one) 1 (complex.abs_nonneg complex.one) (by decide) hsq
+
++ complex.abs_of_real_nonneg (x : ℝ) (hx : 0 ≤ x) : complex.abs (complex.of_real x) = x
+  have hsq : complex.abs (complex.of_real x) * complex.abs (complex.of_real x) = x * x := by rw [complex.abs_sq]; unfold complex.norm_sq complex.of_real; simp
+  exact eq_of_sq_eq_nonneg (complex.abs (complex.of_real x)) x (complex.abs_nonneg (complex.of_real x)) hx hsq
+
+-> sieve_ok (P n : ℕ) : Prop :=
+  1 ≤ n ∧ ∀ q : ℕ, prime q → q < P → n % q ≠ 0
+
+-> gen_sieve_term (w : ℕ → ℂ) (P : ℕ) (s : ℂ) (n : ℕ) : ℂ :=
+  if sieve_ok P n then complex.mul (w n) (cpow_real (n : ℝ) (complex.neg s)) else complex.zero
+
+-> gen_euler_factor (w : ℕ → ℂ) (s : ℂ) (k : ℕ) : ℂ :=
+  if prime k then complex.sub complex.one (complex.mul (w k) (cpow_real (k : ℝ) (complex.neg s))) else complex.one
+
+-> gen_euler_prod (w : ℕ → ℂ) (P : ℕ) (s : ℂ) : ℂ :=
+  cprod P (gen_euler_factor w s)
+
+-> sieve_term (P : ℕ) (s : ℂ) (n : ℕ) : ℂ :=
+  if sieve_ok P n then cpow_real (n : ℝ) (complex.neg s) else complex.zero
+
+-> euler_sieve_factor (s : ℂ) (k : ℕ) : ℂ :=
+  if prime k then complex.sub complex.one (cpow_real (k : ℝ) (complex.neg s)) else complex.one
+
+-> euler_sieve_prod (P : ℕ) (s : ℂ) : ℂ :=
+  cprod P (euler_sieve_factor s)
+
+-> euler_inv_factor (s : ℂ) (k : ℕ) : ℂ :=
+  if prime k then complex.inv (complex.sub complex.one (cpow_real (k : ℝ) (complex.neg s))) else complex.one
+
+-> euler_inv_prod (P : ℕ) (s : ℂ) : ℂ :=
+  cprod P (euler_inv_factor s)
+
++ cpow_real.mul_nat (a b : ℕ) (ha : 1 ≤ a) (hb : 1 ≤ b) (w : ℂ) :
+    cpow_real ((a * b : ℕ) : ℝ) w = complex.mul (cpow_real (a : ℝ) w) (cpow_real (b : ℝ) w)
+  have ha_pos : (0 : ℝ) < (a : ℝ) := (cast_pos.real a).mpr (by omega)
+  have hb_pos : (0 : ℝ) < (b : ℝ) := (cast_pos.real b).mpr (by omega)
+  unfold cpow_real
+  rw [cast_mul.real a b, log_mul.real (a : ℝ) (b : ℝ) ha_pos hb_pos, ← complex.exp_add]
+  have harg : complex.smul (log (a : ℝ) + log (b : ℝ)) w = complex.add (complex.smul (log (a : ℝ)) w) (complex.smul (log (b : ℝ)) w) := by ring
+  rw [harg]
+
++ sieve_ok_mul_prime_iff (P j : ℕ) (hP : prime P) :
+    sieve_ok P (P * j) ↔ sieve_ok P j
+  have hP2 : 2 ≤ P := hP.1
+  constructor
+  · intro h; unfold sieve_ok at h ⊢; constructor
+    · by_contra h0; have hj0 : j = 0 := by omega; rw [hj0] at h; simp at h
+    · intro q hq hqP hdiv
+      have hq_pos : 0 < q := by have h2 := hq.1; omega
+      obtain ⟨t, ht⟩ := (dvd.iff_exists q j hq_pos).mp hdiv
+      exact h.2 q hq hqP ((dvd.iff_exists q (P * j) hq_pos).mpr ⟨P * t, by rw [ht]; ring⟩)
+  · intro h; unfold sieve_ok at h ⊢; constructor
+    · nlinarith [h.1]
+    · intro q hq hqP hdiv
+      obtain hq_P | hq_j := prime_dvd_mul.nat q P j hq hdiv
+      · exact hP.2 q hqP hq.1 hq_P
+      · exact h.2 q hq hqP hq_j
+
++ csum.block_succ (f : ℕ → ℂ) (P k : ℕ) :
+    csum (P * (k + 1)) f = complex.add (csum (P * k) f) (csum P (fun r => f (P * k + r)))
+  have hadd : ∀ (a b : ℕ), csum (a + b) f = complex.add (csum a f) (csum b (fun r => f (a + r)))
+    intro a b; induction b with m ihm
+    · have h0a : a + 0 = a := by omega
+      rw [h0a, csum.zero, complex.add_zero]
+    · rw [succ_eq_add_one.nat]
+      have ha1 : a + (m + 1) = (a + m) + 1 := by omega
+      rw [ha1, csum.succ, csum.succ, ihm]; ring
+  have hmul : P * (k + 1) = P * k + P := by ring
+  rw [hmul]; exact hadd (P * k) P
+
+-- General finite block Euler sieve step for ANY prime-multiplicative weight w:
++ gen_sieve.finite_block_step (w : ℕ → ℂ) (P N : ℕ) (s : ℂ) (hP : prime P)
+    (hw_mul : ∀ k : ℕ, w (P * k) = complex.mul (w P) (w k)) :
+    csum (P * N) (gen_sieve_term w (P + 1) s) =
+    complex.sub (csum (P * N) (gen_sieve_term w P s)) (complex.mul (complex.mul (w P) (cpow_real (P : ℝ) (complex.neg s))) (csum N (gen_sieve_term w P s)))
+  have hP2 : 2 ≤ P := hP.1
+  induction N with k ih
+  · have h0m : P * 0 = 0 := by omega
+    rw [h0m, csum.zero, csum.zero]; ring
+  · rw [succ_eq_add_one.nat, csum.block_succ _ P k, csum.block_succ _ P k, ih, csum.succ]
+    have hP_split : ∀ (g : ℕ → ℂ), csum P g = complex.add (g 0) (csum (P - 1) (fun r => g (r + 1)))
+      intro g
+      have hsh : ∀ m : ℕ, csum (m + 1) g = complex.add (g 0) (csum m (fun r => g (r + 1)))
+        intro m; induction m with j ihj
+        · rw [csum.succ, csum.zero, csum.zero, complex.zero_add, complex.add_zero]
+        · rw [succ_eq_add_one.nat]
+          have hs1 : csum (j + 1 + 1) g = complex.add (csum (j + 1) g) (g (j + 1)) := csum.succ (j + 1) g
+          have hs2 : csum (j + 1) (fun r => g (r + 1)) = complex.add (csum j (fun r => g (r + 1))) (g (j + 1)) := csum.succ j (fun r => g (r + 1))
+          rw [hs1, hs2, ihj]; ring
+      have hP1 : P = (P - 1) + 1 := by omega
+      have h1 := hsh (P - 1)
+      rw [← hP1] at h1; exact h1
+    have hblock : csum P (fun r => gen_sieve_term w (P + 1) s (P * k + r)) = complex.sub (csum P (fun r => gen_sieve_term w P s (P * k + r))) (complex.mul (complex.mul (w P) (cpow_real (P : ℝ) (complex.neg s))) (gen_sieve_term w P s k))
+      rw [hP_split (fun r => gen_sieve_term w (P + 1) s (P * k + r)), hP_split (fun r => gen_sieve_term w P s (P * k + r))]
+      have h0eq : P * k + 0 = P * k := by omega
+      have hr0_a : gen_sieve_term w (P + 1) s (P * k + 0) = complex.zero
+        rw [h0eq]; unfold gen_sieve_term
+        have hnot : ¬ sieve_ok (P + 1) (P * k)
+          intro hok; apply hok.2 P hP (by omega)
+          have heq : P * k = 0 + P * k := by ring
+          rw [heq, add_mul_mod.nat]; exact (div_mod_of_lt.nat 0 P (by omega)).2
+        exact if_neg hnot
+      have hr0_b : gen_sieve_term w P s (P * k + 0) = complex.mul (complex.mul (w P) (cpow_real (P : ℝ) (complex.neg s))) (gen_sieve_term w P s k)
+        rw [h0eq]; unfold gen_sieve_term
+        by_cases hok : sieve_ok P k
+        · have hok_mul := (sieve_ok_mul_prime_iff P k hP).mpr hok
+          rw [if_pos hok_mul, if_pos hok, hw_mul k, cpow_real.mul_nat P k (by omega) hok.1 (complex.neg s)]; ring
+        · have hnot' : ¬ sieve_ok P (P * k) := by intro h; exact hok ((sieve_ok_mul_prime_iff P k hP).mp h)
+          rw [if_neg hnot', if_neg hok]; ring
+      have htail_eq : csum (P - 1) (fun r => gen_sieve_term w (P + 1) s (P * k + (r + 1))) = csum (P - 1) (fun r => gen_sieve_term w P s (P * k + (r + 1)))
+        apply csum.congr; intro r hr
+        have hmod_ne : (P * k + (r + 1)) % P ≠ 0
+          have hcomm : P * k + (r + 1) = (r + 1) + P * k := by ring
+          rw [hcomm, add_mul_mod.nat, (div_mod_of_lt.nat (r + 1) P (by omega)).2]; omega
+        unfold gen_sieve_term
+        have hiff : sieve_ok (P + 1) (P * k + (r + 1)) ↔ sieve_ok P (P * k + (r + 1))
+          unfold sieve_ok; constructor
+          · intro h; exact ⟨h.1, by intro q hq hqP; exact h.2 q hq (by omega)⟩
+          · intro h; constructor
+            · exact h.1
+            · intro q hq hqP1
+              by_cases hqp : q = P
+              · rw [hqp]; exact hmod_ne
+              · exact h.2 q hq (by omega)
+        by_cases hok : sieve_ok P (P * k + (r + 1))
+        · rw [if_pos (hiff.mpr hok), if_pos hok]
+        · have hnot1 : ¬ sieve_ok (P + 1) (P * k + (r + 1)) := by intro h; exact hok (hiff.mp h)
+          rw [if_neg hnot1, if_neg hok]
+      rw [hr0_a, hr0_b, htail_eq]; ring
+    rw [hblock]; ring
+
++ gen_sieve.csummable (w : ℕ → ℂ) (hw_bd : ∀ n : ℕ, complex.abs (w n) ≤ 1) (P : ℕ) (s : ℂ) (hs : 1 < complex.re s) :
+    csummable (gen_sieve_term w P s)
+  apply csummable.of_abs_summable (gen_sieve_term w P s)
+  apply summable.of_nonneg_le (fun n => complex.abs (gen_sieve_term w P s n)) (pseries.term (complex.re s))
+  · intro n; exact complex.abs_nonneg (gen_sieve_term w P s n)
+  · intro n; unfold gen_sieve_term
+    by_cases hok : sieve_ok P n
+    · rw [if_pos hok, complex.abs_mul, cpow_real.abs_neg]; unfold pseries.term
+      rw [if_neg (by have h1 := hok.1; omega)]
+      have hm := mul_le_mul_of_nonneg_right.real (complex.abs (w n)) 1 (rpow (n : ℝ) (-complex.re s)) (hw_bd n) (by linarith [rpow.pos (n : ℝ) (-complex.re s)])
+      linarith
+    · rw [if_neg hok, complex.abs_zero]; exact pseries.term_nonneg (complex.re s) n
+  · exact pseries.summable (complex.re s) hs
+
++ gen_sieve.sum_eq_prod_mul (w : ℕ → ℂ) (hw_mul : ∀ p k : ℕ, prime p → w (p * k) = complex.mul (w p) (w k))
+    (hw_bd : ∀ n : ℕ, complex.abs (w n) ≤ 1) (P : ℕ) (s Z : ℂ) (hs : 1 < complex.re s)
+    (hZ : ctends_to (fun (N : ℕ) => csum N (fun n => complex.mul (w (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) Z) :
+    ctends_to (fun (N : ℕ) => csum N (gen_sieve_term w P s)) (complex.mul (gen_euler_prod w P s) Z)
+  induction P with k ih
+  · have hp0 : gen_euler_prod w 0 s = complex.one := by rfl
+    rw [hp0, complex.one_mul]
+    have hshift : ∀ M : ℕ, csum (M + 1) (gen_sieve_term w 0 s) = csum M (fun n => complex.mul (w (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))
+      intro M; induction M with m ihm
+      · have hnot : ¬ sieve_ok 0 0 := by intro h; have h1 := h.1; omega
+        rw [csum.succ, csum.zero, csum.zero]; unfold gen_sieve_term; rw [if_neg hnot, complex.add_zero]
+      · rw [succ_eq_add_one.nat]
+        have hs1 : csum (m + 1 + 1) (gen_sieve_term w 0 s) = complex.add (csum (m + 1) (gen_sieve_term w 0 s)) (gen_sieve_term w 0 s (m + 1)) := csum.succ (m + 1) (gen_sieve_term w 0 s)
+        have hs2 : csum (m + 1) (fun n => complex.mul (w (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s))) = complex.add (csum m (fun n => complex.mul (w (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) (complex.mul (w (m + 1)) (cpow_real ((m + 1 : ℕ) : ℝ) (complex.neg s))) := csum.succ m (fun n => complex.mul (w (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))
+        rw [hs1, hs2, ihm]
+        have hok : sieve_ok 0 (m + 1) := ⟨by omega, by intro q _ hq0; omega⟩
+        unfold gen_sieve_term; rw [if_pos hok]
+    unfold ctends_to at hZ ⊢; intro e he
+    obtain ⟨N0, hN0⟩ := hZ e he
+    use N0 + 1; intro N hN
+    have hN1 : N = (N - 1) + 1 := by omega
+    rw [hN1, hshift (N - 1)]; exact hN0 (N - 1) (by omega)
+  · rw [succ_eq_add_one.nat]
+    have hprod_step : gen_euler_prod w (k + 1) s = complex.mul (gen_euler_prod w k s) (gen_euler_factor w s k) := by rfl
+    rw [hprod_step]
+    by_cases hk : prime k
+    · have hfac : gen_euler_factor w s k = complex.sub complex.one (complex.mul (w k) (cpow_real (k : ℝ) (complex.neg s))) := by unfold gen_euler_factor; exact if_pos hk
+      rw [hfac]
+      obtain ⟨L, hL⟩ := gen_sieve.csummable w hw_bd (k + 1) s hs
+      have hsub1 : ctends_to (fun (N : ℕ) => csum (k * N) (gen_sieve_term w (k + 1) s)) L
+        unfold ctends_to at hL ⊢; intro e he; obtain ⟨N0, hN0⟩ := hL e he
+        use N0; intro N hN; exact hN0 (k * N) (by have h2 := hk.1; nlinarith)
+      set c := complex.mul (w k) (cpow_real (k : ℝ) (complex.neg s)) with hc
+      have hsub2 : ctends_to (fun (N : ℕ) => csum (k * N) (gen_sieve_term w (k + 1) s)) (complex.mul (complex.mul (gen_euler_prod w k s) (complex.sub complex.one c)) Z)
+        unfold ctends_to at ih ⊢; intro e he
+        set M := 1 + complex.abs c with hM
+        have hM_pos : 0 < M := by rw [hM]; linarith [complex.abs_nonneg c]
+        obtain ⟨N0, hN0⟩ := ih (e / M) (div_pos.real e M he hM_pos)
+        use N0; intro N hN
+        have h1 := hN0 (k * N) (by have h2 := hk.1; nlinarith)
+        have h2 := hN0 N hN
+        rw [gen_sieve.finite_block_step w k N s hk (by intro k1; exact hw_mul k k1 hk), ← hc]
+        have hdecomp : complex.sub (complex.sub (csum (k * N) (gen_sieve_term w k s)) (complex.mul c (csum N (gen_sieve_term w k s)))) (complex.mul (complex.mul (gen_euler_prod w k s) (complex.sub complex.one c)) Z) =
+            complex.add (complex.sub (csum (k * N) (gen_sieve_term w k s)) (complex.mul (gen_euler_prod w k s) Z)) (complex.mul (complex.neg c) (complex.sub (csum N (gen_sieve_term w k s)) (complex.mul (gen_euler_prod w k s) Z))) := by ring
+        rw [hdecomp]
+        have htri := complex.abs_add_le (complex.sub (csum (k * N) (gen_sieve_term w k s)) (complex.mul (gen_euler_prod w k s) Z)) (complex.mul (complex.neg c) (complex.sub (csum N (gen_sieve_term w k s)) (complex.mul (gen_euler_prod w k s) Z)))
+        rw [complex.abs_mul, complex.abs_neg] at htri
+        have hm := mul_le_mul_of_nonneg_left.real (complex.abs (complex.sub (csum N (gen_sieve_term w k s)) (complex.mul (gen_euler_prod w k s) Z))) (e / M) (complex.abs c) (by linarith) (complex.abs_nonneg c)
+        have hMe : (1 + complex.abs c) * (e / M) = e := by rw [← hM]; field_simp
+        linarith
+      rw [← ctends_to.unique _ L _ hsub1 hsub2]; exact hL
+    · have hfac : gen_euler_factor w s k = complex.one := by unfold gen_euler_factor; exact if_neg hk
+      rw [hfac, complex.mul_one]
+      have hfeq : gen_sieve_term w (k + 1) s = gen_sieve_term w k s
+        funext n; unfold gen_sieve_term
+        have hiff : sieve_ok (k + 1) n ↔ sieve_ok k n
+          unfold sieve_ok; constructor
+          · intro h; exact ⟨h.1, by intro q hq hqk; exact h.2 q hq (by omega)⟩
+          · intro h; constructor
+            · exact h.1
+            · intro q hq hqk1
+              by_cases eqk : q = k
+              · rw [eqk] at hq; exfalso; exact hk hq
+              · exact h.2 q hq (by omega)
+        by_cases hok : sieve_ok k n
+        · rw [if_pos (hiff.mpr hok), if_pos hok]
+        · have hnot1 : ¬ sieve_ok (k + 1) n := by intro h; exact hok (hiff.mp h)
+          rw [if_neg hnot1, if_neg hok]
+      rw [hfeq]; exact ih
+
++ gen_sieve.prod_mul_bound (w : ℕ → ℂ) (hw1 : w 1 = complex.one)
+    (hw_mul : ∀ p k : ℕ, prime p → w (p * k) = complex.mul (w p) (w k))
+    (hw_bd : ∀ n : ℕ, complex.abs (w n) ≤ 1)
+    (P : ℕ) (s Z : ℂ) (hP : 2 ≤ P) (hs : 1 < complex.re s)
+    (hZ : ctends_to (fun (N : ℕ) => csum N (fun n => complex.mul (w (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) Z) :
+    complex.abs (complex.sub (complex.mul (gen_euler_prod w P s) Z) complex.one) ≤ rpow ((P - 1 : ℕ) : ℝ) (-(complex.re s - 1)) / (complex.re s - 1)
+  have hlim := gen_sieve.sum_eq_prod_mul w hw_mul hw_bd P s Z hs hZ
+  have hlim_sub : ctends_to (fun (N : ℕ) => complex.sub (csum N (gen_sieve_term w P s)) complex.one) (complex.sub (complex.mul (gen_euler_prod w P s) Z) complex.one)
+    unfold ctends_to at hlim ⊢; intro e he; obtain ⟨N0, hN0⟩ := hlim e he
+    use N0; intro N hN
+    have hdiff : complex.sub (complex.sub (csum N (gen_sieve_term w P s)) complex.one) (complex.sub (complex.mul (gen_euler_prod w P s) Z) complex.one) = complex.sub (csum N (gen_sieve_term w P s)) (complex.mul (gen_euler_prod w P s) Z) := by ring
+    rw [hdiff]; exact hN0 N hN
+  have hlim_abs := ctends_to.abs _ _ hlim_sub
+  have hN_bd : ∀ N : ℕ, P ≤ N → complex.abs (complex.sub (csum N (gen_sieve_term w P s)) complex.one) ≤ rpow ((P - 1 : ℕ) : ℝ) (-(complex.re s - 1)) / (complex.re s - 1)
+    intro N hPN
+    have hcP : csum P (gen_sieve_term w P s) = complex.one
+      have hlt : ∀ M : ℕ, 2 ≤ M → M ≤ P → csum M (gen_sieve_term w P s) = complex.one
+        intro M; induction M with h2 hMP k ih h2 hMP
+        · omega
+        · rw [succ_eq_add_one.nat] at h2 hMP ⊢
+          by_cases hk2 : 2 ≤ k
+          · rw [csum.succ, ih hk2 (by omega)]
+            have hnot : ¬ sieve_ok P k
+              intro hok
+              have hms := min_fac.spec k hk2
+              exact hok.2 (min_fac k) (min_fac.prime k hk2) (by omega) hms.2.2.1
+            unfold gen_sieve_term; rw [if_neg hnot, complex.add_zero]
+          · have hk1 : k = 1 := by omega
+            have h10 : (1 : ℕ) = 0 + 1 := by decide
+            rw [hk1, csum.succ, h10, csum.succ, csum.zero]
+            have hnot0 : ¬ sieve_ok P 0 := by intro h; have h1 := h.1; omega
+            have hok1 : sieve_ok P 1 := ⟨by omega, by intro q hq _; rw [(div_mod_of_lt.nat 1 q (by have hq2 := hq.1; omega)).2]; omega⟩
+            unfold gen_sieve_term; rw [if_neg hnot0, if_pos hok1, hw1, complex.one_mul]
+            unfold cpow_real; apply complex.ext <;> simp [log_one, exp_zero, cos_zero, sin_zero]
+      exact hlt P hP (by omega)
+    have hsplit : complex.sub (csum N (gen_sieve_term w P s)) complex.one = csum N (fun n => if P ≤ n then gen_sieve_term w P s n else complex.zero)
+      have hgen : ∀ M : ℕ, P ≤ M → complex.sub (csum M (gen_sieve_term w P s)) complex.one = csum M (fun n => if P ≤ n then gen_sieve_term w P s n else complex.zero)
+        intro M; induction M with hPM k ih hPM
+        · omega
+        · rw [succ_eq_add_one.nat] at hPM ⊢
+          by_cases hkP : P ≤ k
+          · rw [csum.succ, csum.succ, if_pos hkP, ← ih hkP]; ring
+          · have hk1 : k + 1 = P := by omega
+            rw [hk1, hcP, complex.sub_self]
+            have hcz : csum P (fun n => if P ≤ n then gen_sieve_term w P s n else complex.zero) = csum P (fun _ => complex.zero)
+              apply csum.congr; intro i hi; exact if_neg (by omega)
+            rw [hcz, csum.const]; apply complex.ext <;> simp
+      exact hgen N hPN
+    rw [hsplit]
+    have htri := csum.abs_le_sum N (fun n => if P ≤ n then gen_sieve_term w P s n else complex.zero)
+    have hterm_le : ∀ n : ℕ, n < N → complex.abs (if P ≤ n then gen_sieve_term w P s n else complex.zero) ≤ (if P ≤ n then pseries.term (complex.re s) n else 0)
+      intro n _
+      by_cases hPn : P ≤ n
+      · rw [if_pos hPn, if_pos hPn]; unfold gen_sieve_term
+        by_cases hok : sieve_ok P n
+        · rw [if_pos hok, complex.abs_mul, cpow_real.abs_neg]; unfold pseries.term
+          rw [if_neg (by omega)]
+          have hm := mul_le_mul_of_nonneg_right.real (complex.abs (w n)) 1 (rpow (n : ℝ) (-complex.re s)) (hw_bd n) (by linarith [rpow.pos (n : ℝ) (-complex.re s)])
+          linarith
+        · rw [if_neg hok, complex.abs_zero]; exact pseries.term_nonneg (complex.re s) n
+      · rw [if_neg hPn, if_neg hPn, complex.abs_zero]; linarith
+    have hsum_le := sum_le.real _ _ N hterm_le
+    linarith [pseries.tail_sum_le (complex.re s) P N hs hP]
+  by_contra hgt
+  unfold tends_to at hlim_abs
+  set B := rpow ((P - 1 : ℕ) : ℝ) (-(complex.re s - 1)) / (complex.re s - 1) with hB
+  set gap := complex.abs (complex.sub (complex.mul (gen_euler_prod w P s) Z) complex.one) - B with hgap
+  obtain ⟨N0, hN0⟩ := hlim_abs (gap / 2) (by rw [hgap]; linarith)
+  have h1 := hN0 (N0 + P) (by omega)
+  have h2 := hN_bd (N0 + P) (by omega)
+  linarith [neg_le_abs.real (complex.abs (complex.sub (csum (N0 + P) (gen_sieve_term w P s)) complex.one) - complex.abs (complex.sub (complex.mul (gen_euler_prod w P s) Z) complex.one))]
+
++ gen_sieve.prod_mul_tends_to_one (w : ℕ → ℂ) (hw1 : w 1 = complex.one)
+    (hw_mul : ∀ p k : ℕ, prime p → w (p * k) = complex.mul (w p) (w k))
+    (hw_bd : ∀ n : ℕ, complex.abs (w n) ≤ 1)
+    (s Z : ℂ) (hs : 1 < complex.re s)
+    (hZ : ctends_to (fun (N : ℕ) => csum N (fun n => complex.mul (w (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) Z) :
+    ctends_to (fun (P : ℕ) => complex.mul (gen_euler_prod w P s) Z) complex.one
+  unfold ctends_to; intro e he
+  set alpha := complex.re s - 1 with halpha
+  have ha_pos : 0 < alpha := by rw [halpha]; linarith
+  have ht0 := rpow.nat_neg_tends_to_zero alpha ha_pos
+  unfold tends_to at ht0
+  obtain ⟨N0, hN0⟩ := ht0 (e * alpha) (mul_pos.real e alpha he ha_pos)
+  use N0 + 2; intro P hP
+  have hb := gen_sieve.prod_mul_bound w hw1 hw_mul hw_bd P s Z (by omega) hs hZ
+  have h1 := hN0 (P - 2) (by omega)
+  have hp_eq : P - 2 + 1 = P - 1 := by omega
+  have hsub0 : rpow ((P - 1 : ℕ) : ℝ) (-alpha) - 0 = rpow ((P - 1 : ℕ) : ℝ) (-alpha) := by ring
+  rw [hp_eq, hsub0, abs_of_pos.real (rpow ((P - 1 : ℕ) : ℝ) (-alpha)) (rpow.pos ((P - 1 : ℕ) : ℝ) (-alpha))] at h1
+  have hdiv_lt := (div_lt_iff.real (rpow ((P - 1 : ℕ) : ℝ) (-alpha)) e alpha ha_pos).mpr h1
+  rw [← halpha] at hb; linarith
+
++ gen_sieve.ne_zero_re_gt_one (w : ℕ → ℂ) (hw1 : w 1 = complex.one)
+    (hw_mul : ∀ p k : ℕ, prime p → w (p * k) = complex.mul (w p) (w k))
+    (hw_bd : ∀ n : ℕ, complex.abs (w n) ≤ 1)
+    (s Z : ℂ) (hs : 1 < complex.re s)
+    (hZ : ctends_to (fun (N : ℕ) => csum N (fun n => complex.mul (w (n + 1)) (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) Z) :
+    Z ≠ complex.zero
+  intro hz
+  have ht := gen_sieve.prod_mul_tends_to_one w hw1 hw_mul hw_bd s Z hs hZ
+  unfold ctends_to at ht
+  obtain ⟨P0, hP0⟩ := ht (1 / 2) (by decide)
+  have h1 := hP0 P0 (by omega)
+  have h01 : complex.sub (complex.mul (gen_euler_prod w P0 s) complex.zero) complex.one = complex.neg complex.one := by ring
+  rw [hz, h01, complex.abs_neg, complex.abs_one_eq] at h1; linarith
+
+-- Zeta specialization (w = fun _ => 1):
++ sieve_term.eq_gen_one (P : ℕ) (s : ℂ) : sieve_term P s = gen_sieve_term (fun _ => complex.one) P s
+  funext n; unfold sieve_term gen_sieve_term
+  by_cases hok : sieve_ok P n
+  · rw [if_pos hok, if_pos hok, complex.one_mul]
+  · rw [if_neg hok, if_neg hok]
+
++ euler_sieve_prod.eq_gen_one (P : ℕ) (s : ℂ) : euler_sieve_prod P s = gen_euler_prod (fun _ => complex.one) P s
+  unfold euler_sieve_prod gen_euler_prod
+  induction P with k ih
+  · rfl
+  · rw [succ_eq_add_one.nat]
+    have hs1 : cprod (k + 1) (euler_sieve_factor s) = complex.mul (cprod k (euler_sieve_factor s)) (euler_sieve_factor s k) := by rfl
+    have hs2 : cprod (k + 1) (gen_euler_factor (fun _ => complex.one) s) = complex.mul (cprod k (gen_euler_factor (fun _ => complex.one) s)) (gen_euler_factor (fun _ => complex.one) s k) := by rfl
+    rw [hs1, hs2, ih]; unfold euler_sieve_factor gen_euler_factor
+    by_cases hk : prime k
+    · rw [if_pos hk, if_pos hk, complex.one_mul]
+    · rw [if_neg hk, if_neg hk]
+
++ euler_sieve.finite_block_step (P N : ℕ) (s : ℂ) (hP : prime P) :
+    csum (P * N) (sieve_term (P + 1) s) =
+    complex.sub (csum (P * N) (sieve_term P s)) (complex.mul (cpow_real (P : ℝ) (complex.neg s)) (csum N (sieve_term P s)))
+  rw [sieve_term.eq_gen_one (P + 1) s, sieve_term.eq_gen_one P s]
+  have h := gen_sieve.finite_block_step (fun _ => complex.one) P N s hP (by intro _; rw [complex.one_mul])
+  rw [complex.one_mul] at h; exact h
+
++ euler_sieve.csummable (P : ℕ) (s : ℂ) (hs : 1 < complex.re s) :
+    csummable (sieve_term P s)
+  rw [sieve_term.eq_gen_one P s]
+  exact gen_sieve.csummable (fun _ => complex.one) (by intro _; rw [complex.abs_one_eq]; linarith) P s hs
+
++ euler_sieve.sum_eq_prod_mul_zeta (P : ℕ) (s Z : ℂ) (hs : 1 < complex.re s)
+    (hZ : ctends_to (fun (N : ℕ) => csum N (fun n => cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s))) Z) :
+    ctends_to (fun (N : ℕ) => csum N (sieve_term P s)) (complex.mul (euler_sieve_prod P s) Z)
+  rw [sieve_term.eq_gen_one P s, euler_sieve_prod.eq_gen_one P s]
+  have hZ1 : ctends_to (fun (N : ℕ) => csum N (fun n => complex.mul complex.one (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) Z
+    have hfe : (fun (N : ℕ) => csum N (fun n => complex.mul complex.one (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) = (fun (N : ℕ) => csum N (fun n => cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))
+      funext N; apply csum.congr; intro n _; exact complex.one_mul _
+    rw [hfe]; exact hZ
+  exact gen_sieve.sum_eq_prod_mul (fun _ => complex.one) (by intro _ _ _; rw [complex.one_mul]) (by intro _; rw [complex.abs_one_eq]; linarith) P s Z hs hZ1
+
++ euler_sieve.prod_mul_zeta_bound (P : ℕ) (s Z : ℂ) (hP : 2 ≤ P) (hs : 1 < complex.re s)
+    (hZ : ctends_to (fun (N : ℕ) => csum N (fun n => cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s))) Z) :
+    complex.abs (complex.sub (complex.mul (euler_sieve_prod P s) Z) complex.one) ≤ rpow ((P - 1 : ℕ) : ℝ) (-(complex.re s - 1)) / (complex.re s - 1)
+  rw [euler_sieve_prod.eq_gen_one P s]
+  have hZ1 : ctends_to (fun (N : ℕ) => csum N (fun n => complex.mul complex.one (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) Z
+    have hfe : (fun (N : ℕ) => csum N (fun n => complex.mul complex.one (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) = (fun (N : ℕ) => csum N (fun n => cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))
+      funext N; apply csum.congr; intro n _; exact complex.one_mul _
+    rw [hfe]; exact hZ
+  exact gen_sieve.prod_mul_bound (fun _ => complex.one) rfl (by intro _ _ _; rw [complex.one_mul]) (by intro _; rw [complex.abs_one_eq]; linarith) P s Z hP hs hZ1
+
++ euler_sieve.prod_mul_zeta_tends_to_one (s Z : ℂ) (hs : 1 < complex.re s)
+    (hZ : ctends_to (fun (N : ℕ) => csum N (fun n => cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s))) Z) :
+    ctends_to (fun (P : ℕ) => complex.mul (euler_sieve_prod P s) Z) complex.one
+  have hfe : (fun (P : ℕ) => complex.mul (euler_sieve_prod P s) Z) = (fun (P : ℕ) => complex.mul (gen_euler_prod (fun _ => complex.one) P s) Z)
+    funext P; rw [euler_sieve_prod.eq_gen_one P s]
+  rw [hfe]
+  have hZ1 : ctends_to (fun (N : ℕ) => csum N (fun n => complex.mul complex.one (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) Z
+    have hf2 : (fun (N : ℕ) => csum N (fun n => complex.mul complex.one (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) = (fun (N : ℕ) => csum N (fun n => cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))
+      funext N; apply csum.congr; intro n _; exact complex.one_mul _
+    rw [hf2]; exact hZ
+  exact gen_sieve.prod_mul_tends_to_one (fun _ => complex.one) rfl (by intro _ _ _; rw [complex.one_mul]) (by intro _; rw [complex.abs_one_eq]; linarith) s Z hs hZ1
+
+-- ====================================================================================
+-- 4. UNCONDITIONAL NONVANISHING ON Re(s) > 1, EULER PRODUCT CONVERGENCE, MERTENS 3-4-1,
+--    AND FULL UNCONDITIONAL HADAMARD-DE LA VALLEE POUSSIN (Re(s) >= 1, s != 1)!
+-- ====================================================================================
+
++ zeta.dseries_ne_zero_re_gt_one (s Z : ℂ) (hs : 1 < complex.re s)
+    (hZ : ctends_to (fun (N : ℕ) => csum N (fun n => cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s))) Z) :
+    Z ≠ complex.zero
+  have hZ1 : ctends_to (fun (N : ℕ) => csum N (fun n => complex.mul complex.one (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) Z
+    have hf2 : (fun (N : ℕ) => csum N (fun n => complex.mul complex.one (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))) = (fun (N : ℕ) => csum N (fun n => cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s)))
+      funext N; apply csum.congr; intro n _; exact complex.one_mul _
+    rw [hf2]; exact hZ
+  exact gen_sieve.ne_zero_re_gt_one (fun _ => complex.one) rfl (by intro _ _ _; rw [complex.one_mul]) (by intro _; rw [complex.abs_one_eq]; linarith) s Z hs hZ1
+
++ zeta.em2_dseries_limit_exists (zeta : ℂ → ℂ) (hzeta : is_zeta_em2 zeta) (s : ℂ) (hs : 1 < complex.re s) :
+    ctends_to (fun (N : ℕ) => csum N (fun n => cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s))) (zeta s)
+  have hne : s ≠ complex.one := by intro h; have hr : complex.re s = complex.re complex.one := by rw [h]; simp at hr; linarith
+  obtain ⟨S, hS⟩ := zeta.em2_csummable s (by linarith) hne
+  have hcs_ds : csummable (fun n => cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s))
+    apply csummable.of_abs_summable
+    apply summable.of_nonneg_le (fun n => complex.abs (cpow_real ((n + 1 : ℕ) : ℝ) (complex.neg s))) (fun n => 1 * pseries.term (complex.re s - 1 + 1) (n + 1))
+    · intro n; exact complex.abs_nonneg _
+    · intro n; rw [cpow_real.abs_neg]; unfold pseries.term; rw [if_neg (by omega)]
+      have he : -(complex.re s - 1 + 1) = -complex.re s := by ring
+      rw [he]; linarith
+    · exact pseries.scaled_shift_summable (complex.re s - 1) 1 (by linarith)
+  obtain ⟨Z, hZ⟩ := hcs_ds
+  have hagr := zeta.em2_eq_dseries_re_gt_one s S Z hs hS hZ
+  unfold is_zeta_em2 at hzeta
+  have hlim_z := hzeta s (by linarith) hne
+  set c0 := complex.add (complex.inv (complex.sub s complex.one)) (complex.of_real (1 / 2)) with hc0
+  have hlim_S : ctends_to (fun (N : ℕ) => complex.add c0 (csum N (zeta_em2_term s))) (complex.add c0 S)
+    unfold ctends_to at hS ⊢; intro e he; obtain ⟨N0, hN0⟩ := hS e he; use N0; intro N hN
+    have hdiff : complex.sub (complex.add c0 (csum N (zeta_em2_term s))) (complex.add c0 S) = complex.sub (csum N (zeta_em2_term s)) S := by ring
+    rw [hdiff]; exact hN0 N hN
+  rw [hc0] at hlim_S
+  have hz_eq : zeta s = Z := by rw [ctends_to.unique _ (zeta s) _ hlim_z hlim_S, ← hagr, hc0]; ring
+  rw [hz_eq]; exact hZ
+
++ zeta.em2_ne_zero_re_gt_one (zeta : ℂ → ℂ) (hzeta : is_zeta_em2 zeta)
+    (s : ℂ) (hs : 1 < complex.re s) :
+    zeta s ≠ complex.zero
+  exact zeta.dseries_ne_zero_re_gt_one s (zeta s) hs (zeta.em2_dseries_limit_exists zeta hzeta s hs)
+
++ euler_sieve.prod_mul_inv_eq_one (P : ℕ) (s : ℂ) (hs : 1 < complex.re s) :
+    complex.mul (euler_sieve_prod P s) (euler_inv_prod P s) = complex.one
+  induction P with k ih
+  · rfl
+  · rw [succ_eq_add_one.nat]
+    have hs1 : euler_sieve_prod (k + 1) s = complex.mul (euler_sieve_prod k s) (euler_sieve_factor s k) := by rfl
+    have hs2 : euler_inv_prod (k + 1) s = complex.mul (euler_inv_prod k s) (euler_inv_factor s k) := by rfl
+    have hrearr : complex.mul (complex.mul (euler_sieve_prod k s) (euler_sieve_factor s k)) (complex.mul (euler_inv_prod k s) (euler_inv_factor s k)) = complex.mul (complex.mul (euler_sieve_prod k s) (euler_inv_prod k s)) (complex.mul (euler_sieve_factor s k) (euler_inv_factor s k)) := by ring
+    rw [hs1, hs2, hrearr, ih, complex.one_mul]
+    unfold euler_sieve_factor euler_inv_factor
+    by_cases hk : prime k
+    · rw [if_pos hk, if_pos hk]
+      have hne : complex.sub complex.one (cpow_real (k : ℝ) (complex.neg s)) ≠ complex.zero
+        intro hz
+        have habs : complex.abs (cpow_real (k : ℝ) (complex.neg s)) = 1
+          have heq1 : cpow_real (k : ℝ) (complex.neg s) = complex.one
+            have hr : complex.re (complex.sub complex.one (cpow_real (k : ℝ) (complex.neg s))) = complex.re complex.zero := by rw [hz]
+            have hi : complex.im (complex.sub complex.one (cpow_real (k : ℝ) (complex.neg s))) = complex.im complex.zero := by rw [hz]
+            simp at hr hi; apply complex.ext <;> simp <;> linarith
+          rw [heq1, complex.abs_one_eq]
+        rw [cpow_real.abs_neg] at habs
+        have hk2 : (2 : ℝ) ≤ (k : ℝ) := (cast_le.real 2 k).mpr hk.1
+        have hlog : 0 < log (k : ℝ) := by have h := (log_lt_log 1 (k : ℝ) (by decide) (by linarith)).mpr (by linarith); rw [log_one] at h; exact h
+        have hlt1 : rpow (k : ℝ) (-complex.re s) < 1 := by unfold rpow; have h := (exp_lt_exp (-complex.re s * log (k : ℝ)) 0).mpr (by nlinarith); rw [exp_zero] at h; exact h
+        linarith
+      exact complex.mul_inv_cancel _ hne
+    · rw [if_neg hk, if_neg hk, complex.one_mul]
+
++ zeta.euler_prod_tends_to_em2 (zeta : ℂ → ℂ) (hzeta : is_zeta_em2 zeta)
+    (s : ℂ) (hs : 1 < complex.re s) :
+    ctends_to (fun (P : ℕ) => euler_inv_prod P s) (zeta s)
+  set Z := zeta s with hZ_def
+  have hZ := zeta.em2_dseries_limit_exists zeta hzeta s hs
+  rw [← hZ_def] at hZ
+  have ht1 := euler_sieve.prod_mul_zeta_tends_to_one s Z hs hZ
+  unfold ctends_to at ht1 ⊢; intro e he
+  set M := 2 * complex.abs Z + 1 with hM
+  have hM_pos : 0 < M := by rw [hM]; linarith [complex.abs_nonneg Z]
+  obtain ⟨P1, hP1⟩ := ht1 (1 / 2) (by decide)
+  obtain ⟨P2, hP2⟩ := ht1 (e / M) (div_pos.real e M he hM_pos)
+  use P1 + P2; intro P hP
+  have h1 := hP1 P (by omega)
+  have h2 := hP2 P (by omega)
+  have hinv := euler_sieve.prod_mul_inv_eq_one P s hs
+  have hfact : complex.sub (euler_inv_prod P s) Z = complex.mul (euler_inv_prod P s) (complex.sub complex.one (complex.mul (euler_sieve_prod P s) Z))
+    have ha : complex.mul (euler_inv_prod P s) (complex.sub complex.one (complex.mul (euler_sieve_prod P s) Z)) = complex.sub (euler_inv_prod P s) (complex.mul (complex.mul (euler_sieve_prod P s) (euler_inv_prod P s)) Z) := by ring
+    rw [ha, hinv, complex.one_mul]
+  have hEP_bd : complex.abs (euler_inv_prod P s) ≤ 2 * complex.abs Z
+    have hprod_ge : 1 / 2 ≤ complex.abs (complex.mul (euler_sieve_prod P s) Z)
+      have htri := complex.abs_add_le (complex.mul (euler_sieve_prod P s) Z) (complex.sub complex.one (complex.mul (euler_sieve_prod P s) Z))
+      have heq1 : complex.add (complex.mul (euler_sieve_prod P s) Z) (complex.sub complex.one (complex.mul (euler_sieve_prod P s) Z)) = complex.one := by ring
+      rw [heq1, complex.abs_sub_comm complex.one (complex.mul (euler_sieve_prod P s) Z), complex.abs_one_eq] at htri; linarith
+    have hmul_eq : complex.abs (euler_inv_prod P s) * complex.abs (complex.mul (euler_sieve_prod P s) Z) = complex.abs Z
+      rw [← complex.abs_mul]
+      have ha : complex.mul (euler_inv_prod P s) (complex.mul (euler_sieve_prod P s) Z) = complex.mul (complex.mul (euler_sieve_prod P s) (euler_inv_prod P s)) Z := by ring
+      rw [ha, hinv, complex.one_mul]
+    nlinarith [complex.abs_nonneg (euler_inv_prod P s)]
+  rw [hfact, complex.abs_mul, complex.abs_sub_comm complex.one (complex.mul (euler_sieve_prod P s) Z)]
+  have hm1 := mul_le_mul_of_nonneg_right.real (complex.abs (euler_inv_prod P s)) M (complex.abs (complex.sub (complex.mul (euler_sieve_prod P s) Z) complex.one)) (by rw [hM]; linarith) (complex.abs_nonneg _)
+  have hm2 := mul_lt_mul_of_pos_left.real (complex.abs (complex.sub (complex.mul (euler_sieve_prod P s) Z) complex.one)) (e / M) M h2 hM_pos
+  have hMe : M * (e / M) = e := by field_simp
+  linarith
+
+-- THEOREM 6 (UNCONDITIONAL MERTENS 3-4-1 FOR zeta_EM2 FOR ALL sigma > 1, t in R — 0 AXIOMS!):
++ zeta.em2_mertens_341_unconditional (zeta : ℂ → ℂ) (hzeta : is_zeta_em2 zeta)
+    (sigma t : ℝ) (hs : 1 < sigma) :
+    1 ≤ (complex.abs (zeta (complex.of_real sigma))) ^ 3 *
+        (complex.abs (zeta (complex.mk sigma t))) ^ 4 *
+        complex.abs (zeta (complex.mk sigma (2 * t)))
+  have h0 := ctends_to.abs (fun (P : ℕ) => euler_inv_prod P (complex.of_real sigma)) (zeta (complex.of_real sigma)) (zeta.euler_prod_tends_to_em2 zeta hzeta (complex.of_real sigma) (by simp))
+  have h1 := ctends_to.abs (fun (P : ℕ) => euler_inv_prod P (complex.mk sigma t)) (zeta (complex.mk sigma t)) (zeta.euler_prod_tends_to_em2 zeta hzeta (complex.mk sigma t) (by simp))
+  have h2 := ctends_to.abs (fun (P : ℕ) => euler_inv_prod P (complex.mk sigma (2 * t))) (zeta (complex.mk sigma (2 * t))) (zeta.euler_prod_tends_to_em2 zeta hzeta (complex.mk sigma (2 * t)) (by simp))
+  apply mertens.limit_341_ge_one (fun (P : ℕ) => complex.abs (euler_inv_prod P (complex.of_real sigma))) (fun (P : ℕ) => complex.abs (euler_inv_prod P (complex.mk sigma t))) (fun (P : ℕ) => complex.abs (euler_inv_prod P (complex.mk sigma (2 * t)))) (complex.abs (zeta (complex.of_real sigma))) (complex.abs (zeta (complex.mk sigma t))) (complex.abs (zeta (complex.mk sigma (2 * t)))) h0 h1 h2
+  intro P
+  induction P with k ih
+  · have h0a : euler_inv_prod 0 (complex.of_real sigma) = complex.one := by rfl
+    have h0b : euler_inv_prod 0 (complex.mk sigma t) = complex.one := by rfl
+    have h0c : euler_inv_prod 0 (complex.mk sigma (2 * t)) = complex.one := by rfl
+    have habs1 : complex.abs complex.one = 1
+      have hsq : complex.abs complex.one * complex.abs complex.one = 1 := by rw [complex.abs_sq]; unfold complex.norm_sq; simp
+      exact eq_of_sq_eq_nonneg (complex.abs complex.one) 1 (complex.abs_nonneg complex.one) (by decide) hsq
+    rw [h0a, h0b, h0c, habs1]
+    have h1 : (1 : ℝ) ^ 3 * (1 : ℝ) ^ 4 * 1 = 1 := by ring
+    linarith
+  · rw [succ_eq_add_one.nat]
+    have ha : euler_inv_prod (k + 1) (complex.of_real sigma) = complex.mul (euler_inv_prod k (complex.of_real sigma)) (euler_inv_factor (complex.of_real sigma) k) := by rfl
+    have hb : euler_inv_prod (k + 1) (complex.mk sigma t) = complex.mul (euler_inv_prod k (complex.mk sigma t)) (euler_inv_factor (complex.mk sigma t) k) := by rfl
+    have hc : euler_inv_prod (k + 1) (complex.mk sigma (2 * t)) = complex.mul (euler_inv_prod k (complex.mk sigma (2 * t))) (euler_inv_factor (complex.mk sigma (2 * t)) k) := by rfl
+    rw [ha, hb, hc, complex.abs_mul, complex.abs_mul, complex.abs_mul]
+    have hrearr : (complex.abs (euler_inv_prod k (complex.of_real sigma)) * complex.abs (euler_inv_factor (complex.of_real sigma) k)) ^ 3 * (complex.abs (euler_inv_prod k (complex.mk sigma t)) * complex.abs (euler_inv_factor (complex.mk sigma t) k)) ^ 4 * (complex.abs (euler_inv_prod k (complex.mk sigma (2 * t))) * complex.abs (euler_inv_factor (complex.mk sigma (2 * t)) k)) = ((complex.abs (euler_inv_prod k (complex.of_real sigma))) ^ 3 * (complex.abs (euler_inv_prod k (complex.mk sigma t))) ^ 4 * complex.abs (euler_inv_prod k (complex.mk sigma (2 * t)))) * ((complex.abs (euler_inv_factor (complex.of_real sigma) k)) ^ 3 * (complex.abs (euler_inv_factor (complex.mk sigma t) k)) ^ 4 * complex.abs (euler_inv_factor (complex.mk sigma (2 * t)) k)) := by ring
+    rw [hrearr]
+    have hstep : 1 ≤ (complex.abs (euler_inv_factor (complex.of_real sigma) k)) ^ 3 * (complex.abs (euler_inv_factor (complex.mk sigma t) k)) ^ 4 * complex.abs (euler_inv_factor (complex.mk sigma (2 * t)) k)
+      unfold euler_inv_factor
+      by_cases hk : prime k
+      · rw [if_pos hk, if_pos hk, if_pos hk]
+        exact mertens.single_prime_euler_341_ge_one k sigma t hk.1 hs
+      · rw [if_neg hk, if_neg hk, if_neg hk]
+        have habs1 : complex.abs complex.one = 1
+          have hsq : complex.abs complex.one * complex.abs complex.one = 1 := by rw [complex.abs_sq]; unfold complex.norm_sq; simp
+          exact eq_of_sq_eq_nonneg (complex.abs complex.one) 1 (complex.abs_nonneg complex.one) (by decide) hsq
+        rw [habs1]
+        have h1 : (1 : ℝ) ^ 3 * (1 : ℝ) ^ 4 * 1 = 1 := by ring
+        linarith
+    nlinarith
+
+-- ====================================================================================
+-- 5. GRAND FINALE: UNCONDITIONAL HADAMARD-DE LA VALLEE POUSSIN ON Re(s) >= 1, s != 1!
+-- ====================================================================================
+
+-- THEOREM 7 (UNCONDITIONAL HADAMARD-DE LA VALLEE POUSSIN NONVANISHING — 0 AXIOMS!):
+-- For EVERY zeta matching the order-2 Euler-Maclaurin continuation on Re(s) > -1, s != 1
+-- (which agrees with sum n^(-s) on Re(s) > 1 and satisfies zeta(0) = -1/2):
+--   zeta(s) != 0   for EVERY s in C with Re(s) >= 1 and s != 1 !
++ zeta.em2_ne_zero_re_ge_one_unconditional (zeta : ℂ → ℂ) (hzeta : is_zeta_em2 zeta)
+    (s : ℂ) (hs : 1 ≤ complex.re s) (hne : s ≠ complex.one) :
+    zeta s ≠ complex.zero
+  by_cases hgt : 1 < complex.re s
+  · exact zeta.em2_ne_zero_re_gt_one zeta hzeta s hgt
+  · have hre1 : complex.re s = 1 := by linarith
+    have him_ne : complex.im s ≠ 0
+      intro him0; apply hne
+      apply complex.ext
+      · simp
+      · simp
+    have hseq : s = complex.mk 1 (complex.im s)
+      apply complex.ext
+      · simp
+      · simp
+    rw [hseq]
+    apply zeta.em2_ne_zero_re_eq_one_of_mertens zeta hzeta (complex.im s) him_ne
+    intro sigma hs1 _
+    exact zeta.em2_mertens_341_unconditional zeta hzeta sigma (complex.im s) hs1

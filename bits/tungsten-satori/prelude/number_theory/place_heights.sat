@@ -36,6 +36,23 @@ import padic.legendre_fps
 + cpadic_place.ultrametric (l : ℕ) (v : ℂ → ℝ) (h : cpadic_place l v) : is_ultrametric_norm v
   exact ⟨⟨h.2.1.1, h.2.1.2.1, h.2.1.2.2.1, h.2.1.2.2.2.2.2.1⟩, h.2.1.2.2.2.1, h.2.1.2.2.2.2.1⟩
 
++ cpadic_place.inv (l : ℕ) (v : ℂ → ℝ) (h : cpadic_place l v) (z : ℂ) (hz : z ≠ complex.zero) :
+    v (complex.inv z) = 1 / v z :=
+  is_mult_seminorm.inv_eq v (cpadic_place.ultrametric l v h).1 z hz
+
+-- A natural number prime to `l` is a unit at every place over `l`.
++ cpadic_place.nat_unit (l : ℕ) (v : ℂ → ℝ) (h : cpadic_place l v) (n : ℕ) (hn : 0 < n)
+    (hnd : ¬ (l ∣ n)) : v (complex.of_real (n : ℝ)) = 1
+  rw [h.2.1.2.2.2.2.2.2 n]
+  exact padic.abs_eq_one_of_not_dvd l n h.1.1 hn hnd
+
++ complex.of_real_nat_ne_zero (n : ℕ) (hn : 0 < n) : complex.of_real (n : ℝ) ≠ complex.zero
+  intro hz
+  rw [← complex.of_real_zero] at hz
+  have he := complex.of_real_inj (n : ℝ) 0 hz
+  have hp : (0 : ℝ) < (n : ℝ) := (cast_pos.real n).mpr hn
+  linarith
+
 -- ====================================================================================
 -- SECTION 2: HEIGHT BOUNDS
 -- ====================================================================================

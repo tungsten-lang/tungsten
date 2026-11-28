@@ -66,6 +66,15 @@ import algebra.valuation_lindep
     rw [← cpow_nat.mul_dist a (complex.inv a) d, complex.mul_inv_cancel a ha, cpow_nat.one]
   exact (complex.inv_unique (cpow_nat a d) (cpow_nat (complex.inv a) d) h).symm
 
++ cprod_c.inv (n : ℕ) (f : ℕ → ℂ) (hf : ∀ i < n, f i ≠ complex.zero) :
+    cprod_c n (fun i => complex.inv (f i)) = complex.inv (cprod_c n f)
+  induction n with hf r ihr hf
+  · rw [cprod_c.zero_eq, cprod_c.zero_eq]
+    exact (complex.inv_unique complex.one complex.one (complex.mul_one complex.one)).symm
+  · rw [succ_eq_add_one.nat] at hf ⊢
+    have hprev : ∀ i < r, f i ≠ complex.zero := by intro i hi; exact hf i (by omega)
+    rw [cprod_c.succ_eq, cprod_c.succ_eq, ihr hprev, complex.inv_mul (cprod_c r f) (f r) (cprod_c.ne_zero r f hprev) (hf r (by omega))]
+
 -- ====================================================================================
 -- SECTION 2: THE MAXIMAL IDEAL OF A VALUATION RING
 -- ====================================================================================

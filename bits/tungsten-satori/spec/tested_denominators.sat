@@ -1,0 +1,82 @@
+import algebra.local_operator_denominator
+import number_theory.denominator_budget
+import fermat_descent
+
+-- No valuation-extension hypothesis is needed to measure the rational witness.
++ denominator_spec.diagonal_two :
+    cmat.projected_det 2 1 cmat.id (fun _ _ => complex.one) cmat.id cmat.id = complex.of_real (1 / 2) ∧
+    padic.abs 2 1 / padic.abs 2 2 = 2
+  constructor
+  · exact cmat.diagonal_line_projected_det 2 (by decide)
+  · have h := padic.reciprocal_prime_power_norm 2 1 is_prime_nat_two
+    rw [pow_one.nat, cast_one.real, one_mul.real, exp_log ((2 : ℕ) : ℝ) (by decide)] at h; exact h
+
+-- Even with a negative budget, dimension zero gives the 0-by-0 determinant 1.
++ denominator_spec.empty_space (N r : ℕ) (H U : ℕ → ℕ → ℂ) (E L T : (ℕ → ℂ) → Prop)
+    (v : ℂ → ℝ) (hv : is_mult_seminorm v) :
+    cmat.denominator_le 0 r E L T v (cmat.projected_det N 0 H U) (-7)
+  intro Y Z _; unfold cmat.projected_det; rw [cmat.det_zero_eq, hv.2.1, zero_mul.real, exp_zero]; linarith
+
+-- Lifting separation from rank-one idempotents requires different operators
+-- on the two lines. Their individual clearing estimates suffice.
++ denominator_spec.two_clearing_operators (A C : ℕ → ℕ → ℂ) (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (hi : ∀ t < 2, ∀ i < 2, ∀ j < 2, v (cmat.mul 2 A (fun k b => complex.mul (cmat.id k t) (C k b)) i j) ≤ 1) :
+    v (cmat.det 2 (cmat.mul 2 A C)) ≤ 1
+  have hs : ∀ k < 2, ∃ t < 2, exp (-(0 : ℝ)) ≤ v (cmat.id k t)
+    intro k hk; use k; constructor; exact hk
+    have hid : cmat.id k k = complex.one := by unfold cmat.id; trivial
+    rw [hid, hv.1.2.1]; simp [exp_zero]
+  have h := cmat.det_le_of_separating_operators 2 2 A C cmat.id v hv (fun _ => 0) hs hi
+  rw [sum_const.real, mul_zero.real, exp_zero] at h; exact h
+
+-- A family of embeddings over 2. Its reference twist uses the diagonal in
+-- dimension 2, every other twist uses the full line in dimension 1.
+-> denominator_spec.lattice (v : α → ℂ → ℝ) (s : α) (y : ℕ → ℂ) : Prop :=
+  ∀ i : ℕ, v s (y i) ≤ 1 ∧ v s (complex.conj (y i)) ≤ 1
+
+-> denominator_spec.line (v : α → ℂ → ℝ) (s : α) (k : ℕ) : ProjectionTest :=
+  projection_test.at_embedding (fun _ => 2) s (denominator_spec.lattice v) (2 ^ k) 1 1 cmat.id (fun _ _ => complex.one) cmat.id (fun w : ℕ => w = 0) (fun _ => cmat.id)
+
++ denominator_spec.line_bound (v : α → ℂ → ℝ) (hv : ∀ s, is_ultrametric_norm (v s))
+    (hext : ∀ (s : α) (n : ℕ), v s (complex.of_real (n : ℝ)) = padic.abs 2 n) (s : α) (k : ℕ) (b : ℝ) :
+    projection_test.bound (denominator_spec.line v s k) (v s) b ↔ (k : ℝ) * log 2 ≤ b
+  set E : (ℕ → ℂ) → Prop := fun y => ∀ t : α, (2 : ℕ) = 2 → denominator_spec.lattice v t y with hE
+  set T := cmat.passes_kernel_tests (2 ^ k) 1 cmat.id (fun _ _ => complex.one) cmat.id (fun w : ℕ => w = 0) (fun _ => cmat.id) with hT
+  have he : denominator_spec.line v s k = ProjectionTest.mk (2 ^ k) 1 1 cmat.id (fun _ _ => complex.one) E (denominator_spec.lattice v s) T
+    rw [hE, hT]; unfold denominator_spec.line projection_test.at_embedding; trivial
+  rw [he]
+  apply projection_test.diagonal_line_bound_iff 2 k is_prime_nat_two (v s) (hv s) (hext s) E (denominator_spec.lattice v s) T
+  · intro y hy i _; rw [hE] at hy
+    have h := hy s (by rfl); unfold denominator_spec.lattice at h; exact (h i).2
+  · intro y hy i _; unfold denominator_spec.lattice at hy; exact (hy i).1
+  · have hid : ∀ t a, denominator_spec.lattice v t (fun i => cmat.id i a)
+      intro t a i; by_cases e : i = a
+      · have he : cmat.id i a = complex.one := by unfold cmat.id; rw [if_pos e]
+        rw [he, complex.conj_one, (hv t).1.2.1]; exact ⟨by linarith, by linarith⟩
+      · have he : cmat.id i a = complex.zero := by unfold cmat.id; rw [if_neg e]
+        have hz : complex.conj complex.zero = complex.zero := by apply complex.ext <;> simp
+        rw [he, hz, (hv t).1.1]; exact ⟨by linarith, by linarith⟩
+    constructor
+    · intro a _; rw [hE]; intro t _; exact hid t a
+    · intro a _; constructor; exact hid s a
+      rw [hT]; apply cmat.passes_kernel_tests_of_injective
+      intro w _ x h i hi
+      have he := h i hi
+      have hid := cmat.mul_id_left (2 ^ k) (fun j _ => x j) i 0 hi
+      change cmat.apply (2 ^ k) cmat.id x i = x i at hid; rw [← hid]; exact he
+
++ denominator_spec.zero_budget_iff_changed_everywhere (v : α → ℂ → ℝ) (hv : ∀ s, is_ultrametric_norm (v s))
+    (hext : ∀ (s : α) (n : ℕ), v s (complex.of_real (n : ℝ)) = padic.abs 2 n) (theta : α → ℕ) :
+    prime_budget.for_projections (fun _ => 2) v theta (fun s t z => z = (0 : ℕ)) (fun s t z => denominator_spec.line v s (if t = 0 then 1 else 0)) 0 ↔ ∀ s, theta s ≠ 0
+  unfold prime_budget.for_projections
+  constructor
+  · intro hfit s hzero; obtain ⟨g, htotal, hloc⟩ := hfit
+    have h := hloc s 0 (by rfl); rw [hzero] at h
+    have he := (denominator_spec.line_bound v hv hext s 1 (g 2)).mp h
+    rw [cast_one.real, one_mul.real] at he
+    linarith [prime_budget.le_at_prime g 0 htotal 2 is_prime_nat_two, log_pos 2 (by decide)]
+  · intro hn
+    use (fun _ : ℕ => (0 : ℝ)); constructor
+    · intro k p _ _; rw [sum_const.real]; linarith
+    · intro s z _; rw [if_neg (hn s)]
+      apply (denominator_spec.line_bound v hv hext s 0 0).mpr; rw [cast_zero.real]; linarith

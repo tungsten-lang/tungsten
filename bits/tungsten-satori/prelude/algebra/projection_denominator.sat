@@ -1,0 +1,309 @@
+-- Projected Gram determinants in coordinates. For a Hermitian metric H,
+-- project_frame is the orthogonal projection onto the columns of U whenever
+-- their Gram determinant is nonzero. The identities also hold for general H.
+import algebra.frame_transport
+
+-> cmat.frame_dual (N : ℕ) (H U : ℕ → ℕ → ℂ) : ℕ → ℕ → ℂ :=
+  cmat.mul N (cmat.adj U) H
+
+-> cmat.cross_gram (N : ℕ) (H Y Z : ℕ → ℕ → ℂ) : ℕ → ℕ → ℂ :=
+  cmat.mul N (cmat.frame_dual N H Y) Z
+
+-> cmat.project_frame (N d : ℕ) (H U Z : ℕ → ℕ → ℂ) : ℕ → ℕ → ℂ :=
+  cmat.mul d U (cmat.mul d (cmat.inv d (cmat.cross_gram N H U U)) (cmat.cross_gram N H U Z))
+
+-- The projected columns solve the normal equations.
++ cmat.project_frame_normal (N d : ℕ) (H U Z : ℕ → ℕ → ℂ)
+    (hG : cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero) (i j : ℕ) (hi : i < d) :
+    cmat.cross_gram N H U (cmat.project_frame N d H U Z) i j = cmat.cross_gram N H U Z i j
+  unfold cmat.project_frame
+  change cmat.mul N (cmat.frame_dual N H U) (cmat.mul d U (cmat.mul d (cmat.inv d (cmat.cross_gram N H U U)) (cmat.cross_gram N H U Z))) i j = cmat.cross_gram N H U Z i j
+  rw [← cmat.mul_rect_assoc N d]
+  change cmat.mul d (cmat.cross_gram N H U U) (cmat.mul d (cmat.inv d (cmat.cross_gram N H U U)) (cmat.cross_gram N H U Z)) i j = cmat.cross_gram N H U Z i j
+  rw [← cmat.mul_assoc]
+  have he := cmat.mul_congr_left d (cmat.mul d (cmat.cross_gram N H U U) (cmat.inv d (cmat.cross_gram N H U U))) cmat.id (cmat.cross_gram N H U Z) i j (by intro t ht; exact cmat.mul_inv_eq_id d _ hG i hi t ht)
+  rw [he, cmat.mul_id_left d _ i j hi]
+
++ cmat.project_frame_fixes_span (N d : ℕ) (H U C : ℕ → ℕ → ℂ)
+    (hG : cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero) (i j : ℕ) :
+    cmat.project_frame N d H U (cmat.mul d U C) i j = cmat.mul d U C i j
+  unfold cmat.project_frame
+  apply cmat.mul_congr_right; intro k hk
+  set G := cmat.cross_gram N H U U with hGdef
+  have h := cmat.mul_congr_right d (cmat.inv d G) (cmat.cross_gram N H U (cmat.mul d U C)) (cmat.mul d G C) k j (by intro t ht; rw [hGdef]; exact (cmat.mul_rect_assoc N d (cmat.frame_dual N H U) U C t j).symm)
+  rw [h, ← cmat.mul_assoc]
+  have e := cmat.mul_congr_left d (cmat.mul d (cmat.inv d G) G) cmat.id C k j (by intro t ht; exact cmat.inv_mul_eq_id d G hG k hk t ht)
+  rw [e, cmat.mul_id_left d C k j hk]
+
++ cmat.project_frame_idempotent (N d : ℕ) (H U Z : ℕ → ℕ → ℂ)
+    (hG : cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero) (i j : ℕ) :
+    cmat.project_frame N d H U (cmat.project_frame N d H U Z) i j = cmat.project_frame N d H U Z i j
+  exact cmat.project_frame_fixes_span N d H U (cmat.mul d (cmat.inv d (cmat.cross_gram N H U U)) (cmat.cross_gram N H U Z)) hG i j
+
+-> cmat.projected_det (N d : ℕ) (H U Y Z : ℕ → ℕ → ℂ) : ℂ :=
+  cmat.det d (cmat.cross_gram N H Y (cmat.project_frame N d H U Z))
+
+-- Only one copy of det(U* H U) occurs in the denominator, in every rank.
++ cmat.projected_det_clear (N d : ℕ) (H U Y Z : ℕ → ℕ → ℂ)
+    (hG : cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero) :
+    complex.mul (cmat.det d (cmat.cross_gram N H U U)) (cmat.projected_det N d H U Y Z) =
+      complex.mul (cmat.det d (cmat.cross_gram N H Y U)) (cmat.det d (cmat.cross_gram N H U Z))
+  set G := cmat.cross_gram N H U U with hGdef
+  set A := cmat.cross_gram N H Y U with hAdef
+  set B := cmat.cross_gram N H U Z with hBdef
+  have h : cmat.projected_det N d H U Y Z = cmat.det d (cmat.mul d A (cmat.mul d (cmat.inv d G) B))
+    rw [hAdef, hBdef, hGdef]; unfold cmat.projected_det
+    apply cmat.det_congr d (cmat.cross_gram N H Y (cmat.project_frame N d H U Z)) (cmat.mul d (cmat.cross_gram N H Y U) (cmat.mul d (cmat.inv d (cmat.cross_gram N H U U)) (cmat.cross_gram N H U Z)))
+    intro i _ j _; exact (cmat.mul_rect_assoc N d (cmat.frame_dual N H Y) U (cmat.mul d (cmat.inv d (cmat.cross_gram N H U U)) (cmat.cross_gram N H U Z)) i j).symm
+  rw [h, cmat.det_mul, cmat.det_mul, cmat.det_inv d G hG]
+  have hre : ∀ g a b : ℂ, complex.mul g (complex.mul a (complex.mul (complex.inv g) b)) =
+      complex.mul (complex.mul g (complex.inv g)) (complex.mul a b)
+    intro g a b; apply complex.ext <;> simp <;> ring
+  rw [hre, complex.mul_inv_cancel _ hG, complex.mul_one_l]
+
+-- The left columns are integral at every place above the given prime.
+-- On the right both integrality at the selected embedding and the test apply.
+-> cmat.admissible_columns (d : ℕ) (everywhere here tested : (ℕ → ℂ) → Prop)
+    (Y Z : ℕ → ℕ → ℂ) : Prop :=
+  (∀ a < d, everywhere (fun i => Y i a)) ∧ (∀ b < d, here (fun i => Z i b) ∧ tested (fun i => Z i b))
+
+-> cmat.denominator_le (d r : ℕ) (everywhere here tested : (ℕ → ℂ) → Prop)
+    (v : ℂ → ℝ) (D : (ℕ → ℕ → ℂ) → (ℕ → ℕ → ℂ) → ℂ) (beta : ℝ) : Prop :=
+  ∀ Y Z, cmat.admissible_columns d everywhere here tested Y Z →
+    v (D Y Z) ≤ exp ((d : ℝ) * ((r : ℝ) * beta))
+
++ cmat.projected_denominator_iff (N d r : ℕ) (H U : ℕ → ℕ → ℂ)
+    (hG : cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero) (v : ℂ → ℝ) (hv : is_mult_seminorm v)
+    (E L T : (ℕ → ℂ) → Prop) (beta : ℝ) :
+    cmat.denominator_le d r E L T v (cmat.projected_det N d H U) beta ↔
+      ∀ Y Z, cmat.admissible_columns d E L T Y Z →
+        v (cmat.det d (cmat.cross_gram N H Y U)) * v (cmat.det d (cmat.cross_gram N H U Z)) ≤
+          v (cmat.det d (cmat.cross_gram N H U U)) * exp ((d : ℝ) * ((r : ℝ) * beta))
+  have hpos := is_mult_seminorm.pos_of_ne_zero v hv _ hG
+  have h : ∀ Y Z : ℕ → ℕ → ℂ, v (cmat.det d (cmat.cross_gram N H U U)) * v (cmat.projected_det N d H U Y Z) =
+      v (cmat.det d (cmat.cross_gram N H Y U)) * v (cmat.det d (cmat.cross_gram N H U Z))
+    intro Y Z; rw [← hv.2.2.2, cmat.projected_det_clear N d H U Y Z hG, hv.2.2.2]
+  unfold cmat.denominator_le
+  constructor
+  · intro hden Y Z had; rw [← h Y Z]
+    exact mul_le_mul_of_nonneg_left.real _ _ _ (hden Y Z had) (by linarith)
+  · intro hb Y Z had
+    have he := hb Y Z had
+    rw [← h Y Z] at he
+    by_contra hgt
+    have hs := mul_pos.real (v (cmat.det d (cmat.cross_gram N H U U))) (v (cmat.projected_det N d H U Y Z) - exp ((d : ℝ) * ((r : ℝ) * beta))) hpos (by linarith)
+    nlinarith
+
++ cmat.not_denominator_le_of_cross_gram (N d r : ℕ) (H U Y Z : ℕ → ℕ → ℂ)
+    (hG : cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero) (v : ℂ → ℝ) (hv : is_mult_seminorm v)
+    (E L T : (ℕ → ℂ) → Prop) (beta : ℝ) (had : cmat.admissible_columns d E L T Y Z)
+    (hexcess : v (cmat.det d (cmat.cross_gram N H U U)) * exp ((d : ℝ) * ((r : ℝ) * beta)) <
+      v (cmat.det d (cmat.cross_gram N H Y U)) * v (cmat.det d (cmat.cross_gram N H U Z))) :
+    ¬ cmat.denominator_le d r E L T v (cmat.projected_det N d H U) beta
+  intro hd
+  have hf := (cmat.projected_denominator_iff N d r H U hG v hv E L T beta).mp hd
+  have hb := hf Y Z had
+  linarith
+
++ cmat.cross_gram_entry (N : ℕ) (H Y Z : ℕ → ℕ → ℂ) (a b : ℕ) :
+    cmat.cross_gram N H Y Z a b = cmat.pairing N H (fun i => Y i a) (fun i => Z i b)
+  exact cmat.mul_assoc N (cmat.adj Y) H Z a b
+
+-- W contains the images of the frame vectors under an ambient linear map.
+-- These are the coordinates of its compression back onto the frame.
+-> cmat.frame_compression (N d : ℕ) (H U W : ℕ → ℕ → ℂ) : ℕ → ℕ → ℂ :=
+  cmat.mul d (cmat.inv d (cmat.cross_gram N H U U)) (cmat.cross_gram N H U W)
+
++ cmat.projected_det_on_dual_columns (N d : ℕ) (H U Y W C : ℕ → ℕ → ℂ)
+    (hdual : ∀ i < d, ∀ j < d, cmat.mul d (cmat.cross_gram N H Y U) C i j = cmat.id i j) :
+    cmat.projected_det N d H U Y (cmat.mul d W C) = cmat.det d (cmat.frame_compression N d H U W)
+  set A := cmat.cross_gram N H Y U with hA
+  set B := cmat.cross_gram N H U W with hB
+  set J := cmat.inv d (cmat.cross_gram N H U U) with hJ
+  have hx : ∀ i j : ℕ, cmat.cross_gram N H U (cmat.mul d W C) i j = cmat.mul d B C i j
+    intro i j; rw [hB]; exact (cmat.mul_rect_assoc N d (cmat.frame_dual N H U) W C i j).symm
+  have he : cmat.projected_det N d H U Y (cmat.mul d W C) = cmat.det d (cmat.mul d A (cmat.mul d J (cmat.mul d B C)))
+    unfold cmat.projected_det
+    apply cmat.det_congr d (cmat.cross_gram N H Y (cmat.project_frame N d H U (cmat.mul d W C))) (cmat.mul d A (cmat.mul d J (cmat.mul d B C)))
+    intro i _ j _
+    have ha := cmat.mul_rect_assoc N d (cmat.frame_dual N H Y) U (cmat.mul d J (cmat.cross_gram N H U (cmat.mul d W C))) i j
+    change cmat.mul d (cmat.cross_gram N H Y U) (cmat.mul d J (cmat.cross_gram N H U (cmat.mul d W C))) i j = cmat.mul N (cmat.frame_dual N H Y) (cmat.mul d U (cmat.mul d J (cmat.cross_gram N H U (cmat.mul d W C)))) i j at ha
+    rw [← hA] at ha
+    rw [hJ] at ha
+    change cmat.mul N (cmat.frame_dual N H Y) (cmat.mul d U (cmat.mul d (cmat.inv d (cmat.cross_gram N H U U)) (cmat.cross_gram N H U (cmat.mul d W C)))) i j = cmat.mul d A (cmat.mul d J (cmat.mul d B C)) i j
+    rw [← ha, ← hJ]
+    apply cmat.mul_congr_right; intro k _
+    apply cmat.mul_congr_right; intro t _; exact hx t j
+  have hid := cmat.det_congr d (cmat.mul d A C) cmat.id hdual
+  rw [cmat.det_mul, cmat.det_id] at hid
+  have hre : ∀ a g b c : ℂ, complex.mul a (complex.mul g (complex.mul b c)) = complex.mul (complex.mul a c) (complex.mul g b)
+    intro a g b c; apply complex.ext <;> simp <;> ring
+  rw [he, cmat.det_mul, cmat.det_mul, cmat.det_mul, hre, hid, complex.mul_one_l]
+  unfold cmat.frame_compression; rw [cmat.det_mul, hJ, hB]
+
++ cmat.cross_gram_select_columns (N : ℕ) (H Y U : ℕ → ℕ → ℂ) (s : ℕ → ℕ) (a b : ℕ) :
+    cmat.cross_gram N H (fun i j => Y i (s j)) U a b = cmat.cross_gram N H Y U (s a) b
+  rw [cmat.cross_gram_entry, cmat.cross_gram_entry]
+
+-- Select the integral left tests by Auerbach. A column of W C is a valid
+-- right test as soon as its preimage has integral evaluations by all Y.
++ cmat.compressed_det_le_of_tested_denominator (N M d r : ℕ) (H U Y W : ℕ → ℕ → ℂ)
+    (v : ℂ → ℝ) (hv : is_mult_seminorm v) (E L T : (ℕ → ℂ) → Prop) (beta : ℝ)
+    (hd : cmat.denominator_le d r E L T v (cmat.projected_det N d H U) beta)
+    (s0 : ℕ → ℕ) (hs0 : ∀ i < d, s0 i < M)
+    (hsep : cmat.det d (fun i j => cmat.cross_gram N H Y U (s0 i) j) ≠ complex.zero)
+    (hleft : ∀ a < M, E (fun i => Y i a))
+    (hright : ∀ c : ℕ → ℂ, (∀ a < M, v (cmat.apply d (cmat.cross_gram N H Y U) c a) ≤ 1) →
+      L (cmat.apply d W c) ∧ T (cmat.apply d W c)) :
+    v (cmat.det d (cmat.frame_compression N d H U W)) ≤ exp ((d : ℝ) * ((r : ℝ) * beta))
+  obtain ⟨s, C, hs, _, hdual, hsmall⟩ := auerbach.exists_dual_basis M d (cmat.cross_gram N H Y U) v hv s0 hs0 (is_mult_seminorm.pos_of_ne_zero v hv _ hsep)
+  set X : ℕ → ℕ → ℂ := fun i j => Y i (s j) with hX
+  have he : ∀ i < d, ∀ j < d, cmat.mul d (cmat.cross_gram N H X U) C i j = cmat.id i j
+    intro i hi j hj
+    have h := cmat.mul_congr_left d (cmat.cross_gram N H X U) (fun a b => cmat.cross_gram N H Y U (s a) b) C i j (by intro k _; rw [hX, cmat.cross_gram_select_columns])
+    rw [h]; exact hdual i hi j hj
+  rw [← cmat.projected_det_on_dual_columns N d H U X W C he]
+  unfold cmat.denominator_le at hd
+  apply hd X (cmat.mul d W C)
+  constructor
+  · intro a ha; rw [hX]; exact hleft (s a) (hs a ha)
+  · intro b hb; exact hright (fun j => C j b) (by intro a ha; exact hsmall a ha b hb)
+
+-- A vector passes each operator test when it is orthogonal to the intersection
+-- of the idempotent image, the operator kernel, and the frame complement.
+-> cmat.passes_kernel_tests (N d : ℕ) (H U E : ℕ → ℕ → ℂ) (eligible : α → Prop)
+    (op : α → ℕ → ℕ → ℂ) (y : ℕ → ℂ) : Prop :=
+  ∀ w, eligible w → ∀ x : ℕ → ℂ, (∃ t : ℕ → ℂ, ∀ i < N, x i = cmat.apply N E t i) →
+    (∀ i < N, cmat.apply N (op w) x i = complex.zero) →
+    (∀ a < d, cmat.pairing N H (fun i => U i a) x = complex.zero) → cmat.pairing N H x y = complex.zero
+
++ cmat.det_rank_one_entry (A : ℕ → ℕ → ℂ) : cmat.det 1 A = A 0 0
+  have h := cmat.det_succ_eq 0 A
+  change cmat.det 1 A = csum (0 + 1) (fun j => complex.mul (csign (0 + j)) (complex.mul (A 0 j) (cmat.det 0 (minor_mat A 0 j)))) at h
+  rw [h, csum.succ, csum.zero, complex.zero_add, cmat.det_zero_eq, complex.mul_one_r]
+  have hs : csign (0 + 0) = complex.one := by rfl
+  rw [hs, complex.mul_one_l]
+
++ cmat.cross_gram_identity_metric (N : ℕ) (Y Z : ℕ → ℕ → ℂ) (a b : ℕ) :
+    cmat.cross_gram N cmat.id Y Z a b = cmat.mul N (cmat.adj Y) Z a b
+  unfold cmat.cross_gram
+  apply cmat.mul_congr_left; intro k hk; exact cmat.mul_id_right N (cmat.adj Y) a k hk
+
++ cmat.diagonal_line_gram_det (N : ℕ) :
+    cmat.det 1 (cmat.cross_gram N cmat.id (fun _ _ => complex.one) (fun _ _ => complex.one)) = complex.of_real (N : ℝ)
+  rw [cmat.det_rank_one_entry, cmat.cross_gram_identity_metric]
+  unfold cmat.mul cmat.adj
+  have hc : csum N (fun _ => complex.mul (complex.conj complex.one) complex.one) = complex.smul (N : ℝ) (complex.mul (complex.conj complex.one) complex.one) := csum.const N _
+  rw [hc]; apply complex.ext <;> simp <;> ring
+
+-- The standard coordinate paired with its projection onto the diagonal line
+-- is 1/N. In particular a primitive integral column can have a denominator.
++ cmat.diagonal_line_projected_det (N : ℕ) (hN : 0 < N) :
+    cmat.projected_det N 1 cmat.id (fun _ _ => complex.one) cmat.id cmat.id = complex.of_real (1 / (N : ℝ))
+  set U : ℕ → ℕ → ℂ := fun _ _ => complex.one with hU
+  have hG : cmat.det 1 (cmat.cross_gram N cmat.id U U) = complex.of_real (N : ℝ) := by rw [hU]; exact cmat.diagonal_line_gram_det N
+  have hA : cmat.det 1 (cmat.cross_gram N cmat.id cmat.id U) = complex.one
+    rw [cmat.det_rank_one_entry, cmat.cross_gram_identity_metric]
+    have he := cmat.mul_congr_left N (cmat.adj cmat.id) cmat.id U 0 0 (by intro k _; exact cmat.adj_id 0 k)
+    rw [he, cmat.mul_id_left N U 0 0 hN, hU]
+  have hB : cmat.det 1 (cmat.cross_gram N cmat.id U cmat.id) = complex.one
+    rw [cmat.det_rank_one_entry, cmat.cross_gram_identity_metric, cmat.mul_id_right N (cmat.adj U) 0 0 hN, hU]
+    apply complex.ext <;> simp [cmat.adj]
+  have hp := (cast_pos.real N).mpr hN
+  have hn : cmat.det 1 (cmat.cross_gram N cmat.id U U) ≠ complex.zero
+    rw [hG]; intro e; have h := complex.of_real_inj (N : ℝ) 0 e; linarith
+  have he := cmat.projected_det_clear N 1 cmat.id U cmat.id cmat.id hn
+  rw [hG, hA, hB, complex.mul_one_l] at he
+  set z := cmat.projected_det N 1 cmat.id U cmat.id cmat.id with hz
+  have hre : complex.re (complex.mul (complex.of_real (N : ℝ)) z) = complex.re complex.one := by rw [he]
+  have him : complex.im (complex.mul (complex.of_real (N : ℝ)) z) = complex.im complex.one := by rw [he]
+  simp at hre; simp at him
+  apply complex.ext
+  · simp; exact eq_one_div_of_mul_eq_one.real (N : ℝ) (complex.re z) (by linarith)
+  · simp; by_contra hne
+    by_cases hs : 0 < complex.im z
+    · nlinarith [mul_pos.real (N : ℝ) (complex.im z) hp hs]
+    · nlinarith [mul_pos.real (N : ℝ) (-complex.im z) hp (by linarith)]
+
++ cmat.passes_kernel_tests_of_injective (N d : ℕ) (H U E : ℕ → ℕ → ℂ) (eligible : α → Prop)
+    (op : α → ℕ → ℕ → ℂ)
+    (hinj : ∀ w, eligible w → ∀ x : ℕ → ℂ, (∀ i < N, cmat.apply N (op w) x i = complex.zero) → ∀ i < N, x i = complex.zero)
+    (y : ℕ → ℂ) : cmat.passes_kernel_tests N d H U E eligible op y
+  intro w hw x _ hker _
+  unfold cmat.pairing cdot
+  have h := csum.congr N (fun i => complex.mul (complex.conj (x i)) (cmat.apply N H y i)) (fun _ => complex.zero) (by intro i hi; rw [hinj w hw x hker i hi]; apply complex.ext <;> simp)
+  rw [h, csum.const]; apply complex.ext <;> simp
+
+-- Matrix step for a separating operator acting diagonally in a spanning
+-- basis. Clearing the tested pairings A diag(l) C gives the determinant
+-- bound for A C with the product of the individual eigenvalue norms.
++ cmat.det_le_of_diagonal_clearing (d : ℕ) (A C : ℕ → ℕ → ℂ) (l : ℕ → ℂ)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (B : ℝ)
+    (hl : 1 ≤ B * v (cprod_c d l))
+    (hclear : ∀ i < d, ∀ j < d, v (cmat.mul d A (fun k b => complex.mul (l k) (C k b)) i j) ≤ 1) :
+    v (cmat.det d (cmat.mul d A C)) ≤ B
+  have ht := is_ultrametric_norm.det_le v hv d (cmat.mul d A (fun k b => complex.mul (l k) (C k b))) 1 (by decide) hclear
+  have hone := exp_nat_mul 0 d
+  rw [mul_zero.real, exp_zero] at hone
+  rw [cmat.det_mul, cmat.det_row_scale, hv.1.2.2.2, hv.1.2.2.2, ← hone] at ht
+  have hn := hv.1.2.2.1 (cprod_c d l)
+  have hpos : 0 < v (cprod_c d l)
+    by_contra h; have he : v (cprod_c d l) = 0 := by linarith
+    rw [he, mul_zero.real] at hl; linarith
+  rw [cmat.det_mul, hv.1.2.2.2]
+  by_contra h
+  have hs := mul_pos.real (v (cprod_c d l)) (v (cmat.det d A) * v (cmat.det d C) - B) hpos (by linarith)
+  nlinarith
+
++ cmat.cross_gram_det_right_mul (N d : ℕ) (H Y U B : ℕ → ℕ → ℂ) :
+    cmat.det d (cmat.cross_gram N H Y (cmat.mul d U B)) =
+      complex.mul (cmat.det d (cmat.cross_gram N H Y U)) (cmat.det d B)
+  rw [← cmat.det_mul]
+  apply cmat.det_congr d (cmat.cross_gram N H Y (cmat.mul d U B)) (cmat.mul d (cmat.cross_gram N H Y U) B)
+  intro i _ j _; exact (cmat.mul_rect_assoc N d (cmat.frame_dual N H Y) U B i j).symm
+
++ cmat.cross_gram_det_left_mul (N d : ℕ) (H U Z B : ℕ → ℕ → ℂ) :
+    cmat.det d (cmat.cross_gram N H (cmat.mul d U B) Z) =
+      complex.mul (cmat.det d (cmat.adj B)) (cmat.det d (cmat.cross_gram N H U Z))
+  rw [← cmat.det_mul]
+  apply cmat.det_congr d (cmat.cross_gram N H (cmat.mul d U B) Z) (cmat.mul d (cmat.adj B) (cmat.cross_gram N H U Z))
+  intro i _ j _
+  have hl : ∀ t : ℕ, cmat.frame_dual N H (cmat.mul d U B) i t = cmat.mul d (cmat.adj B) (cmat.frame_dual N H U) i t
+    intro t; unfold cmat.frame_dual; rw [← cmat.mul_rect_assoc d N]
+    apply cmat.mul_congr_left; intro k _; exact cmat.adj_mul d U B i k
+  unfold cmat.cross_gram; rw [← cmat.mul_rect_assoc d N]
+  apply cmat.mul_congr_left; intro t _; exact hl t
+
+-- Arbitrary invertible changes of the spanning basis preserve every tested
+-- projected determinant, even when the change of basis has local denominators.
++ cmat.projected_det_change_of_basis (N d : ℕ) (H U B Y Z : ℕ → ℕ → ℂ)
+    (hG : cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero)
+    (hB : cmat.det d B ≠ complex.zero) :
+    cmat.projected_det N d H (cmat.mul d U B) Y Z = cmat.projected_det N d H U Y Z
+  set V := cmat.mul d U B with hV
+  set g := cmat.det d (cmat.cross_gram N H U U) with hg
+  set b := cmat.det d B with hb
+  set c := cmat.det d (cmat.adj B) with hc
+  have hcn : c ≠ complex.zero
+    rw [hc, cmat.det_adj]; intro he; apply hB
+    rw [← hb] at he; rw [← complex.conj_conj b, he]; apply complex.ext <;> simp
+  have hgv : cmat.det d (cmat.cross_gram N H V V) = complex.mul c (complex.mul g b)
+    rw [hV, cmat.cross_gram_det_left_mul, cmat.cross_gram_det_right_mul, hc, hg, hb]
+  have hn : cmat.det d (cmat.cross_gram N H V V) ≠ complex.zero
+    rw [hgv]; exact complex.mul_ne_zero _ _ hcn (complex.mul_ne_zero g b hG hB)
+  have h1 := cmat.projected_det_clear N d H U Y Z (by rw [← hg]; exact hG)
+  have h2 := cmat.projected_det_clear N d H V Y Z hn
+  set a := cmat.det d (cmat.cross_gram N H Y U) with ha
+  set z := cmat.det d (cmat.cross_gram N H U Z) with hz
+  have hleft : cmat.det d (cmat.cross_gram N H Y V) = complex.mul a b := by rw [hV, cmat.cross_gram_det_right_mul, ha, hb]
+  have hright : cmat.det d (cmat.cross_gram N H V Z) = complex.mul c z := by rw [hV, cmat.cross_gram_det_left_mul, hc, hz]
+  have ht : complex.mul (cmat.det d (cmat.cross_gram N H V V)) (cmat.projected_det N d H U Y Z) = complex.mul (complex.mul a b) (complex.mul c z)
+    rw [hgv]
+    have hr : ∀ c g b x : ℂ, complex.mul (complex.mul c (complex.mul g b)) x = complex.mul (complex.mul c b) (complex.mul g x)
+      intro c g b x; apply complex.ext <;> simp <;> ring
+    rw [hr, hg, h1, ha, hz]; apply complex.ext <;> simp <;> ring
+  rw [hleft, hright, ← ht] at h2
+  set D := cmat.det d (cmat.cross_gram N H V V) with hD
+  have hcancel : ∀ x : ℂ, complex.mul (complex.inv D) (complex.mul D x) = x
+    intro x; rw [← complex.mul_assoc, complex.inv_mul_cancel D hn, complex.mul_one_l]
+  rw [← hcancel (cmat.projected_det N d H V Y Z), h2, hcancel]

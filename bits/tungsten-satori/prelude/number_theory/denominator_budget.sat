@@ -1,0 +1,246 @@
+-- One budget per prime for a family of projected determinant tests.
+import algebra.projection_denominator
+import number_theory.prime_scaling
+
+structure ProjectionTest :=
+  (ambient : ℕ)
+  (dim : ℕ)
+  (rank : ℕ)
+  (metric : ℕ → ℕ → ℂ)
+  (frame : ℕ → ℕ → ℂ)
+  (everywhere : (ℕ → ℂ) → Prop)
+  (here : (ℕ → ℂ) → Prop)
+  (tested : (ℕ → ℂ) → Prop)
+
+-> projection_test.det (X : ProjectionTest) : (ℕ → ℕ → ℂ) → (ℕ → ℕ → ℂ) → ℂ :=
+  cmat.projected_det X.ambient X.dim X.metric X.frame
+
+-> projection_test.admits (X : ProjectionTest) (Y Z : ℕ → ℕ → ℂ) : Prop :=
+  cmat.admissible_columns X.dim X.everywhere X.here X.tested Y Z
+
+-> projection_test.bound (X : ProjectionTest) (v : ℂ → ℝ) (b : ℝ) : Prop :=
+  cmat.is_psd X.ambient X.metric ∧ cmat.det X.dim (cmat.cross_gram X.ambient X.metric X.frame X.frame) ≠ complex.zero ∧
+    cmat.denominator_le X.dim X.rank X.everywhere X.here X.tested v (projection_test.det X) b
+
+-- An admissible determinant forces a minimum spend when both ranks are positive.
++ projection_test.loss_le (X : ProjectionTest) (v : ℂ → ℝ) (b e : ℝ) (Y Z : ℕ → ℕ → ℂ)
+    (h : projection_test.bound X v b) (had : projection_test.admits X Y Z)
+    (hd : 0 < X.dim) (hr : 0 < X.rank)
+    (he : exp ((X.dim : ℝ) * ((X.rank : ℝ) * e)) ≤ v (projection_test.det X Y Z)) : e ≤ b
+  unfold projection_test.bound at h
+  have hb := h.2.2
+  unfold cmat.denominator_le at hb
+  have hv := hb Y Z had
+  have hx := (exp_le_exp ((X.dim : ℝ) * ((X.rank : ℝ) * e)) ((X.dim : ℝ) * ((X.rank : ℝ) * b))).mp (by linarith)
+  have hp := mul_pos.real (X.dim : ℝ) (X.rank : ℝ) ((cast_pos.real X.dim).mpr hd) ((cast_pos.real X.rank).mpr hr)
+  by_contra hlt
+  have hh := mul_pos.real ((X.dim : ℝ) * (X.rank : ℝ)) (e - b) hp (by linarith)
+  nlinarith
+
+-> prime_budget.finite_bound (g : ℕ → ℝ) (B : ℝ) : Prop :=
+  ∀ (k : ℕ) (p : ℕ → ℕ), (∀ i < k, is_prime_nat (p i)) →
+    (∀ i < k, ∀ j < k, i ≠ j → p i ≠ p j) → (∑ i < k, g (p i)) ≤ B
+
+-- For one lift index, s ranges over embeddings, t over twists and z over
+-- the required subspaces (including rank-one lines). The family is evaluated
+-- at the actual t = theta(s). All embeddings above p share g(p).
+-> prime_budget.for_projections (p : α → ℕ) (v : α → ℂ → ℝ) (theta : α → β)
+    (active : α → β → γ → Prop) (X : α → β → γ → ProjectionTest) (B : ℝ) : Prop :=
+  ∃ g : ℕ → ℝ, prime_budget.finite_bound g B ∧
+    ∀ s z, active s (theta s) z → projection_test.bound (X s (theta s) z) (v s) (g (p s))
+
+-> projection_test.witnesses_loss (X : ProjectionTest) (v : ℂ → ℝ) (e : ℝ) : Prop :=
+  ∃ Y Z : ℕ → ℕ → ℂ, projection_test.admits X Y Z ∧ 0 < X.dim ∧ 0 < X.rank ∧
+    exp ((X.dim : ℝ) * ((X.rank : ℝ) * e)) ≤ v (projection_test.det X Y Z)
+
+-- Pick one embedding and one tested space for each of finitely many distinct
+-- primes. Other tests above the same prime are covered by the same g.
++ prime_budget.tested_losses_le (p : α → ℕ) (v : α → ℂ → ℝ) (theta : α → β)
+    (active : α → β → γ → Prop) (X : α → β → γ → ProjectionTest) (B : ℝ)
+    (hfit : prime_budget.for_projections p v theta active X B) (k : ℕ)
+    (s : ℕ → α) (z : ℕ → γ) (e : ℕ → ℝ)
+    (hp : ∀ i < k, is_prime_nat (p (s i)))
+    (hdist : ∀ i < k, ∀ j < k, i ≠ j → p (s i) ≠ p (s j))
+    (hactive : ∀ i < k, active (s i) (theta (s i)) (z i))
+    (hw : ∀ i < k, projection_test.witnesses_loss (X (s i) (theta (s i)) (z i)) (v (s i)) (e i)) :
+    (∑ i < k, e i) ≤ B
+  unfold prime_budget.for_projections at hfit
+  obtain ⟨g, hsum, hlocal⟩ := hfit
+  unfold prime_budget.finite_bound at hsum
+  unfold projection_test.witnesses_loss at hw
+  have h := sum_le.real e (fun i => g (p (s i))) k (by intro i hi; obtain ⟨Y, Z, ha, hd, hr, hv⟩ := hw i hi; exact projection_test.loss_le _ _ _ _ Y Z (hlocal (s i) (z i) (hactive i hi)) ha hd hr hv)
+  linarith [hsum k (fun i => p (s i)) hp hdist]
+
+-- A finite certificate at the reference twist forces a change at one of
+-- those exact embeddings. Distinct embeddings over one prime count only once.
++ prime_budget.exists_changed_twist (p : α → ℕ) (v : α → ℂ → ℝ) (theta : α → β) (ref : β)
+    (active : α → β → γ → Prop) (X : α → β → γ → ProjectionTest) (B : ℝ)
+    (hfit : prime_budget.for_projections p v theta active X B) (k : ℕ)
+    (s : ℕ → α) (z : ℕ → γ) (e : ℕ → ℝ)
+    (hp : ∀ i < k, is_prime_nat (p (s i)))
+    (hdist : ∀ i < k, ∀ j < k, i ≠ j → p (s i) ≠ p (s j))
+    (hactive : ∀ i < k, active (s i) ref (z i))
+    (hw : ∀ i < k, projection_test.witnesses_loss (X (s i) ref (z i)) (v (s i)) (e i))
+    (hexcess : B < (∑ i < k, e i)) :
+    ∃ i < k, theta (s i) ≠ ref
+  by_contra hnone
+  have heq : ∀ i < k, theta (s i) = ref
+    intro i hi; by_contra hne; exact hnone ⟨i, hi, hne⟩
+  have h := prime_budget.tested_losses_le p v theta active X B hfit k s z e hp hdist (by intro i hi; rw [heq i hi]; exact hactive i hi) (by intro i hi; rw [heq i hi]; exact hw i hi)
+  linarith
+
+-- Product-formula step after descent to a nonzero rational norm a/b of
+-- positive degree m. Archimedean and local logarithms have the same scaling.
++ rat.nonneg_height_of_norm_bounds (a b m : ℕ) (ha : 0 < a) (hb : 0 < b) (hm : 0 < m)
+    (arch cost : ℝ) (g : ℕ → ℝ) (M0 : ℕ)
+    (hinf : log ((a : ℝ) / (b : ℝ)) ≤ (m : ℝ) * arch)
+    (hlocal : ∀ p : ℕ, is_prime_nat p → log (padic.abs p a / padic.abs p b) ≤ (m : ℝ) * g p)
+    (htotal : ∀ M : ℕ, M0 ≤ M → arch + (∑ p < M, if is_prime_nat p then g p else 0) ≤ cost) :
+    0 ≤ cost
+  set M := M0 + a + b + 1 with hM
+  have hpf := rat.log_padic_product_formula M a b ha hb (by rw [hM]; omega) (by rw [hM]; omega)
+  have hsum : (∑ p < M, if is_prime_nat p then log (padic.abs p a / padic.abs p b) else 0) ≤
+      ∑ p < M, (m : ℝ) * (if is_prime_nat p then g p else 0)
+    apply sum_le.real; intro p _
+    by_cases hp : is_prime_nat p
+    · rw [if_pos hp, if_pos hp]; exact hlocal p hp
+    · rw [if_neg hp, if_neg hp]; linarith
+  rw [sum_const_mul.real] at hsum
+  have h := htotal M (by rw [hM]; omega)
+  have hn := mul_le_mul_of_nonneg_left.real _ _ (m : ℝ) h (cast_nonneg.real m)
+  by_contra hc
+  have hneg := mul_pos.real (m : ℝ) (-cost) ((cast_pos.real m).mpr hm) (by linarith)
+  nlinarith
+
+-- If the twist always equals ref, every volume ratio in the local norm
+-- inequalities is one. The rational product formula then contradicts a
+-- negative height bound. This uses the volume of the actual twist at s.
++ rat.exists_changed_twist_of_volume_height (p : α → ℕ) (theta : α → β) (ref : β)
+    (V : α → β → ℝ) (above : ∀ q : ℕ, is_prime_nat q → ∃ s, p s = q)
+    (hV : ∀ s, 0 < V s ref)
+    (a b m : ℕ) (ha : 0 < a) (hb : 0 < b) (hm : 0 < m) (arch cost : ℝ) (g : ℕ → ℝ) (M0 : ℕ)
+    (hinf : log ((a : ℝ) / (b : ℝ)) ≤ (m : ℝ) * arch)
+    (hlocal : ∀ s, is_prime_nat (p s) →
+      log (padic.abs (p s) a / padic.abs (p s) b) + (m : ℝ) * log (V s ref / V s (theta s)) ≤ (m : ℝ) * g (p s))
+    (htotal : ∀ M : ℕ, M0 ≤ M → arch + (∑ q < M, if is_prime_nat q then g q else 0) ≤ cost)
+    (hneg : cost < 0) :
+    ∃ s, is_prime_nat (p s) ∧ theta s ≠ ref
+  by_contra hall
+  have hp : ∀ q : ℕ, is_prime_nat q → log (padic.abs q a / padic.abs q b) ≤ (m : ℝ) * g q
+    intro q hq; obtain ⟨s, hs⟩ := above q hq
+    have hsprime : is_prime_nat (p s) := by rw [hs]; exact hq
+    have he : theta s = ref := by by_contra h; exact hall ⟨s, hsprime, h⟩
+    have h := hlocal s hsprime
+    have one : V s ref / V s ref = 1 := div_self.real (V s ref) (by linarith [hV s])
+    rw [hs, he, one, log_one] at h; linarith
+  have h := rat.nonneg_height_of_norm_bounds a b m ha hb hm arch cost g M0 hinf hp htotal
+  linarith
+
+-- Construct a test at an embedding directly from the integral lattices of
+-- all embeddings of the given prime and the eligible local operators.
+-> projection_test.at_embedding (p : α → ℕ) (s : α) (integral : α → (ℕ → ℂ) → Prop)
+    (N d r : ℕ) (H U E : ℕ → ℕ → ℂ) (eligible : β → Prop) (op : β → ℕ → ℕ → ℂ) : ProjectionTest :=
+  ProjectionTest.mk N d r H U (fun y => ∀ t, p t = p s → integral t y) (integral s)
+    (cmat.passes_kernel_tests N d H U E eligible op)
+
++ padic.reciprocal_prime_power_norm (p k : ℕ) (hp : is_prime_nat p) :
+    padic.abs p 1 / padic.abs p (p ^ k) = exp ((k : ℝ) * log (p : ℝ))
+  rw [padic.abs_one_eq p hp.1, ← padic.exp_neg_mul_log_eq_abs_pow p k hp]
+  have h := exp_neg_mul' ((k : ℝ) * log (p : ℝ))
+  exact (eq_one_div_of_mul_eq_one.real (exp (-((k : ℝ) * log (p : ℝ)))) (exp ((k : ℝ) * log (p : ℝ))) (by linarith)).symm
+
+-- With the coordinate pair admitted, a diagonal line in dimension p^k
+-- forces at least k log p of the rank-one local budget.
++ projection_test.diagonal_line_loss (p k : ℕ) (hp : is_prime_nat p)
+    (v : ℂ → ℝ) (hv : is_mult_seminorm v)
+    (hext : ∀ n : ℕ, v (complex.of_real (n : ℝ)) = padic.abs p n)
+    (E L T : (ℕ → ℂ) → Prop) (had : cmat.admissible_columns 1 E L T cmat.id cmat.id) :
+    projection_test.witnesses_loss (ProjectionTest.mk (p ^ k) 1 1 cmat.id (fun _ _ => complex.one) E L T) v ((k : ℝ) * log (p : ℝ))
+  have hn := pow_pos.nat p k (by linarith [hp.1])
+  have hn' := (cast_pos.real (p ^ k)).mpr hn
+  have he : complex.mul (complex.of_real ((p ^ k : ℕ) : ℝ)) (complex.of_real (1 / ((p ^ k : ℕ) : ℝ))) = complex.one
+    have h : ((p ^ k : ℕ) : ℝ) * (1 / ((p ^ k : ℕ) : ℝ)) = 1 := by field_simp
+    rw [← complex.of_real_mul, h, complex.of_real_one]
+  have hm : v (complex.of_real ((p ^ k : ℕ) : ℝ)) * v (complex.of_real (1 / ((p ^ k : ℕ) : ℝ))) = 1 := by rw [← hv.2.2.2, he, hv.2.1]
+  rw [hext] at hm
+  have hr := padic.reciprocal_prime_power_norm p k hp
+  rw [padic.abs_one_eq p hp.1] at hr
+  have hval := eq_one_div_of_mul_eq_one.real _ _ hm
+  unfold projection_test.witnesses_loss
+  use cmat.id, cmat.id
+  refine ⟨had, (by decide), (by decide), _⟩
+  change exp ((1 : ℝ) * (1 * ((k : ℝ) * log (p : ℝ)))) ≤ v (cmat.projected_det (p ^ k) 1 cmat.id (fun _ _ => complex.one) cmat.id cmat.id)
+  rw [cmat.diagonal_line_projected_det (p ^ k) hn, hval, hr]; simp
+
+-- The lower bound is attained when all allowed left conjugate coordinates
+-- and right coordinates are integral. No compatibility between v and complex
+-- conjugation is needed.
++ projection_test.diagonal_line_bound (p k : ℕ) (hp : is_prime_nat p)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (hext : ∀ n : ℕ, v (complex.of_real (n : ℝ)) = padic.abs p n)
+    (E L T : (ℕ → ℂ) → Prop)
+    (hE : ∀ y : ℕ → ℂ, E y → ∀ i < p ^ k, v (complex.conj (y i)) ≤ 1)
+    (hL : ∀ y : ℕ → ℂ, L y → ∀ i < p ^ k, v (y i) ≤ 1) :
+    projection_test.bound (ProjectionTest.mk (p ^ k) 1 1 cmat.id (fun _ _ => complex.one) E L T) v ((k : ℝ) * log (p : ℝ))
+  set N := p ^ k with hN
+  set U : ℕ → ℕ → ℂ := fun _ _ => complex.one with hU
+  have hn : 0 < N := by rw [hN]; exact pow_pos.nat p k (by linarith [hp.1])
+  have hG : cmat.det 1 (cmat.cross_gram N cmat.id U U) = complex.of_real (N : ℝ) := by rw [hU]; exact cmat.diagonal_line_gram_det N
+  have hne : cmat.det 1 (cmat.cross_gram N cmat.id U U) ≠ complex.zero
+    rw [hG]; intro e; have h := complex.of_real_inj (N : ℝ) 0 e; linarith [(cast_pos.real N).mpr hn]
+  refine ⟨cmat.is_psd_id N, hne, _⟩
+  apply (cmat.projected_denominator_iff N 1 1 cmat.id U hne v hv.1 E L T ((k : ℝ) * log (p : ℝ))).mpr
+  intro Y Z had
+  unfold cmat.admissible_columns at had
+  have hY := hE (fun i => Y i 0) (had.1 0 (by decide))
+  have hZ := hL (fun i => Z i 0) (had.2 0 (by decide)).1
+  have hA : v (cmat.det 1 (cmat.cross_gram N cmat.id Y U)) ≤ 1
+    rw [cmat.det_rank_one_entry, cmat.cross_gram_identity_metric, hU]; unfold cmat.mul cmat.adj
+    apply is_ultrametric_norm.csum_le v hv N _ 1 (by decide)
+    intro i hi; rw [complex.mul_one_r]; exact hY i hi
+  have hB : v (cmat.det 1 (cmat.cross_gram N cmat.id U Z)) ≤ 1
+    rw [cmat.det_rank_one_entry, cmat.cross_gram_identity_metric, hU]; unfold cmat.mul cmat.adj
+    apply is_ultrametric_norm.csum_le v hv N _ 1 (by decide)
+    intro i hi
+    have hc : complex.conj complex.one = complex.one := by apply complex.ext <;> simp
+    rw [hc, complex.mul_one_l]; exact hZ i hi
+  have hmul := mul_le_mul_of_nonneg_right.real _ _ (v (cmat.det 1 (cmat.cross_gram N cmat.id U Z))) hA (hv.1.2.2.1 _)
+  rw [hG, hext, hN, ← padic.exp_neg_mul_log_eq_abs_pow p k hp, cast_one.real, one_mul.real, one_mul.real]
+  rw [hN] at hmul; rw [hN] at hB
+  have he := exp_neg_mul' ((k : ℝ) * log (p : ℝ))
+  nlinarith
+
++ projection_test.bound_mono (X : ProjectionTest) (v : ℂ → ℝ) (a b : ℝ)
+    (h : projection_test.bound X v a) (hab : a ≤ b) : projection_test.bound X v b
+  unfold projection_test.bound at h ⊢
+  refine ⟨h.1, h.2.1, _⟩
+  have hd := h.2.2
+  unfold cmat.denominator_le at hd ⊢
+  intro Y Z had
+  have hx := mul_le_mul_of_nonneg_left.real a b (X.rank : ℝ) hab (cast_nonneg.real X.rank)
+  have hy := mul_le_mul_of_nonneg_left.real _ _ (X.dim : ℝ) hx (cast_nonneg.real X.dim)
+  linarith [(exp_le_exp _ _).mpr hy, hd Y Z had]
+
++ projection_test.diagonal_line_bound_iff (p k : ℕ) (hp : is_prime_nat p)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (hext : ∀ n : ℕ, v (complex.of_real (n : ℝ)) = padic.abs p n)
+    (E L T : (ℕ → ℂ) → Prop)
+    (hE : ∀ y : ℕ → ℂ, E y → ∀ i < p ^ k, v (complex.conj (y i)) ≤ 1)
+    (hL : ∀ y : ℕ → ℂ, L y → ∀ i < p ^ k, v (y i) ≤ 1)
+    (had : cmat.admissible_columns 1 E L T cmat.id cmat.id) (b : ℝ) :
+    projection_test.bound (ProjectionTest.mk (p ^ k) 1 1 cmat.id (fun _ _ => complex.one) E L T) v b ↔ (k : ℝ) * log (p : ℝ) ≤ b
+  constructor
+  · intro h
+    have hw := projection_test.diagonal_line_loss p k hp v hv.1 hext E L T had
+    unfold projection_test.witnesses_loss at hw
+    obtain ⟨Y, Z, hYZ, hd, hr, he⟩ := hw
+    exact projection_test.loss_le _ _ _ _ Y Z h hYZ hd hr he
+  · intro h; exact projection_test.bound_mono _ _ _ _ (projection_test.diagonal_line_bound p k hp v hv hext E L T hE hL) h
+
++ prime_budget.le_at_prime (g : ℕ → ℝ) (B : ℝ) (h : prime_budget.finite_bound g B) (q : ℕ) (hq : is_prime_nat q) :
+    g q ≤ B
+  unfold prime_budget.finite_bound at h
+  have hb := h 1 (fun _ => q) (by intro _ _; exact hq) (by intro i hi j hj hne; omega)
+  have he := sum_const.real (g q) 1
+  rw [he, cast_one.real, one_mul.real] at hb
+  exact hb

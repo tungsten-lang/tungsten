@@ -11,6 +11,8 @@ import algebra.compressed_gram
 import algebra.finite_fourier
 import algebra.finite_weil
 import algebra.frame_transport
+import algebra.projection_denominator
+import algebra.local_operator_denominator
 import algebra.gram_legendre
 import algebra.hilbert_comparison
 import algebra.polynomial_fermat
@@ -43,6 +45,7 @@ import number_theory.minkowski_lattice
 import number_theory.polya_vinogradov
 import number_theory.prime_rationals
 import number_theory.prime_scaling
+import number_theory.denominator_budget
 import number_theory.dirichlet_L_deriv_bound
 import number_theory.dirichlet_primes_ap
 import number_theory.jacobi_symbol
@@ -51,6 +54,8 @@ import number_theory.quadratic_reciprocity
 import padic.formal_group
 import padic.kummer_artin_hasse
 import padic.mvps_pderiv_ult
+
+import tested_denominators
 
 -- Flagship zero-custom-axiom audit across all 6 domains
 #axioms qr.quadratic_reciprocity
@@ -118,6 +123,25 @@ import padic.mvps_pderiv_ult
 #axioms cmat.det_gram_change_of_frame
 #axioms cmat.adjoint_section_spec
 #axioms cmat.det_gram_transport_frame
+#axioms cmat.project_frame_normal
+#axioms cmat.project_frame_idempotent
+#axioms cmat.projected_det_clear
+#axioms cmat.projected_det_change_of_basis
+#axioms cmat.projected_denominator_iff
+#axioms cmat.not_denominator_le_of_cross_gram
+#axioms cmat.compressed_det_le_of_tested_denominator
+#axioms cmat.diagonal_line_projected_det
+#axioms uproot.unit_distance
+#axioms is_ultrametric_norm.exists_separated_units
+#axioms is_ultrametric_norm.exists_integral_linear_evaluation
+#axioms cmat.det_le_of_separating_operators
+#axioms cmat.denominator_le_of_separating_operators
+#axioms prime_budget.tested_losses_le
+#axioms prime_budget.exists_changed_twist
+#axioms rat.nonneg_height_of_norm_bounds
+#axioms rat.exists_changed_twist_of_volume_height
+#axioms projection_test.diagonal_line_bound_iff
+#axioms denominator_spec.zero_budget_iff_changed_everywhere
 #axioms character_table.cyclic_product_delta
 #axioms character_table.product_delta
 #axioms dft.centered_character_sum

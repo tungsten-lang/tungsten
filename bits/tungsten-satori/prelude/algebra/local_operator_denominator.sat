@@ -1,0 +1,219 @@
+-- Integral combinations of diagonal operators and local determinant bounds.
+import algebra.projection_denominator
+import algebra.ultrametric_fourier
+import finite_range
+
++ is_ultrametric_norm.sub_le_max (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (a b : ℂ) :
+    v (complex.sub a b) ≤ max (v a) (v b)
+  have h := hv.2.2 a (complex.neg b)
+  rw [← complex.sub_eq_add_neg, hv.2.1] at h; exact h
+
++ is_ultrametric_norm.unit_power_difference (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (a b : ℂ) (ha : v a = 1) (hb : v b = 1) (k : ℕ) :
+    v (complex.sub (cpow_nat a k) (cpow_nat b k)) ≤ v (complex.sub a b)
+  induction k with n ih
+  · change v (complex.sub complex.one complex.one) ≤ v (complex.sub a b)
+    rw [complex.sub_self, hv.1.1]; exact hv.1.2.2.1 _
+  · set x := cpow_nat a n with hx
+    set y := cpow_nat b n with hy
+    have hx1 : cpow_nat a (succ n) = complex.mul (cpow_nat a n) a := by rfl
+    have hy1 : cpow_nat b (succ n) = complex.mul (cpow_nat b n) b := by rfl
+    rw [hx1, hy1, ← hx, ← hy]
+    have he : complex.sub (complex.mul x a) (complex.mul y b) = complex.add (complex.mul (complex.sub x y) a) (complex.mul y (complex.sub a b))
+      apply complex.ext <;> simp <;> ring
+    have hu : v y = 1
+      rw [hy, is_mult_seminorm.cpow_nat v hv.1, hb]
+      have hone := exp_nat_mul 0 n; rw [mul_zero.real, exp_zero] at hone; exact hone.symm
+    have h := hv.2.2 (complex.mul (complex.sub x y) a) (complex.mul y (complex.sub a b))
+    rw [hv.1.2.2.2, hv.1.2.2.2, ha, hu, mul_one.real, one_mul.real] at h
+    rw [he]; exact le_trans.real _ _ _ h (max_le.real (v (complex.sub x y)) (v (complex.sub a b)) (v (complex.sub a b)) ih (by linarith))
+
++ dft.sub_functions (q : ℕ) (zeta : ℂ) (f g : ℕ → ℂ) (h : ℕ) :
+    dft q zeta (fun i => complex.sub (f i) (g i)) h = complex.sub (dft q zeta f h) (dft q zeta g h)
+  unfold dft; rw [← csum.sub]; apply csum.congr; intro i _; apply complex.ext <;> simp <;> ring
+
+-- Prime-to-residue-characteristic roots of unity have distinct reductions.
+-- Fourier inversion detects the two coefficients of the difference of point masses.
++ uproot.unit_distance (q : ℕ) (zeta : ℂ) (hprim : is_unitary_prim_root q zeta)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (hq : v (complex.of_real (q : ℝ)) = 1)
+    (i j : ℕ) (hi : i < q) (hj : j < q) (hne : i ≠ j) :
+    v (complex.sub (cpow_nat zeta i) (cpow_nat zeta j)) = 1
+  set a := cpow_nat zeta i with ha
+  set b := cpow_nat zeta j with hb
+  have hA : v a = 1 := by rw [ha]; exact (uproot.seminorm_phase q zeta hprim v hv.1 i).1
+  have hB : v b = 1 := by rw [hb]; exact (uproot.seminorm_phase q zeta hprim v hv.1 j).1
+  set D := v (complex.sub a b) with hD
+  set f : ℕ → ℂ := fun t => if t = i then complex.one else complex.zero with hf
+  set g : ℕ → ℂ := fun t => if t = j then complex.one else complex.zero with hg
+  have hh : ∀ k < q, v (dft q zeta (fun t => complex.sub (f t) (g t)) k) ≤ D
+    intro k _
+    rw [dft.sub_functions, hf, hg, dft.point_mass q zeta i hi, dft.point_mass q zeta j hj, mul_comm.nat k i, mul_comm.nat k j, cpow_nat.mul, cpow_nat.mul, ← ha, ← hb]
+    rw [hD]; exact is_ultrametric_norm.unit_power_difference v hv a b hA hB k
+  have hcoef := (dft.same_uniform_bound q zeta hprim v hv hq (fun t => complex.sub (f t) (g t)) D (by rw [hD]; exact hv.1.2.2.1 _)).mpr hh
+  have hlow := hcoef i hi
+  have he : complex.sub (f i) (g i) = complex.one := by rw [hf, hg, if_pos (by rfl), if_neg hne]; apply complex.ext <;> simp
+  rw [he, hv.1.2.1] at hlow
+  have htop := is_ultrametric_norm.sub_le_max v hv a b
+  rw [hA, hB, max_eq_left.real 1 1 (by decide), ← hD] at htop; linarith
+
+-- One of any two successive positive integers is a unit for v. This gives
+-- arbitrarily many distinct nonzero residues for any ultrametric norm on C.
++ is_ultrametric_norm.exists_separated_units (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ) :
+    ∃ u : ℕ → ℂ, (∀ i < n, v (u i) = 1) ∧
+      ∀ i < n, ∀ j < n, i ≠ j → v (complex.sub (u i) (u j)) = 1
+  have hnat : ∀ m : ℕ, v (complex.of_real (m : ℝ)) ≤ 1
+    intro m; induction m with k ih
+    · rw [cast_zero.real, complex.of_real_zero, hv.1.1]; linarith
+    · rw [succ_eq_add_one.nat, cast_add.real, cast_one.real, complex.of_real_add, complex.of_real_one]
+      have h := hv.2.2 (complex.of_real (k : ℝ)) complex.one
+      rw [hv.1.2.1] at h; exact le_trans.real _ _ _ h (max_le.real (v (complex.of_real (k : ℝ))) 1 1 ih (by linarith))
+  have hex : ∃ q : ℕ, n < q ∧ v (complex.of_real (q : ℝ)) = 1
+    by_cases h : v (complex.of_real ((n + 1 : ℕ) : ℝ)) = 1
+    · exact ⟨n + 1, (by omega), h⟩
+    · use n + 1 + 1; constructor; omega
+      have he : complex.sub (complex.of_real ((n + 1 + 1 : ℕ) : ℝ)) (complex.of_real ((n + 1 : ℕ) : ℝ)) = complex.one
+        rw [← complex.of_real_sub, cast_add.real (n + 1) 1, cast_one.real]; apply complex.ext <;> simp <;> ring
+      have hle' := is_ultrametric_norm.sub_le_max v hv (complex.of_real ((n + 1 + 1 : ℕ) : ℝ)) (complex.of_real ((n + 1 : ℕ) : ℝ))
+      rw [he, hv.1.2.1] at hle'
+      by_contra hn; have hmax := max_lt.real (v (complex.of_real ((n + 1 + 1 : ℕ) : ℝ))) (v (complex.of_real ((n + 1 : ℕ) : ℝ))) 1 (by linarith [hnat (n + 1 + 1)]) (by linarith [hnat (n + 1)]); linarith
+  obtain ⟨q, hq, hqu⟩ := hex
+  set zeta := complex.exp (complex.mk 0 (2 * pi / (q : ℝ))) with hz
+  have hprim : is_unitary_prim_root q zeta := by rw [hz]; exact uproot.cexp_is_unitary_prim q (by omega)
+  use (fun i => cpow_nat zeta i)
+  constructor
+  · intro i _; exact (uproot.seminorm_phase q zeta hprim v hv.1 i).1
+  · intro i hi j hj hne; exact uproot.unit_distance q zeta hprim v hv hqu i j (by omega) (by omega) hne
+
+-- For one affine linear form a+t b, two different residues t cannot both
+-- give a value smaller than max(|a|,|b|).
++ is_ultrametric_norm.affine_bad_residue_unique (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (a b t u : ℂ) (e : ℝ) (ht : v t = 1) (htu : v (complex.sub t u) = 1)
+    (hab : e ≤ max (v a) (v b)) (h1 : v (complex.add a (complex.mul t b)) < e)
+    (h2 : v (complex.add a (complex.mul u b)) < e) : False
+  set x := complex.add a (complex.mul t b) with hx
+  set y := complex.add a (complex.mul u b) with hy
+  have hd : complex.sub x y = complex.mul (complex.sub t u) b
+    rw [hx, hy]; apply complex.ext <;> simp <;> ring
+  have h := is_ultrametric_norm.sub_le_max v hv x y
+  rw [hd, hv.1.2.2.2, htu, one_mul.real] at h
+  have hb : v b < e := by linarith [max_lt.real (v x) (v y) e h1 h2]
+  have ha : complex.sub x (complex.mul t b) = a := by rw [hx]; apply complex.ext <;> simp <;> ring
+  have h' := is_ultrametric_norm.sub_le_max v hv x (complex.mul t b)
+  rw [ha, hv.1.2.2.2, ht, one_mul.real] at h'
+  have ha' : v a < e := by linarith [max_lt.real (v x) (v b) e h1 hb]
+  linarith [max_lt.real (v a) (v b) e ha' hb]
+
++ is_ultrametric_norm.exists_affine_unit (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (n : ℕ) (a b : ℕ → ℂ) (e : ℕ → ℝ) (h : ∀ i < n, e i ≤ max (v (a i)) (v (b i))) :
+    ∃ t : ℂ, v t = 1 ∧ ∀ i < n, e i ≤ v (complex.add (a i) (complex.mul t (b i)))
+  obtain ⟨u, hu, hd⟩ := is_ultrametric_norm.exists_separated_units v hv (n + 1)
+  by_contra hnone
+  have hex : ∀ j < n + 1, ∃ i < n, v (complex.add (a i) (complex.mul (u j) (b i))) < e i
+    intro j hj; by_contra ht
+    apply hnone; use u j; constructor; exact hu j hj
+    intro i hi; by_contra he; exact ht ⟨i, hi, (by linarith)⟩
+  set f : ℕ → ℕ := fun j => choice (fun i => i < n ∧ v (complex.add (a i) (complex.mul (u j) (b i))) < e i) with hf
+  have hs : ∀ j < n + 1, f j < n ∧ v (complex.add (a (f j)) (complex.mul (u j) (b (f j)))) < e (f j)
+    intro j hj; rw [hf]; exact choice.spec (fun i => i < n ∧ v (complex.add (a i) (complex.mul (u j) (b i))) < e i) (hex j hj)
+  obtain ⟨j, hj, k, hk, hjk, he⟩ := nat.pigeonhole (n + 1) n f (by omega) (by intro j h; exact (hs j h).1)
+  have hbad := (hs k hk).2
+  rw [← he] at hbad
+  exact is_ultrametric_norm.affine_bad_residue_unique v hv (a (f j)) (b (f j)) (u j) (u k) (e (f j)) (hu j hj) (hd j hj k hk (by omega)) (h (f j) (hs j hj).1) (hs j hj).2 hbad
+
++ cmat.apply_add_at (m : ℕ) (A : ℕ → ℕ → ℂ) (x : ℕ → ℂ) (t : ℂ) (r j : ℕ) (hj : j < m) :
+    cmat.apply m A (fun k => complex.add (x k) (if k = j then t else complex.zero)) r =
+      complex.add (cmat.apply m A x r) (complex.mul t (A r j))
+  unfold cmat.apply
+  have he := csum.congr m (fun k => complex.mul (A r k) (complex.add (x k) (if k = j then t else complex.zero))) (fun k => complex.add (complex.mul (A r k) (x k)) (if k = j then complex.mul t (A r k) else complex.zero)) (by intro k _; by_cases h : k = j; (rw [if_pos h, if_pos h]; apply complex.ext <;> simp <;> ring); (rw [if_neg h, if_neg h]; apply complex.ext <;> simp <;> ring))
+  rw [he, csum.add, csum.single m j (fun k => complex.mul t (A r k)) hj]
+
+-- Simultaneous Gauss bound for finitely many linear forms over C with v.
+-- The same integral coefficients work for every row, including tied maxima.
++ is_ultrametric_norm.exists_integral_linear_evaluation (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (n m : ℕ) (A : ℕ → ℕ → ℂ) (e : ℕ → ℝ)
+    (h : ∀ i < n, ∃ j < m, e i ≤ v (A i j)) :
+    ∃ x : ℕ → ℂ, (∀ j < m, v (x j) ≤ 1) ∧ ∀ i < n, e i ≤ v (cmat.apply m A x i)
+  induction n with h0 r ih h
+  · use (fun _ => complex.zero); constructor
+    · intro j _; rw [hv.1.1]; linarith
+    · intro i hi; omega
+  · rw [succ_eq_add_one.nat] at h ⊢
+    obtain ⟨x, hxi, hx⟩ := ih (by intro i hi; exact h i (by omega))
+    obtain ⟨j, hj, hnew⟩ := h r (by omega)
+    have hrows : ∀ i < r + 1, e i ≤ max (v (cmat.apply m A x i)) (v (A i j))
+      intro i hi; by_cases hh : i < r
+      · linarith [hx i hh, le_max_left.real (v (cmat.apply m A x i)) (v (A i j))]
+      · have he : i = r := by omega
+        rw [he]; linarith [le_max_right.real (v (cmat.apply m A x r)) (v (A r j))]
+    obtain ⟨t, ht, hev⟩ := is_ultrametric_norm.exists_affine_unit v hv (r + 1) (cmat.apply m A x) (fun i => A i j) e hrows
+    use (fun k => complex.add (x k) (if k = j then t else complex.zero))
+    constructor
+    · intro k hk; by_cases hkj : k = j
+      · rw [if_pos hkj]; have htri := hv.2.2 (x k) t
+        rw [ht] at htri; linarith [max_le.real (v (x k)) 1 1 (hxi k hk) (by decide)]
+      · rw [if_neg hkj, complex.add_zero]; exact hxi k hk
+    · intro i hi; rw [cmat.apply_add_at m A x t i j hj]; exact hev i hi
+
+-- Integrality is preserved when the diagonal operators are combined with
+-- integral coefficients. Entrywise this is an interchange of two finite sums.
++ cmat.diagonal_linear_combination (d m : ℕ) (A C F : ℕ → ℕ → ℂ) (x : ℕ → ℂ) (i j : ℕ) :
+    cmat.mul d A (fun k b => complex.mul (cmat.apply m F x k) (C k b)) i j =
+      csum m (fun t => complex.mul (x t) (cmat.mul d A (fun k b => complex.mul (F k t) (C k b)) i j))
+  unfold cmat.mul cmat.apply
+  have he : csum d (fun k => complex.mul (A i k) (complex.mul (csum m (fun t => complex.mul (F k t) (x t))) (C k j))) =
+      csum d (fun k => csum m (fun t => complex.mul (x t) (complex.mul (A i k) (complex.mul (F k t) (C k j)))))
+    apply csum.congr; intro k _
+    rw [← csum.scale_right, ← csum.scale_left]
+    apply csum.congr; intro t _; apply complex.ext <;> simp <;> ring
+  rw [he, csum.swap]
+  apply csum.congr; intro t _; exact csum.scale_left d (x t) _
+
++ is_mult_seminorm.exp_neg_sum_le_prod (v : ℂ → ℝ) (hv : is_mult_seminorm v) (d : ℕ)
+    (l : ℕ → ℂ) (loss : ℕ → ℝ) (h : ∀ i < d, exp (-(loss i)) ≤ v (l i)) :
+    exp (-(∑ i < d, loss i)) ≤ v (cprod_c d l)
+  induction d with h0 k ih h
+  · rw [cprod_c.zero_eq, hv.2.1]; simp [exp_zero]
+  · rw [succ_eq_add_one.nat] at h ⊢
+    have hi := ih (by intro i hi; exact h i (by omega))
+    have he : -(∑ i < k + 1, loss i) = -(∑ i < k, loss i) + -(loss k) := by simp; ring
+    rw [he, exp_add, cprod_c.succ_eq, hv.2.2.2]
+    have h1 := mul_le_mul_of_nonneg_right.real _ _ (exp (-(loss k))) hi (by linarith [exp_pos (-(loss k))])
+    have h2 := mul_le_mul_of_nonneg_left.real _ _ (v (cprod_c k l)) (h k (by omega)) (hv.2.2.1 _)
+    linarith
+
+-- In an eigenbasis let A be the testing functionals, C the target columns,
+-- and F(k,t) the eigenvalue of the t-th integral clearing operator on k.
+-- Operators may differ from eigenline to eigenline. The losses add exactly.
++ cmat.det_le_of_separating_operators (d m : ℕ) (A C F : ℕ → ℕ → ℂ)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (loss : ℕ → ℝ)
+    (hsep : ∀ k < d, ∃ t < m, exp (-(loss k)) ≤ v (F k t))
+    (hint : ∀ t < m, ∀ i < d, ∀ j < d, v (cmat.mul d A (fun k b => complex.mul (F k t) (C k b)) i j) ≤ 1) :
+    v (cmat.det d (cmat.mul d A C)) ≤ exp (∑ k < d, loss k)
+  obtain ⟨x, hx, he⟩ := is_ultrametric_norm.exists_integral_linear_evaluation v hv d m F (fun k => exp (-(loss k))) hsep
+  set l := cmat.apply m F x with hl
+  apply cmat.det_le_of_diagonal_clearing d A C l v hv (exp (∑ k < d, loss k))
+  · have h := is_mult_seminorm.exp_neg_sum_le_prod v hv.1 d l loss he
+    have hmul := mul_le_mul_of_nonneg_left.real _ _ (exp (∑ k < d, loss k)) h (by linarith [exp_pos (∑ k < d, loss k)])
+    linarith [exp_neg_mul' (∑ k < d, loss k)]
+  · intro i hi j hj; rw [hl, cmat.diagonal_linear_combination]
+    apply is_ultrametric_norm.csum_le v hv m _ 1 (by decide)
+    intro t ht; rw [hv.1.2.2.2]
+    have h := mul_le_mul_of_nonneg_left.real _ _ (v (x t)) (hint t ht i hi j hj) (hv.1.2.2.1 _)
+    linarith [hx t ht]
+
++ cmat.denominator_le_of_separating_operators (N d r m : ℕ) (H U F : ℕ → ℕ → ℂ)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (E L T : (ℕ → ℂ) → Prop) (b : ℝ)
+    (hsep : ∀ k < d, ∃ t < m, exp (-((r : ℝ) * b)) ≤ v (F k t))
+    (hint : ∀ Y Z, cmat.admissible_columns d E L T Y Z → ∀ t < m, ∀ i < d, ∀ j < d,
+      v (cmat.mul d (cmat.cross_gram N H Y U) (fun k c => complex.mul (F k t) (cmat.frame_compression N d H U Z k c)) i j) ≤ 1) :
+    cmat.denominator_le d r E L T v (cmat.projected_det N d H U) b
+  intro Y Z had
+  set A := cmat.cross_gram N H Y U with hA
+  set C := cmat.frame_compression N d H U Z with hC
+  have he : cmat.projected_det N d H U Y Z = cmat.det d (cmat.mul d A C)
+    unfold cmat.projected_det
+    apply cmat.det_congr d (cmat.cross_gram N H Y (cmat.project_frame N d H U Z)) (cmat.mul d A C)
+    intro i _ j _; rw [hA, hC]
+    exact (cmat.mul_rect_assoc N d (cmat.frame_dual N H Y) U (cmat.frame_compression N d H U Z) i j).symm
+  have ht := cmat.det_le_of_separating_operators d m A C F v hv (fun _ => (r : ℝ) * b) hsep (by rw [hA, hC]; exact hint Y Z had)
+  rw [sum_const.real] at ht; rw [he]; exact ht

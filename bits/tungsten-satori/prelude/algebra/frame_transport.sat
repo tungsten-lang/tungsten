@@ -1,0 +1,254 @@
+-- Rectangular frames and the Gram matrices of iterated linear maps.
+import algebra.compressed_gram
+
++ cmat.mul_rect_assoc (n k : ℕ) (A B C : ℕ → ℕ → ℂ) (i j : ℕ) :
+    cmat.mul k (cmat.mul n A B) C i j = cmat.mul n A (cmat.mul k B C) i j
+  unfold cmat.mul
+  have h1 : csum k (fun t => complex.mul (csum n (fun r => complex.mul (A i r) (B r t))) (C t j)) =
+      csum k (fun t => csum n (fun r => complex.mul (complex.mul (A i r) (B r t)) (C t j)))
+    apply csum.congr; intro t _; rw [← csum.scale_right]
+  have h2 : csum n (fun r => complex.mul (A i r) (csum k (fun t => complex.mul (B r t) (C t j)))) =
+      csum n (fun r => csum k (fun t => complex.mul (A i r) (complex.mul (B r t) (C t j))))
+    apply csum.congr; intro r _; rw [← csum.scale_left]
+  rw [h1, h2, csum.swap]
+  apply csum.congr; intro r _; apply csum.congr; intro t _
+  exact complex.mul_assoc (A i r) (B r t) (C t j)
+
++ cmat.gram_cols_comp (n N : ℕ) (T X : ℕ → ℕ → ℂ) (i j : ℕ) :
+    cmat.gram_cols N (cmat.mul n T X) i j =
+      cmat.mul n (cmat.adj X) (cmat.mul n (cmat.gram_cols N T) X) i j
+  unfold cmat.gram_cols
+  have h := cmat.mul_congr_left N (cmat.adj (cmat.mul n T X)) (cmat.mul n (cmat.adj X) (cmat.adj T)) (cmat.mul n T X) i j (by intro k _; exact cmat.adj_mul n T X i k)
+  rw [h, cmat.mul_rect_assoc n N]
+  apply cmat.mul_congr_right; intro k _
+  exact (cmat.mul_rect_assoc N n (cmat.adj T) T X k j).symm
+
+-- A square change of frame scales squared covolume by the squared absolute determinant.
++ cmat.det_gram_change_of_frame (N d : ℕ) (X B : ℕ → ℕ → ℂ) :
+    cmat.det d (cmat.gram_cols N (cmat.mul d X B)) =
+      complex.mul (complex.of_real (complex.norm_sq (cmat.det d B))) (cmat.det d (cmat.gram_cols N X))
+  have h := cmat.det_congr d (cmat.gram_cols N (cmat.mul d X B)) (cmat.mul d (cmat.adj B) (cmat.mul d (cmat.gram_cols N X) B)) (by intro i _ j _; exact cmat.gram_cols_comp d N X B i j)
+  rw [h, cmat.det_mul, cmat.det_mul, cmat.det_adj]
+  apply complex.ext <;> simp [complex.norm_sq] <;> ring
+
+-- Solve U*Y = B with columns of Y in the span of U, using the inverse Gram matrix.
+-> cmat.adjoint_section (N d : ℕ) (U B : ℕ → ℕ → ℂ) : ℕ → ℕ → ℂ :=
+  cmat.mul d U (cmat.mul d (cmat.inv d (cmat.gram_cols N U)) B)
+
++ cmat.adjoint_section_spec (N d : ℕ) (U B : ℕ → ℕ → ℂ)
+    (hU : cmat.det d (cmat.gram_cols N U) ≠ complex.zero) (i j : ℕ) (hi : i < d) :
+    cmat.mul N (cmat.adj U) (cmat.adjoint_section N d U B) i j = B i j
+  unfold cmat.adjoint_section
+  rw [← cmat.mul_rect_assoc N d]
+  change cmat.mul d (cmat.gram_cols N U) (cmat.mul d (cmat.inv d (cmat.gram_cols N U)) B) i j = B i j
+  rw [← cmat.mul_assoc]
+  have h := cmat.mul_congr_left d (cmat.mul d (cmat.gram_cols N U) (cmat.inv d (cmat.gram_cols N U))) cmat.id B i j (by intro k hk; exact cmat.mul_inv_eq_id d (cmat.gram_cols N U) hU i hi k hk)
+  rw [h, cmat.mul_id_left d B i j hi]
+
+-- The frame after j lifts is the composite of the first j maps applied to X.
+-> cmat.transport_frame (n : ℕ → ℕ) (T : ℕ → ℕ → ℕ → ℂ) (X : ℕ → ℕ → ℂ) : ℕ → ℕ → ℕ → ℂ
+  | 0 => X
+  | j + 1 => cmat.mul (n j) (T j) (cmat.transport_frame n T X j)
+
+-- It suffices to know how T*T acts on the carried columns, even in changing ambient dimensions.
++ cmat.gram_step_of_intertwining (n N d : ℕ) (T X S : ℕ → ℕ → ℂ) (a : ℝ)
+    (h : ∀ k < n, ∀ j < d, cmat.mul n (cmat.gram_cols N T) X k j =
+      complex.mul (complex.of_real a) (cmat.mul d X S k j)) :
+    ∀ i < d, ∀ j < d, cmat.gram_cols N (cmat.mul n T X) i j =
+      complex.mul (complex.of_real a) (cmat.mul d (cmat.gram_cols n X) S i j)
+  intro i _ j hj
+  rw [cmat.gram_cols_comp]
+  have hassoc := cmat.mul_rect_assoc n d (cmat.adj X) X S i j
+  change cmat.mul d (cmat.gram_cols n X) S i j = cmat.mul n (cmat.adj X) (cmat.mul d X S) i j at hassoc
+  rw [hassoc]
+  unfold cmat.mul
+  rw [← csum.scale_left]
+  apply csum.congr; intro k hk
+  have he := h k hk j hj
+  unfold cmat.mul at he
+  rw [he]
+  apply complex.ext <;> simp <;> ring
+
++ cmat.det_gram_transport_frame (m d : ℕ) (n : ℕ → ℕ) (T S : ℕ → ℕ → ℕ → ℂ)
+    (X : ℕ → ℕ → ℂ) (a : ℕ → ℝ)
+    (h : ∀ j < m, ∀ r < n j, ∀ c < d,
+      cmat.mul (n j) (cmat.gram_cols (n (j + 1)) (T j)) (cmat.transport_frame n T X j) r c =
+        complex.mul (complex.of_real (a j)) (cmat.mul d (cmat.transport_frame n T X j) (S j) r c)) :
+    cmat.det d (cmat.gram_cols (n m) (cmat.transport_frame n T X m)) =
+      complex.mul (complex.of_real ((∏ j < m, a j) ^ d)) (complex.mul (cmat.det d (cmat.gram_cols (n 0) X)) (cprod_c m (fun j => cmat.det d (S j))))
+  apply cmat.rallis_chain_det_prod m d a (fun j => cmat.gram_cols (n j) (cmat.transport_frame n T X j)) S
+  intro j hj
+  exact cmat.gram_step_of_intertwining (n j) (n (j + 1)) d (T j) (cmat.transport_frame n T X j) (S j) (a j) (h j hj)
+
+-- Compare two Hermitian forms through their quadratic measurements.
++ cmat.pairing_sub_forms (d : ℕ) (A B : ℕ → ℕ → ℂ) (x y : ℕ → ℂ) :
+    cmat.pairing d (fun i j => complex.sub (A i j) (B i j)) x y =
+      complex.sub (cmat.pairing d A x y) (cmat.pairing d B x y)
+  rw [cmat.pairing_double_sum, cmat.pairing_double_sum, cmat.pairing_double_sum, ← csum.sub]
+  apply csum.congr; intro i _; rw [← csum.sub]
+  apply csum.congr; intro j _; apply complex.ext <;> simp <;> ring
+
++ cmat.pairing_scalar_id (d : ℕ) (a : ℂ) (x y : ℕ → ℂ) :
+    cmat.pairing d (fun i j => complex.mul a (cmat.id i j)) x y = complex.mul a (cdot d x y)
+  unfold cmat.pairing cdot; rw [← csum.scale_left]
+  apply csum.congr; intro i hi
+  have hrow : cmat.apply d (fun r j => complex.mul a (cmat.id r j)) y i = complex.mul a (y i)
+    have hid := cmat.mul_id_left d (fun j _ => y j) i 0 hi
+    unfold cmat.apply; rw [← hid]; unfold cmat.mul; rw [← csum.scale_left]
+    apply csum.congr; intro j _; exact complex.mul_assoc a (cmat.id i j) (y j)
+  rw [hrow]; apply complex.ext <;> simp <;> ring
+
++ cmat.gram_pairing (N d : ℕ) (U : ℕ → ℕ → ℂ) (x y : ℕ → ℂ) :
+    cmat.pairing d (cmat.gram_cols N U) x y = cdot N (cmat.apply d U x) (cmat.apply d U y)
+  set X : ℕ → ℕ → ℂ := fun k _ => x k with hX
+  set Y : ℕ → ℕ → ℂ := fun k _ => y k with hY
+  have ha := cmat.mul_rect_assoc d N (cmat.adj X) (cmat.adj U) (cmat.mul d U Y) 0 0
+  have hb := cmat.mul_congr_left N (cmat.adj (cmat.mul d U X)) (cmat.mul d (cmat.adj X) (cmat.adj U)) (cmat.mul d U Y) 0 0 (by intro k _; exact cmat.adj_mul d U X 0 k)
+  have hc := cmat.mul_congr_right d (cmat.adj X) (cmat.mul d (cmat.gram_cols N U) Y) (cmat.mul N (cmat.adj U) (cmat.mul d U Y)) 0 0 (by intro k _; exact cmat.mul_rect_assoc N d (cmat.adj U) U Y k 0)
+  rw [← ha, ← hb, hX, hY] at hc
+  exact hc
+
+-- A lower second-moment bound gives a quantitative squared-covolume bound.
++ cmat.det_gram_ge_of_frame_bound (N d : ℕ) (U : ℕ → ℕ → ℂ) (c : ℝ) (hc : 0 ≤ c)
+    (h : ∀ x : ℕ → ℂ, c * complex.re (cdot d x x) ≤ complex.re (cdot N (cmat.apply d U x) (cmat.apply d U x))) :
+    c ^ d ≤ complex.re (cmat.det d (cmat.gram_cols N U))
+  set A : ℕ → ℕ → ℂ := fun i j => complex.mul (complex.of_real c) (cmat.id i j) with hA
+  set G := cmat.gram_cols N U with hG
+  have hpsA : cmat.is_psd d A := by rw [hA]; exact cmat.is_psd_smul d c cmat.id hc (cmat.is_psd_id d)
+  have hpsG : cmat.is_psd d G := by rw [hG]; exact cmat.gram_cols_is_psd N d U
+  have hdiff : cmat.is_psd d (fun i j => complex.sub (G i j) (A i j))
+    constructor
+    · unfold cmat.is_hermitian; intro i hi j hj
+      rw [cmat.hermitian_entry d G hpsG.1 i j hi hj, cmat.hermitian_entry d A hpsA.1 i j hi hj, complex.conj_sub]
+    · intro x; rw [cmat.pairing_sub_forms, hG, hA, cmat.gram_pairing, cmat.pairing_scalar_id]
+      simp; linarith [h x]
+  have hdet := cmat.psd_det_le_of_le d A G hpsA hdiff
+  rw [hA, cmat.det_real_smul_eq, cmat.det_id, complex.mul_one_r, complex.of_real_re] at hdet
+  exact hdet
+
+-- The columns of U* span every target column under a positive lower frame bound.
+-- The displayed solution coefficients work for any number of right-hand sides.
++ cmat.reconstruct_of_frame_bound (N d : ℕ) (U B : ℕ → ℕ → ℂ) (c : ℝ) (hc : 0 < c)
+    (h : ∀ x : ℕ → ℂ, c * complex.re (cdot d x x) ≤ complex.re (cdot N (cmat.apply d U x) (cmat.apply d U x))) :
+    ∀ i < d, ∀ j : ℕ, cmat.mul N (cmat.adj U) (cmat.adjoint_section N d U B) i j = B i j
+  have hdet := cmat.det_gram_ge_of_frame_bound N d U c (by linarith) h
+  have hne : cmat.det d (cmat.gram_cols N U) ≠ complex.zero
+    intro e; rw [e] at hdet; simp at hdet; linarith [pow_pos.real c hc d]
+  intro i hi j; exact cmat.adjoint_section_spec N d U B hne i j hi
+
++ cmat.adjoint_pairing_rect (N d : ℕ) (U : ℕ → ℕ → ℂ) (x y : ℕ → ℂ) :
+    cdot N (cmat.apply d U x) y = cdot d x (cmat.apply N (cmat.adj U) y)
+  set X : ℕ → ℕ → ℂ := fun k _ => x k with hX
+  set Y : ℕ → ℕ → ℂ := fun k _ => y k with hY
+  have he := cmat.mul_congr_left N (cmat.adj (cmat.mul d U X)) (cmat.mul d (cmat.adj X) (cmat.adj U)) Y 0 0 (by intro k _; exact cmat.adj_mul d U X 0 k)
+  rw [cmat.mul_rect_assoc, hX, hY] at he
+  exact he
+
+-- The canonical solution of U*Y=B has squared column norm at most 1/c times that of B.
++ cmat.adjoint_section_norm_bound (N d : ℕ) (U B : ℕ → ℕ → ℂ) (c : ℝ) (hc : 0 < c)
+    (h : ∀ x : ℕ → ℂ, c * complex.re (cdot d x x) ≤ complex.re (cdot N (cmat.apply d U x) (cmat.apply d U x)))
+    (j : ℕ) :
+    c * complex.re (cdot N (fun i => cmat.adjoint_section N d U B i j) (fun i => cmat.adjoint_section N d U B i j)) ≤
+      complex.re (cdot d (fun i => B i j) (fun i => B i j))
+  set x : ℕ → ℂ := fun i => cmat.mul d (cmat.inv d (cmat.gram_cols N U)) B i j with hx
+  set y := cmat.apply d U x with hy
+  have hycol : ∀ i : ℕ, y i = cmat.adjoint_section N d U B i j := by intro i; rw [hy, hx]; unfold cmat.adjoint_section cmat.apply cmat.mul; trivial
+  have hxB : cdot N y y = cdot d x (fun i => B i j)
+    have ha := cmat.adjoint_pairing_rect N d U x y
+    rw [← hy] at ha
+    rw [ha]; unfold cdot; apply csum.congr; intro i hi
+    have hrow : cmat.apply N (cmat.adj U) y i = B i j
+      have hreplace := cmat.mul_congr_right N (cmat.adj U) (fun k _ => y k) (cmat.adjoint_section N d U B) i j (by intro k _; exact hycol k)
+      rw [cmat.reconstruct_of_frame_bound N d U B c hc h i hi j] at hreplace
+      exact hreplace
+    rw [hrow]
+  have hcs := cdot.cauchy_schwarz d x (fun i => B i j)
+  rw [← hxB] at hcs
+  have him := cdot.self_im N y
+  unfold complex.norm_sq at hcs; rw [him] at hcs
+  have hlow := h x; rw [← hy] at hlow
+  have hB := cdot.self_re_nonneg d (fun i => B i j)
+  have hY := cdot.self_re_nonneg N y
+  have hbound : c * complex.re (cdot N y y) ≤ complex.re (cdot d (fun i => B i j) (fun i => B i j))
+    by_cases hzero : complex.re (cdot N y y) = 0
+    · rw [hzero, mul_zero.real]; exact hB
+    · have hsq : complex.re (cdot N y y) * complex.re (cdot N y y) ≤ complex.re (cdot d x x) * complex.re (cdot d (fun i => B i j) (fun i => B i j)) := by linarith
+      have h1 := mul_le_mul_of_nonneg_left.real _ _ c hsq (by linarith)
+      have h2 := mul_le_mul_of_nonneg_right.real _ _ _ hlow hB
+      by_contra hbad
+      have h3 := mul_lt_mul_of_pos_right.real (complex.re (cdot d (fun i => B i j) (fun i => B i j))) (c * complex.re (cdot N y y)) (complex.re (cdot N y y)) (by linarith) (by linarith)
+      linarith
+  rw [hy, hx] at hbound; exact hbound
+
+-- A normalized multiplicative seminorm on the field ℂ is positive away from zero.
++ is_mult_seminorm.pos_of_ne_zero (v : ℂ → ℝ) (hv : is_mult_seminorm v) (z : ℂ) (hz : z ≠ complex.zero) :
+    0 < v z
+  have hn := hv.2.2.1 z
+  have hm : v z * v (complex.inv z) = 1 := by rw [← hv.2.2.2, complex.mul_inv_cancel z hz, hv.2.1]
+  by_contra h
+  have h0 : v z = 0 := by linarith
+  rw [h0, zero_mul.real] at hm; linarith
+
++ is_mult_seminorm.inv_eq (v : ℂ → ℝ) (hv : is_mult_seminorm v) (z : ℂ) (hz : z ≠ complex.zero) :
+    v (complex.inv z) = 1 / v z
+  have he : 1 = v z * v (complex.inv z) := by rw [← hv.2.2.2, complex.mul_inv_cancel z hz, hv.2.1]
+  exact eq_one_div_of_mul_eq_one.real (v z) (v (complex.inv z)) he.symm
+
++ is_ultrametric_norm.matrix_product_le (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (k : ℕ)
+    (A B : ℕ → ℕ → ℂ) (i j : ℕ) (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b)
+    (hA : ∀ t < k, v (A i t) ≤ a) (hB : ∀ t < k, v (B t j) ≤ b) :
+    v (cmat.mul k A B i j) ≤ a * b
+  unfold cmat.mul
+  apply is_ultrametric_norm.csum_le v hv k _ (a * b) (mul_nonneg.real a b ha hb)
+  intro t ht; rw [hv.1.2.2.2]
+  have h1 := mul_le_mul_of_nonneg_right.real _ _ _ (hA t ht) (hv.1.2.2.1 (B t j))
+  have h2 := mul_le_mul_of_nonneg_left.real _ _ a (hB t ht) ha
+  linarith
+
++ is_ultrametric_norm.adjugate_le (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (d : ℕ)
+    (G : ℕ → ℕ → ℂ) (b : ℝ) (hb : 0 ≤ b) (hG : ∀ i < d, ∀ j < d, v (G i j) ≤ b) :
+    ∀ i < d, ∀ j < d, v (cmat.adjugate d G i j) ≤ b ^ (d - 1)
+  intro i hi j hj; unfold cmat.adjugate cmat.cofactor
+  rw [hv.1.2.2.2, is_ultrametric_norm.csign_eq_one v hv (j + i), one_mul.real]
+  apply is_ultrametric_norm.det_le v hv (d - 1) (minor_mat G j i) b hb
+  intro r hr s hs; unfold minor_mat
+  by_cases er : r < j
+  · rw [if_pos er]; by_cases es : s < i
+    · rw [if_pos es]; exact hG r (by omega) s (by omega)
+    · rw [if_neg es]; exact hG r (by omega) (s + 1) (by omega)
+  · rw [if_neg er]; by_cases es : s < i
+    · rw [if_pos es]; exact hG (r + 1) (by omega) s (by omega)
+    · rw [if_neg es]; exact hG (r + 1) (by omega) (s + 1) (by omega)
+
+-- Cramer's rule bounds local denominators of the same canonical section used above.
++ cmat.adjoint_section_ultrametric_bound (N d : ℕ) (U B : ℕ → ℕ → ℂ) (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (hdet : cmat.det d (cmat.gram_cols N U) ≠ complex.zero)
+    (i j : ℕ) (u g b : ℝ) (hu : 0 ≤ u) (hg : 0 ≤ g) (hb : 0 ≤ b)
+    (hU : ∀ t < d, v (U i t) ≤ u) (hG : ∀ t < d, ∀ s < d, v (cmat.gram_cols N U t s) ≤ g)
+    (hB : ∀ t < d, v (B t j) ≤ b) :
+    v (cmat.adjoint_section N d U B i j) ≤ u * (((1 / v (cmat.det d (cmat.gram_cols N U))) * g ^ (d - 1)) * b)
+  set G := cmat.gram_cols N U with hGdef
+  set factor := 1 / v (cmat.det d G) with hfactor
+  have hp := is_mult_seminorm.pos_of_ne_zero v hv.1 (cmat.det d G) hdet
+  have hf : 0 ≤ factor := by rw [hfactor]; exact div_nonneg.real 1 _ (by linarith) (by linarith)
+  have hgpow := pow_nonneg.real g hg (d - 1)
+  have hinv : ∀ t < d, ∀ s < d, v (cmat.inv d G t s) ≤ factor * g ^ (d - 1)
+    intro t ht s hs; unfold cmat.inv
+    rw [hv.1.2.2.2, is_mult_seminorm.inv_eq v hv.1 (cmat.det d G) hdet, ← hfactor]
+    exact mul_le_mul_of_nonneg_left.real _ _ factor (is_ultrametric_norm.adjugate_le v hv d G g hg hG t ht s hs) hf
+  have hfg := mul_nonneg.real factor (g ^ (d - 1)) hf hgpow
+  have hinner : ∀ t < d, v (cmat.mul d (cmat.inv d G) B t j) ≤ (factor * g ^ (d - 1)) * b
+    intro t ht; exact is_ultrametric_norm.matrix_product_le v hv d (cmat.inv d G) B t j _ b hfg hb (hinv t ht) hB
+  have hout := is_ultrametric_norm.matrix_product_le v hv d U (cmat.mul d (cmat.inv d G) B) i j u _ hu (mul_nonneg.real _ b hfg hb) hU hinner
+  rw [hGdef] at hout; unfold cmat.adjoint_section; exact hout
+
+#axioms cmat.adjoint_section_ultrametric_bound
+
+#axioms cmat.adjoint_section_norm_bound
+
+#axioms cmat.det_gram_ge_of_frame_bound
+#axioms cmat.reconstruct_of_frame_bound
+
+#axioms cmat.det_gram_change_of_frame
+#axioms cmat.adjoint_section_spec
+#axioms cmat.det_gram_transport_frame

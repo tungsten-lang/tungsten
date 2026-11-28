@@ -10,10 +10,12 @@ import algebra.cholesky_hadamard
 import algebra.compressed_gram
 import algebra.finite_fourier
 import algebra.finite_weil
+import algebra.frame_transport
 import algebra.gram_legendre
 import algebra.hilbert_comparison
 import algebra.polynomial_fermat
 import algebra.spectral_det
+import algebra.ultrametric_fourier
 import algebra.vandermonde_siegel
 
 import analysis.abel_siegel_mass
@@ -40,6 +42,7 @@ import number_theory.dirichlet_nonvanishing
 import number_theory.minkowski_lattice
 import number_theory.polya_vinogradov
 import number_theory.prime_rationals
+import number_theory.prime_scaling
 import number_theory.dirichlet_L_deriv_bound
 import number_theory.dirichlet_primes_ap
 import number_theory.jacobi_symbol
@@ -108,3 +111,19 @@ import padic.mvps_pderiv_ult
 #axioms group.exists_factorisation_abs_le
 #axioms group.exists_twisted_sum_ge
 #axioms group.exists_factorisation_twisted_sum_ge
+#axioms cmat.adjoint_section_ultrametric_bound
+#axioms cmat.adjoint_section_norm_bound
+#axioms cmat.det_gram_ge_of_frame_bound
+#axioms cmat.reconstruct_of_frame_bound
+#axioms cmat.det_gram_change_of_frame
+#axioms cmat.adjoint_section_spec
+#axioms cmat.det_gram_transport_frame
+#axioms character_table.cyclic_product_delta
+#axioms character_table.product_delta
+#axioms dft.centered_character_sum
+#axioms dft.exists_large_coefficient
+#axioms dft.same_uniform_bound
+#axioms dft.exists_large_product_coefficient
+#axioms rat.log_padic_product_formula
+#axioms rat.le_of_padic_ratios
+#axioms rat.exists_rounded_prime_scaling

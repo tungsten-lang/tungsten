@@ -1,0 +1,188 @@
+-- Finite Fourier bounds at a nonarchimedean place.
+import algebra.finite_fourier
+import analysis.complex_strip_cauchy
+import algebra.hilbert_comparison
+import number_theory.prime_rationals
+
++ is_mult_seminorm.root_of_unity (v : ℂ → ℝ) (hv : is_mult_seminorm v)
+    (z : ℂ) (n : ℕ) (hn : 0 < n) (hz : cpow_nat z n = complex.one) : v z = 1
+  have hpow := is_mult_seminorm.cpow_nat v hv z n
+  rw [hz, hv.2.1] at hpow
+  have hone : ∀ k : ℕ, (1 : ℝ) ^ k = 1
+    intro k; induction k with j ih
+    · exact pow_zero.real 1
+    · rw [succ_eq_add_one.nat, pow_succ.real, ih]; ring
+  have hle := pow_le_pow_cancel.real (v z) 1 n (by omega) (by linarith) (by rw [hone n]; linarith)
+  have hge := pow_le_pow_cancel.real 1 (v z) n (by omega) (hv.2.2.1 z) (by rw [hone n]; linarith)
+  linarith
+
++ uproot.seminorm_phase (q : ℕ) (zeta : ℂ) (hprim : is_unitary_prim_root q zeta)
+    (v : ℂ → ℝ) (hv : is_mult_seminorm v) (k : ℕ) :
+    v (cpow_nat zeta k) = 1 ∧ v (complex.conj (cpow_nat zeta k)) = 1
+  have hpow : cpow_nat (cpow_nat zeta k) q = complex.one
+    rw [← cpow_nat.mul, mul_comm.nat k q, cpow_nat.mul, hprim.2.2.1, cpow_nat.one]
+  have hconj : cpow_nat (complex.conj (cpow_nat zeta k)) q = complex.one
+    rw [← cpow_nat.conj, hpow, complex.conj_one]
+  exact ⟨is_mult_seminorm.root_of_unity v hv _ q hprim.1 hpow, is_mult_seminorm.root_of_unity v hv _ q hprim.1 hconj⟩
+
+-- Fourier inversion supplies a coefficient large enough to detect any chosen entry.
+-- Keeping the factor 1/q inside the seminorm includes primes dividing q.
++ dft.exists_large_coefficient (q : ℕ) (zeta : ℂ) (hprim : is_unitary_prim_root q zeta)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (f : ℕ → ℂ) (y : ℕ) (hy : y < q) :
+    ∃ h < q, v (f y) ≤ v (complex.mul (complex.inv (complex.of_real (q : ℝ))) (dft q zeta f h))
+  have hqpos := hprim.1
+  have hq : complex.of_real (q : ℝ) ≠ complex.zero
+    intro e
+    have hre : complex.re (complex.of_real (q : ℝ)) = complex.re complex.zero := by rw [e]
+    simp at hre; have hpos := (cast_pos.real q).mpr hqpos; linarith
+  set c := complex.inv (complex.of_real (q : ℝ)) with hc
+  set F := fun h => complex.mul c (complex.mul (dft q zeta f h) (complex.conj (cpow_nat zeta (h * y)))) with hF
+  have hinv : csum q F = f y
+    rw [hF, csum.scale_left, dft.inversion q zeta hprim f y hy, ← complex.mul_assoc, hc, complex.inv_mul_cancel _ hq, complex.mul_one_l]
+  obtain ⟨h, hh, hle⟩ := is_ultrametric_norm.exists_le_csum v hv q (by omega) F
+  have hterm : v (F h) = v (complex.mul c (dft q zeta f h))
+    rw [hF, ← complex.mul_assoc, hv.1.2.2.2, (uproot.seminorm_phase q zeta hprim v hv.1 (h * y)).2, mul_one.real]
+  rw [hinv, hterm] at hle
+  exact ⟨h, hh, hle⟩
+
++ dft.seminorm_le (q : ℕ) (zeta : ℂ) (hprim : is_unitary_prim_root q zeta)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (f : ℕ → ℂ) (B : ℝ)
+    (hB : 0 ≤ B) (hf : ∀ x < q, v (f x) ≤ B) (h : ℕ) : v (dft q zeta f h) ≤ B
+  unfold dft; apply is_ultrametric_norm.csum_le v hv q _ B hB
+  intro x hx; rw [hv.1.2.2.2, (uproot.seminorm_phase q zeta hprim v hv.1 (h * x)).1, mul_one.real]
+  exact hf x hx
+
+-- At a place where q is a unit, the Fourier transform preserves the sup norm.
++ dft.same_uniform_bound (q : ℕ) (zeta : ℂ) (hprim : is_unitary_prim_root q zeta)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (hq : v (complex.of_real (q : ℝ)) = 1)
+    (f : ℕ → ℂ) (B : ℝ) (hB : 0 ≤ B) :
+    (∀ y < q, v (f y) ≤ B) ↔ (∀ h < q, v (dft q zeta f h) ≤ B)
+  constructor
+  · intro hf h _; exact dft.seminorm_le q zeta hprim v hv f B hB hf h
+  · intro hF y hy
+    obtain ⟨h, hh, hle⟩ := dft.exists_large_coefficient q zeta hprim v hv f y hy
+    have hne : complex.of_real (q : ℝ) ≠ complex.zero
+      intro e; rw [e, hv.1.1] at hq; linarith
+    have hinv := complex.inv_mul_cancel (complex.of_real (q : ℝ)) hne
+    have hone : v (complex.mul (complex.inv (complex.of_real (q : ℝ))) (complex.of_real (q : ℝ))) = 1 := by rw [hinv, hv.1.2.1]
+    rw [hv.1.2.2.2, hq, mul_one.real] at hone
+    rw [hv.1.2.2.2, hone, one_mul.real] at hle
+    linarith [hF h hh]
+
+-- Successive inversion yields a single pair of frequencies for a product of cyclic groups.
++ dft.exists_large_product_coefficient (q n : ℕ) (zeta eta : ℂ)
+    (hq : is_unitary_prim_root q zeta) (hn : is_unitary_prim_root n eta)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (f : ℕ → ℕ → ℂ) (x y : ℕ) (hx : x < q) (hy : y < n) :
+    ∃ h < q, ∃ k < n, v (f x y) ≤ v (complex.mul (complex.inv (complex.of_real (n : ℝ)))
+      (dft n eta (fun t => complex.mul (complex.inv (complex.of_real (q : ℝ))) (dft q zeta (fun s => f s t) h)) k))
+  obtain ⟨h, hh, hle⟩ := dft.exists_large_coefficient q zeta hq v hv (fun s => f s y) x hx
+  obtain ⟨k, hk, hle'⟩ := dft.exists_large_coefficient n eta hn v hv (fun t => complex.mul (complex.inv (complex.of_real (q : ℝ))) (dft q zeta (fun s => f s t) h)) y hy
+  exact ⟨h, hh, k, hk, by linarith⟩
+
+-- Fourier transform of a point mass, and the resulting character table centered at y.
++ dft.point_mass (q : ℕ) (zeta : ℂ) (g : ℕ) (hg : g < q) (r : ℕ) :
+    dft q zeta (fun t => if t = g then complex.one else complex.zero) r = cpow_nat zeta (r * g)
+  unfold dft
+  have he : csum q (fun t => complex.mul (if t = g then complex.one else complex.zero) (cpow_nat zeta (r * t))) =
+      csum q (fun t => if t = g then cpow_nat zeta (r * t) else complex.zero)
+    apply csum.congr; intro t _; by_cases ht : t = g
+    · rw [if_pos ht, if_pos ht, complex.mul_one_l]
+    · rw [if_neg ht, if_neg ht, complex.mul_zero_l]
+  rw [he, csum.single q g (fun t => cpow_nat zeta (r * t)) hg]
+
+-> dft.centered_character (zeta : ℂ) (y r g : ℕ) : ℂ :=
+  complex.mul (cpow_nat zeta (r * g)) (complex.conj (cpow_nat zeta (r * y)))
+
++ dft.centered_character_sum (q : ℕ) (zeta : ℂ) (hp : is_unitary_prim_root q zeta)
+    (y : ℕ) (hy : y < q) :
+    ∀ g < q, csum q (fun r => dft.centered_character zeta y r g) =
+      if g = y then complex.of_real (q : ℝ) else complex.zero
+  intro g hg
+  have he := dft.inversion q zeta hp (fun t => if t = g then complex.one else complex.zero) y hy
+  have hs : csum q (fun r => complex.mul (dft q zeta (fun t => if t = g then complex.one else complex.zero) r) (complex.conj (cpow_nat zeta (r * y)))) =
+      csum q (fun r => dft.centered_character zeta y r g)
+    apply csum.congr; intro r _; unfold dft.centered_character; rw [dft.point_mass q zeta g hg r]
+  rw [hs] at he
+  by_cases hgy : g = y
+  · rw [if_pos hgy]; rw [if_pos hgy.symm, complex.mul_one_r] at he; exact he
+  · have hyg : y ≠ g := by omega
+    rw [if_neg hgy]; rw [if_neg hyg, complex.mul_zero_r] at he; exact he
+
+-- Flatten a product table by its quotient and remainder indices.
++ csum.tensor_product (m n : ℕ) (A B : ℕ → ℂ) (hn : 0 < n) :
+    csum (m * n) (fun r => complex.mul (A (r / n)) (B (r % n))) =
+      complex.mul (csum m A) (csum n B)
+  induction m with k ih
+  · rw [zero_mul.nat, csum.zero, csum.zero, complex.mul_zero_l]
+  · rw [succ_eq_add_one.nat]
+    have hsize : (k + 1) * n = k * n + n := by ring
+    rw [hsize, csum.split_add, ih, csum.succ]
+    have hblock : csum n (fun j => complex.mul (A ((k * n + j) / n)) (B ((k * n + j) % n))) =
+        complex.mul (A k) (csum n B)
+      rw [← csum.scale_left]; apply csum.congr; intro j hj
+      have h := div_mod_unique.nat (k * n + j) n k j (by ring) hj
+      rw [← h.1, ← h.2]
+    rw [hblock]; apply complex.ext <;> simp <;> ring
+
+-- Any two character tables centered at selected points give the table of their direct product.
+-- Iterating this result covers a finite product with specified cyclic factors.
++ character_table.product_delta (m n x y : ℕ) (hn : 0 < n) (hx : x < m) (hy : y < n)
+    (A B : ℕ → ℕ → ℂ)
+    (hA : ∀ a < m, csum m (fun i => A i a) = if a = x then complex.of_real (m : ℝ) else complex.zero)
+    (hB : ∀ b < n, csum n (fun j => B j b) = if b = y then complex.of_real (n : ℝ) else complex.zero) :
+    ∀ g < m * n, csum (m * n) (fun r => complex.mul (A (r / n) (g / n)) (B (r % n) (g % n))) =
+      if g = n * x + y then complex.of_real ((m * n : ℕ) : ℝ) else complex.zero
+  intro g hg
+  have hqa := (div_lt_iff_lt_mul.nat g m n hn).mpr hg
+  rw [csum.tensor_product m n (fun i => A i (g / n)) (fun j => B j (g % n)) hn, hA (g / n) hqa, hB (g % n) (mod_lt.nat g n hn)]
+  by_cases hit : g = n * x + y
+  · have he := div_mod_unique.nat g n x y hit hy
+    rw [if_pos he.1.symm, if_pos he.2.symm, if_pos hit, ← complex.of_real_mul, cast_mul.real]
+  · rw [if_neg hit]
+    by_cases ha : g / n = x
+    · have hb : g % n ≠ y
+        intro e; have hrec := div_add_mod.nat g n; rw [ha, e] at hrec; exact hit hrec.symm
+      rw [if_pos ha, if_neg hb, complex.mul_zero_r]
+    · rw [if_neg ha, complex.mul_zero_l]
+
+-- Coordinates are encoded in mixed radix, with the newest factor in the low digit.
+-> character_table.order (q : ℕ → ℕ) : ℕ → ℕ
+  | 0 => 1
+  | t + 1 => character_table.order q t * q t
+
+-> character_table.cyclic_product (q : ℕ → ℕ) : ℕ → ℕ → ℕ → ℕ → ℂ
+  | 0 => fun _ _ _ => complex.one
+  | t + 1 => fun y r g => complex.mul
+      (character_table.cyclic_product q t (y / q t) (r / q t) (g / q t))
+      (dft.centered_character (complex.exp (complex.mk 0 (2 * pi / (q t : ℝ)))) (y % q t) (r % q t) (g % q t))
+
++ character_table.cyclic_product_delta (q : ℕ → ℕ) (t : ℕ)
+    (hp : ∀ j < t, 0 < q j) :
+    ∀ y < character_table.order q t, ∀ g < character_table.order q t,
+      csum (character_table.order q t) (fun r => character_table.cyclic_product q t y r g) =
+        if g = y then complex.of_real (character_table.order q t : ℝ) else complex.zero
+  induction t with hp y hy g hg k ih hp y hy g hg
+  · change y < 1 at hy; change g < 1 at hg
+    have he : g = y := by omega
+    change csum 1 (fun _ => complex.one) = (if g = y then complex.of_real (1 : ℝ) else complex.zero)
+    rw [if_pos he, complex.of_real_one, csum.const]; apply complex.ext <;> simp <;> ring
+  · change y < character_table.order q k * q k at hy
+    change g < character_table.order q k * q k at hg
+    have hq : 0 < q k := hp k (by omega)
+    have hprev := ih (by intro j hj; exact hp j (by omega)) (y / q k) ((div_lt_iff_lt_mul.nat y (character_table.order q k) (q k) hq).mpr hy)
+    set z := complex.exp (complex.mk 0 (2 * pi / (q k : ℝ))) with hz
+    have hprim : is_unitary_prim_root (q k) z := by rw [hz]; exact uproot.cexp_is_unitary_prim (q k) hq
+    have hnew : ∀ b < q k, csum (q k) (fun r => dft.centered_character z (y % q k) r b) = if b = y % q k then complex.of_real (q k : ℝ) else complex.zero
+      intro b hb; exact dft.centered_character_sum (q k) z hprim (y % q k) (mod_lt.nat y (q k) hq) b hb
+    have h := character_table.product_delta (character_table.order q k) (q k) (y / q k) (y % q k) hq ((div_lt_iff_lt_mul.nat y (character_table.order q k) (q k) hq).mpr hy) (mod_lt.nat y (q k) hq) (character_table.cyclic_product q k (y / q k)) (dft.centered_character z (y % q k)) hprev hnew g hg
+    rw [div_add_mod.nat y (q k), hz] at h; exact h
+
+#axioms character_table.cyclic_product_delta
+
+#axioms character_table.product_delta
+
+#axioms dft.centered_character_sum
+
+#axioms dft.exists_large_coefficient
+#axioms dft.same_uniform_bound
+#axioms dft.exists_large_product_coefficient

@@ -1,0 +1,81 @@
+-- Rounding real local exponents to a single positive rational scaling.
+import number_theory.prime_rationals
+import number_theory.minkowski_lattice
+
++ rat.prime_floor_local_bounds (p : ℕ) (hp : 1 < p) (b : ℝ) :
+    rpow (p : ℝ) (-b) ≤ rpow (p : ℝ) (-((int_floor b : ℤ) : ℝ)) ∧
+    rpow (p : ℝ) (-((int_floor b : ℤ) : ℝ)) < (p : ℝ) * rpow (p : ℝ) (-b)
+  have hp1 : (1 : ℝ) < (p : ℝ) := by linarith [(cast_lt.real 1 p).mpr hp]
+  have hf := int_floor.spec b
+  constructor
+  · exact rpow_le_of_exp_le (p : ℝ) (-b) (-((int_floor b : ℤ) : ℝ)) (by linarith) (by linarith)
+  · have hlog := log_pos (p : ℝ) hp1
+    have hlt : -((int_floor b : ℤ) : ℝ) * log (p : ℝ) < (1 - b) * log (p : ℝ) := by nlinarith [mul_pos.real (1 - b + ((int_floor b : ℤ) : ℝ)) (log (p : ℝ)) (by linarith) hlog]
+    have hsplit : (1 - b) * log (p : ℝ) = log (p : ℝ) + (-b) * log (p : ℝ) := by ring
+    have h := exp_lt_exp_of_lt _ _ hlt
+    rw [hsplit, exp_add, exp_log (p : ℝ) (by linarith)] at h
+    exact h
+
+-- The archimedean rounding loss is at most one log p per listed prime.
+-- The same numerator and denominator satisfy every local condition.
++ rat.exists_rounded_prime_scaling (k : ℕ) (p : ℕ → ℕ) (b : ℕ → ℝ)
+    (hp : ∀ i < k, is_prime_full (p i))
+    (hinj : ∀ i < k, ∀ j < k, i ≠ j → p i ≠ p j) :
+    ∃ (u v : ℕ), 0 < u ∧ 0 < v ∧
+      log ((u : ℝ) / (v : ℝ)) = (∑ i < k, ((int_floor (b (p i)) : ℤ) : ℝ) * log (p i : ℝ)) ∧
+      (∑ i < k, b (p i) * log (p i : ℝ)) - (∑ i < k, log (p i : ℝ)) ≤ log ((u : ℝ) / (v : ℝ)) ∧
+      log ((u : ℝ) / (v : ℝ)) ≤ (∑ i < k, b (p i) * log (p i : ℝ)) ∧
+      (∀ l : ℕ, is_prime_full l → (∀ i < k, l ≠ p i) → padic.abs l u / padic.abs l v = 1) ∧
+      (∀ i < k, padic.abs (p i) u / padic.abs (p i) v = rpow (p i : ℝ) (-((int_floor (b (p i)) : ℤ) : ℝ)) ∧
+        rpow (p i : ℝ) (-(b (p i))) ≤ padic.abs (p i) u / padic.abs (p i) v ∧
+        padic.abs (p i) u / padic.abs (p i) v < (p i : ℝ) * rpow (p i : ℝ) (-(b (p i))))
+  obtain ⟨u, v, hu, hv, hlog, hout, hloc⟩ := rat.exists_prime_factor_log_and_padic k p (fun l => int_floor (b l)) hp hinj
+  have hprime : ∀ i < k, 1 < p i := by intro i hi; have h := (hp i hi).1.1; omega
+  have hn : ∀ i < k, 0 ≤ log (p i : ℝ)
+    intro i hi; apply log_nonneg; linarith [(cast_lt.real 1 (p i)).mpr (hprime i hi)]
+  have hupper := sum_le.real (fun i => ((int_floor (b (p i)) : ℤ) : ℝ) * log (p i : ℝ)) (fun i => b (p i) * log (p i : ℝ)) k (by intro i hi; exact mul_le_mul_of_nonneg_right.real _ _ _ (int_floor.spec (b (p i))).1 (hn i hi))
+  have hpoint : ∀ i < k, b (p i) * log (p i : ℝ) - log (p i : ℝ) ≤ ((int_floor (b (p i)) : ℤ) : ℝ) * log (p i : ℝ)
+    intro i hi
+    have hf := (int_floor.spec (b (p i))).2
+    have h := mul_le_mul_of_nonneg_right.real (b (p i) - 1) ((int_floor (b (p i)) : ℤ) : ℝ) (log (p i : ℝ)) (by linarith) (hn i hi)
+    linarith
+  have hlower := sum_le.real (fun i => b (p i) * log (p i : ℝ) - log (p i : ℝ)) (fun i => ((int_floor (b (p i)) : ℤ) : ℝ) * log (p i : ℝ)) k hpoint
+  have hsub := sum_below.sub.real (fun i => b (p i) * log (p i : ℝ) - log (p i : ℝ)) (fun i => b (p i) * log (p i : ℝ)) (fun i => log (p i : ℝ)) k (by intro i _; rfl)
+  use u, v
+  refine ⟨hu, hv, hlog, (by linarith), (by linarith), hout, _⟩
+  intro i hi
+  have he := hloc i hi
+  rw [he]; exact ⟨rfl, rat.prime_floor_local_bounds (p i) (hprime i hi) (b (p i))⟩
+
+-- Logarithmic product formula for a positive rational. A cutoff beyond both
+-- integers includes every prime that contributes to either valuation.
++ rat.log_padic_product_formula (M u v : ℕ) (hu : 0 < u) (hv : 0 < v) (huM : u < M) (hvM : v < M) :
+    log ((u : ℝ) / (v : ℝ)) + (∑ p < M, if is_prime_nat p then log (padic.abs p u / padic.abs p v) else 0) = 0
+  set p := sernau.primes_below_at M with hp
+  set k := sernau.primes_below_len M with hk
+  have hsub := sum_below.sub.real (fun i => log (padic.abs (p i) u / padic.abs (p i) v)) (fun i => log (padic.abs (p i) u)) (fun i => log (padic.abs (p i) v)) k (by intro i _; exact log_div _ _ (padic.abs_pos (p i) u hu) (padic.abs_pos (p i) v hv))
+  rw [hp, hk] at hsub
+  have he := (sernau.primes_below_spec M).2.2.2 (fun p => log (padic.abs p u / padic.abs p v))
+  rw [← he, hsub, log_div _ _ ((cast_pos.real u).mpr hu) ((cast_pos.real v).mpr hv)]
+  linarith [sernau.log_add_sum_log_padic_abs_eq_zero M u hu huM, sernau.log_add_sum_log_padic_abs_eq_zero M v hv hvM]
+
++ rat.le_of_padic_ratios (a b c d : ℕ) (ha : 0 < a) (hb : 0 < b) (hc : 0 < c) (hd : 0 < d)
+    (hloc : ∀ p : ℕ, is_prime_nat p → padic.abs p c / padic.abs p d ≤ padic.abs p a / padic.abs p b) :
+    (a : ℝ) / (b : ℝ) ≤ (c : ℝ) / (d : ℝ)
+  set M := a + b + c + d + 1 with hM
+  have h1 := rat.log_padic_product_formula M a b ha hb (by rw [hM]; omega) (by rw [hM]; omega)
+  have h2 := rat.log_padic_product_formula M c d hc hd (by rw [hM]; omega) (by rw [hM]; omega)
+  have hsum : (∑ p < M, if is_prime_nat p then log (padic.abs p c / padic.abs p d) else 0) ≤
+      (∑ p < M, if is_prime_nat p then log (padic.abs p a / padic.abs p b) else 0)
+    apply sum_le.real; intro p _
+    by_cases hp : is_prime_nat p
+    · rw [if_pos hp, if_pos hp]
+      exact (log_le_log _ _ (div_pos.real _ _ (padic.abs_pos p c hc) (padic.abs_pos p d hd)) (div_pos.real _ _ (padic.abs_pos p a ha) (padic.abs_pos p b hb))).mpr (hloc p hp)
+    · rw [if_neg hp, if_neg hp]; linarith
+  apply (log_le_log _ _ (div_pos.real _ _ ((cast_pos.real a).mpr ha) ((cast_pos.real b).mpr hb)) (div_pos.real _ _ ((cast_pos.real c).mpr hc) ((cast_pos.real d).mpr hd))).mp
+  linarith
+
+#axioms rat.log_padic_product_formula
+#axioms rat.le_of_padic_ratios
+
+#axioms rat.exists_rounded_prime_scaling

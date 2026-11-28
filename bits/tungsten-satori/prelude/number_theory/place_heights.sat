@@ -8,11 +8,11 @@
 --
 -- Proved on Satori's HOL kernel (0 custom axioms).
 
-import algebra.compressed_gram
+import algebra.field_aut
 import padic.legendre_fps
 
 -- ====================================================================================
--- SECTION 1: PLACES AND AUTOMORPHISMS
+-- SECTION 1: PLACES (automorphisms of ℂ are `cfield_aut`, `algebra.field_aut`)
 -- ====================================================================================
 
 -- `v` is an absolute value on ℂ extending the `l`-adic one, positive off zero.
@@ -20,12 +20,6 @@ import padic.legendre_fps
   is_prime_nat l ∧ sernau.is_padic_val_on_C l v ∧ ∀ z : ℂ, z ≠ complex.zero → 0 < v z
 
 -> place_family (p : α → ℕ) (v : α → ℂ → ℝ) : Prop := ∀ s : α, cpadic_place (p s) (v s)
-
--- A field automorphism of ℂ.
--> cfield_aut (f : ℂ → ℂ) : Prop :=
-  f complex.one = complex.one ∧ (∀ a b : ℂ, f (complex.add a b) = complex.add (f a) (f b)) ∧
-  (∀ a b : ℂ, f (complex.mul a b) = complex.mul (f a) (f b)) ∧
-  ∃ g : ℂ → ℂ, ∀ z : ℂ, f (g z) = z ∧ g (f z) = z
 
 + place_family.at (p : α → ℕ) (v : α → ℂ → ℝ) (hpl : place_family p v) (s : α) :
     cpadic_place (p s) (v s)
@@ -38,6 +32,9 @@ import padic.legendre_fps
   h.2.1.2.2.1 z
 
 + cpadic_place.one (l : ℕ) (v : ℂ → ℝ) (h : cpadic_place l v) : v complex.one = 1 := h.2.1.2.1
+
++ cpadic_place.ultrametric (l : ℕ) (v : ℂ → ℝ) (h : cpadic_place l v) : is_ultrametric_norm v
+  exact ⟨⟨h.2.1.1, h.2.1.2.1, h.2.1.2.2.1, h.2.1.2.2.2.2.2.1⟩, h.2.1.2.2.2.1, h.2.1.2.2.2.2.1⟩
 
 -- ====================================================================================
 -- SECTION 2: HEIGHT BOUNDS

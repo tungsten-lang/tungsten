@@ -1,0 +1,164 @@
+-- Field automorphisms of ℂ and their action on finite sums, determinants, matrix products and
+-- inverses, and (on a subfield where they commute with complex conjugation) on adjoints and
+-- frame compressions.
+--
+-- Proved on Satori's HOL kernel (0 custom axioms).
+
+import algebra.projection_denominator
+import algebra.valuation_torsion
+
+-- ====================================================================================
+-- SECTION 1: AUTOMORPHISMS
+-- ====================================================================================
+
+-- A field automorphism of ℂ.
+-> cfield_aut (f : ℂ → ℂ) : Prop :=
+  f complex.one = complex.one ∧ (∀ a b : ℂ, f (complex.add a b) = complex.add (f a) (f b)) ∧
+  (∀ a b : ℂ, f (complex.mul a b) = complex.mul (f a) (f b)) ∧
+  ∃ g : ℂ → ℂ, ∀ z : ℂ, f (g z) = z ∧ g (f z) = z
+
++ complex.eq_zero_of_add_self (a : ℂ) (h : a = complex.add a a) : a = complex.zero
+  have hre : complex.re a = complex.re (complex.add a a) := by rw [← h]
+  have him : complex.im a = complex.im (complex.add a a) := by rw [← h]
+  simp at hre him
+  apply complex.ext <;> simp <;> linarith
+
++ cfield_aut.zero (f : ℂ → ℂ) (hf : cfield_aut f) : f complex.zero = complex.zero
+  have h := hf.2.1 complex.zero complex.zero
+  rw [complex.add_zero] at h
+  exact complex.eq_zero_of_add_self (f complex.zero) h
+
++ cfield_aut.neg (f : ℂ → ℂ) (hf : cfield_aut f) (a : ℂ) : f (complex.neg a) = complex.neg (f a)
+  have h := hf.2.1 a (complex.neg a)
+  rw [complex.add_neg, cfield_aut.zero f hf] at h
+  have hre : complex.re complex.zero = complex.re (complex.add (f a) (f (complex.neg a))) := by rw [← h]
+  have him : complex.im complex.zero = complex.im (complex.add (f a) (f (complex.neg a))) := by rw [← h]
+  simp at hre him
+  apply complex.ext <;> simp <;> linarith
+
++ cfield_aut.sub (f : ℂ → ℂ) (hf : cfield_aut f) (a b : ℂ) :
+    f (complex.sub a b) = complex.sub (f a) (f b)
+  rw [complex.sub_eq_add_neg, complex.sub_eq_add_neg, hf.2.1, cfield_aut.neg f hf]
+
++ cfield_aut.injective (f : ℂ → ℂ) (hf : cfield_aut f) (a b : ℂ) (h : f a = f b) : a = b
+  obtain ⟨g, hg⟩ := hf.2.2.2
+  have ha := (hg a).2
+  have hb := (hg b).2
+  rw [h] at ha
+  rw [← ha, hb]
+
++ cfield_aut.ne_zero (f : ℂ → ℂ) (hf : cfield_aut f) (a : ℂ) (ha : a ≠ complex.zero) :
+    f a ≠ complex.zero
+  intro h0
+  apply ha
+  apply cfield_aut.injective f hf a complex.zero
+  rw [h0, cfield_aut.zero f hf]
+
++ complex.inv_zero : complex.inv complex.zero = complex.zero
+  apply complex.ext <;> (unfold complex.inv; simp)
+
++ cfield_aut.inv (f : ℂ → ℂ) (hf : cfield_aut f) (a : ℂ) : f (complex.inv a) = complex.inv (f a)
+  by_cases ha : a = complex.zero
+  · rw [ha, complex.inv_zero, cfield_aut.zero f hf, complex.inv_zero]
+  · have h := hf.2.2.1 a (complex.inv a)
+    rw [complex.mul_inv_cancel a ha, hf.1] at h
+    exact (complex.inv_unique (f a) (f (complex.inv a)) h.symm).symm
+
++ cfield_aut.csum (f : ℂ → ℂ) (hf : cfield_aut f) (n : ℕ) (g : ℕ → ℂ) :
+    f (csum n g) = csum n (fun i => f (g i))
+  induction n with r ihr
+  · rw [csum.zero, csum.zero]; exact cfield_aut.zero f hf
+  · rw [succ_eq_add_one.nat, csum.succ, csum.succ, hf.2.1, ihr]
+
++ cfield_aut.csign (f : ℂ → ℂ) (hf : cfield_aut f) (k : ℕ) : f (csign k) = csign k
+  unfold csign
+  by_cases hk : k % 2 = 0
+  · rw [if_pos hk]; exact hf.1
+  · rw [if_neg hk, cfield_aut.neg f hf, hf.1]
+
++ cfield_aut.of_nat (f : ℂ → ℂ) (hf : cfield_aut f) (n : ℕ) :
+    f (complex.of_real (n : ℝ)) = complex.of_real (n : ℝ)
+  induction n with r ihr
+  · rw [cast_zero.real, complex.of_real_zero]; exact cfield_aut.zero f hf
+  · rw [succ_eq_add_one.nat, cast_succ.real, complex.of_real_add, complex.of_real_one, hf.2.1, ihr, hf.1]
+
+-- ====================================================================================
+-- SECTION 2: DETERMINANTS, PRODUCTS, INVERSES
+-- ====================================================================================
+
+-> cmat.map (f : ℂ → ℂ) (A : ℕ → ℕ → ℂ) (i j : ℕ) : ℂ := f (A i j)
+
++ cmat.map_minor (f : ℂ → ℂ) (A : ℕ → ℕ → ℂ) (r c : ℕ) :
+    minor_mat (cmat.map f A) r c = cmat.map f (minor_mat A r c)
+  funext i; funext j; unfold cmat.map minor_mat; trivial
+
++ cfield_aut.det (f : ℂ → ℂ) (hf : cfield_aut f) (n : ℕ) :
+    ∀ A : ℕ → ℕ → ℂ, f (cmat.det n A) = cmat.det n (cmat.map f A)
+  induction n with A r ihr A
+  · rw [cmat.det_zero_eq, cmat.det_zero_eq]; exact hf.1
+  · rw [succ_eq_add_one.nat, cmat.det_succ_eq r A, cmat.det_succ_eq r (cmat.map f A), cfield_aut.csum f hf]
+    apply csum.congr; intro c hc
+    rw [hf.2.2.1, hf.2.2.1, cfield_aut.csign f hf, ihr (minor_mat A r c), cmat.map_minor]
+    unfold cmat.map; trivial
+
++ cfield_aut.mul_entry (f : ℂ → ℂ) (hf : cfield_aut f) (n : ℕ) (A B : ℕ → ℕ → ℂ) (i j : ℕ) :
+    f (cmat.mul n A B i j) = cmat.mul n (cmat.map f A) (cmat.map f B) i j
+  unfold cmat.mul cmat.map
+  rw [cfield_aut.csum f hf]
+  apply csum.congr; intro k _
+  rw [hf.2.2.1]
+
++ cmat.map_mul (f : ℂ → ℂ) (hf : cfield_aut f) (n : ℕ) (A B : ℕ → ℕ → ℂ) :
+    cmat.map f (cmat.mul n A B) = cmat.mul n (cmat.map f A) (cmat.map f B)
+  funext i; funext j
+  have h := cfield_aut.mul_entry f hf n A B i j
+  unfold cmat.map at h ⊢; exact h
+
++ cmat.map_inv (f : ℂ → ℂ) (hf : cfield_aut f) (n : ℕ) (A : ℕ → ℕ → ℂ) :
+    cmat.map f (cmat.inv n A) = cmat.inv n (cmat.map f A)
+  funext i; funext j
+  have hdet := cfield_aut.det f hf n A
+  have hmin := cfield_aut.det f hf (n - 1) (minor_mat A j i)
+  rw [← cmat.map_minor f A j i] at hmin
+  have h : f (cmat.inv n A i j) = cmat.inv n (cmat.map f A) i j
+    unfold cmat.inv cmat.adjugate cmat.cofactor
+    rw [hf.2.2.1, hf.2.2.1, cfield_aut.inv f hf, cfield_aut.csign f hf, hdet, hmin]
+  unfold cmat.map at h ⊢; exact h
+
+-- ====================================================================================
+-- SECTION 3: CONJUGATION-COMPATIBLE DATA
+-- ====================================================================================
+
+-- `f` commutes with complex conjugation on the set `K` (true for every automorphism on a CM field).
+-> caut_conj_compat (f : ℂ → ℂ) (K : ℂ → Prop) : Prop :=
+  ∀ a : ℂ, K a → f (complex.conj a) = complex.conj (f a)
+
++ cmat.map_adj (f : ℂ → ℂ) (K : ℂ → Prop) (hc : caut_conj_compat f K) (A : ℕ → ℕ → ℂ)
+    (hA : ∀ i j : ℕ, K (A i j)) : cmat.map f (cmat.adj A) = cmat.adj (cmat.map f A)
+  funext i; funext j
+  unfold cmat.map cmat.adj
+  unfold caut_conj_compat at hc
+  exact hc (A j i) (hA j i)
+
++ cmat.map_cross_gram (f : ℂ → ℂ) (hf : cfield_aut f) (K : ℂ → Prop) (hc : caut_conj_compat f K)
+    (N : ℕ) (H Y Z : ℕ → ℕ → ℂ) (hY : ∀ i j : ℕ, K (Y i j)) :
+    cmat.map f (cmat.cross_gram N H Y Z) = cmat.cross_gram N (cmat.map f H) (cmat.map f Y) (cmat.map f Z)
+  unfold cmat.cross_gram cmat.frame_dual
+  rw [cmat.map_mul f hf N (cmat.mul N (cmat.adj Y) H) Z, cmat.map_mul f hf N (cmat.adj Y) H, cmat.map_adj f K hc Y hY]
+
+-- An automorphism compatible with conjugation on the entries of the frame carries a frame
+-- compression to the frame compression of the conjugated data.
++ cmat.map_frame_compression (f : ℂ → ℂ) (hf : cfield_aut f) (K : ℂ → Prop)
+    (hc : caut_conj_compat f K) (N d : ℕ) (H U W : ℕ → ℕ → ℂ) (hU : ∀ i j : ℕ, K (U i j)) :
+    cmat.map f (cmat.frame_compression N d H U W) = cmat.frame_compression N d (cmat.map f H) (cmat.map f U) (cmat.map f W)
+  unfold cmat.frame_compression
+  rw [cmat.map_mul f hf d (cmat.inv d (cmat.cross_gram N H U U)) (cmat.cross_gram N H U W), cmat.map_inv f hf d (cmat.cross_gram N H U U), cmat.map_cross_gram f hf K hc N H U U hU, cmat.map_cross_gram f hf K hc N H U W hU]
+
++ cfield_aut.det_frame_compression (f : ℂ → ℂ) (hf : cfield_aut f) (K : ℂ → Prop)
+    (hc : caut_conj_compat f K) (N d : ℕ) (H U W : ℕ → ℕ → ℂ) (hU : ∀ i j : ℕ, K (U i j)) :
+    f (cmat.det d (cmat.frame_compression N d H U W)) = cmat.det d (cmat.frame_compression N d (cmat.map f H) (cmat.map f U) (cmat.map f W))
+  rw [cfield_aut.det f hf d (cmat.frame_compression N d H U W), cmat.map_frame_compression f hf K hc N d H U W hU]
+
+#axioms cfield_aut.det
+#axioms cmat.map_inv
+#axioms cfield_aut.det_frame_compression

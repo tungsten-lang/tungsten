@@ -7,7 +7,9 @@ import algebra.behrend_arakelov_seesaw
 import algebra.bourbaki_witt
 import algebra.char_p_frobenius
 import algebra.cholesky_hadamard
+import algebra.compressed_arch
 import algebra.compressed_gram
+import algebra.field_aut
 import algebra.dyad_spread
 import algebra.finite_fourier
 import algebra.finite_weil
@@ -189,3 +191,7 @@ import tested_denominators
 #axioms height_le.one_determinant
 #axioms height_le.one_determinant_of_lattice_oracle
 #axioms cdot.sum_group_shift_eq
+#axioms cfield_aut.det
+#axioms cfield_aut.det_frame_compression
+#axioms cmat.frame_compression_arch_det_le
+#axioms cfield_aut.abs_det_frame_compression_le

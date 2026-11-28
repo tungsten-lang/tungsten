@@ -1,0 +1,182 @@
+-- Archimedean bound for the determinant of a compressed Gram operator with respect to an
+-- arbitrary positive semidefinite metric (`norm_det_compressedGramOp_arch_le`,
+-- `New/Rows/LiftVolumeHeight.lean:76-93`): if `k <G z, G z>_H ≤ B <z, z>` for all `z`, the
+-- compression of `k G G^* H` to a frame `U` has real determinant in `[0, B^d]`.
+-- The metric is factored as `H = L^* L` (Cholesky) and the identity-metric bound
+-- `cmat.compressed_gram_arch_det_le` is applied to `L U` and `L G`.
+--
+-- Proved on Satori's HOL kernel (0 custom axioms).
+
+import algebra.field_aut
+
+-- The images `k G (G^* (H u))` of the frame vectors under the operator `k G G^* H`.
+-> cmat.compressed_image (N M : ℕ) (k : ℝ) (H U G : ℕ → ℕ → ℂ) (i c : ℕ) : ℂ :=
+  complex.mul (complex.of_real k) (cmat.mul M G (cmat.mul N (cmat.adj G) (cmat.mul N H U)) i c)
+
++ cmat.psd_exists_factor (N : ℕ) (H : ℕ → ℕ → ℂ) (hH : cmat.is_psd N H) :
+    ∃ L : ℕ → ℕ → ℂ, ∀ i < N, ∀ j < N, H i j = cmat.mul N (cmat.adj L) L i j
+  obtain ⟨Wc, hW⟩ := cmat.psd_cholesky_decomp N H hH
+  use (fun k i => Wc i k)
+  intro i hi j hj
+  rw [hW i hi j hj]
+  unfold cdot cmat.mul cmat.adj; trivial
+
++ cmat.mul_metric_factor (N : ℕ) (H L A B : ℕ → ℕ → ℂ)
+    (hHL : ∀ i < N, ∀ j < N, H i j = cmat.mul N (cmat.adj L) L i j) (i j : ℕ) :
+    cmat.mul N (cmat.mul N A H) B i j = cmat.mul N (cmat.mul N A (cmat.adj L)) (cmat.mul N L B) i j
+  have h1 : cmat.mul N (cmat.mul N A H) B i j = cmat.mul N (cmat.mul N A (cmat.mul N (cmat.adj L) L)) B i j
+    apply cmat.mul_congr_left; intro k hk
+    apply cmat.mul_congr_right; intro t ht
+    exact hHL t ht k hk
+  have h2 : cmat.mul N (cmat.mul N A (cmat.mul N (cmat.adj L) L)) B i j = cmat.mul N (cmat.mul N (cmat.mul N A (cmat.adj L)) L) B i j
+    apply cmat.mul_congr_left; intro k hk
+    exact (cmat.mul_assoc N A (cmat.adj L) L i k).symm
+  rw [h1, h2, cmat.mul_assoc]
+
++ cmat.cross_factor (N : ℕ) (H L U G : ℕ → ℕ → ℂ)
+    (hHL : ∀ i < N, ∀ j < N, H i j = cmat.mul N (cmat.adj L) L i j) (i a : ℕ) :
+    cmat.mul N (cmat.adj (cmat.mul N L U)) (cmat.mul N L G) i a = cmat.cross_gram N H U G i a
+  unfold cmat.cross_gram cmat.frame_dual
+  have h1 : cmat.mul N (cmat.adj (cmat.mul N L U)) (cmat.mul N L G) i a = cmat.mul N (cmat.mul N (cmat.adj U) (cmat.adj L)) (cmat.mul N L G) i a
+    apply cmat.mul_congr_left; intro k _; exact cmat.adj_mul N L U i k
+  rw [h1, cmat.mul_metric_factor N H L (cmat.adj U) G hHL i a]
+
++ cmat.adj_cross_gram (N : ℕ) (H U G : ℕ → ℕ → ℂ) (hherm : cmat.is_hermitian N H) (a c : ℕ) :
+    cmat.adj (cmat.cross_gram N H U G) a c = cmat.mul N (cmat.adj G) (cmat.mul N H U) a c
+  unfold cmat.cross_gram cmat.frame_dual
+  rw [cmat.adj_mul N (cmat.mul N (cmat.adj U) H) G a c]
+  apply cmat.mul_congr_right; intro t ht
+  rw [cmat.adj_mul N (cmat.adj U) H t c]
+  unfold cmat.mul
+  apply csum.congr; intro s hs
+  have hh : cmat.adj H t s = H t s
+    unfold cmat.adj; exact (cmat.hermitian_entry N H hherm t s ht hs).symm
+  rw [cmat.adj_adj, hh]
+
++ cmat.mul_scale_right (n : ℕ) (A X : ℕ → ℕ → ℂ) (k : ℂ) (i c : ℕ) :
+    cmat.mul n A (fun t b => complex.mul k (X t b)) i c = complex.mul k (cmat.mul n A X i c)
+  unfold cmat.mul
+  rw [← csum.scale_left n k (fun t => complex.mul (A i t) (X t c))]
+  apply csum.congr; intro t _
+  apply complex.ext <;> simp <;> ring
+
++ cmat.cross_gram_compressed_image (N M : ℕ) (k : ℝ) (H U G : ℕ → ℕ → ℂ)
+    (hherm : cmat.is_hermitian N H) (i c : ℕ) :
+    cmat.cross_gram N H U (cmat.compressed_image N M k H U G) i c = complex.mul (complex.of_real k) (cmat.mul M (cmat.cross_gram N H U G) (cmat.adj (cmat.cross_gram N H U G)) i c)
+  have hr : cmat.mul M (cmat.cross_gram N H U G) (cmat.adj (cmat.cross_gram N H U G)) i c = cmat.mul M (cmat.cross_gram N H U G) (cmat.mul N (cmat.adj G) (cmat.mul N H U)) i c
+    apply cmat.mul_congr_right; intro a _; exact cmat.adj_cross_gram N H U G hherm a c
+  have ha : cmat.mul M (cmat.cross_gram N H U G) (cmat.mul N (cmat.adj G) (cmat.mul N H U)) i c = cmat.mul N (cmat.frame_dual N H U) (cmat.mul M G (cmat.mul N (cmat.adj G) (cmat.mul N H U))) i c
+    unfold cmat.cross_gram
+    exact cmat.mul_rect_assoc N M (cmat.frame_dual N H U) G (cmat.mul N (cmat.adj G) (cmat.mul N H U)) i c
+  have hW : cmat.compressed_image N M k H U G = (fun t b => complex.mul (complex.of_real k) (cmat.mul M G (cmat.mul N (cmat.adj G) (cmat.mul N H U)) t b))
+    funext t; funext b; unfold cmat.compressed_image; trivial
+  rw [hr, ha, hW]
+  unfold cmat.cross_gram
+  exact cmat.mul_scale_right N (cmat.frame_dual N H U) (cmat.mul M G (cmat.mul N (cmat.adj G) (cmat.mul N H U))) (complex.of_real k) i c
+
++ cmat.frame_compression_eq_compressed_gram (N M d : ℕ) (k : ℝ) (H L U G : ℕ → ℕ → ℂ)
+    (hherm : cmat.is_hermitian N H)
+    (hHL : ∀ i < N, ∀ j < N, H i j = cmat.mul N (cmat.adj L) L i j) (i j : ℕ) :
+    cmat.frame_compression N d H U (cmat.compressed_image N M k H U G) i j = cmat.compressed_gram N M d k (cmat.mul N L U) (cmat.mul N L G) i j
+  have e1 : cmat.gram_cols N (cmat.mul N L U) = cmat.cross_gram N H U U
+    funext a; funext b; unfold cmat.gram_cols; exact cmat.cross_factor N H L U U hHL a b
+  have e2 : cmat.mul N (cmat.adj (cmat.mul N L U)) (cmat.mul N L G) = cmat.cross_gram N H U G
+    funext a; funext b; exact cmat.cross_factor N H L U G hHL a b
+  have e3 : cmat.cross_gram N H U (cmat.compressed_image N M k H U G) = (fun t b => complex.mul (complex.of_real k) (cmat.mul M (cmat.cross_gram N H U G) (cmat.adj (cmat.cross_gram N H U G)) t b))
+    funext t; funext b; exact cmat.cross_gram_compressed_image N M k H U G hherm t b
+  unfold cmat.compressed_gram cmat.frame_compression
+  rw [e1, e2, e3]
+  exact cmat.mul_scale_right d (cmat.inv d (cmat.cross_gram N H U U)) (cmat.mul M (cmat.cross_gram N H U G) (cmat.adj (cmat.cross_gram N H U G))) (complex.of_real k) i j
+
++ cmat.apply_mul_fun (N M : ℕ) (L G : ℕ → ℕ → ℂ) (zeta : ℕ → ℂ) :
+    cmat.apply M (cmat.mul N L G) zeta = cmat.apply N L (cmat.apply M G zeta)
+  funext i
+  unfold cmat.apply cmat.mul
+  have h1 : csum M (fun a => complex.mul (csum N (fun t => complex.mul (L i t) (G t a))) (zeta a)) = csum M (fun a => csum N (fun t => complex.mul (complex.mul (L i t) (G t a)) (zeta a)))
+    apply csum.congr; intro a _; rw [← csum.scale_right]
+  have h2 : csum N (fun t => complex.mul (L i t) (csum M (fun a => complex.mul (G t a) (zeta a)))) = csum N (fun t => csum M (fun a => complex.mul (L i t) (complex.mul (G t a) (zeta a))))
+    apply csum.congr; intro t _; rw [← csum.scale_left]
+  rw [h1, h2, csum.swap]
+  apply csum.congr; intro t _; apply csum.congr; intro a _
+  exact complex.mul_assoc (L i t) (G t a) (zeta a)
+
++ cmat.cdot_factor (N : ℕ) (H L : ℕ → ℕ → ℂ) (x : ℕ → ℂ)
+    (hHL : ∀ i < N, ∀ j < N, H i j = cmat.mul N (cmat.adj L) L i j) :
+    cdot N (cmat.apply N L x) (cmat.apply N L x) = cmat.pairing N H x x
+  rw [← cmat.gram_pairing N N L x x]
+  apply cmat.pairing_congr; intro i hi j hj
+  unfold cmat.gram_cols; exact (hHL i hi j hj).symm
+
+-- The archimedean bound with a metric.
++ cmat.frame_compression_arch_det_le (N M d : ℕ) (k B : ℝ) (H U G : ℕ → ℕ → ℂ)
+    (hk : 0 ≤ k) (hB : 0 ≤ B) (hH : cmat.is_psd N H)
+    (hGu : cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero)
+    (hop : ∀ zeta : ℕ → ℂ, k * complex.re (cmat.pairing N H (cmat.apply M G zeta) (cmat.apply M G zeta)) ≤ B * complex.re (cdot M zeta zeta)) :
+    complex.im (cmat.det d (cmat.frame_compression N d H U (cmat.compressed_image N M k H U G))) = 0 ∧ 0 ≤ complex.re (cmat.det d (cmat.frame_compression N d H U (cmat.compressed_image N M k H U G))) ∧ complex.re (cmat.det d (cmat.frame_compression N d H U (cmat.compressed_image N M k H U G))) ≤ B ^ d
+  obtain ⟨L, hHL⟩ := cmat.psd_exists_factor N H hH
+  have hdet : cmat.det d (cmat.frame_compression N d H U (cmat.compressed_image N M k H U G)) = cmat.det d (cmat.compressed_gram N M d k (cmat.mul N L U) (cmat.mul N L G))
+    apply cmat.det_congr; intro i _ j _
+    exact cmat.frame_compression_eq_compressed_gram N M d k H L U G hH.1 hHL i j
+  have hGu' : cmat.det d (cmat.gram_cols N (cmat.mul N L U)) ≠ complex.zero
+    have e1 : cmat.gram_cols N (cmat.mul N L U) = cmat.cross_gram N H U U
+      funext a; funext b; unfold cmat.gram_cols; exact cmat.cross_factor N H L U U hHL a b
+    rw [e1]; exact hGu
+  have hop' : ∀ zeta : ℕ → ℂ, k * complex.re (cdot N (cmat.apply M (cmat.mul N L G) zeta) (cmat.apply M (cmat.mul N L G) zeta)) ≤ B * complex.re (cdot M zeta zeta)
+    intro zeta
+    rw [cmat.apply_mul_fun N M L G zeta, cmat.cdot_factor N H L (cmat.apply M G zeta) hHL]
+    exact hop zeta
+  rw [hdet]
+  exact cmat.compressed_gram_arch_det_le N M d k B (cmat.mul N L U) (cmat.mul N L G) hk hB hGu' hop'
+
+-- A complex number with zero imaginary part and real part in `[0, c]` has absolute value `≤ c`.
++ complex.abs_le_of_real_nonneg (z : ℂ) (c : ℝ) (him : complex.im z = 0) (h0 : 0 ≤ complex.re z)
+    (hc : complex.re z ≤ c) : complex.abs z ≤ c
+  have hsq := complex.abs_sq z
+  unfold complex.norm_sq at hsq
+  rw [him] at hsq
+  have hnn := complex.abs_nonneg z
+  by_contra hgt
+  have hlt : complex.re z < complex.abs z := by linarith
+  nlinarith
+
+-- ====================================================================================
+-- THE BOUND AT EVERY AUTOMORPHISM OF ℂ
+-- ====================================================================================
+
++ cmat.map_compressed_image_entry (f : ℂ → ℂ) (hf : cfield_aut f) (K : ℂ → Prop)
+    (hc : caut_conj_compat f K) (N M kk : ℕ) (H U G : ℕ → ℕ → ℂ) (hG : ∀ i j : ℕ, K (G i j)) (i c : ℕ) :
+    f (cmat.compressed_image N M (kk : ℝ) H U G i c) = cmat.compressed_image N M (kk : ℝ) (cmat.map f H) (cmat.map f U) (cmat.map f G) i c
+  have h1 : cmat.map f (cmat.mul N (cmat.adj G) (cmat.mul N H U)) = cmat.mul N (cmat.adj (cmat.map f G)) (cmat.mul N (cmat.map f H) (cmat.map f U))
+    rw [cmat.map_mul f hf N (cmat.adj G) (cmat.mul N H U), cmat.map_mul f hf N H U, cmat.map_adj f K hc G hG]
+  have h2 := cfield_aut.mul_entry f hf M G (cmat.mul N (cmat.adj G) (cmat.mul N H U)) i c
+  rw [h1] at h2
+  unfold cmat.compressed_image
+  rw [hf.2.2.1, cfield_aut.of_nat f hf kk, h2]
+
++ cmat.map_compressed_image (f : ℂ → ℂ) (hf : cfield_aut f) (K : ℂ → Prop)
+    (hc : caut_conj_compat f K) (N M kk : ℕ) (H U G : ℕ → ℕ → ℂ) (hG : ∀ i j : ℕ, K (G i j)) :
+    cmat.map f (cmat.compressed_image N M (kk : ℝ) H U G) = cmat.compressed_image N M (kk : ℝ) (cmat.map f H) (cmat.map f U) (cmat.map f G)
+  funext i; funext c
+  have h := cmat.map_compressed_image_entry f hf K hc N M kk H U G hG i c
+  unfold cmat.map at h ⊢; exact h
+
+-- For an automorphism `f` commuting with conjugation on the entries of the frame `U` and of
+-- `G`: if the conjugated metric is positive semidefinite and the conjugated operator has the
+-- size bound `B`, then the `f`-conjugate of the compressed Gram determinant has absolute
+-- value at most `B^d`.
++ cfield_aut.abs_det_frame_compression_le (f : ℂ → ℂ) (hf : cfield_aut f) (K : ℂ → Prop)
+    (hc : caut_conj_compat f K) (N M d kk : ℕ) (B : ℝ) (H U G : ℕ → ℕ → ℂ) (hB : 0 ≤ B)
+    (hU : ∀ i j : ℕ, K (U i j)) (hG : ∀ i j : ℕ, K (G i j))
+    (hGu : cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero)
+    (hHf : cmat.is_psd N (cmat.map f H))
+    (hopf : ∀ zeta : ℕ → ℂ, (kk : ℝ) * complex.re (cmat.pairing N (cmat.map f H) (cmat.apply M (cmat.map f G) zeta) (cmat.apply M (cmat.map f G) zeta)) ≤ B * complex.re (cdot M zeta zeta)) :
+    complex.abs (f (cmat.det d (cmat.frame_compression N d H U (cmat.compressed_image N M (kk : ℝ) H U G)))) ≤ B ^ d
+  have hGuf : cmat.det d (cmat.cross_gram N (cmat.map f H) (cmat.map f U) (cmat.map f U)) ≠ complex.zero
+    rw [← cmat.map_cross_gram f hf K hc N H U U hU, ← cfield_aut.det f hf d (cmat.cross_gram N H U U)]
+    exact cfield_aut.ne_zero f hf (cmat.det d (cmat.cross_gram N H U U)) hGu
+  rw [cfield_aut.det_frame_compression f hf K hc N d H U (cmat.compressed_image N M (kk : ℝ) H U G) hU, cmat.map_compressed_image f hf K hc N M kk H U G hG]
+  obtain ⟨him, h0, hle⟩ := cmat.frame_compression_arch_det_le N M d (kk : ℝ) B (cmat.map f H) (cmat.map f U) (cmat.map f G) (cast_nonneg.real kk) hB hHf hGuf hopf
+  exact complex.abs_le_of_real_nonneg (cmat.det d (cmat.frame_compression N d (cmat.map f H) (cmat.map f U) (cmat.compressed_image N M (kk : ℝ) (cmat.map f H) (cmat.map f U) (cmat.map f G)))) (B ^ d) him h0 hle
+
+#axioms cmat.frame_compression_arch_det_le
+#axioms cfield_aut.abs_det_frame_compression_le

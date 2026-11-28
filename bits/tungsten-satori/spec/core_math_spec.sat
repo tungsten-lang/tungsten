@@ -8,6 +8,7 @@ import algebra.bourbaki_witt
 import algebra.char_p_frobenius
 import algebra.cholesky_hadamard
 import algebra.compressed_gram
+import algebra.dyad_spread
 import algebra.finite_fourier
 import algebra.finite_weil
 import algebra.frame_transport
@@ -16,6 +17,7 @@ import algebra.local_operator_denominator
 import algebra.gram_legendre
 import algebra.hilbert_comparison
 import algebra.polynomial_fermat
+import algebra.smith_hecke
 import algebra.spectral_det
 import algebra.ultrametric_fourier
 import algebra.valuation_torsion
@@ -165,3 +167,16 @@ import tested_denominators
 #axioms height_le.pow
 #axioms height_le.of_ratio
 #axioms prime_segment.enumerate
+#axioms cmat.bessel_sum_norm_sq_le
+#axioms cmat.hs_inner_dyad_eq
+#axioms cmat.hs_cauchy_schwarz
+#axioms cmat.finrank_sub_le_re_inner_dyad_sum
+#axioms cmat.exists_translate_dim_le_of_second_moment
+#axioms spread.exists_few_translates
+#axioms cmat.smith_normal_form_of_ultrametric
+#axioms cmat.ultrametric_det_eq_prod_smith
+#axioms cmat.exists_symm_unit_of_ultrametric
+#axioms cmat.ultrametric_vec_clear
+#axioms hecke.bi_inv_transpose_eq
+#axioms hecke.gelfand_convolution_comm
+#axioms hecke.gelfand_adjoint_sum

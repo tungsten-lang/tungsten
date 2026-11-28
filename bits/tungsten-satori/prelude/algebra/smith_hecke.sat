@@ -1,0 +1,1263 @@
+-- Constructive Smith Normal Form over Arbitrary Ultrametric Valuation Rings
+-- `O_v = {z ∈ ℂ | v z ≤ 1}`, Unimodular Symmetry `g^T = (k^T)^{-1} g k`,
+-- Column-Clearing / Vector Reduction, and Gelfand's Trick for Spherical Hecke
+-- Commutativity & Adjoints (`Lib/General/LinearAlgebra/ColumnLattices.lean`).
+--
+-- Proved unconditionally on Satori's HOL kernel (0 custom axioms).
+
+import algebra.hilbert_comparison
+
+-- ====================================================================================
+-- SECTION 1: VALUATION-INTEGRAL MATRICES `O_v`, `GL_n(O_v)`, DIAGONALS, & TRANSPOSE
+-- ====================================================================================
+
+-> cmat.diag (d : ℕ → ℂ) (i j : ℕ) : ℂ :=
+  if i = j then d i else complex.zero
+
+-> cmat.eq_on (n : ℕ) (A B : ℕ → ℕ → ℂ) : Prop :=
+  ∀ i < n, ∀ j < n, A i j = B i j
+
+-> cmat.is_val_int (v : ℂ → ℝ) (n : ℕ) (A : ℕ → ℕ → ℂ) : Prop :=
+  ∀ i < n, ∀ j < n, v (A i j) ≤ 1
+
+-> cmat.is_val_gl (v : ℂ → ℝ) (n : ℕ) (K : ℕ → ℕ → ℂ) : Prop :=
+  cmat.is_val_int v n K ∧
+  ∃ K_inv : ℕ → ℕ → ℂ,
+    cmat.is_val_int v n K_inv ∧
+    cmat.eq_on n (cmat.mul n K K_inv) cmat.id ∧
+    cmat.eq_on n (cmat.mul n K_inv K) cmat.id
+
++ cmat.eq_on_refl (n : ℕ) (A : ℕ → ℕ → ℂ) : cmat.eq_on n A A
+  unfold cmat.eq_on; intro i _ j; trivial
+
++ cmat.eq_on_symm (n : ℕ) (A B : ℕ → ℕ → ℂ) (h : cmat.eq_on n A B) : cmat.eq_on n B A
+  unfold cmat.eq_on at h ⊢; intro i hi j hj; exact (h i hi j hj).symm
+
++ cmat.eq_on_trans (n : ℕ) (A B C : ℕ → ℕ → ℂ) (h1 : cmat.eq_on n A B) (h2 : cmat.eq_on n B C) :
+    cmat.eq_on n A C
+  unfold cmat.eq_on at h1 h2 ⊢; intro i hi j hj; rw [h1 i hi j hj, h2 i hi j hj]
+
++ cmat.mul_eq_on (n : ℕ) (A A' B B' : ℕ → ℕ → ℂ)
+    (hA : cmat.eq_on n A A') (hB : cmat.eq_on n B B') :
+    cmat.eq_on n (cmat.mul n A B) (cmat.mul n A' B')
+  unfold cmat.eq_on at hA hB ⊢; intro i hi j hj
+  rw [cmat.mul_congr_left n A A' B i j (by intro k hk; exact hA i hi k hk)]
+  exact cmat.mul_congr_right n A' B B' i j (by intro k hk; exact hB k hk j hj)
+
++ cmat.is_val_int_congr (v : ℂ → ℝ) (n : ℕ) (A B : ℕ → ℕ → ℂ)
+    (hAB : cmat.eq_on n A B) (hA : cmat.is_val_int v n A) : cmat.is_val_int v n B
+  unfold cmat.eq_on at hAB; unfold cmat.is_val_int at hA ⊢
+  intro i hi j hj; rw [← hAB i hi j hj]; exact hA i hi j hj
+
++ cmat.is_val_int_id (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ) :
+    cmat.is_val_int v n cmat.id
+  unfold cmat.is_val_int; intro i _ j _; unfold cmat.id
+  by_cases hij : i = j
+  · rw [if_pos hij, hv.1.2.1]; linarith
+  · rw [if_neg hij, hv.1.1]; linarith
+
++ cmat.is_val_int_mul_bound (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (A B : ℕ → ℕ → ℂ) (R1 R2 : ℝ) (hR1 : 0 ≤ R1) (hR2 : 0 ≤ R2)
+    (hA : ∀ i < n, ∀ j < n, v (A i j) ≤ R1)
+    (hB : ∀ i < n, ∀ j < n, v (B i j) ≤ R2) :
+    ∀ i < n, ∀ j < n, v (cmat.mul n A B i j) ≤ R1 * R2
+  intro i hi j hj; unfold cmat.mul
+  apply is_ultrametric_norm.csum_le v hv n _ (R1 * R2) (mul_nonneg.real R1 R2 hR1 hR2)
+  intro k hk
+  rw [hv.1.2.2.2]
+  have hm1 := mul_le_mul_of_nonneg_right.real (v (A i k)) R1 (v (B k j)) (hA i hi k hk) (hv.1.2.2.1 (B k j))
+  have hm2 := mul_le_mul_of_nonneg_left.real (v (B k j)) R2 R1 (hB k hk j hj) hR1
+  linarith
+
++ cmat.is_val_int_mul (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (A B : ℕ → ℕ → ℂ) (hA : cmat.is_val_int v n A) (hB : cmat.is_val_int v n B) :
+    cmat.is_val_int v n (cmat.mul n A B)
+  unfold cmat.is_val_int at hA hB ⊢
+  intro i hi j hj
+  have h := cmat.is_val_int_mul_bound v hv n A B 1 1 (by linarith) (by linarith) hA hB i hi j hj
+  linarith
+
++ cmat.transpose_transpose (A : ℕ → ℕ → ℂ) (i j : ℕ) :
+    cmat.transpose (cmat.transpose A) i j = A i j
+  unfold cmat.transpose; trivial
+
++ cmat.id_symm (i j : ℕ) : cmat.id j i = cmat.id i j
+  unfold cmat.id
+  by_cases hij : i = j
+  · rw [if_pos hij.symm, if_pos hij]
+  · rw [if_neg (by omega), if_neg hij]
+
++ cmat.transpose_id (i j : ℕ) : cmat.transpose cmat.id i j = cmat.id i j
+  unfold cmat.transpose; exact cmat.id_symm i j
+
++ cmat.transpose_diag (d : ℕ → ℂ) (i j : ℕ) : cmat.transpose (cmat.diag d) i j = cmat.diag d i j
+  unfold cmat.transpose cmat.diag
+  by_cases hij : i = j
+  · rw [if_pos hij.symm, if_pos hij, hij]
+  · rw [if_neg (by omega), if_neg hij]
+
++ cmat.transpose_mul (n : ℕ) (A B : ℕ → ℕ → ℂ) (i j : ℕ) :
+    cmat.transpose (cmat.mul n A B) i j = cmat.mul n (cmat.transpose B) (cmat.transpose A) i j
+  unfold cmat.transpose cmat.mul
+  apply csum.congr; intro k _; exact complex.mul_comm (A j k) (B k i)
+
++ cmat.transpose_eq_on (n : ℕ) (A B : ℕ → ℕ → ℂ) (h : cmat.eq_on n A B) :
+    cmat.eq_on n (cmat.transpose A) (cmat.transpose B)
+  unfold cmat.eq_on at h ⊢; intro i hi j hj; unfold cmat.transpose; exact h j hj i hi
+
++ cmat.is_val_int_transpose (v : ℂ → ℝ) (n : ℕ) (A : ℕ → ℕ → ℂ) (hA : cmat.is_val_int v n A) :
+    cmat.is_val_int v n (cmat.transpose A)
+  unfold cmat.is_val_int at hA ⊢; intro i hi j hj; unfold cmat.transpose; exact hA j hj i hi
+
++ cmat.is_val_gl_congr (v : ℂ → ℝ) (n : ℕ) (A B : ℕ → ℕ → ℂ)
+    (hAB : cmat.eq_on n A B) (hA : cmat.is_val_gl v n A) : cmat.is_val_gl v n B
+  unfold cmat.is_val_gl at hA ⊢
+  obtain ⟨hA_int, Ai, hAi_int, hAAi, hAiA⟩ := hA
+  refine ⟨cmat.is_val_int_congr v n A B hAB hA_int, Ai, hAi_int, ?_, ?_⟩
+  · exact cmat.eq_on_trans n _ _ _ (cmat.mul_eq_on n B A Ai Ai (cmat.eq_on_symm n A B hAB) (cmat.eq_on_refl n Ai)) hAAi
+  · exact cmat.eq_on_trans n _ _ _ (cmat.mul_eq_on n Ai Ai B A (cmat.eq_on_refl n Ai) (cmat.eq_on_symm n A B hAB)) hAiA
+
++ cmat.is_val_gl_id (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ) :
+    cmat.is_val_gl v n cmat.id
+  unfold cmat.is_val_gl
+  refine ⟨cmat.is_val_int_id v hv n, cmat.id, cmat.is_val_int_id v hv n, ?_, ?_⟩
+  · unfold cmat.eq_on; intro i _ j hj; exact cmat.mul_id_right n cmat.id i j hj
+  · unfold cmat.eq_on; intro i _ j hj; exact cmat.mul_id_right n cmat.id i j hj
+
++ cmat.is_val_gl_mul (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (K1 K2 : ℕ → ℕ → ℂ) (h1 : cmat.is_val_gl v n K1) (h2 : cmat.is_val_gl v n K2) :
+    cmat.is_val_gl v n (cmat.mul n K1 K2)
+  unfold cmat.is_val_gl at h1 h2 ⊢
+  obtain ⟨h1_int, K1i, h1i_int, h1R, h1L⟩ := h1
+  obtain ⟨h2_int, K2i, h2i_int, h2R, h2L⟩ := h2
+  refine ⟨cmat.is_val_int_mul v hv n K1 K2 h1_int h2_int, cmat.mul n K2i K1i, cmat.is_val_int_mul v hv n K2i K1i h2i_int h1i_int, ?_, ?_⟩
+  · unfold cmat.eq_on at h1R h2R ⊢; intro i hi j hj
+    rw [cmat.mul_assoc n K1 K2 (cmat.mul n K2i K1i) i j]
+    have hmid : ∀ k < n, cmat.mul n K2 (cmat.mul n K2i K1i) k j = K1i k j
+      intro k hk
+      rw [← cmat.mul_assoc n K2 K2i K1i k j]
+      rw [cmat.mul_congr_left n (cmat.mul n K2 K2i) cmat.id K1i k j (by intro t ht; exact h2R k hk t ht)]
+      exact cmat.mul_id_left n K1i k j hk
+    rw [cmat.mul_congr_right n K1 _ K1i i j hmid]
+    exact h1R i hi j hj
+  · unfold cmat.eq_on at h1L h2L ⊢; intro i hi j hj
+    rw [cmat.mul_assoc n K2i K1i (cmat.mul n K1 K2) i j]
+    have hmid : ∀ k < n, cmat.mul n K1i (cmat.mul n K1 K2) k j = K2 k j
+      intro k hk
+      rw [← cmat.mul_assoc n K1i K1 K2 k j]
+      rw [cmat.mul_congr_left n (cmat.mul n K1i K1) cmat.id K2 k j (by intro t ht; exact h1L k hk t ht)]
+      exact cmat.mul_id_left n K2 k j hk
+    rw [cmat.mul_congr_right n K2i _ K2 i j hmid]
+    exact h2L i hi j hj
+
++ cmat.is_val_gl_transpose (v : ℂ → ℝ) (n : ℕ) (K : ℕ → ℕ → ℂ) (hK : cmat.is_val_gl v n K) :
+    cmat.is_val_gl v n (cmat.transpose K)
+  unfold cmat.is_val_gl at hK ⊢
+  obtain ⟨hK_int, Ki, hKi_int, hKR, hKL⟩ := hK
+  refine ⟨cmat.is_val_int_transpose v n K hK_int, cmat.transpose Ki, cmat.is_val_int_transpose v n Ki hKi_int, ?_, ?_⟩
+  · unfold cmat.eq_on at hKL ⊢; intro i hi j hj
+    rw [← cmat.transpose_mul n Ki K i j]; unfold cmat.transpose; rw [hKL j hj i hi, cmat.id_symm]
+  · unfold cmat.eq_on at hKR ⊢; intro i hi j hj
+    rw [← cmat.transpose_mul n K Ki i j]; unfold cmat.transpose; rw [hKR j hj i hi, cmat.id_symm]
+
++ cmat.is_val_gl_det_eq_one (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (K : ℕ → ℕ → ℂ) (hK : cmat.is_val_gl v n K) :
+    v (cmat.det n K) = 1
+  unfold cmat.is_val_gl at hK
+  obtain ⟨hK_int, Ki, hKi_int, hKR, _⟩ := hK
+  have h1 : v (cmat.det n K) ≤ 1
+    have h := is_ultrametric_norm.det_le v hv n K 1 (by linarith) hK_int
+    have h1n : ∀ m : ℕ, (1 : ℝ) ^ m = 1
+      intro m; induction m with r ihr; (exact pow_zero.real 1); (rw [succ_eq_add_one.nat, pow_succ.real, ihr]; ring)
+    rw [h1n n] at h; exact h
+  have h2 : v (cmat.det n Ki) ≤ 1
+    have h := is_ultrametric_norm.det_le v hv n Ki 1 (by linarith) hKi_int
+    have h1n : ∀ m : ℕ, (1 : ℝ) ^ m = 1
+      intro m; induction m with r ihr; (exact pow_zero.real 1); (rw [succ_eq_add_one.nat, pow_succ.real, ihr]; ring)
+    rw [h1n n] at h; exact h
+  have hprod : v (cmat.det n K) * v (cmat.det n Ki) = 1
+    rw [← hv.1.2.2.2, ← cmat.det_mul, cmat.det_congr n (cmat.mul n K Ki) cmat.id hKR, cmat.det_id, hv.1.2.1]
+  have hnn1 := hv.1.2.2.1 (cmat.det n K)
+  have hnn2 := hv.1.2.2.1 (cmat.det n Ki)
+  nlinarith
+
++ cmat.is_val_gl_det_ne_zero (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (K : ℕ → ℕ → ℂ) (hK : cmat.is_val_gl v n K) :
+    cmat.det n K ≠ complex.zero
+  intro h0
+  have h1 := cmat.is_val_gl_det_eq_one v hv n K hK
+  rw [h0, hv.1.1] at h1; linarith
+
++ cmat.inv_eq_of_mul_id (n : ℕ) (A B : ℕ → ℕ → ℂ)
+    (hdet : cmat.det n A ≠ complex.zero)
+    (hAB : cmat.eq_on n (cmat.mul n A B) cmat.id) :
+    cmat.eq_on n B (cmat.inv n A)
+  unfold cmat.eq_on at hAB ⊢; intro i hi j hj
+  calc B i j = cmat.mul n cmat.id B i j := (cmat.mul_id_left n B i j hi).symm
+    _ = cmat.mul n (cmat.mul n (cmat.inv n A) A) B i j := cmat.mul_congr_left n cmat.id (cmat.mul n (cmat.inv n A) A) B i j (by intro k hk; exact (cmat.inv_mul_eq_id n A hdet i hi k hk).symm)
+    _ = cmat.mul n (cmat.inv n A) (cmat.mul n A B) i j := cmat.mul_assoc n (cmat.inv n A) A B i j
+    _ = cmat.mul n (cmat.inv n A) cmat.id i j := cmat.mul_congr_right n (cmat.inv n A) (cmat.mul n A B) cmat.id i j (by intro k hk; exact hAB k hk j hj)
+    _ = cmat.inv n A i j := cmat.mul_id_right n (cmat.inv n A) i j hj
+
++ cmat.inv_congr (n : ℕ) (A B : ℕ → ℕ → ℂ) (hAB : cmat.eq_on n A B) (hdetA : cmat.det n A ≠ complex.zero) :
+    cmat.eq_on n (cmat.inv n A) (cmat.inv n B)
+  unfold cmat.eq_on at hAB
+  have hdetB : cmat.det n B ≠ complex.zero := by rw [← cmat.det_congr n A B hAB]; exact hdetA
+  apply cmat.inv_eq_of_mul_id n B (cmat.inv n A) hdetB
+  unfold cmat.eq_on; intro i hi j hj
+  rw [cmat.mul_congr_left n B A (cmat.inv n A) i j (by intro k hk; exact (hAB i hi k hk).symm)]
+  exact cmat.mul_inv_eq_id n A hdetA i hi j hj
+
++ cmat.inv_transpose_eq (n : ℕ) (A : ℕ → ℕ → ℂ) (hdet : cmat.det n A ≠ complex.zero) :
+    cmat.eq_on n (cmat.transpose (cmat.inv n A)) (cmat.inv n (cmat.transpose A))
+  have hdetT : cmat.det n (cmat.transpose A) ≠ complex.zero := by rw [cmat.det_transpose]; exact hdet
+  apply cmat.inv_eq_of_mul_id n (cmat.transpose A) (cmat.transpose (cmat.inv n A)) hdetT
+  unfold cmat.eq_on; intro i hi j hj
+  rw [← cmat.transpose_mul n (cmat.inv n A) A i j]; unfold cmat.transpose
+  rw [cmat.inv_mul_eq_id n A hdet j hj i hi, cmat.id_symm]
+
++ cmat.inv_mul_eq (n : ℕ) (A B : ℕ → ℕ → ℂ)
+    (hA : cmat.det n A ≠ complex.zero) (hB : cmat.det n B ≠ complex.zero) :
+    cmat.eq_on n (cmat.mul n (cmat.inv n B) (cmat.inv n A)) (cmat.inv n (cmat.mul n A B))
+  have hAB : cmat.det n (cmat.mul n A B) ≠ complex.zero
+    rw [cmat.det_mul]; intro hz
+    have hns : complex.norm_sq (complex.mul (cmat.det n A) (cmat.det n B)) = 0 := by rw [hz]; unfold complex.norm_sq; simp
+    rw [complex.norm_sq_mul] at hns
+    have ha := complex.norm_sq_pos (cmat.det n A) hA
+    have hb := complex.norm_sq_pos (cmat.det n B) hB
+    nlinarith
+  apply cmat.inv_eq_of_mul_id n (cmat.mul n A B) (cmat.mul n (cmat.inv n B) (cmat.inv n A)) hAB
+  unfold cmat.eq_on; intro i hi j hj
+  rw [cmat.mul_assoc n A B (cmat.mul n (cmat.inv n B) (cmat.inv n A)) i j]
+  have hmid : ∀ k < n, cmat.mul n B (cmat.mul n (cmat.inv n B) (cmat.inv n A)) k j = cmat.inv n A k j
+    intro k hk
+    rw [← cmat.mul_assoc n B (cmat.inv n B) (cmat.inv n A) k j]
+    rw [cmat.mul_congr_left n (cmat.mul n B (cmat.inv n B)) cmat.id (cmat.inv n A) k j (by intro t ht; exact cmat.mul_inv_eq_id n B hB k hk t ht)]
+    exact cmat.mul_id_left n (cmat.inv n A) k j hk
+  rw [cmat.mul_congr_right n A _ (cmat.inv n A) i j hmid]
+  exact cmat.mul_inv_eq_id n A hA i hi j hj
+
++ cmat.inv_inv_eq (n : ℕ) (A : ℕ → ℕ → ℂ) (hA : cmat.det n A ≠ complex.zero) :
+    cmat.eq_on n A (cmat.inv n (cmat.inv n A))
+  have hAi : cmat.det n (cmat.inv n A) ≠ complex.zero
+    rw [cmat.det_inv n A hA]; intro hz
+    have h1 := complex.mul_inv_cancel (cmat.det n A) hA
+    rw [hz, complex.mul_zero_r] at h1
+    have hre : complex.re complex.zero = complex.re complex.one := by rw [h1]
+    simp at hre
+  apply cmat.inv_eq_of_mul_id n (cmat.inv n A) A hAi
+  unfold cmat.eq_on; intro i hi j hj; exact cmat.inv_mul_eq_id n A hA i hi j hj
+
++ cmat.is_val_gl_inv (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (K : ℕ → ℕ → ℂ) (hK : cmat.is_val_gl v n K) :
+    cmat.is_val_gl v n (cmat.inv n K)
+  have hdet := cmat.is_val_gl_det_ne_zero v hv n K hK
+  unfold cmat.is_val_gl at hK ⊢
+  obtain ⟨hK_int, Ki, hKi_int, hKR, _⟩ := hK
+  have hKi_eq := cmat.inv_eq_of_mul_id n K Ki hdet hKR
+  refine ⟨cmat.is_val_int_congr v n Ki (cmat.inv n K) hKi_eq hKi_int, K, hK_int, ?_, ?_⟩
+  · unfold cmat.eq_on; intro i hi j hj; exact cmat.inv_mul_eq_id n K hdet i hi j hj
+  · unfold cmat.eq_on; intro i hi j hj; exact cmat.mul_inv_eq_id n K hdet i hi j hj
+
++ cmat.det_diag (n : ℕ) (d : ℕ → ℂ) :
+    cmat.det n (cmat.diag d) = cprod_c n d
+  induction n with r ihr
+  · rw [cmat.det_zero_eq, cprod_c.zero_eq]
+  · rw [succ_eq_add_one.nat, cprod_c.succ_eq]
+    have hcol : ∀ i < r, cmat.diag d i r = complex.zero
+      intro i hi; unfold cmat.diag; rw [if_neg (by omega)]
+    rw [cmat.det_block_lower r (cmat.diag d) hcol, ihr]
+    have hd : cmat.diag d r r = d r := by unfold cmat.diag; simp
+    rw [hd, complex.mul_comm]
+
+-- ====================================================================================
+-- SECTION 2: ELEMENTARY `GL_n(O_v)` MATRICES (SWAP, BLOCK-EXT, LAST-ROW/COL ELIM)
+-- ====================================================================================
+
+-> swap_idx (a b i : ℕ) : ℕ :=
+  if i = a then b else if i = b then a else i
+
+-> cmat.swap_mat (a b i j : ℕ) : ℂ :=
+  if i = swap_idx a b j then complex.one else complex.zero
+
+-> cmat.block_ext (n : ℕ) (K : ℕ → ℕ → ℂ) (i j : ℕ) : ℂ :=
+  if i < n ∧ j < n then K i j else if i = n ∧ j = n then complex.one else complex.zero
+
+-> cmat.elim_col_last (n : ℕ) (w : ℕ → ℂ) (i j : ℕ) : ℂ :=
+  if i = j then complex.one else if i < n ∧ j = n then w i else complex.zero
+
+-> cmat.elim_row_last (n : ℕ) (u : ℕ → ℂ) (i j : ℕ) : ℂ :=
+  cmat.transpose (cmat.elim_col_last n u) i j
+
++ swap_idx.involution (a b i : ℕ) : swap_idx a b (swap_idx a b i) = i
+  unfold swap_idx
+  by_cases hia : i = a
+  · rw [if_pos hia]
+    by_cases hba : b = a
+    · rw [if_pos hba]; omega
+    · rw [if_neg hba]; simp; omega
+  · rw [if_neg hia]
+    by_cases hib : i = b
+    · rw [if_pos hib]; simp; omega
+    · rw [if_neg hib, if_neg hia, if_neg hib]
+
++ swap_idx.lt (m a b i : ℕ) (ha : a < m) (hb : b < m) (hi : i < m) : swap_idx a b i < m
+  unfold swap_idx
+  by_cases hia : i = a
+  · rw [if_pos hia]; exact hb
+  · rw [if_neg hia]
+    by_cases hib : i = b
+    · rw [if_pos hib]; exact ha
+    · rw [if_neg hib]; exact hi
+
++ cmat.mul_swap_left (m a b : ℕ) (ha : a < m) (hb : b < m) (A : ℕ → ℕ → ℂ) (i j : ℕ) (hi : i < m) :
+    cmat.mul m (cmat.swap_mat a b) A i j = A (swap_idx a b i) j
+  unfold cmat.mul cmat.swap_mat
+  have h1 : csum m (fun k => complex.mul (if i = swap_idx a b k then complex.one else complex.zero) (A k j)) =
+      csum m (fun k => if k = swap_idx a b i then A k j else complex.zero)
+    apply csum.congr; intro k _
+    by_cases hk : k = swap_idx a b i
+    · have hik : i = swap_idx a b k := by rw [hk, swap_idx.involution]
+      rw [if_pos hik, if_pos hk, complex.mul_one_l]
+    · have hik : i ≠ swap_idx a b k
+        intro heq; apply hk; rw [heq, swap_idx.involution]
+      rw [if_neg hik, if_neg hk, complex.mul_zero_l]
+  rw [h1, csum.single m (swap_idx a b i) (fun k => A k j) (swap_idx.lt m a b i ha hb hi)]
+
++ cmat.mul_swap_right (m a b : ℕ) (ha : a < m) (hb : b < m) (A : ℕ → ℕ → ℂ) (i j : ℕ) (hj : j < m) :
+    cmat.mul m A (cmat.swap_mat a b) i j = A i (swap_idx a b j)
+  unfold cmat.mul cmat.swap_mat
+  have h1 : csum m (fun k => complex.mul (A i k) (if k = swap_idx a b j then complex.one else complex.zero)) =
+      csum m (fun k => if k = swap_idx a b j then A i k else complex.zero)
+    apply csum.congr; intro k _
+    by_cases hk : k = swap_idx a b j
+    · rw [if_pos hk, if_pos hk, complex.mul_one_r]
+    · rw [if_neg hk, if_neg hk, complex.mul_zero_r]
+  rw [h1, csum.single m (swap_idx a b j) (fun k => A i k) (swap_idx.lt m a b j ha hb hj)]
+
++ cmat.is_val_gl_swap (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (m a b : ℕ) (ha : a < m) (hb : b < m) :
+    cmat.is_val_gl v m (cmat.swap_mat a b)
+  have hint : cmat.is_val_int v m (cmat.swap_mat a b)
+    unfold cmat.is_val_int cmat.swap_mat; intro i _ j _
+    by_cases h : i = swap_idx a b j
+    · rw [if_pos h, hv.1.2.1]; linarith
+    · rw [if_neg h, hv.1.1]; linarith
+  have hsq : cmat.eq_on m (cmat.mul m (cmat.swap_mat a b) (cmat.swap_mat a b)) cmat.id
+    unfold cmat.eq_on; intro i hi j _
+    rw [cmat.mul_swap_left m a b ha hb (cmat.swap_mat a b) i j hi]
+    unfold cmat.swap_mat cmat.id
+    by_cases hij : i = j
+    · rw [hij]; simp
+    · have hne : swap_idx a b i ≠ swap_idx a b j
+        intro heq; apply hij
+        have h1 := swap_idx.involution a b i
+        have h2 := swap_idx.involution a b j
+        rw [← h1, heq, h2]
+      rw [if_neg hne, if_neg hij]
+  unfold cmat.is_val_gl
+  exact ⟨hint, cmat.swap_mat a b, hint, hsq, hsq⟩
+
++ cmat.block_ext_mul (n : ℕ) (A B : ℕ → ℕ → ℂ) :
+    cmat.eq_on (n + 1) (cmat.mul (n + 1) (cmat.block_ext n A) (cmat.block_ext n B)) (cmat.block_ext n (cmat.mul n A B))
+  unfold cmat.eq_on; intro i hi j hj
+  unfold cmat.mul; rw [csum.succ]
+  by_cases hin : i < n
+  · by_cases hjn : j < n
+    · have hlast : complex.mul (cmat.block_ext n A i n) (cmat.block_ext n B n j) = complex.zero
+        unfold cmat.block_ext
+        rw [if_neg (by omega), if_neg (by omega), complex.mul_zero_l]
+      have hhead : csum n (fun k => complex.mul (cmat.block_ext n A i k) (cmat.block_ext n B k j)) = csum n (fun k => complex.mul (A i k) (B k j))
+        apply csum.congr; intro k hk; unfold cmat.block_ext
+        rw [if_pos ⟨hin, hk⟩, if_pos ⟨hk, hjn⟩]
+      rw [hhead, hlast, complex.add_zero_r]; unfold cmat.block_ext; rw [if_pos ⟨hin, hjn⟩]; unfold cmat.mul; trivial
+    · have hjn_eq : j = n := by omega
+      have hlast : complex.mul (cmat.block_ext n A i n) (cmat.block_ext n B n j) = complex.zero
+        unfold cmat.block_ext; rw [if_neg (by omega), if_neg (by omega), complex.mul_zero_l]
+      have hhead : csum n (fun k => complex.mul (cmat.block_ext n A i k) (cmat.block_ext n B k j)) = complex.zero
+        apply csum.zero_of_all_zero; intro k hk
+        have hb0 : cmat.block_ext n B k j = complex.zero
+          unfold cmat.block_ext; rw [if_neg (by omega), if_neg (by omega)]
+        rw [hb0, complex.mul_zero_r]
+      rw [hhead, hlast, complex.add_zero_l]; unfold cmat.block_ext; rw [if_neg (by omega), if_neg (by omega)]
+  · have hin_eq : i = n := by omega
+    by_cases hjn : j < n
+    · have hlast : complex.mul (cmat.block_ext n A i n) (cmat.block_ext n B n j) = complex.zero
+        have hb0 : cmat.block_ext n B n j = complex.zero
+          unfold cmat.block_ext; rw [if_neg (by omega), if_neg (by omega)]
+        rw [hb0, complex.mul_zero_r]
+      have hhead : csum n (fun k => complex.mul (cmat.block_ext n A i k) (cmat.block_ext n B k j)) = complex.zero
+        apply csum.zero_of_all_zero; intro k hk
+        have ha0 : cmat.block_ext n A i k = complex.zero
+          unfold cmat.block_ext; rw [if_neg (by omega), if_neg (by omega)]
+        rw [ha0, complex.mul_zero_l]
+      rw [hhead, hlast, complex.add_zero_l]; unfold cmat.block_ext; rw [if_neg (by omega), if_neg (by omega)]
+    · have hjn_eq : j = n := by omega
+      have hhead : csum n (fun k => complex.mul (cmat.block_ext n A i k) (cmat.block_ext n B k j)) = complex.zero
+        apply csum.zero_of_all_zero; intro k hk
+        have ha0 : cmat.block_ext n A i k = complex.zero
+          unfold cmat.block_ext; rw [if_neg (by omega), if_neg (by omega)]
+        rw [ha0, complex.mul_zero_l]
+      have hlast : complex.mul (cmat.block_ext n A i n) (cmat.block_ext n B n j) = complex.one
+        have ha1 : cmat.block_ext n A i n = complex.one
+          rw [hin_eq]; unfold cmat.block_ext; rw [if_neg (by omega)]; unfold complex.one; trivial
+        have hb1 : cmat.block_ext n B n j = complex.one
+          rw [hjn_eq]; unfold cmat.block_ext; rw [if_neg (by omega)]; unfold complex.one; trivial
+        rw [ha1, hb1, complex.mul_one_l]
+      rw [hhead, hlast, complex.add_zero_l, hin_eq, hjn_eq]; unfold cmat.block_ext
+      rw [if_neg (by omega)]; unfold complex.one; trivial
+
++ cmat.is_val_gl_block_ext (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (K : ℕ → ℕ → ℂ) (hK : cmat.is_val_gl v n K) :
+    cmat.is_val_gl v (n + 1) (cmat.block_ext n K)
+  unfold cmat.is_val_gl at hK ⊢
+  obtain ⟨hK_int, Ki, hKi_int, hKR, hKL⟩ := hK
+  have hext_int : ∀ A : ℕ → ℕ → ℂ, cmat.is_val_int v n A → cmat.is_val_int v (n + 1) (cmat.block_ext n A)
+    intro A hA; unfold cmat.is_val_int at hA ⊢; intro i hi j hj; unfold cmat.block_ext
+    by_cases h1 : i < n ∧ j < n
+    · rw [if_pos h1]; exact hA i h1.1 j h1.2
+    · rw [if_neg h1]
+      by_cases h2 : i = n ∧ j = n
+      · rw [if_pos h2, hv.1.2.1]; linarith
+      · rw [if_neg h2, hv.1.1]; linarith
+  have hext_id : cmat.eq_on (n + 1) (cmat.block_ext n cmat.id) cmat.id
+    unfold cmat.eq_on; intro i hi j hj; unfold cmat.block_ext
+    by_cases h1 : i < n ∧ j < n
+    · rw [if_pos h1]
+    · rw [if_neg h1]
+      by_cases h2 : i = n ∧ j = n
+      · rw [if_pos h2]; unfold cmat.id; rw [if_pos (by omega)]
+      · rw [if_neg h2]; unfold cmat.id
+        have hne : i ≠ j
+          intro hij
+          by_cases hin : i < n
+          · apply h1; exact ⟨hin, by omega⟩
+          · apply h2; exact ⟨by omega, by omega⟩
+        rw [if_neg hne]
+  have hext_congr : ∀ A B : ℕ → ℕ → ℂ, cmat.eq_on n A B → cmat.eq_on (n + 1) (cmat.block_ext n A) (cmat.block_ext n B)
+    intro A B hAB; unfold cmat.eq_on at hAB ⊢; intro i hi j hj; unfold cmat.block_ext
+    by_cases h1 : i < n ∧ j < n
+    · rw [if_pos h1, if_pos h1, hAB i h1.1 j h1.2]
+    · rw [if_neg h1, if_neg h1]
+  refine ⟨hext_int K hK_int, cmat.block_ext n Ki, hext_int Ki hKi_int, ?_, ?_⟩
+  · exact cmat.eq_on_trans (n + 1) _ _ _ (cmat.block_ext_mul n K Ki) (cmat.eq_on_trans (n + 1) _ _ _ (hext_congr _ _ hKR) hext_id)
+  · exact cmat.eq_on_trans (n + 1) _ _ _ (cmat.block_ext_mul n Ki K) (cmat.eq_on_trans (n + 1) _ _ _ (hext_congr _ _ hKL) hext_id)
+
++ cmat.mul_elim_col_last_left (n : ℕ) (w : ℕ → ℂ) (A : ℕ → ℕ → ℂ) (i j : ℕ) (hi : i < n + 1) :
+    cmat.mul (n + 1) (cmat.elim_col_last n w) A i j =
+    if i < n then complex.add (A i j) (complex.mul (w i) (A n j)) else A n j
+  unfold cmat.mul; rw [csum.succ]
+  by_cases hin : i < n
+  · rw [if_pos hin]
+    have hhead : csum n (fun k => complex.mul (cmat.elim_col_last n w i k) (A k j)) = A i j
+      have h1 : csum n (fun k => complex.mul (cmat.elim_col_last n w i k) (A k j)) =
+          csum n (fun k => if k = i then A k j else complex.zero)
+        apply csum.congr; intro k hk; unfold cmat.elim_col_last
+        by_cases hki : k = i
+        · rw [if_pos hki.symm, if_pos hki, complex.mul_one_l]
+        · rw [if_neg (by omega), if_neg (by omega), if_neg hki, complex.mul_zero_l]
+      rw [h1, csum.single n i (fun k => A k j) hin]
+    have hlast : cmat.elim_col_last n w i n = w i
+      unfold cmat.elim_col_last; rw [if_neg (by omega), if_pos hin]
+    rw [hhead, hlast]
+  · rw [if_neg hin]
+    have hin_eq : i = n := by omega
+    have hhead : csum n (fun k => complex.mul (cmat.elim_col_last n w i k) (A k j)) = complex.zero
+      apply csum.zero_of_all_zero; intro k hk; unfold cmat.elim_col_last
+      rw [if_neg (by omega), if_neg (by omega), complex.mul_zero_l]
+    have hlast : cmat.elim_col_last n w i n = complex.one
+      unfold cmat.elim_col_last; rw [hin_eq]; simp; unfold complex.one; trivial
+    rw [hhead, hlast, complex.add_zero_l, complex.mul_one_l]
+
++ cmat.mul_elim_row_last_right (n : ℕ) (u : ℕ → ℂ) (A : ℕ → ℕ → ℂ) (i j : ℕ) (hj : j < n + 1) :
+    cmat.mul (n + 1) A (cmat.elim_row_last n u) i j =
+    if j < n then complex.add (A i j) (complex.mul (A i n) (u j)) else A i n
+  unfold cmat.mul; rw [csum.succ]
+  by_cases hjn : j < n
+  · rw [if_pos hjn]
+    have hhead : csum n (fun k => complex.mul (A i k) (cmat.elim_row_last n u k j)) = A i j
+      have h1 : csum n (fun k => complex.mul (A i k) (cmat.elim_row_last n u k j)) =
+          csum n (fun k => if k = j then A i k else complex.zero)
+        apply csum.congr; intro k hk; unfold cmat.elim_row_last cmat.transpose cmat.elim_col_last
+        by_cases hkj : k = j
+        · rw [if_pos hkj.symm, if_pos hkj, complex.mul_one_r]
+        · rw [if_neg (by omega), if_neg (by omega), if_neg hkj, complex.mul_zero_r]
+      rw [h1, csum.single n j (fun k => A i k) hjn]
+    have hlast : cmat.elim_row_last n u n j = u j
+      unfold cmat.elim_row_last cmat.transpose cmat.elim_col_last
+      rw [if_neg (by omega), if_pos hjn]
+    rw [hhead, hlast]
+  · rw [if_neg hjn]
+    have hjn_eq : j = n := by omega
+    have hhead : csum n (fun k => complex.mul (A i k) (cmat.elim_row_last n u k j)) = complex.zero
+      apply csum.zero_of_all_zero; intro k hk; unfold cmat.elim_row_last cmat.transpose cmat.elim_col_last
+      rw [if_neg (by omega), if_neg (by omega), complex.mul_zero_r]
+    have hlast : cmat.elim_row_last n u n j = complex.one
+      unfold cmat.elim_row_last cmat.transpose cmat.elim_col_last; rw [hjn_eq]; simp; unfold complex.one; trivial
+    rw [hhead, hlast, complex.add_zero_l, complex.mul_one_r]
+
++ cmat.is_val_gl_elim_col_last (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (w : ℕ → ℂ) (hw : ∀ i < n, v (w i) ≤ 1) :
+    cmat.is_val_gl v (n + 1) (cmat.elim_col_last n w)
+  set nw : ℕ → ℂ := fun i => complex.neg (w i) with hnw_def
+  have hint_of : ∀ z : ℕ → ℂ, (∀ i < n, v (z i) ≤ 1) → cmat.is_val_int v (n + 1) (cmat.elim_col_last n z)
+    intro z hz; unfold cmat.is_val_int cmat.elim_col_last; intro i hi j hj
+    by_cases h1 : i = j
+    · rw [if_pos h1, hv.1.2.1]; linarith
+    · rw [if_neg h1]
+      by_cases h2 : i < n ∧ j = n
+      · rw [if_pos h2]; exact hz i h2.1
+      · rw [if_neg h2, hv.1.1]; linarith
+  have hnw_le : ∀ i < n, v (nw i) ≤ 1
+    intro i hi; rw [hnw_def, hv.2.1]; exact hw i hi
+  have hprod : ∀ a b : ℕ → ℂ, (∀ i < n, complex.add (a i) (b i) = complex.zero) →
+      cmat.eq_on (n + 1) (cmat.mul (n + 1) (cmat.elim_col_last n a) (cmat.elim_col_last n b)) cmat.id
+    intro a b hab; unfold cmat.eq_on; intro i hi j hj
+    rw [cmat.mul_elim_col_last_left n a (cmat.elim_col_last n b) i j hi]
+    by_cases hin : i < n
+    · rw [if_pos hin]
+      by_cases hjn : j = n
+      · rw [hjn]
+        have hbin : cmat.elim_col_last n b i n = b i
+          unfold cmat.elim_col_last; rw [if_neg (by omega), if_pos hin]
+        have hbnn : cmat.elim_col_last n b n n = complex.one
+          unfold cmat.elim_col_last; unfold complex.one; trivial
+        have hid0 : cmat.id i n = complex.zero
+          unfold cmat.id; rw [if_neg (by omega)]
+        rw [hbin, hbnn, hid0, complex.mul_one_r, complex.add_comm]; exact hab i hin
+      · have hbnj : cmat.elim_col_last n b n j = complex.zero
+          unfold cmat.elim_col_last; rw [if_neg (by omega), if_neg (by omega)]
+        rw [hbnj, complex.mul_zero_r, complex.add_zero_r]
+        unfold cmat.elim_col_last cmat.id
+        by_cases hij : i = j
+        · rw [if_pos hij, if_pos hij]
+        · rw [if_neg hij, if_neg (by omega), if_neg hij]
+    · rw [if_neg hin]; have hin_eq : i = n := by omega
+      unfold cmat.elim_col_last cmat.id; rw [hin_eq]
+      by_cases hnj : n = j
+      · rw [if_pos hnj, if_pos hnj]
+      · rw [if_neg hnj, if_neg (by omega), if_neg hnj]
+  unfold cmat.is_val_gl
+  refine ⟨hint_of w hw, cmat.elim_col_last n nw, hint_of nw hnw_le, ?_, ?_⟩
+  · exact hprod w nw (by intro i _; rw [hnw_def]; apply complex.ext <;> simp <;> ring)
+  · exact hprod nw w (by intro i _; rw [hnw_def]; apply complex.ext <;> simp <;> ring)
+
++ cmat.is_val_gl_elim_row_last (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (u : ℕ → ℂ) (hu : ∀ j < n, v (u j) ≤ 1) :
+    cmat.is_val_gl v (n + 1) (cmat.elim_row_last n u)
+  exact cmat.is_val_gl_transpose v (n + 1) (cmat.elim_col_last n u) (cmat.is_val_gl_elim_col_last v hv n u hu)
+
+-- ====================================================================================
+-- SECTION 3: CONSTRUCTIVE SMITH NORMAL FORM OVER ULTRAMETRIC VALUATION RINGS
+-- ====================================================================================
+
++ exists_argmax_real (m : ℕ) (hm : 1 ≤ m) (f : ℕ → ℝ) :
+    ∃ i0 < m, ∀ i < m, f i ≤ f i0
+  induction m with hm r ihr hm
+  · omega
+  · rw [succ_eq_add_one.nat] at hm ⊢
+    by_cases hr0 : r = 0
+    · refine ⟨0, by omega, ?_⟩
+      intro i hi; have hi0 : i = 0 := by omega; rw [hi0]; linarith
+    · obtain ⟨j0, hj0, hmax⟩ := ihr (by omega)
+      by_cases hcmp : f j0 ≤ f r
+      · refine ⟨r, by omega, ?_⟩
+        intro i hi
+        by_cases hir : i = r
+        · rw [hir]; linarith
+        · have hle := hmax i (by omega); linarith
+      · refine ⟨j0, by omega, ?_⟩
+        intro i hi
+        by_cases hir : i = r
+        · rw [hir]; linarith
+        · exact hmax i (by omega)
+
++ exists_argmax_mat_real (m : ℕ) (hm : 1 ≤ m) (F : ℕ → ℕ → ℝ) :
+    ∃ r0 < m, ∃ c0 < m, ∀ r < m, ∀ c < m, F r c ≤ F r0 c0
+  have hcol : ∀ r < m, ∃ c < m, ∀ j < m, F r j ≤ F r c
+    intro r _; exact exists_argmax_real m hm (fun j => F r j)
+  -- Track maximum over `(r, c)` by induction on number of rows `k ≤ m`
+  have hrows : ∀ k : ℕ, 1 ≤ k → k ≤ m → ∃ r0 < k, ∃ c0 < m, ∀ r < k, ∀ c < m, F r c ≤ F r0 c0
+    intro k; induction k with hk1 hkm r ihr hk1 hkm
+    · omega
+    · rw [succ_eq_add_one.nat] at hk1 hkm ⊢
+      obtain ⟨cr, hcr, hcr_max⟩ := exists_argmax_real m hm (fun c => F r c)
+      by_cases hr0 : r = 0
+      · refine ⟨0, by omega, cr, hcr, ?_⟩
+        intro i hi j hj; have hi0 : i = 0 := by omega; rw [hi0, ← hr0]; exact hcr_max j hj
+      · obtain ⟨r0, hr0_lt, c0, hc0_lt, hprev⟩ := ihr (by omega) (by omega)
+        by_cases hcmp : F r0 c0 ≤ F r cr
+        · refine ⟨r, by omega, cr, hcr, ?_⟩
+          intro i hi j hj
+          by_cases hir : i = r
+          · rw [hir]; exact hcr_max j hj
+          · have hle := hprev i (by omega) j hj; linarith
+        · refine ⟨r0, by omega, c0, hc0_lt, ?_⟩
+          intro i hi j hj
+          by_cases hir : i = r
+          · rw [hir]; have hle := hcr_max j hj; linarith
+          · exact hprev i (by omega) j hj
+  exact hrows m hm (by omega)
+
+-- Smith Normal Form over any nondegenerate ultrametric valuation ring `O_v = {v z ≤ 1}`:
+-- Every `n × n` complex matrix `A` factors as `A = K * diag(d) * L` on `n × n` with
+-- `K, L ∈ GL_n(O_v)` and monotone valuations `v(d 0) ≤ v(d 1) ≤ ... ≤ v(d (n-1))`!
++ cmat.smith_normal_form_of_ultrametric (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (hnondeg : ∀ z : ℂ, z ≠ complex.zero → 0 < v z) :
+    ∀ (n : ℕ) (A : ℕ → ℕ → ℂ),
+      ∃ K L : ℕ → ℕ → ℂ, ∃ d : ℕ → ℂ,
+        cmat.is_val_gl v n K ∧
+        cmat.is_val_gl v n L ∧
+        cmat.eq_on n A (cmat.mul n (cmat.mul n K (cmat.diag d)) L) ∧
+        (∀ i < n, ∀ j < n, i ≤ j → v (d i) ≤ v (d j))
+  intro n; induction n with A r ihr A
+  · refine ⟨cmat.id, cmat.id, fun _ => complex.zero, cmat.is_val_gl_id v hv 0, cmat.is_val_gl_id v hv 0, ?_, ?_⟩
+    · unfold cmat.eq_on; intro i hi; omega
+    · intro i hi; omega
+  · rw [succ_eq_add_one.nat]
+    obtain ⟨r0, hr0, c0, hc0, hmax⟩ := exists_argmax_mat_real (r + 1) (by omega) (fun i j => v (A i j))
+    by_cases hpiv0 : A r0 c0 = complex.zero
+    · -- All entries vanish!
+      have hA0 : ∀ i < r + 1, ∀ j < r + 1, A i j = complex.zero
+        intro i hi j hj
+        have hle := hmax i hi j hj
+        rw [hpiv0, hv.1.1] at hle
+        by_contra hne
+        have hpos := hnondeg (A i j) hne
+        linarith
+      refine ⟨cmat.id, cmat.id, fun _ => complex.zero, cmat.is_val_gl_id v hv (r + 1), cmat.is_val_gl_id v hv (r + 1), ?_, ?_⟩
+      · unfold cmat.eq_on; intro i hi j hj
+        rw [hA0 i hi j hj, cmat.mul_id_right (r + 1) _ i j hj, cmat.mul_id_left (r + 1) _ i j hi]
+        unfold cmat.diag; by_cases hij : i = j; (rw [if_pos hij]); (rw [if_neg hij])
+      · intro i _ j _ _; linarith
+    · -- Nonzero maximal pivot `piv := A r0 c0`!
+      set Sr : ℕ → ℕ → ℂ := cmat.swap_mat r0 r with hSr_def
+      set Sc : ℕ → ℕ → ℂ := cmat.swap_mat c0 r with hSc_def
+      set B : ℕ → ℕ → ℂ := cmat.mul (r + 1) (cmat.mul (r + 1) Sr A) Sc with hB_def
+      have hB_ent : ∀ i < r + 1, ∀ j < r + 1, B i j = A (swap_idx r0 r i) (swap_idx c0 r j)
+        intro i hi j hj
+        rw [hB_def, hSc_def, cmat.mul_swap_right (r + 1) c0 r hc0 (by omega) _ i j hj]
+        rw [hSr_def, cmat.mul_swap_left (r + 1) r0 r hr0 (by omega) A i (swap_idx c0 r j) hi]
+      have hB_piv : B r r = A r0 c0
+        rw [hB_ent r (by omega) r (by omega)]
+        have hs1 : swap_idx r0 r r = r0
+          unfold swap_idx
+          by_cases h : r = r0
+          · rw [if_pos h]; omega
+          · rw [if_neg h]
+        have hs2 : swap_idx c0 r r = c0
+          unfold swap_idx
+          by_cases h : r = c0
+          · rw [if_pos h]; omega
+          · rw [if_neg h]
+        rw [hs1, hs2]
+      have hB_ne : B r r ≠ complex.zero := by rw [hB_piv]; exact hpiv0
+      have hB_pos : 0 < v (B r r) := hnondeg (B r r) hB_ne
+      have hB_max : ∀ i < r + 1, ∀ j < r + 1, v (B i j) ≤ v (B r r)
+        intro i hi j hj
+        rw [hB_ent i hi j hj, hB_piv]
+        exact hmax (swap_idx r0 r i) (swap_idx.lt (r + 1) r0 r i hr0 (by omega) hi) (swap_idx c0 r j) (swap_idx.lt (r + 1) c0 r j hc0 (by omega) hj)
+      have hv_inv : v (complex.inv (B r r)) * v (B r r) = 1
+        rw [← hv.1.2.2.2, complex.inv_mul_cancel (B r r) hB_ne, hv.1.2.1]
+      set w : ℕ → ℂ := fun i => complex.neg (complex.mul (B i r) (complex.inv (B r r))) with hw_def
+      set u : ℕ → ℂ := fun j => complex.neg (complex.mul (B r j) (complex.inv (B r r))) with hu_def
+      have hw_le1 : ∀ i < r, v (w i) ≤ 1
+        intro i hi
+        rw [hw_def, hv.2.1, hv.1.2.2.2]
+        have hm := mul_le_mul_of_nonneg_right.real (v (B i r)) (v (B r r)) (v (complex.inv (B r r))) (hB_max i (by omega) r (by omega)) (hv.1.2.2.1 _)
+        linarith
+      have hu_le1 : ∀ j < r, v (u j) ≤ 1
+        intro j hj
+        rw [hu_def, hv.2.1, hv.1.2.2.2]
+        have hm := mul_le_mul_of_nonneg_right.real (v (B r j)) (v (B r r)) (v (complex.inv (B r r))) (hB_max r (by omega) j (by omega)) (hv.1.2.2.1 _)
+        linarith
+      set Ec : ℕ → ℕ → ℂ := cmat.elim_col_last r w with hEc_def
+      set Er : ℕ → ℕ → ℂ := cmat.elim_row_last r u with hEr_def
+      set B1 : ℕ → ℕ → ℂ := cmat.mul (r + 1) Ec B with hB1_def
+      set C : ℕ → ℕ → ℂ := cmat.mul (r + 1) B1 Er with hC_def
+      -- Compute entries of `B1` and `C`
+      have hB1_last : ∀ i < r, B1 i r = complex.zero
+        intro i hi
+        rw [hB1_def, hEc_def, cmat.mul_elim_col_last_left r w B i r (by omega), if_pos hi, hw_def]
+        have h1 : complex.mul (complex.neg (complex.mul (B i r) (complex.inv (B r r)))) (B r r) = complex.neg (B i r)
+          have h2 : complex.mul (complex.mul (B i r) (complex.inv (B r r))) (B r r) = B i r
+            rw [complex.mul_assoc, complex.inv_mul_cancel (B r r) hB_ne, complex.mul_one_r]
+          have h3 : complex.mul (complex.neg (complex.mul (B i r) (complex.inv (B r r)))) (B r r) = complex.neg (complex.mul (complex.mul (B i r) (complex.inv (B r r))) (B r r))
+            apply complex.ext <;> simp <;> ring
+          rw [h3, h2]
+        rw [h1]; apply complex.ext <;> simp <;> ring
+      have hB1_rr : B1 r r = B r r
+        rw [hB1_def, hEc_def, cmat.mul_elim_col_last_left r w B r r (by omega), if_neg (by omega)]
+      have hB1_rj : ∀ j < r, B1 r j = B r j
+        intro j hj
+        rw [hB1_def, hEc_def, cmat.mul_elim_col_last_left r w B r j (by omega), if_neg (by omega)]
+      have hC_ir : ∀ i < r, C i r = complex.zero
+        intro i hi
+        rw [hC_def, hEr_def, cmat.mul_elim_row_last_right r u B1 i r (by omega), if_neg (by omega), hB1_last i hi]
+      have hC_rj : ∀ j < r, C r j = complex.zero
+        intro j hj
+        rw [hC_def, hEr_def, cmat.mul_elim_row_last_right r u B1 r j (by omega), if_pos hj, hB1_rj j hj, hB1_rr, hu_def]
+        have h1 : complex.mul (B r r) (complex.neg (complex.mul (B r j) (complex.inv (B r r)))) = complex.neg (B r j)
+          have h2 : complex.mul (B r r) (complex.mul (B r j) (complex.inv (B r r))) = B r j
+            have hsw : complex.mul (B r r) (complex.mul (B r j) (complex.inv (B r r))) = complex.mul (B r j) (complex.mul (B r r) (complex.inv (B r r)))
+              apply complex.ext <;> simp <;> ring
+            rw [hsw, complex.mul_inv_cancel (B r r) hB_ne, complex.mul_one_r]
+          have h3 : complex.mul (B r r) (complex.neg (complex.mul (B r j) (complex.inv (B r r)))) = complex.neg (complex.mul (B r r) (complex.mul (B r j) (complex.inv (B r r))))
+            apply complex.ext <;> simp <;> ring
+          rw [h3, h2]
+        rw [h1]; apply complex.ext <;> simp <;> ring
+      have hC_rr : C r r = B r r
+        rw [hC_def, hEr_def, cmat.mul_elim_row_last_right r u B1 r r (by omega), if_neg (by omega), hB1_rr]
+      have hC_bound : ∀ i < r, ∀ j < r, v (C i j) ≤ v (B r r)
+        intro i hi j hj
+        rw [hC_def, hEr_def, cmat.mul_elim_row_last_right r u B1 i j (by omega), if_pos hj, hB1_last i hi, complex.mul_zero_l, complex.add_zero_r]
+        rw [hB1_def, hEc_def, cmat.mul_elim_col_last_left r w B i j (by omega), if_pos hi]
+        have htri := hv.2.2 (B i j) (complex.mul (w i) (B r j))
+        have h1 := hB_max i (by omega) j (by omega)
+        have h2 : v (complex.mul (w i) (B r j)) ≤ v (B r r)
+          rw [hv.1.2.2.2]
+          have hm1 := mul_le_mul_of_nonneg_right.real (v (w i)) 1 (v (B r j)) (hw_le1 i hi) (hv.1.2.2.1 _)
+          have hm2 := hB_max r (by omega) j (by omega)
+          linarith
+        unfold max at htri
+        by_cases hcmp : v (B i j) ≤ v (complex.mul (w i) (B r j))
+        · rw [if_pos hcmp] at htri; linarith
+        · rw [if_neg hcmp] at htri; linarith
+      -- Apply IH to the top-left `r × r` block of `C`!
+      obtain ⟨K0, L0, d0, hK0_gl, hL0_gl, hC_snf, hd0_mono⟩ := ihr C
+      set d : ℕ → ℂ := fun i => if i < r then d0 i else B r r with hd_def
+      -- Check `C = (block_ext r K0) * diag(d) * (block_ext r L0)` on `(r+1) × (r+1)`
+      have hC_full : cmat.eq_on (r + 1) C (cmat.mul (r + 1) (cmat.mul (r + 1) (cmat.block_ext r K0) (cmat.diag d)) (cmat.block_ext r L0))
+        unfold cmat.eq_on; intro i hi j hj
+        have hmid_diag : ∀ a < r + 1, ∀ b < r + 1, cmat.mul (r + 1) (cmat.block_ext r K0) (cmat.diag d) a b = (if a < r ∧ b < r then cmat.mul r K0 (cmat.diag d0) a b else if a = r ∧ b = r then B r r else complex.zero)
+          intro a ha b hb
+          unfold cmat.mul
+          have h1 : csum (r + 1) (fun k => complex.mul (cmat.block_ext r K0 a k) (cmat.diag d k b)) =
+              csum (r + 1) (fun k => if k = b then complex.mul (cmat.block_ext r K0 a k) (d k) else complex.zero)
+            apply csum.congr; intro k _; unfold cmat.diag
+            by_cases hkb : k = b
+            · rw [if_pos hkb, if_pos hkb]
+            · rw [if_neg hkb, if_neg hkb, complex.mul_zero_r]
+          rw [h1, csum.single (r + 1) b _ hb]
+          by_cases h1ab : a < r ∧ b < r
+          · rw [if_pos h1ab]
+            unfold cmat.block_ext; rw [if_pos h1ab, hd_def, if_pos h1ab.2]
+            have h2 : csum r (fun k => complex.mul (K0 a k) (cmat.diag d0 k b)) =
+                csum r (fun k => if k = b then complex.mul (K0 a k) (d0 k) else complex.zero)
+              apply csum.congr; intro k _; unfold cmat.diag
+              by_cases hkb : k = b
+              · rw [if_pos hkb, if_pos hkb]
+              · rw [if_neg hkb, if_neg hkb, complex.mul_zero_r]
+            rw [h2, csum.single r b _ h1ab.2]
+          · rw [if_neg h1ab]
+            by_cases h2ab : a = r ∧ b = r
+            · rw [if_pos h2ab]; unfold cmat.block_ext
+              rw [if_neg (by omega), if_pos h2ab, hd_def, if_neg (by omega), complex.mul_one_l]
+            · rw [if_neg h2ab]; unfold cmat.block_ext
+              rw [if_neg h1ab, if_neg h2ab, complex.mul_zero_l]
+        set KD : ℕ → ℕ → ℂ := cmat.mul (r + 1) (cmat.block_ext r K0) (cmat.diag d) with hKD_def
+        have houter : cmat.mul (r + 1) KD (cmat.block_ext r L0) i j =
+            complex.add (csum r (fun k => complex.mul (KD i k) (cmat.block_ext r L0 k j))) (complex.mul (KD i r) (cmat.block_ext r L0 r j))
+          unfold cmat.mul; rw [csum.succ]
+        rw [houter]
+        by_cases hir : i < r
+        · by_cases hjr : j < r
+          · have hlast : complex.mul (KD i r) (cmat.block_ext r L0 r j) = complex.zero
+              rw [hmid_diag i hi r (by omega), if_neg (by omega), if_neg (by omega), complex.mul_zero_l]
+            have hhead : csum r (fun k => complex.mul (KD i k) (cmat.block_ext r L0 k j)) =
+                cmat.mul r (cmat.mul r K0 (cmat.diag d0)) L0 i j
+              have hrhs : cmat.mul r (cmat.mul r K0 (cmat.diag d0)) L0 i j = csum r (fun k => complex.mul (cmat.mul r K0 (cmat.diag d0) i k) (L0 k j))
+                unfold cmat.mul; trivial
+              rw [hrhs]; apply csum.congr; intro k hk
+              rw [hmid_diag i hi k (by omega), if_pos ⟨hir, hk⟩]
+              unfold cmat.block_ext; rw [if_pos ⟨hk, hjr⟩]
+            rw [hhead, hlast, complex.add_zero_r]; unfold cmat.eq_on at hC_snf; exact hC_snf i hir j hjr
+          · have hjr_eq : j = r := by omega
+            have hlast : complex.mul (KD i r) (cmat.block_ext r L0 r j) = complex.zero
+              rw [hmid_diag i hi r (by omega), if_neg (by omega), if_neg (by omega), complex.mul_zero_l]
+            have hhead : csum r (fun k => complex.mul (KD i k) (cmat.block_ext r L0 k j)) = complex.zero
+              apply csum.zero_of_all_zero; intro k hk
+              unfold cmat.block_ext; rw [if_neg (by omega), if_neg (by omega), complex.mul_zero_r]
+            rw [hhead, hlast, complex.add_zero_l, hjr_eq, hC_ir i hir]
+        · have hir_eq : i = r := by omega
+          by_cases hjr : j < r
+          · have hlast : complex.mul (KD i r) (cmat.block_ext r L0 r j) = complex.zero
+              unfold cmat.block_ext; rw [if_neg (by omega), if_neg (by omega), complex.mul_zero_r]
+            have hhead : csum r (fun k => complex.mul (KD i k) (cmat.block_ext r L0 k j)) = complex.zero
+              apply csum.zero_of_all_zero; intro k hk
+              rw [hmid_diag i hi k (by omega), if_neg (by omega), if_neg (by omega), complex.mul_zero_l]
+            rw [hhead, hlast, complex.add_zero_l, hir_eq, hC_rj j hjr]
+          · have hjr_eq : j = r := by omega
+            have hhead : csum r (fun k => complex.mul (KD i k) (cmat.block_ext r L0 k j)) = complex.zero
+              apply csum.zero_of_all_zero; intro k hk
+              rw [hmid_diag i hi k (by omega), if_neg (by omega), if_neg (by omega), complex.mul_zero_l]
+            have hlast : complex.mul (KD i r) (cmat.block_ext r L0 r j) = B r r
+              have hl1 : cmat.block_ext r L0 r j = complex.one
+                rw [hjr_eq]; unfold cmat.block_ext; rw [if_neg (by omega)]; unfold complex.one; trivial
+              have hkd1 : KD i r = B r r
+                rw [hir_eq, hmid_diag r (by omega) r (by omega), if_neg (by omega)]; simp
+              rw [hkd1, hl1, complex.mul_one_r]
+            rw [hhead, hlast, complex.add_zero_l, hir_eq, hjr_eq, hC_rr]
+      -- Assemble `K` and `L` in `GL_{r+1}(O_v)`!
+      have hSr_gl : cmat.is_val_gl v (r + 1) Sr := by rw [hSr_def]; exact cmat.is_val_gl_swap v hv (r + 1) r0 r hr0 (by omega)
+      have hSc_gl : cmat.is_val_gl v (r + 1) Sc := by rw [hSc_def]; exact cmat.is_val_gl_swap v hv (r + 1) c0 r hc0 (by omega)
+      have hEc_gl : cmat.is_val_gl v (r + 1) Ec := by rw [hEc_def]; exact cmat.is_val_gl_elim_col_last v hv r w hw_le1
+      have hEr_gl : cmat.is_val_gl v (r + 1) Er := by rw [hEr_def]; exact cmat.is_val_gl_elim_row_last v hv r u hu_le1
+      have hEci_gl := cmat.is_val_gl_inv v hv (r + 1) Ec hEc_gl
+      have hEri_gl := cmat.is_val_gl_inv v hv (r + 1) Er hEr_gl
+      have hK0e_gl := cmat.is_val_gl_block_ext v hv r K0 hK0_gl
+      have hL0e_gl := cmat.is_val_gl_block_ext v hv r L0 hL0_gl
+      set K : ℕ → ℕ → ℂ := cmat.mul (r + 1) (cmat.mul (r + 1) Sr (cmat.inv (r + 1) Ec)) (cmat.block_ext r K0) with hK_def
+      set L : ℕ → ℕ → ℂ := cmat.mul (r + 1) (cmat.block_ext r L0) (cmat.mul (r + 1) (cmat.inv (r + 1) Er) Sc) with hL_def
+      have hK_gl : cmat.is_val_gl v (r + 1) K
+        rw [hK_def]; exact cmat.is_val_gl_mul v hv (r + 1) _ _ (cmat.is_val_gl_mul v hv (r + 1) _ _ hSr_gl hEci_gl) hK0e_gl
+      have hL_gl : cmat.is_val_gl v (r + 1) L
+        rw [hL_def]; exact cmat.is_val_gl_mul v hv (r + 1) _ _ hL0e_gl (cmat.is_val_gl_mul v hv (r + 1) _ _ hEri_gl hSc_gl)
+      -- Unwind `A = Sr * B * Sc`, `B = Ec⁻¹ * C * Er⁻¹`
+      have hdet_Ec := cmat.is_val_gl_det_ne_zero v hv (r + 1) Ec hEc_gl
+      have hdet_Er := cmat.is_val_gl_det_ne_zero v hv (r + 1) Er hEr_gl
+      have hA_eq_B : cmat.eq_on (r + 1) A (cmat.mul (r + 1) (cmat.mul (r + 1) Sr B) Sc)
+        unfold cmat.eq_on; intro i hi j hj
+        rw [hSc_def, cmat.mul_swap_right (r + 1) c0 r hc0 (by omega) _ i j hj]
+        rw [hSr_def, cmat.mul_swap_left (r + 1) r0 r hr0 (by omega) B i (swap_idx c0 r j) hi]
+        rw [hB_ent (swap_idx r0 r i) (swap_idx.lt (r + 1) r0 r i hr0 (by omega) hi) (swap_idx c0 r j) (swap_idx.lt (r + 1) c0 r j hc0 (by omega) hj)]
+        rw [swap_idx.involution, swap_idx.involution]
+      have hB_eq_C : cmat.eq_on (r + 1) B (cmat.mul (r + 1) (cmat.mul (r + 1) (cmat.inv (r + 1) Ec) C) (cmat.inv (r + 1) Er))
+        unfold cmat.eq_on; intro i hi j hj
+        have hB1_eq : ∀ a < r + 1, ∀ b < r + 1, cmat.mul (r + 1) (cmat.inv (r + 1) Ec) B1 a b = B a b
+          intro a ha b hb
+          rw [hB1_def, ← cmat.mul_assoc (r + 1) (cmat.inv (r + 1) Ec) Ec B a b]
+          rw [cmat.mul_congr_left (r + 1) _ cmat.id B a b (by intro k hk; exact cmat.inv_mul_eq_id (r + 1) Ec hdet_Ec a ha k hk)]
+          exact cmat.mul_id_left (r + 1) B a b ha
+        have hEr_eq : ∀ a < r + 1, ∀ b < r + 1, cmat.mul (r + 1) C (cmat.inv (r + 1) Er) a b = B1 a b
+          intro a ha b hb
+          rw [hC_def, cmat.mul_assoc (r + 1) B1 Er (cmat.inv (r + 1) Er) a b]
+          rw [cmat.mul_congr_right (r + 1) B1 _ cmat.id a b (by intro k hk; exact cmat.mul_inv_eq_id (r + 1) Er hdet_Er k hk b hb)]
+          exact cmat.mul_id_right (r + 1) B1 a b hb
+        rw [cmat.mul_assoc (r + 1) (cmat.inv (r + 1) Ec) C (cmat.inv (r + 1) Er) i j]
+        rw [cmat.mul_congr_right (r + 1) (cmat.inv (r + 1) Ec) _ B1 i j (by intro k hk; exact hEr_eq k hk j hj)]
+        exact (hB1_eq i hi j hj).symm
+      have hA_snf : cmat.eq_on (r + 1) A (cmat.mul (r + 1) (cmat.mul (r + 1) K (cmat.diag d)) L)
+        set M1 : ℕ → ℕ → ℂ := cmat.mul (r + 1) Sr (cmat.inv (r + 1) Ec) with hM1_def
+        set M2 : ℕ → ℕ → ℂ := cmat.mul (r + 1) (cmat.inv (r + 1) Er) Sc with hM2_def
+        unfold cmat.eq_on at hA_eq_B hB_eq_C hC_full ⊢; intro i hi j hj
+        have h1 := hA_eq_B i hi j hj
+        have h2 : cmat.mul (r + 1) (cmat.mul (r + 1) Sr B) Sc i j = cmat.mul (r + 1) (cmat.mul (r + 1) M1 C) M2 i j
+          have h2a : ∀ k < r + 1, cmat.mul (r + 1) Sr B i k = cmat.mul (r + 1) (cmat.mul (r + 1) M1 C) (cmat.inv (r + 1) Er) i k
+            intro k hk
+            have hs1 : cmat.mul (r + 1) Sr B i k = cmat.mul (r + 1) Sr (cmat.mul (r + 1) (cmat.mul (r + 1) (cmat.inv (r + 1) Ec) C) (cmat.inv (r + 1) Er)) i k
+              exact cmat.mul_congr_right (r + 1) Sr B (cmat.mul (r + 1) (cmat.mul (r + 1) (cmat.inv (r + 1) Ec) C) (cmat.inv (r + 1) Er)) i k (by intro t ht; exact hB_eq_C t ht k hk)
+            rw [hs1, ← cmat.mul_assoc (r + 1) Sr (cmat.mul (r + 1) (cmat.inv (r + 1) Ec) C) (cmat.inv (r + 1) Er) i k]
+            exact cmat.mul_congr_left (r + 1) (cmat.mul (r + 1) Sr (cmat.mul (r + 1) (cmat.inv (r + 1) Ec) C)) (cmat.mul (r + 1) M1 C) (cmat.inv (r + 1) Er) i k (by intro t _; rw [hM1_def, ← cmat.mul_assoc (r + 1) Sr (cmat.inv (r + 1) Ec) C i t])
+          rw [cmat.mul_congr_left (r + 1) (cmat.mul (r + 1) Sr B) (cmat.mul (r + 1) (cmat.mul (r + 1) M1 C) (cmat.inv (r + 1) Er)) Sc i j h2a, hM2_def]
+          exact cmat.mul_assoc (r + 1) (cmat.mul (r + 1) M1 C) (cmat.inv (r + 1) Er) Sc i j
+        have h3 : cmat.mul (r + 1) (cmat.mul (r + 1) M1 C) M2 i j = cmat.mul (r + 1) (cmat.mul (r + 1) K (cmat.diag d)) L i j
+          have h3a : ∀ k < r + 1, cmat.mul (r + 1) M1 C i k = cmat.mul (r + 1) (cmat.mul (r + 1) K (cmat.diag d)) (cmat.block_ext r L0) i k
+            intro k hk
+            have hs1 : cmat.mul (r + 1) M1 C i k = cmat.mul (r + 1) M1 (cmat.mul (r + 1) (cmat.mul (r + 1) (cmat.block_ext r K0) (cmat.diag d)) (cmat.block_ext r L0)) i k
+              exact cmat.mul_congr_right (r + 1) M1 C (cmat.mul (r + 1) (cmat.mul (r + 1) (cmat.block_ext r K0) (cmat.diag d)) (cmat.block_ext r L0)) i k (by intro t ht; exact hC_full t ht k hk)
+            rw [hs1, ← cmat.mul_assoc (r + 1) M1 (cmat.mul (r + 1) (cmat.block_ext r K0) (cmat.diag d)) (cmat.block_ext r L0) i k]
+            exact cmat.mul_congr_left (r + 1) (cmat.mul (r + 1) M1 (cmat.mul (r + 1) (cmat.block_ext r K0) (cmat.diag d))) (cmat.mul (r + 1) K (cmat.diag d)) (cmat.block_ext r L0) i k (by intro t _; rw [hK_def, ← cmat.mul_assoc (r + 1) M1 (cmat.block_ext r K0) (cmat.diag d) i t])
+          rw [cmat.mul_congr_left (r + 1) (cmat.mul (r + 1) M1 C) (cmat.mul (r + 1) (cmat.mul (r + 1) K (cmat.diag d)) (cmat.block_ext r L0)) M2 i j h3a, hL_def]
+          exact cmat.mul_assoc (r + 1) (cmat.mul (r + 1) K (cmat.diag d)) (cmat.block_ext r L0) M2 i j
+        rw [h1, h2, h3]
+      -- Monotonicity: `v(d0 i) ≤ v(B r r)` for all `i < r`!
+      have hd_mono : ∀ i < r + 1, ∀ j < r + 1, i ≤ j → v (d i) ≤ v (d j)
+        have hd0_le_piv : ∀ i < r, v (d0 i) ≤ v (B r r)
+          intro i hi
+          have hdet_K0 := cmat.is_val_gl_det_ne_zero v hv r K0 hK0_gl
+          have hdet_L0 := cmat.is_val_gl_det_ne_zero v hv r L0 hL0_gl
+          have hK0i_gl := cmat.is_val_gl_inv v hv r K0 hK0_gl
+          have hL0i_gl := cmat.is_val_gl_inv v hv r L0 hL0_gl
+          have hd0_eq : d0 i = cmat.mul r (cmat.mul r (cmat.inv r K0) C) (cmat.inv r L0) i i
+            have h2 : cmat.mul r (cmat.mul r (cmat.inv r K0) C) (cmat.inv r L0) i i = cmat.diag d0 i i
+              have hA : ∀ k < r, cmat.mul r (cmat.inv r K0) C i k = cmat.mul r (cmat.diag d0) L0 i k
+                intro k hk
+                unfold cmat.eq_on at hC_snf
+                rw [cmat.mul_congr_right r (cmat.inv r K0) C (cmat.mul r (cmat.mul r K0 (cmat.diag d0)) L0) i k (by intro t ht; exact hC_snf t ht k hk)]
+                rw [← cmat.mul_assoc r (cmat.inv r K0) (cmat.mul r K0 (cmat.diag d0)) L0 i k]
+                have hKD0 : ∀ t < r, cmat.mul r (cmat.inv r K0) (cmat.mul r K0 (cmat.diag d0)) i t = cmat.diag d0 i t
+                  intro t ht
+                  rw [← cmat.mul_assoc r (cmat.inv r K0) K0 (cmat.diag d0) i t]
+                  rw [cmat.mul_congr_left r _ cmat.id (cmat.diag d0) i t (by intro s hs; exact cmat.inv_mul_eq_id r K0 hdet_K0 i hi s hs)]
+                  exact cmat.mul_id_left r (cmat.diag d0) i t hi
+                exact cmat.mul_congr_left r _ (cmat.diag d0) L0 i k hKD0
+              rw [cmat.mul_congr_left r _ (cmat.mul r (cmat.diag d0) L0) (cmat.inv r L0) i i hA]
+              rw [cmat.mul_assoc r (cmat.diag d0) L0 (cmat.inv r L0) i i]
+              rw [cmat.mul_congr_right r (cmat.diag d0) _ cmat.id i i (by intro k hk; exact cmat.mul_inv_eq_id r L0 hdet_L0 k hk i hi)]
+              exact cmat.mul_id_right r (cmat.diag d0) i i hi
+            rw [h2]; unfold cmat.diag; simp
+          rw [hd0_eq]
+          unfold cmat.is_val_gl at hK0i_gl hL0i_gl
+          have hK0i_int := hK0i_gl.1
+          have hL0i_int := hL0i_gl.1
+          unfold cmat.is_val_int at hK0i_int hL0i_int
+          have hb1 := cmat.is_val_int_mul_bound v hv r (cmat.inv r K0) C 1 (v (B r r)) (by linarith) (by linarith) hK0i_int hC_bound
+          have hb1' : ∀ a < r, ∀ b < r, v (cmat.mul r (cmat.inv r K0) C a b) ≤ v (B r r)
+            intro a ha b hb; have h := hb1 a ha b hb; linarith
+          have hb2 := cmat.is_val_int_mul_bound v hv r (cmat.mul r (cmat.inv r K0) C) (cmat.inv r L0) (v (B r r)) 1 (by linarith) (by linarith) hb1' hL0i_int i hi i hi
+          linarith
+        intro i hi j hj hij
+        by_cases hjr : j < r
+        · have hir : i < r := by omega
+          rw [hd_def, if_pos hir, if_pos hjr]; exact hd0_mono i hir j hjr hij
+        · have hjr_eq : j = r := by omega
+          by_cases hir : i < r
+          · rw [hd_def, if_pos hir, if_neg (by omega)]; exact hd0_le_piv i hir
+          · have hir_eq : i = r := by omega
+            rw [hir_eq, hjr_eq]; linarith
+      exact ⟨K, L, d, hK_gl, hL_gl, hA_snf, hd_mono⟩
+
+-- Valuation of determinant equals product of Smith diagonal valuations!
++ cmat.ultrametric_det_eq_prod_smith (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (A K L : ℕ → ℕ → ℂ) (d : ℕ → ℂ)
+    (hK : cmat.is_val_gl v n K) (hL : cmat.is_val_gl v n L)
+    (hsnf : cmat.eq_on n A (cmat.mul n (cmat.mul n K (cmat.diag d)) L)) :
+    v (cmat.det n A) = real_prod n (fun i => v (d i))
+  unfold cmat.eq_on at hsnf
+  rw [cmat.det_congr n A _ hsnf, cmat.det_mul, cmat.det_mul, cmat.det_diag]
+  rw [hv.1.2.2.2, hv.1.2.2.2]
+  rw [cmat.is_val_gl_det_eq_one v hv n K hK, cmat.is_val_gl_det_eq_one v hv n L hL]
+  rw [one_mul.real, mul_one.real]
+  exact is_mult_seminorm.cprod_c v hv.1 n d
+
+-- ====================================================================================
+-- SECTION 4: TRANSPOSE SYMMETRY (`exists_invTransposeGL_inv_eq`) & COLUMN CLEARING
+-- ====================================================================================
+
+-- Every `g ∈ M_n(ℂ)` admits `k ∈ GL_n(O_v)` such that `g * k` is symmetric and
+-- `g^T = (k^T)^{-1} * g * k` (`ColumnLattices.lean`, line 117)!
++ cmat.exists_symm_unit_of_ultrametric (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (hnondeg : ∀ z : ℂ, z ≠ complex.zero → 0 < v z) (n : ℕ) (g : ℕ → ℕ → ℂ) :
+    ∃ k : ℕ → ℕ → ℂ,
+      cmat.is_val_gl v n k ∧
+      cmat.eq_on n (cmat.mul n g k) (cmat.transpose (cmat.mul n g k)) ∧
+      cmat.eq_on n (cmat.transpose g) (cmat.mul n (cmat.mul n (cmat.inv n (cmat.transpose k)) g) k)
+  obtain ⟨K, L, d, hK_gl, hL_gl, hsnf, _⟩ := cmat.smith_normal_form_of_ultrametric v hv hnondeg n g
+  have hdet_L := cmat.is_val_gl_det_ne_zero v hv n L hL_gl
+  set k : ℕ → ℕ → ℂ := cmat.mul n (cmat.inv n L) (cmat.transpose K) with hk_def
+  have hk_gl : cmat.is_val_gl v n k
+    rw [hk_def]; exact cmat.is_val_gl_mul v hv n (cmat.inv n L) (cmat.transpose K) (cmat.is_val_gl_inv v hv n L hL_gl) (cmat.is_val_gl_transpose v n K hK_gl)
+  have hgk_eq : cmat.eq_on n (cmat.mul n g k) (cmat.mul n (cmat.mul n K (cmat.diag d)) (cmat.transpose K))
+    unfold cmat.eq_on at hsnf ⊢; intro i hi j hj
+    rw [cmat.mul_congr_left n g (cmat.mul n (cmat.mul n K (cmat.diag d)) L) k i j (by intro t ht; exact hsnf i hi t ht)]
+    rw [hk_def, cmat.mul_assoc n (cmat.mul n K (cmat.diag d)) L (cmat.mul n (cmat.inv n L) (cmat.transpose K)) i j]
+    have hmid : ∀ t < n, cmat.mul n L (cmat.mul n (cmat.inv n L) (cmat.transpose K)) t j = cmat.transpose K t j
+      intro t ht
+      rw [← cmat.mul_assoc n L (cmat.inv n L) (cmat.transpose K) t j]
+      rw [cmat.mul_congr_left n _ cmat.id (cmat.transpose K) t j (by intro s hs; exact cmat.mul_inv_eq_id n L hdet_L t ht s hs)]
+      exact cmat.mul_id_left n (cmat.transpose K) t j ht
+    exact cmat.mul_congr_right n (cmat.mul n K (cmat.diag d)) _ (cmat.transpose K) i j hmid
+  have hsymm : cmat.eq_on n (cmat.mul n g k) (cmat.transpose (cmat.mul n g k))
+    have hKDK_symm : cmat.eq_on n (cmat.transpose (cmat.mul n (cmat.mul n K (cmat.diag d)) (cmat.transpose K))) (cmat.mul n (cmat.mul n K (cmat.diag d)) (cmat.transpose K))
+      unfold cmat.eq_on; intro i hi j hj
+      rw [cmat.transpose_mul n (cmat.mul n K (cmat.diag d)) (cmat.transpose K) i j]
+      rw [cmat.mul_congr_left n (cmat.transpose (cmat.transpose K)) K _ i j (by intro t _; exact cmat.transpose_transpose K i t)]
+      have hrt : ∀ t < n, cmat.transpose (cmat.mul n K (cmat.diag d)) t j = cmat.mul n (cmat.diag d) (cmat.transpose K) t j
+        intro t _; rw [cmat.transpose_mul n K (cmat.diag d) t j]
+        exact cmat.mul_congr_left n (cmat.transpose (cmat.diag d)) (cmat.diag d) (cmat.transpose K) t j (by intro s _; exact cmat.transpose_diag d t s)
+      rw [cmat.mul_congr_right n K _ (cmat.mul n (cmat.diag d) (cmat.transpose K)) i j hrt]
+      exact (cmat.mul_assoc n K (cmat.diag d) (cmat.transpose K) i j).symm
+    exact cmat.eq_on_trans n _ _ _ hgk_eq (cmat.eq_on_trans n _ _ _ (cmat.eq_on_symm n _ _ hKDK_symm) (cmat.transpose_eq_on n _ _ (cmat.eq_on_symm n _ _ hgk_eq)))
+  have hconj : cmat.eq_on n (cmat.transpose g) (cmat.mul n (cmat.mul n (cmat.inv n (cmat.transpose k)) g) k)
+    have hdet_kT : cmat.det n (cmat.transpose k) ≠ complex.zero := by rw [cmat.det_transpose]; exact cmat.is_val_gl_det_ne_zero v hv n k hk_gl
+    unfold cmat.eq_on at hsymm ⊢; intro i hi j hj
+    have hstep1 : cmat.mul n (cmat.transpose k) (cmat.transpose g) i j = cmat.mul n g k i j
+      rw [← cmat.transpose_mul n g k i j]; exact (hsymm i hi j hj).symm
+    calc cmat.transpose g i j = cmat.mul n cmat.id (cmat.transpose g) i j := (cmat.mul_id_left n (cmat.transpose g) i j hi).symm
+      _ = cmat.mul n (cmat.mul n (cmat.inv n (cmat.transpose k)) (cmat.transpose k)) (cmat.transpose g) i j :=
+          cmat.mul_congr_left n cmat.id _ (cmat.transpose g) i j (by intro t ht; exact (cmat.inv_mul_eq_id n (cmat.transpose k) hdet_kT i hi t ht).symm)
+      _ = cmat.mul n (cmat.inv n (cmat.transpose k)) (cmat.mul n (cmat.transpose k) (cmat.transpose g)) i j :=
+          cmat.mul_assoc n (cmat.inv n (cmat.transpose k)) (cmat.transpose k) (cmat.transpose g) i j
+      _ = cmat.mul n (cmat.inv n (cmat.transpose k)) (cmat.mul n g k) i j :=
+          cmat.mul_congr_right n (cmat.inv n (cmat.transpose k)) _ (cmat.mul n g k) i j (by intro t ht; rw [← cmat.transpose_mul n g k t j]; exact (hsymm t ht j hj).symm)
+      _ = cmat.mul n (cmat.mul n (cmat.inv n (cmat.transpose k)) g) k i j :=
+          (cmat.mul_assoc n (cmat.inv n (cmat.transpose k)) g k i j).symm
+  exact ⟨k, hk_gl, hsymm, hconj⟩
+
+-- Vector / single-column clearing over `O_v`: every vector `x : ℕ → ℂ` of length `n ≥ 1`
+-- admits `K ∈ GL_n(O_v)` such that `(K * x)_i = 0` for all `i < n - 1` and
+-- `v((K * x)_{n-1}) = max_{j < n} v(x_j)`.
++ cmat.ultrametric_vec_clear (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (hnondeg : ∀ z : ℂ, z ≠ complex.zero → 0 < v z) (n : ℕ) (hn : 1 ≤ n) (x : ℕ → ℂ) :
+    ∃ K : ℕ → ℕ → ℂ,
+      cmat.is_val_gl v n K ∧
+      (∀ i < n - 1, cmat.apply n K x i = complex.zero) ∧
+      (∀ j < n, v (x j) ≤ v (cmat.apply n K x (n - 1))) ∧
+      (∃ j0 < n, cmat.apply n K x (n - 1) = x j0)
+  have hm : n = (n - 1) + 1 := by omega
+  set m := n - 1 with hm_def
+  obtain ⟨j0, hj0, hmax⟩ := exists_argmax_real n hn (fun j => v (x j))
+  by_cases hx0 : x j0 = complex.zero
+  · have hall0 : ∀ j < n, x j = complex.zero
+      intro j hj
+      have hle := hmax j hj; rw [hx0, hv.1.1] at hle
+      by_contra hne; have hp := hnondeg (x j) hne; linarith
+    refine ⟨cmat.id, cmat.is_val_gl_id v hv n, ?_, ?_, j0, hj0, ?_⟩
+    · intro i hi; unfold cmat.apply; apply csum.zero_of_all_zero; intro j hj; rw [hall0 j hj, complex.mul_zero_r]
+    · intro j hj; rw [hall0 j hj, hv.1.1]; exact hv.1.2.2.1 _
+    · rw [hx0]; unfold cmat.apply; apply csum.zero_of_all_zero; intro j hj; rw [hall0 j hj, complex.mul_zero_r]
+  · set S : ℕ → ℕ → ℂ := cmat.swap_mat j0 m with hS_def
+    set y : ℕ → ℂ := fun i => x (swap_idx j0 m i) with hy_def
+    have hym_eq : y m = x j0
+      rw [hy_def]; unfold swap_idx
+      by_cases h : m = j0
+      · rw [if_pos h, h]
+      · rw [if_neg h]
+    have hym_ne : y m ≠ complex.zero := by rw [hym_eq]; exact hx0
+    have hym_pos : 0 < v (y m) := hnondeg (y m) hym_ne
+    have hv_inv : v (complex.inv (y m)) * v (y m) = 1
+      rw [← hv.1.2.2.2, complex.inv_mul_cancel (y m) hym_ne, hv.1.2.1]
+    set w : ℕ → ℂ := fun i => complex.neg (complex.mul (y i) (complex.inv (y m))) with hw_def
+    have hw_le1 : ∀ i < m, v (w i) ≤ 1
+      intro i hi
+      rw [hw_def, hv.2.1, hv.1.2.2.2]
+      have hyi_le : v (y i) ≤ v (y m)
+        rw [hym_eq, hy_def]; exact hmax (swap_idx j0 m i) (swap_idx.lt n j0 m i hj0 (by omega) (by omega))
+      have hm1 := mul_le_mul_of_nonneg_right.real (v (y i)) (v (y m)) (v (complex.inv (y m))) hyi_le (hv.1.2.2.1 _)
+      linarith
+    set K : ℕ → ℕ → ℂ := cmat.mul n (cmat.elim_col_last m w) S with hK_def
+    have hK_gl : cmat.is_val_gl v n K
+      rw [hK_def, hS_def, hm]
+      exact cmat.is_val_gl_mul v hv (m + 1) _ _ (cmat.is_val_gl_elim_col_last v hv m w hw_le1) (cmat.is_val_gl_swap v hv (m + 1) j0 m (by omega) (by omega))
+    have hKx : ∀ i < n, cmat.apply n K x i = if i < m then complex.add (y i) (complex.mul (w i) (y m)) else y m
+      intro i hi
+      rw [hK_def, hm]; unfold cmat.apply
+      have h1 : csum (m + 1) (fun j => complex.mul (cmat.mul (m + 1) (cmat.elim_col_last m w) S i j) (x j)) =
+          csum (m + 1) (fun k => complex.mul (cmat.elim_col_last m w i k) (csum (m + 1) (fun j => complex.mul (S k j) (x j))))
+        unfold cmat.mul
+        have ha : csum (m + 1) (fun j => complex.mul (csum (m + 1) (fun k => complex.mul (cmat.elim_col_last m w i k) (S k j))) (x j)) =
+            csum (m + 1) (fun j => csum (m + 1) (fun k => complex.mul (cmat.elim_col_last m w i k) (complex.mul (S k j) (x j))))
+          apply csum.congr; intro j _; rw [← csum.scale_right]
+          apply csum.congr; intro k _; exact complex.mul_assoc _ _ _
+        rw [ha, csum.swap]; apply csum.congr; intro k _; rw [csum.scale_left]
+      have hSx : ∀ k < m + 1, csum (m + 1) (fun j => complex.mul (S k j) (x j)) = y k
+        intro k hk; rw [hS_def, hy_def]; unfold cmat.swap_mat
+        have hc : csum (m + 1) (fun j => complex.mul (if k = swap_idx j0 m j then complex.one else complex.zero) (x j)) =
+            csum (m + 1) (fun j => if j = swap_idx j0 m k then x j else complex.zero)
+          apply csum.congr; intro j _
+          by_cases hjk : j = swap_idx j0 m k
+          · have hkj : k = swap_idx j0 m j := by rw [hjk, swap_idx.involution]
+            rw [if_pos hkj, if_pos hjk, complex.mul_one_l]
+          · have hkj : k ≠ swap_idx j0 m j := by intro heq; apply hjk; rw [heq, swap_idx.involution]
+            rw [if_neg hkj, if_neg hjk, complex.mul_zero_l]
+        rw [hc, csum.single (m + 1) (swap_idx j0 m k) x (swap_idx.lt (m + 1) j0 m k (by omega) (by omega) hk)]
+      rw [h1]
+      have h2 : csum (m + 1) (fun k => complex.mul (cmat.elim_col_last m w i k) (csum (m + 1) (fun j => complex.mul (S k j) (x j)))) =
+          cmat.mul (m + 1) (cmat.elim_col_last m w) (fun k _ => y k) i 0
+        unfold cmat.mul; apply csum.congr; intro k hk; rw [hSx k hk]
+      rw [h2, cmat.mul_elim_col_last_left m w (fun k _ => y k) i 0 (by omega)]
+    refine ⟨K, hK_gl, ?_, ?_, j0, hj0, ?_⟩
+    · intro i hi
+      rw [hKx i (by omega), if_pos hi, hw_def]
+      have h1 : complex.mul (complex.neg (complex.mul (y i) (complex.inv (y m)))) (y m) = complex.neg (y i)
+        have h2 : complex.mul (complex.mul (y i) (complex.inv (y m))) (y m) = y i
+          rw [complex.mul_assoc, complex.inv_mul_cancel (y m) hym_ne, complex.mul_one_r]
+        have h3 : complex.mul (complex.neg (complex.mul (y i) (complex.inv (y m)))) (y m) = complex.neg (complex.mul (complex.mul (y i) (complex.inv (y m))) (y m))
+          apply complex.ext <;> simp <;> ring
+        rw [h3, h2]
+      rw [h1]; apply complex.ext <;> simp <;> ring
+    · intro j hj
+      rw [hKx m (by omega), if_neg (by omega), hym_eq]; exact hmax j hj
+    · rw [hKx m (by omega), if_neg (by omega), hym_eq]
+
+-- ====================================================================================
+-- SECTION 5: GELFAND'S TRICK FOR SPHERICAL HECKE ALGEBRAS (`ColumnLattices.lean`)
+-- ====================================================================================
+
+-> hecke.is_bi_inv (v : ℂ → ℝ) (n : ℕ) (f : (ℕ → ℕ → ℂ) → ℂ) : Prop :=
+  (∀ A B : ℕ → ℕ → ℂ, cmat.eq_on n A B → f A = f B) ∧
+  (∀ K g : ℕ → ℕ → ℂ, cmat.is_val_gl v n K → f (cmat.mul n K g) = f g) ∧
+  (∀ g K : ℕ → ℕ → ℂ, cmat.is_val_gl v n K → f (cmat.mul n g K) = f g)
+
+-- Key consequence of Smith Normal Form: every `GL_n(O_v)`-bi-invariant function is transpose-invariant!
++ hecke.bi_inv_transpose_eq (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (hnondeg : ∀ z : ℂ, z ≠ complex.zero → 0 < v z) (n : ℕ)
+    (f : (ℕ → ℕ → ℂ) → ℂ) (hf : hecke.is_bi_inv v n f) (g : ℕ → ℕ → ℂ) :
+    f (cmat.transpose g) = f g
+  obtain ⟨k, hk_gl, _, hconj⟩ := cmat.exists_symm_unit_of_ultrametric v hv hnondeg n g
+  have hkTi_gl : cmat.is_val_gl v n (cmat.inv n (cmat.transpose k)) :=
+    cmat.is_val_gl_inv v hv n (cmat.transpose k) (cmat.is_val_gl_transpose v n k hk_gl)
+  unfold hecke.is_bi_inv at hf
+  rw [hf.1 _ _ hconj, hf.2.2 _ k hk_gl, hf.2.1 _ g hkTi_gl]
+
+-- Adjoint function `f^*(g) := conj(f(g⁻¹))` is also `GL_n(O_v)`-bi-invariant on `GL_n(ℂ)`!
++ hecke.bi_inv_star_of_bi_inv (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (n : ℕ)
+    (f : (ℕ → ℕ → ℂ) → ℂ) (hf : hecke.is_bi_inv v n f) :
+    (∀ A B : ℕ → ℕ → ℂ, cmat.det n A ≠ complex.zero → cmat.eq_on n A B →
+      complex.conj (f (cmat.inv n A)) = complex.conj (f (cmat.inv n B))) ∧
+    (∀ K g : ℕ → ℕ → ℂ, cmat.is_val_gl v n K → cmat.det n g ≠ complex.zero →
+      complex.conj (f (cmat.inv n (cmat.mul n K g))) = complex.conj (f (cmat.inv n g))) ∧
+    (∀ g K : ℕ → ℕ → ℂ, cmat.is_val_gl v n K → cmat.det n g ≠ complex.zero →
+      complex.conj (f (cmat.inv n (cmat.mul n g K))) = complex.conj (f (cmat.inv n g)))
+  unfold hecke.is_bi_inv at hf
+  refine ⟨?_, ?_, ?_⟩
+  · intro A B hdet hAB
+    rw [hf.1 _ _ (cmat.inv_congr n A B hAB hdet)]
+  · intro K g hK hdet
+    have hdetK := cmat.is_val_gl_det_ne_zero v hv n K hK
+    have hKi := cmat.is_val_gl_inv v hv n K hK
+    rw [hf.1 _ _ (cmat.eq_on_symm n _ _ (cmat.inv_mul_eq n K g hdetK hdet)), hf.2.2 _ _ hKi]
+  · intro g K hK hdet
+    have hdetK := cmat.is_val_gl_det_ne_zero v hv n K hK
+    have hKi := cmat.is_val_gl_inv v hv n K hK
+    rw [hf.1 _ _ (cmat.eq_on_symm n _ _ (cmat.inv_mul_eq n g K hdet hdetK)), hf.2.1 _ _ hKi]
+
+-- Gelfand's Trick for Spherical Hecke Convolution Commutativity (`ColumnLattices.lean`, line 147):
+-- For any nondegenerate ultrametric valuation `v`, any two `GL_n(O_v)`-bi-invariant functions
+-- `f1, f2`, any `x ∈ GL_n(ℂ)`, and any finite coset-representative family `rep : ℕ → M_n(ℂ)` (`j < M`)
+-- in `GL_n(ℂ)` closed under the Gelfand coset involution `q ↦ (x * k) * (q^T)⁻¹ * u` (`k ∈ GL_n(O_v)`
+-- with `x * k` symmetric, `u ∈ GL_n(O_v)`):
+--   `∑_{j < M} f1(rep j) * f2((rep j)⁻¹ * x) = ∑_{j < M} f2(rep j) * f1((rep j)⁻¹ * x)`.
++ hecke.gelfand_convolution_comm (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (hnondeg : ∀ z : ℂ, z ≠ complex.zero → 0 < v z) (n M : ℕ)
+    (f1 f2 : (ℕ → ℕ → ℂ) → ℂ)
+    (hf1 : hecke.is_bi_inv v n f1) (hf2 : hecke.is_bi_inv v n f2)
+    (x : ℕ → ℕ → ℂ) (hx_det : cmat.det n x ≠ complex.zero)
+    (rep : ℕ → ℕ → ℕ → ℂ) (hrep_det : ∀ j < M, cmat.det n (rep j) ≠ complex.zero)
+    (hclosed : ∀ k : ℕ → ℕ → ℂ, cmat.is_val_gl v n k →
+      cmat.eq_on n (cmat.mul n x k) (cmat.transpose (cmat.mul n x k)) →
+      ∃ pi inv_pi : ℕ → ℕ,
+        (∀ j < M, pi j < M) ∧ (∀ j < M, inv_pi j < M) ∧
+        (∀ j < M, inv_pi (pi j) = j) ∧ (∀ j < M, pi (inv_pi j) = j) ∧
+        (∀ j < M, ∃ u : ℕ → ℕ → ℂ, cmat.is_val_gl v n u ∧
+          cmat.eq_on n (rep (pi j)) (cmat.mul n (cmat.mul n (cmat.mul n x k) (cmat.inv n (cmat.transpose (rep j)))) u))) :
+    csum M (fun j => complex.mul (f1 (rep j)) (f2 (cmat.mul n (cmat.inv n (rep j)) x))) =
+    csum M (fun j => complex.mul (f2 (rep j)) (f1 (cmat.mul n (cmat.inv n (rep j)) x)))
+  obtain ⟨k, hk_gl, hxk_symm, _⟩ := cmat.exists_symm_unit_of_ultrametric v hv hnondeg n x
+  obtain ⟨pi, inv_pi, hpi_lt, hinv_lt, hleft, hright, hmap⟩ := hclosed k hk_gl hxk_symm
+  have hdet_k := cmat.is_val_gl_det_ne_zero v hv n k hk_gl
+  have hkT_gl := cmat.is_val_gl_transpose v n k hk_gl
+  have hki_gl := cmat.is_val_gl_inv v hv n k hk_gl
+  -- Reindex RHS along bijection `pi`
+  rw [← csum.bij M pi inv_pi (fun j => complex.mul (f2 (rep j)) (f1 (cmat.mul n (cmat.inv n (rep j)) x))) hpi_lt hinv_lt hleft hright]
+  apply csum.congr; intro j hj
+  obtain ⟨u, hu_gl, hrep_pi⟩ := hmap j hj
+  have hdet_q := hrep_det j hj
+  have hdet_qT : cmat.det n (cmat.transpose (rep j)) ≠ complex.zero := by rw [cmat.det_transpose]; exact hdet_q
+  have hdet_u := cmat.is_val_gl_det_ne_zero v hv n u hu_gl
+  have hui_gl := cmat.is_val_gl_inv v hv n u hu_gl
+  -- Step 1: `f2 (rep (pi j)) = f2 ((rep j)⁻¹ * x)`
+  -- Since `x k = (x k)^T = k^T x^T`, we have `(x k) (q^T)⁻¹ u = k^T (q⁻¹ x)^T u`!
+  have hf2_eq : f2 (rep (pi j)) = f2 (cmat.mul n (cmat.inv n (rep j)) x)
+    have hmat1 : cmat.eq_on n (cmat.mul n (cmat.mul n (cmat.mul n x k) (cmat.inv n (cmat.transpose (rep j)))) u) (cmat.mul n (cmat.mul n (cmat.transpose k) (cmat.transpose (cmat.mul n (cmat.inv n (rep j)) x))) u)
+      have hleft_eq : cmat.eq_on n (cmat.mul n (cmat.mul n x k) (cmat.inv n (cmat.transpose (rep j)))) (cmat.mul n (cmat.transpose k) (cmat.transpose (cmat.mul n (cmat.inv n (rep j)) x)))
+        have hinT := cmat.inv_transpose_eq n (rep j) hdet_q
+        unfold cmat.eq_on at hxk_symm hinT ⊢; intro a ha b hb
+        rw [cmat.mul_congr_left n (cmat.mul n x k) (cmat.transpose (cmat.mul n x k)) _ a b (by intro t ht; exact hxk_symm a ha t ht)]
+        rw [cmat.mul_congr_left n (cmat.transpose (cmat.mul n x k)) (cmat.mul n (cmat.transpose k) (cmat.transpose x)) _ a b (by intro t _; exact cmat.transpose_mul n x k a t)]
+        rw [cmat.mul_assoc n (cmat.transpose k) (cmat.transpose x) (cmat.inv n (cmat.transpose (rep j))) a b]
+        apply cmat.mul_congr_right; intro t ht
+        rw [cmat.transpose_mul n (cmat.inv n (rep j)) x t b]
+        exact cmat.mul_congr_right n (cmat.transpose x) (cmat.inv n (cmat.transpose (rep j))) (cmat.transpose (cmat.inv n (rep j))) t b (by intro s hs; exact (hinT s hs b hb).symm)
+      exact cmat.mul_eq_on n _ _ u u hleft_eq (cmat.eq_on_refl n u)
+    have hf2_bi := hf2
+    unfold hecke.is_bi_inv at hf2_bi
+    rw [hf2_bi.1 _ _ (cmat.eq_on_trans n _ _ _ hrep_pi hmat1), hf2_bi.2.2 _ u hu_gl, hf2_bi.2.1 _ _ hkT_gl]
+    exact hecke.bi_inv_transpose_eq v hv hnondeg n f2 hf2 (cmat.mul n (cmat.inv n (rep j)) x)
+  -- Step 2: `f1 ((rep (pi j))⁻¹ * x) = f1 (rep j)`
+  -- Since `rep (pi j) = (x k) (q^T)⁻¹ u`, we have `(rep (pi j))⁻¹ * x = u⁻¹ * q^T * k⁻¹`!
+  have hf1_eq : f1 (cmat.mul n (cmat.inv n (rep (pi j))) x) = f1 (rep j)
+    have hdet_pi := hrep_det (pi j) (hpi_lt j hj)
+    have hinv_pi : cmat.eq_on n (cmat.mul n (cmat.inv n (rep (pi j))) x) (cmat.mul n (cmat.inv n u) (cmat.mul n (cmat.transpose (rep j)) (cmat.inv n k)))
+      -- Verify directly by multiplying on the left by `rep (pi j)`:
+      -- `rep (pi j) * (u⁻¹ * q^T * k⁻¹) = ((x k) (q^T)⁻¹ u) * (u⁻¹ * q^T * k⁻¹) = x`!
+      set R := cmat.mul n (cmat.inv n u) (cmat.mul n (cmat.transpose (rep j)) (cmat.inv n k)) with hR_def
+      have hmul_x : cmat.eq_on n (cmat.mul n (rep (pi j)) R) x
+        unfold cmat.eq_on at hrep_pi ⊢; intro a ha b hb
+        rw [cmat.mul_congr_left n (rep (pi j)) (cmat.mul n (cmat.mul n (cmat.mul n x k) (cmat.inv n (cmat.transpose (rep j)))) u) R a b (by intro t ht; exact hrep_pi a ha t ht)]
+        rw [cmat.mul_assoc n (cmat.mul n (cmat.mul n x k) (cmat.inv n (cmat.transpose (rep j)))) u R a b]
+        have huR : ∀ t < n, cmat.mul n u R t b = cmat.mul n (cmat.transpose (rep j)) (cmat.inv n k) t b
+          intro t ht
+          rw [hR_def, ← cmat.mul_assoc n u (cmat.inv n u) (cmat.mul n (cmat.transpose (rep j)) (cmat.inv n k)) t b]
+          rw [cmat.mul_congr_left n (cmat.mul n u (cmat.inv n u)) cmat.id (cmat.mul n (cmat.transpose (rep j)) (cmat.inv n k)) t b (by intro s hs; exact cmat.mul_inv_eq_id n u hdet_u t ht s hs)]
+          exact cmat.mul_id_left n (cmat.mul n (cmat.transpose (rep j)) (cmat.inv n k)) t b ht
+        rw [cmat.mul_congr_right n (cmat.mul n (cmat.mul n x k) (cmat.inv n (cmat.transpose (rep j)))) (cmat.mul n u R) (cmat.mul n (cmat.transpose (rep j)) (cmat.inv n k)) a b huR]
+        rw [cmat.mul_assoc n (cmat.mul n x k) (cmat.inv n (cmat.transpose (rep j))) (cmat.mul n (cmat.transpose (rep j)) (cmat.inv n k)) a b]
+        have hqR : ∀ t < n, cmat.mul n (cmat.inv n (cmat.transpose (rep j))) (cmat.mul n (cmat.transpose (rep j)) (cmat.inv n k)) t b = cmat.inv n k t b
+          intro t ht
+          rw [← cmat.mul_assoc n (cmat.inv n (cmat.transpose (rep j))) (cmat.transpose (rep j)) (cmat.inv n k) t b]
+          rw [cmat.mul_congr_left n _ cmat.id (cmat.inv n k) t b (by intro s hs; exact cmat.inv_mul_eq_id n (cmat.transpose (rep j)) hdet_qT t ht s hs)]
+          exact cmat.mul_id_left n (cmat.inv n k) t b ht
+        rw [cmat.mul_congr_right n (cmat.mul n x k) _ (cmat.inv n k) a b hqR]
+        rw [cmat.mul_assoc n x k (cmat.inv n k) a b]
+        rw [cmat.mul_congr_right n x _ cmat.id a b (by intro t ht; exact cmat.mul_inv_eq_id n k hdet_k t ht b hb)]
+        exact cmat.mul_id_right n x a b hb
+      unfold cmat.eq_on at hmul_x ⊢; intro a ha b hb
+      calc cmat.mul n (cmat.inv n (rep (pi j))) x a b
+        = cmat.mul n (cmat.inv n (rep (pi j))) (cmat.mul n (rep (pi j)) R) a b :=
+            cmat.mul_congr_right n (cmat.inv n (rep (pi j))) x _ a b (by intro t ht; exact (hmul_x t ht b hb).symm)
+        _ = cmat.mul n (cmat.mul n (cmat.inv n (rep (pi j))) (rep (pi j))) R a b :=
+            (cmat.mul_assoc n (cmat.inv n (rep (pi j))) (rep (pi j)) R a b).symm
+        _ = cmat.mul n cmat.id R a b :=
+            cmat.mul_congr_left n _ cmat.id R a b (by intro t ht; exact cmat.inv_mul_eq_id n (rep (pi j)) hdet_pi a ha t ht)
+        _ = R a b := cmat.mul_id_left n R a b ha
+    have hf1_bi := hf1
+    unfold hecke.is_bi_inv at hf1_bi
+    rw [hf1_bi.1 _ _ hinv_pi, hf1_bi.2.1 _ _ hui_gl, hf1_bi.2.2 _ _ hki_gl]
+    exact hecke.bi_inv_transpose_eq v hv hnondeg n f1 hf1 (rep j)
+  rw [hf1_eq, hf2_eq, complex.mul_comm]
+
+-- Spherical Hecke Adjoint Identity (`ColumnLattices.lean`, line 131):
+-- For any `GL_n(ℂ)`-invariant sesquilinear pairing `B(π(g) u, π'(g) w) = B(u, w)` on `K`-fixed
+-- vectors `u, w`, and any `GL_n(O_v)`-bi-invariant function `f` on a finite coset-representative
+-- family closed under `q ↦ (q^T)⁻¹ K`:
+--   `∑_j conj(f(rep j)) * B(π(rep j) u, w) = ∑_j conj(f((rep j)⁻¹)) * B(u, π'(rep j) w)`.
++ hecke.gelfand_adjoint_sum (v : ℂ → ℝ) (hv : is_ultrametric_norm v)
+    (hnondeg : ∀ z : ℂ, z ≠ complex.zero → 0 < v z) (n M : ℕ)
+    (f : (ℕ → ℕ → ℂ) → ℂ) (hf : hecke.is_bi_inv v n f)
+    (pair : (ℕ → ℕ → ℂ) → ℂ)
+    (hpair_congr : ∀ A B : ℕ → ℕ → ℂ, cmat.eq_on n A B → pair A = pair B)
+    (hpair_K_left : ∀ K g : ℕ → ℕ → ℂ, cmat.is_val_gl v n K → pair (cmat.mul n K g) = pair g)
+    (hpair_K_right : ∀ g K : ℕ → ℕ → ℂ, cmat.is_val_gl v n K → pair (cmat.mul n g K) = pair g)
+    (rep : ℕ → ℕ → ℕ → ℂ) (hrep_det : ∀ j < M, cmat.det n (rep j) ≠ complex.zero)
+    (pi inv_pi : ℕ → ℕ)
+    (hpi_lt : ∀ j < M, pi j < M) (hinv_lt : ∀ j < M, inv_pi j < M)
+    (hleft : ∀ j < M, inv_pi (pi j) = j) (hright : ∀ j < M, pi (inv_pi j) = j)
+    (hmap : ∀ j < M, ∃ u : ℕ → ℕ → ℂ, cmat.is_val_gl v n u ∧
+      cmat.eq_on n (rep (pi j)) (cmat.mul n (cmat.inv n (cmat.transpose (rep j))) u)) :
+    csum M (fun j => complex.mul (complex.conj (f (rep j))) (pair (cmat.inv n (rep j)))) =
+    csum M (fun j => complex.mul (complex.conj (f (cmat.inv n (rep j)))) (pair (rep j)))
+  rw [← csum.bij M pi inv_pi (fun j => complex.mul (complex.conj (f (cmat.inv n (rep j)))) (pair (rep j))) hpi_lt hinv_lt hleft hright]
+  apply csum.congr; intro j hj
+  obtain ⟨u, hu_gl, hrep_pi⟩ := hmap j hj
+  have hdet_q := hrep_det j hj
+  have hdet_qT : cmat.det n (cmat.transpose (rep j)) ≠ complex.zero := by rw [cmat.det_transpose]; exact hdet_q
+  have hdet_u := cmat.is_val_gl_det_ne_zero v hv n u hu_gl
+  have hui_gl := cmat.is_val_gl_inv v hv n u hu_gl
+  have hdet_qTi : cmat.det n (cmat.inv n (cmat.transpose (rep j))) ≠ complex.zero
+    rw [cmat.det_inv n _ hdet_qT]; intro hz
+    have h1 := complex.mul_inv_cancel (cmat.det n (cmat.transpose (rep j))) hdet_qT
+    rw [hz, complex.mul_zero_r] at h1
+    have hre : complex.re complex.zero = complex.re complex.one := by rw [h1]
+    simp at hre
+  -- Factor 1: `f ((rep (pi j))⁻¹) = f (rep j)` since `(rep (pi j))⁻¹ = u⁻¹ * q^T`!
+  have hf_eq : f (cmat.inv n (rep (pi j))) = f (rep j)
+    have hinv_eq : cmat.eq_on n (cmat.inv n (rep (pi j))) (cmat.mul n (cmat.inv n u) (cmat.transpose (rep j)))
+      have h1 := cmat.inv_congr n (rep (pi j)) _ hrep_pi (hrep_det (pi j) (hpi_lt j hj))
+      have h2 := cmat.eq_on_symm n _ _ (cmat.inv_mul_eq n (cmat.inv n (cmat.transpose (rep j))) u hdet_qTi hdet_u)
+      have h3 := cmat.mul_eq_on n (cmat.inv n u) (cmat.inv n u) (cmat.inv n (cmat.inv n (cmat.transpose (rep j)))) (cmat.transpose (rep j)) (cmat.eq_on_refl n _) (cmat.eq_on_symm n _ _ (cmat.inv_inv_eq n _ hdet_qT))
+      exact cmat.eq_on_trans n _ _ _ h1 (cmat.eq_on_trans n _ _ _ h2 h3)
+    have hf_bi := hf
+    unfold hecke.is_bi_inv at hf_bi
+    rw [hf_bi.1 _ _ hinv_eq, hf_bi.2.1 _ _ hui_gl]
+    exact hecke.bi_inv_transpose_eq v hv hnondeg n f hf (rep j)
+  -- Factor 2: `pair (rep (pi j)) = pair ((rep j)⁻¹)` since `(q⁻¹)^T = (q^T)⁻¹` and `pair` is `K`-bi-invariant!
+  have hp_eq : pair (rep (pi j)) = pair (cmat.inv n (rep j))
+    obtain ⟨k, hk_gl, _, hconj⟩ := cmat.exists_symm_unit_of_ultrametric v hv hnondeg n (cmat.inv n (rep j))
+    have hkTi_gl := cmat.is_val_gl_inv v hv n (cmat.transpose k) (cmat.is_val_gl_transpose v n k hk_gl)
+    rw [hpair_congr _ _ hrep_pi, hpair_K_right _ u hu_gl]
+    rw [hpair_congr _ _ (cmat.eq_on_symm n _ _ (cmat.inv_transpose_eq n (rep j) hdet_q))]
+    rw [hpair_congr _ _ hconj, hpair_K_right _ k hk_gl, hpair_K_left _ _ hkTi_gl]
+  rw [hf_eq, hp_eq]
+
+-- ====================================================================================
+-- AXIOM AUDIT: ZERO CUSTOM AXIOMS!
+-- ====================================================================================
+
+#axioms cmat.smith_normal_form_of_ultrametric
+#axioms cmat.ultrametric_det_eq_prod_smith
+#axioms cmat.exists_symm_unit_of_ultrametric
+#axioms cmat.ultrametric_vec_clear
+#axioms hecke.bi_inv_transpose_eq
+#axioms hecke.gelfand_convolution_comm
+#axioms hecke.gelfand_adjoint_sum

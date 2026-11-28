@@ -1,0 +1,528 @@
+-- Compressed Gram Volume Theory, Operator-Norm Adjoint Duality, Twist-Ratio
+-- Cancellation, Archimedean Loewner Determinant Bound, Ultrametric Auerbach
+-- Determinant Bound, and Rallis Chain Gram Determinant Factorization.
+--
+-- Proved unconditionally on Satori's untouched HOL kernel (0 custom axioms).
+
+import algebra.auerbach_ostrowski
+
+-- ====================================================================================
+-- SECTION 1: GRAM MATRICES, RALLIS STEP DETERMINANTS, & COMPRESSED GRAM IDENTITY
+-- ====================================================================================
+
+-> cmat.gram_cols (N : ℕ) (u : ℕ → ℕ → ℂ) (i j : ℕ) : ℂ :=
+  cmat.mul N (cmat.adj u) u i j
+
+-> cmat.compressed_gram (N M d : ℕ) (k : ℝ) (u g : ℕ → ℕ → ℂ) (i j : ℕ) : ℂ :=
+  complex.mul (complex.of_real k)
+    (cmat.mul d (cmat.inv d (cmat.gram_cols N u))
+      (cmat.mul M (cmat.mul N (cmat.adj u) g) (cmat.adj (cmat.mul N (cmat.adj u) g))) i j)
+
++ cmat.gram_cols_is_psd (N d : ℕ) (u : ℕ → ℕ → ℂ) :
+    cmat.is_psd d (cmat.gram_cols N u)
+  apply cmat.is_psd_congr d (fun i j => csum N (fun r => complex.mul (complex.conj (u r i)) (u r j))) (cmat.gram_cols N u)
+  · intro i _ j _; unfold cmat.gram_cols cmat.mul cmat.adj; trivial
+  · exact cmat.is_psd_adj_mul_self d N u
+
++ cmat.norm_det_sq_eq_pow_mul_det (N d : ℕ) (a : ℝ) (u S : ℕ → ℕ → ℂ)
+    (hstep : ∀ i < d, ∀ j < d, cmat.gram_cols N u i j = complex.mul (complex.of_real a) (S i j)) :
+    cmat.det d (cmat.gram_cols N u) = complex.mul (complex.of_real (a ^ d)) (cmat.det d S)
+  rw [cmat.det_congr d (cmat.gram_cols N u) (fun i j => complex.mul (complex.of_real a) (S i j)) hstep]
+  exact cmat.det_real_smul_eq d a S
+
++ cmat.det_gram_of_rallis_step (N d : ℕ) (a : ℝ) (u G0 S : ℕ → ℕ → ℂ)
+    (hstep : ∀ i < d, ∀ j < d, cmat.gram_cols N u i j = complex.mul (complex.of_real a) (cmat.mul d G0 S i j)) :
+    cmat.det d (cmat.gram_cols N u) =
+      complex.mul (complex.of_real (a ^ d)) (complex.mul (cmat.det d G0) (cmat.det d S))
+  rw [cmat.norm_det_sq_eq_pow_mul_det N d a u (cmat.mul d G0 S) hstep, cmat.det_mul]
+
++ cmat.rallis_chain_det_prod (m d : ℕ) (a : ℕ → ℝ) (G : ℕ → ℕ → ℕ → ℂ) (S : ℕ → ℕ → ℕ → ℂ)
+    (hstep : ∀ j < m, ∀ r < d, ∀ c < d, G (j + 1) r c = complex.mul (complex.of_real (a j)) (cmat.mul d (G j) (S j) r c)) :
+    cmat.det d (G m) = complex.mul (complex.of_real ((∏ j < m, a j) ^ d)) (complex.mul (cmat.det d (G 0)) (cprod_c m (fun j => cmat.det d (S j))))
+  have hpow_mul : ∀ (x y : ℝ) (k : ℕ), (x * y) ^ k = (x ^ k) * (y ^ k)
+    intro x y k; induction k with r ihr
+    · rw [pow_zero.real, pow_zero.real, pow_zero.real]; ring
+    · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, pow_succ.real, ihr]; ring
+  induction m with hstep r ihr hstep
+  · rw [prod_below_zero, cprod_c.zero_eq]
+    have h1 : (1 : ℝ) ^ d = 1
+      have hall : ∀ n : ℕ, (1 : ℝ) ^ n = 1
+        intro n; induction n with k ihk; (exact pow_zero.real 1); (rw [succ_eq_add_one.nat, pow_succ.real, ihk]; ring)
+      exact hall d
+    rw [h1, complex.of_real_one, complex.mul_one_r, complex.mul_one_l]
+  · rw [succ_eq_add_one.nat] at hstep ⊢
+    rw [prod_below_succ, cprod_c.succ_eq, hpow_mul]
+    have hcon := cmat.det_congr d (G (r + 1)) (fun i j => complex.mul (complex.of_real (a r)) (cmat.mul d (G r) (S r) i j)) (hstep r (by omega))
+    rw [hcon, cmat.det_real_smul_eq, cmat.det_mul, ihr (by intro j hj; exact hstep j (by omega)), complex.of_real_mul]
+    apply complex.ext <;> simp <;> ring
+
++ cmat.det_compressed_gram (N M d : ℕ) (k : ℝ) (u g : ℕ → ℕ → ℂ)
+    (hGu : cmat.det d (cmat.gram_cols N u) ≠ complex.zero) :
+    cmat.det d (cmat.compressed_gram N M d k u g) = complex.mul (complex.of_real (k ^ d)) (complex.mul (complex.inv (cmat.det d (cmat.gram_cols N u))) (cmat.det d (cmat.mul M (cmat.mul N (cmat.adj u) g) (cmat.adj (cmat.mul N (cmat.adj u) g)))))
+  have hcon : cmat.det d (cmat.compressed_gram N M d k u g) = cmat.det d (fun i j => complex.mul (complex.of_real k) (cmat.mul d (cmat.inv d (cmat.gram_cols N u)) (cmat.mul M (cmat.mul N (cmat.adj u) g) (cmat.adj (cmat.mul N (cmat.adj u) g))) i j))
+    apply cmat.det_congr; intro i _ j _; unfold cmat.compressed_gram; trivial
+  rw [hcon, cmat.det_real_smul_eq, cmat.det_mul, cmat.det_inv d (cmat.gram_cols N u) hGu]
+
++ cmat.compressed_gram_det_identity (N M d : ℕ) (k : ℝ) (gam : ℂ) (u g A : ℕ → ℕ → ℂ)
+    (hGu : cmat.det d (cmat.gram_cols N u) ≠ complex.zero)
+    (hcomp : ∀ i < d, ∀ a < M, cmat.mul N (cmat.adj u) g i a = complex.mul gam (A i a)) :
+    complex.mul (cmat.det d (cmat.gram_cols N u)) (cmat.det d (cmat.compressed_gram N M d k u g)) = complex.mul (complex.of_real ((k * complex.norm_sq gam) ^ d)) (cmat.det d (cmat.mul M A (cmat.adj A)))
+  set P : ℕ → ℕ → ℂ := cmat.mul N (cmat.adj u) g with hP_def
+  have hPP_eq : ∀ i < d, ∀ j < d,
+      cmat.mul M P (cmat.adj P) i j = complex.mul (complex.of_real (complex.norm_sq gam)) (cmat.mul M A (cmat.adj A) i j)
+    intro i hi j hj; unfold cmat.mul cmat.adj; rw [← csum.scale_left]
+    apply csum.congr; intro a ha
+    rw [hcomp i hi a ha, hcomp j hj a ha, complex.conj_mul]
+    have hre : complex.mul (complex.mul gam (A i a)) (complex.mul (complex.conj gam) (complex.conj (A j a))) =
+        complex.mul (complex.mul gam (complex.conj gam)) (complex.mul (A i a) (complex.conj (A j a)))
+      apply complex.ext <;> simp <;> ring
+    rw [hre, complex.mul_conj]
+  have hdet_K : cmat.det d (cmat.compressed_gram N M d k u g) =
+      complex.mul (complex.of_real (k ^ d)) (complex.mul (complex.inv (cmat.det d (cmat.gram_cols N u))) (complex.mul (complex.of_real ((complex.norm_sq gam) ^ d)) (cmat.det d (cmat.mul M A (cmat.adj A)))))
+    rw [cmat.det_compressed_gram N M d k u g hGu, ← hP_def]
+    rw [cmat.det_congr d (cmat.mul M P (cmat.adj P)) (fun i j => complex.mul (complex.of_real (complex.norm_sq gam)) (cmat.mul M A (cmat.adj A) i j)) hPP_eq]
+    rw [cmat.det_real_smul_eq]
+  have hpow_mul : (k * complex.norm_sq gam) ^ d = (k ^ d) * ((complex.norm_sq gam) ^ d)
+    have hall : ∀ n : ℕ, (k * complex.norm_sq gam) ^ n = (k ^ n) * ((complex.norm_sq gam) ^ n)
+      intro n; induction n with r ihr
+      · rw [pow_zero.real, pow_zero.real, pow_zero.real]; ring
+      · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, pow_succ.real, ihr]; ring
+    exact hall d
+  rw [hdet_K, hpow_mul, complex.of_real_mul]
+  have hre : complex.mul (cmat.det d (cmat.gram_cols N u)) (complex.mul (complex.of_real (k ^ d)) (complex.mul (complex.inv (cmat.det d (cmat.gram_cols N u))) (complex.mul (complex.of_real ((complex.norm_sq gam) ^ d)) (cmat.det d (cmat.mul M A (cmat.adj A)))))) =
+      complex.mul (complex.mul (cmat.det d (cmat.gram_cols N u)) (complex.inv (cmat.det d (cmat.gram_cols N u)))) (complex.mul (complex.mul (complex.of_real (k ^ d)) (complex.of_real ((complex.norm_sq gam) ^ d))) (cmat.det d (cmat.mul M A (cmat.adj A))))
+    apply complex.ext <;> simp <;> ring
+  rw [hre, complex.mul_inv_cancel (cmat.det d (cmat.gram_cols N u)) hGu, complex.mul_one_l]
+
++ cmat.compressed_gram_twist_ratio_eq (N M d : ℕ) (k : ℝ) (gam1 gam2 : ℂ) (u1 g1 u2 g2 A : ℕ → ℕ → ℂ)
+    (hGu1 : cmat.det d (cmat.gram_cols N u1) ≠ complex.zero)
+    (hGu2 : cmat.det d (cmat.gram_cols N u2) ≠ complex.zero)
+    (hcomp1 : ∀ i < d, ∀ a < M, cmat.mul N (cmat.adj u1) g1 i a = complex.mul gam1 (A i a))
+    (hcomp2 : ∀ i < d, ∀ a < M, cmat.mul N (cmat.adj u2) g2 i a = complex.mul gam2 (A i a)) :
+    complex.mul (complex.of_real ((complex.norm_sq gam2) ^ d)) (complex.mul (cmat.det d (cmat.gram_cols N u1)) (cmat.det d (cmat.compressed_gram N M d k u1 g1))) = complex.mul (complex.of_real ((complex.norm_sq gam1) ^ d)) (complex.mul (cmat.det d (cmat.gram_cols N u2)) (cmat.det d (cmat.compressed_gram N M d k u2 g2)))
+  have h1 := cmat.compressed_gram_det_identity N M d k gam1 u1 g1 A hGu1 hcomp1
+  have h2 := cmat.compressed_gram_det_identity N M d k gam2 u2 g2 A hGu2 hcomp2
+  have hpow_mul : ∀ (x y : ℝ) (n : ℕ), (x * y) ^ n = (x ^ n) * (y ^ n)
+    intro x y n; induction n with r ihr
+    · rw [pow_zero.real, pow_zero.real, pow_zero.real]; ring
+    · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, pow_succ.real, ihr]; ring
+  rw [h1, h2, hpow_mul k (complex.norm_sq gam1) d, hpow_mul k (complex.norm_sq gam2) d]
+  apply complex.ext <;> simp <;> ring
+
++ cmat.compressed_gram_twist_ratio_seminorm (N M d : ℕ) (k : ℝ) (gam1 gam2 : ℂ) (u1 g1 u2 g2 A : ℕ → ℕ → ℂ)
+    (v : ℂ → ℝ) (hv : is_mult_seminorm v)
+    (hGu1 : cmat.det d (cmat.gram_cols N u1) ≠ complex.zero)
+    (hGu2 : cmat.det d (cmat.gram_cols N u2) ≠ complex.zero)
+    (hcomp1 : ∀ i < d, ∀ a < M, cmat.mul N (cmat.adj u1) g1 i a = complex.mul gam1 (A i a))
+    (hcomp2 : ∀ i < d, ∀ a < M, cmat.mul N (cmat.adj u2) g2 i a = complex.mul gam2 (A i a))
+    (hv_Gu2 : 0 < v (cmat.det d (cmat.gram_cols N u2)))
+    (hv_K1 : 0 < v (cmat.det d (cmat.compressed_gram N M d k u1 g1)))
+    (hv_g2 : 0 < v (complex.of_real (complex.norm_sq gam2))) :
+    v (cmat.det d (cmat.gram_cols N u1)) / v (cmat.det d (cmat.gram_cols N u2)) = ((v (complex.of_real (complex.norm_sq gam1)) / v (complex.of_real (complex.norm_sq gam2))) ^ d) * (v (cmat.det d (cmat.compressed_gram N M d k u2 g2)) / v (cmat.det d (cmat.compressed_gram N M d k u1 g1)))
+  have heq := cmat.compressed_gram_twist_ratio_eq N M d k gam1 gam2 u1 g1 u2 g2 A hGu1 hGu2 hcomp1 hcomp2
+  have hv_eq : v (complex.mul (complex.of_real ((complex.norm_sq gam2) ^ d)) (complex.mul (cmat.det d (cmat.gram_cols N u1)) (cmat.det d (cmat.compressed_gram N M d k u1 g1)))) =
+      v (complex.mul (complex.of_real ((complex.norm_sq gam1) ^ d)) (complex.mul (cmat.det d (cmat.gram_cols N u2)) (cmat.det d (cmat.compressed_gram N M d k u2 g2))))
+    rw [heq]
+  have hv_pow : ∀ (x : ℝ) (n : ℕ), v (complex.of_real (x ^ n)) = (v (complex.of_real x)) ^ n
+    intro x n; induction n with r ihr
+    · rw [pow_zero.real, pow_zero.real, complex.of_real_one, hv.2.1]
+    · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, complex.of_real_mul, hv.2.2.2, ihr]
+  rw [hv.2.2.2, hv.2.2.2, hv.2.2.2, hv.2.2.2, hv_pow (complex.norm_sq gam2) d, hv_pow (complex.norm_sq gam1) d] at hv_eq
+  have hdiv_pow : (v (complex.of_real (complex.norm_sq gam1)) / v (complex.of_real (complex.norm_sq gam2))) ^ d =
+      ((v (complex.of_real (complex.norm_sq gam1))) ^ d) / ((v (complex.of_real (complex.norm_sq gam2))) ^ d)
+    exact div_pow.real _ _ d
+  rw [hdiv_pow]
+  have h1ne : v (cmat.det d (cmat.gram_cols N u2)) ≠ 0 := by linarith
+  have h2ne : v (cmat.det d (cmat.compressed_gram N M d k u1 g1)) ≠ 0 := by linarith
+  have h3ne : (v (complex.of_real (complex.norm_sq gam2))) ^ d ≠ 0
+    have hp := pow_pos.real _ hv_g2 d; linarith
+  field_simp
+  linarith
+
+-- ====================================================================================
+-- SECTION 2: OPERATOR-NORM ADJOINT DUALITY & ARCHIMEDEAN COMPRESSED GRAM BOUND
+-- ====================================================================================
+
++ cmat.op_norm_adj_le (N M : ℕ) (C : ℝ) (g : ℕ → ℕ → ℂ) (hC : 0 ≤ C)
+    (hop : ∀ zeta : ℕ → ℂ, complex.re (cdot N (cmat.apply M g zeta) (cmat.apply M g zeta)) ≤ C * complex.re (cdot M zeta zeta)) :
+    ∀ v : ℕ → ℂ, complex.re (cdot M (cmat.apply N (cmat.adj g) v) (cmat.apply N (cmat.adj g) v)) ≤ C * complex.re (cdot N v v)
+  intro v
+  set w : ℕ → ℂ := cmat.apply N (cmat.adj g) v with hw_def
+  have hadj_pair : cdot M w w = cdot N (cmat.apply M g w) v
+    unfold cdot cmat.apply
+    have hL : csum M (fun a => complex.mul (complex.conj (w a)) (w a)) =
+        csum M (fun a => csum N (fun i => complex.mul (complex.conj (complex.mul (g i a) (w a))) (v i)))
+      apply csum.congr; intro a _
+      have hwa : w a = csum N (fun i => complex.mul (complex.conj (g i a)) (v i))
+        rw [hw_def]; unfold cmat.apply cmat.adj; trivial
+      have hsub : complex.mul (complex.conj (w a)) (w a) = complex.mul (complex.conj (w a)) (csum N (fun i => complex.mul (complex.conj (g i a)) (v i)))
+        rw [← hwa]
+      rw [hsub, ← csum.scale_left]; apply csum.congr; intro i _
+      apply complex.ext <;> simp <;> ring
+    have hR : csum N (fun i => complex.mul (complex.conj (csum M (fun a => complex.mul (g i a) (w a)))) (v i)) =
+        csum N (fun i => csum M (fun a => complex.mul (complex.conj (complex.mul (g i a) (w a))) (v i)))
+      apply csum.congr; intro i _; rw [csum.conj, ← csum.scale_right]
+    rw [hL, hR, csum.swap]
+  have hww_nn := cdot.self_re_nonneg M w
+  have hvv_nn := cdot.self_re_nonneg N v
+  by_cases hww0 : complex.re (cdot M w w) = 0
+  · rw [hww0]; exact mul_nonneg.real C (complex.re (cdot N v v)) hC hvv_nn
+  · have hww_pos : 0 < complex.re (cdot M w w) := by by_contra hle; exact hww0 (by linarith)
+    have hcs := cdot.cauchy_schwarz N (cmat.apply M g w) v
+    have hre_sq : complex.re (cdot M w w) * complex.re (cdot M w w) ≤ complex.norm_sq (cdot N (cmat.apply M g w) v)
+      rw [hadj_pair]; unfold complex.norm_sq; linarith [complex.real_sq_nonneg (complex.im (cdot N (cmat.apply M g w) v))]
+    have hgw := hop w
+    have hmul := mul_le_mul_of_nonneg_right.real (complex.re (cdot N (cmat.apply M g w) (cmat.apply M g w))) (C * complex.re (cdot M w w)) (complex.re (cdot N v v)) hgw hvv_nn
+    have hquad : complex.re (cdot M w w) * complex.re (cdot M w w) ≤ (C * complex.re (cdot N v v)) * complex.re (cdot M w w)
+      linarith
+    by_contra hgt
+    linarith [mul_lt_mul_of_pos_right.real (C * complex.re (cdot N v v)) (complex.re (cdot M w w)) (complex.re (cdot M w w)) (by linarith) hww_pos]
+
++ cmat.compressed_gram_arch_det_le (N M d : ℕ) (k B : ℝ) (u g : ℕ → ℕ → ℂ)
+    (hk : 0 ≤ k) (hB : 0 ≤ B)
+    (hGu : cmat.det d (cmat.gram_cols N u) ≠ complex.zero)
+    (hop : ∀ zeta : ℕ → ℂ, k * complex.re (cdot N (cmat.apply M g zeta) (cmat.apply M g zeta)) ≤ B * complex.re (cdot M zeta zeta)) :
+    complex.im (cmat.det d (cmat.compressed_gram N M d k u g)) = 0 ∧
+    0 ≤ complex.re (cmat.det d (cmat.compressed_gram N M d k u g)) ∧
+    complex.re (cmat.det d (cmat.compressed_gram N M d k u g)) ≤ B ^ d
+  set G_u := cmat.gram_cols N u with hGu_def
+  set P : ℕ → ℕ → ℂ := cmat.mul N (cmat.adj u) g with hP_def
+  set PP : ℕ → ℕ → ℂ := cmat.mul M P (cmat.adj P) with hPP_def
+  have hGu_psd : cmat.is_psd d G_u := by rw [hGu_def]; exact cmat.gram_cols_is_psd N d u
+  have hGu_det := cmat.psd_det_real_nonneg d G_u hGu_psd
+  have hGu_re_pos : 0 < complex.re (cmat.det d G_u)
+    by_contra hle; apply hGu; apply complex.ext
+    · simp; linarith [hGu_det.2]
+    · simp [hGu_det.1]
+  have hPP_psd : cmat.is_psd d PP
+    apply cmat.is_psd_congr d (fun i j => csum M (fun a => complex.mul (complex.conj (cmat.adj P a i)) (cmat.adj P a j))) PP
+    · intro i _ j _; rw [hPP_def]; unfold cmat.mul cmat.adj; apply csum.congr; intro a _; rw [complex.conj_conj]
+    · exact cmat.is_psd_adj_mul_self d M (cmat.adj P)
+  have hPP_det := cmat.psd_det_real_nonneg d PP hPP_psd
+  have hdet_K_eq : cmat.det d (cmat.compressed_gram N M d k u g) =
+      complex.of_real (((k ^ d) * complex.re (cmat.det d PP)) / complex.re (cmat.det d G_u))
+    rw [cmat.det_compressed_gram N M d k u g (by rw [← hGu_def]; exact hGu), ← hGu_def, ← hP_def, ← hPP_def]
+    rw [complex.eq_of_real_of_im_zero (cmat.det d G_u) hGu_det.1, complex.eq_of_real_of_im_zero (cmat.det d PP) hPP_det.1]
+    have hinv_r : complex.inv (complex.of_real (complex.re (cmat.det d G_u))) = complex.of_real (1 / complex.re (cmat.det d G_u))
+      unfold complex.inv complex.norm_sq; apply complex.ext
+      · simp; field_simp
+      · simp
+    rw [hinv_r, complex.mul_of_real, complex.mul_of_real]
+    apply complex.ext
+    · simp; field_simp
+    · simp
+  rw [hdet_K_eq, complex.of_real_im, complex.of_real_re]
+  constructor; rfl
+  constructor
+  · exact div_nonneg.real _ _ (mul_nonneg.real _ _ (pow_nonneg.real k hk d) hPP_det.2) (by linarith)
+  · by_cases hk0 : k = 0
+    · by_cases hd0 : d = 0
+      · rw [hd0, pow_zero.real, pow_zero.real]
+        have h1 : complex.re (cmat.det 0 PP) = 1 := by rw [cmat.det_zero_eq]; simp
+        have h2 : complex.re (cmat.det 0 G_u) = 1 := by rw [cmat.det_zero_eq]; simp
+        rw [h1, h2]; linarith
+      · have hd1 : d = (d - 1) + 1 := by omega
+        rw [hd1, hk0, pow_succ.real]; have h0 : ((0 : ℝ) ^ (d - 1) * 0) * complex.re (cmat.det ((d - 1) + 1) PP) / complex.re (cmat.det ((d - 1) + 1) G_u) = 0 := by rw [div_def.real]; ring
+        rw [h0]; exact pow_nonneg.real B hB ((d - 1) + 1)
+    · have hk_pos : 0 < k := by by_contra hle; exact hk0 (by linarith)
+      have hop_div : ∀ zeta : ℕ → ℂ, complex.re (cdot N (cmat.apply M g zeta) (cmat.apply M g zeta)) ≤ (B / k) * complex.re (cdot M zeta zeta)
+        intro zeta
+        have h1 := hop zeta
+        have hdiv := div_le_div_of_nonneg_right.real _ _ k h1 (by linarith)
+        have hL : k * complex.re (cdot N (cmat.apply M g zeta) (cmat.apply M g zeta)) / k = complex.re (cdot N (cmat.apply M g zeta) (cmat.apply M g zeta)) := by field_simp
+        have hR : B * complex.re (cdot M zeta zeta) / k = (B / k) * complex.re (cdot M zeta zeta) := by field_simp
+        rw [hL, hR] at hdiv; exact hdiv
+      have hadj := cmat.op_norm_adj_le N M (B / k) g (div_nonneg.real B k hB (by linarith)) hop_div
+      -- Show B * G_u - k * PP is PSD!
+      set kPP : ℕ → ℕ → ℂ := fun i j => complex.mul (complex.of_real k) (PP i j) with hkPP_def
+      set BGu : ℕ → ℕ → ℂ := fun i j => complex.mul (complex.of_real B) (G_u i j) with hBGu_def
+      have hkPP_psd : cmat.is_psd d kPP := by rw [hkPP_def]; exact cmat.is_psd_smul d k PP hk hPP_psd
+      have hBGu_psd : cmat.is_psd d BGu := by rw [hBGu_def]; exact cmat.is_psd_smul d B G_u hB hGu_psd
+      have hdiff_psd : cmat.is_psd d (fun i j => complex.sub (BGu i j) (kPP i j))
+        unfold cmat.is_psd; constructor
+        · unfold cmat.is_hermitian; intro i hi j hj
+          rw [cmat.hermitian_entry d BGu hBGu_psd.1 i j hi hj, cmat.hermitian_entry d kPP hkPP_psd.1 i j hi hj, complex.conj_sub]
+        · intro w
+          set v : ℕ → ℂ := cmat.apply d u w with hv_def
+          have hpair_Gu : cmat.pairing d G_u w w = cdot N v v
+            rw [cmat.pairing_double_sum]
+            have h1 : csum d (fun i => csum d (fun j => complex.mul (complex.conj (w i)) (complex.mul (G_u i j) (w j)))) =
+                csum d (fun i => csum d (fun j => csum N (fun r => complex.mul (complex.conj (complex.mul (u r i) (w i))) (complex.mul (u r j) (w j)))))
+              apply csum.congr; intro i _; apply csum.congr; intro j _
+              rw [hGu_def]; unfold cmat.gram_cols cmat.mul cmat.adj
+              rw [← csum.scale_right, ← csum.scale_left]
+              apply csum.congr; intro r _; apply complex.ext <;> simp <;> ring
+            have hsw : csum d (fun i => csum d (fun j => csum N (fun r => complex.mul (complex.conj (complex.mul (u r i) (w i))) (complex.mul (u r j) (w j))))) =
+                csum N (fun r => csum d (fun i => csum d (fun j => complex.mul (complex.conj (complex.mul (u r i) (w i))) (complex.mul (u r j) (w j)))))
+              have hs1 : csum d (fun i => csum d (fun j => csum N (fun r => complex.mul (complex.conj (complex.mul (u r i) (w i))) (complex.mul (u r j) (w j))))) =
+                  csum d (fun i => csum N (fun r => csum d (fun j => complex.mul (complex.conj (complex.mul (u r i) (w i))) (complex.mul (u r j) (w j)))))
+                apply csum.congr; intro i _; rw [csum.swap]
+              rw [hs1, csum.swap]
+            rw [h1, hsw, hv_def]; unfold cdot cmat.apply
+            apply csum.congr; intro r _
+            rw [csum.conj, ← csum.scale_right]
+            apply csum.congr; intro i _; rw [csum.scale_left]
+          have hpair_PP : cmat.pairing d PP w w = cdot M (cmat.apply N (cmat.adj g) v) (cmat.apply N (cmat.adj g) v)
+            rw [cmat.pairing_double_sum]
+            have hPw : ∀ a < M, cmat.apply N (cmat.adj g) v a = csum d (fun j => complex.mul (cmat.adj P a j) (w j))
+              intro a _; unfold cmat.apply cmat.adj
+              have h1 : csum N (fun r => complex.mul (complex.conj (g r a)) (v r)) =
+                  csum N (fun r => csum d (fun j => complex.mul (complex.conj (g r a)) (complex.mul (u r j) (w j))))
+                apply csum.congr; intro r _; rw [hv_def]; unfold cmat.apply; rw [← csum.scale_left]
+              rw [h1, csum.swap]; apply csum.congr; intro j _
+              rw [hP_def]; unfold cmat.mul cmat.adj; rw [csum.conj, ← csum.scale_right]
+              apply csum.congr; intro r _; rw [complex.conj_mul, complex.conj_conj]; apply complex.ext <;> simp <;> ring
+            have h1 : csum d (fun i => csum d (fun j => complex.mul (complex.conj (w i)) (complex.mul (PP i j) (w j)))) =
+                csum d (fun i => csum d (fun j => csum M (fun a => complex.mul (complex.conj (complex.mul (cmat.adj P a i) (w i))) (complex.mul (cmat.adj P a j) (w j)))))
+              apply csum.congr; intro i _; apply csum.congr; intro j _
+              rw [hPP_def]; unfold cmat.mul cmat.adj; rw [← csum.scale_right, ← csum.scale_left]
+              apply csum.congr; intro a _; apply complex.ext <;> simp <;> ring
+            have hsw : csum d (fun i => csum d (fun j => csum M (fun a => complex.mul (complex.conj (complex.mul (cmat.adj P a i) (w i))) (complex.mul (cmat.adj P a j) (w j))))) =
+                csum M (fun a => csum d (fun i => csum d (fun j => complex.mul (complex.conj (complex.mul (cmat.adj P a i) (w i))) (complex.mul (cmat.adj P a j) (w j)))))
+              have hs1 : csum d (fun i => csum d (fun j => csum M (fun a => complex.mul (complex.conj (complex.mul (cmat.adj P a i) (w i))) (complex.mul (cmat.adj P a j) (w j))))) =
+                  csum d (fun i => csum M (fun a => csum d (fun j => complex.mul (complex.conj (complex.mul (cmat.adj P a i) (w i))) (complex.mul (cmat.adj P a j) (w j)))))
+                apply csum.congr; intro i _; rw [csum.swap]
+              rw [hs1, csum.swap]
+            rw [h1, hsw]; unfold cdot; apply csum.congr; intro a ha
+            rw [hPw a ha, csum.conj, ← csum.scale_right]
+            apply csum.congr; intro i _; rw [csum.scale_left]
+          have hpair_sub : cmat.pairing d (fun i j => complex.sub (BGu i j) (kPP i j)) w w =
+              complex.sub (complex.mul (complex.of_real B) (cmat.pairing d G_u w w)) (complex.mul (complex.of_real k) (cmat.pairing d PP w w))
+            rw [cmat.pairing_double_sum, cmat.pairing_double_sum, cmat.pairing_double_sum]
+            have h1 : csum d (fun i => csum d (fun j => complex.mul (complex.conj (w i)) (complex.mul (complex.sub (BGu i j) (kPP i j)) (w j)))) =
+                csum d (fun i => complex.sub (complex.mul (complex.of_real B) (csum d (fun j => complex.mul (complex.conj (w i)) (complex.mul (G_u i j) (w j)))))
+                                             (complex.mul (complex.of_real k) (csum d (fun j => complex.mul (complex.conj (w i)) (complex.mul (PP i j) (w j))))))
+              apply csum.congr; intro i _; rw [← csum.scale_left, ← csum.scale_left, ← csum.sub]
+              apply csum.congr; intro j _; rw [hBGu_def, hkPP_def]; apply complex.ext <;> simp <;> ring
+            rw [h1, csum.sub, csum.scale_left, csum.scale_left]
+          rw [hpair_sub, hpair_Gu, hpair_PP]
+          have hre_s : complex.re (complex.sub (complex.mul (complex.of_real B) (cdot N v v)) (complex.mul (complex.of_real k) (cdot M (cmat.apply N (cmat.adj g) v) (cmat.apply N (cmat.adj g) v)))) =
+              B * complex.re (cdot N v v) - k * complex.re (cdot M (cmat.apply N (cmat.adj g) v) (cmat.apply N (cmat.adj g) v))
+            simp; ring
+          rw [hre_s]
+          have hadj_v := mul_le_mul_of_nonneg_left.real _ _ k (hadj v) (by linarith)
+          have hkB : k * ((B / k) * complex.re (cdot N v v)) = B * complex.re (cdot N v v) := by field_simp
+          linarith
+      have hmono := cmat.psd_det_le_of_le d kPP BGu hkPP_psd hdiff_psd
+      rw [hkPP_def, hBGu_def, cmat.det_real_smul_eq, cmat.det_real_smul_eq] at hmono
+      have hL : complex.re (complex.mul (complex.of_real (k ^ d)) (cmat.det d PP)) = (k ^ d) * complex.re (cmat.det d PP)
+        simp; ring
+      have hR : complex.re (complex.mul (complex.of_real (B ^ d)) (cmat.det d G_u)) = (B ^ d) * complex.re (cmat.det d G_u)
+        simp; ring
+      rw [hL, hR] at hmono
+      exact (div_le_iff.real _ (B ^ d) (complex.re (cmat.det d G_u)) hGu_re_pos).mpr hmono
+
+-- ====================================================================================
+-- SECTION 3: ULTRAMETRIC AUERBACH BOUND FOR COMPRESSED GRAM DETERMINANTS
+-- ====================================================================================
+
+-> is_ultrametric_norm (v : ℂ → ℝ) : Prop :=
+  is_mult_seminorm v ∧
+  (∀ z : ℂ, v (complex.neg z) = v z) ∧
+  (∀ w z : ℂ, v (complex.add w z) ≤ max (v w) (v z))
+
++ is_ultrametric_norm.csum_le (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (K : ℕ) (f : ℕ → ℂ) (B : ℝ)
+    (hB : 0 ≤ B) (hf : ∀ i < K, v (f i) ≤ B) :
+    v (csum K f) ≤ B
+  induction K with hf r ihr hf
+  · rw [csum.zero, hv.1.1]; exact hB
+  · rw [succ_eq_add_one.nat] at hf ⊢; rw [csum.succ]
+    have htri := hv.2.2 (csum r f) (f r)
+    have h1 := ihr (by intro i hi; exact hf i (by omega))
+    have h2 := hf r (by omega)
+    unfold max at htri
+    by_cases hcmp : v (csum r f) ≤ v (f r)
+    · rw [if_pos hcmp] at htri; linarith
+    · rw [if_neg hcmp] at htri; linarith
+
++ is_ultrametric_norm.csign_eq_one (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (k : ℕ) :
+    v (csign k) = 1
+  unfold csign
+  by_cases h0 : k % 2 = 0
+  · rw [if_pos h0, hv.1.2.1]
+  · rw [if_neg h0, hv.2.1, hv.1.2.1]
+
++ is_ultrametric_norm.det_le (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (d : ℕ) :
+    ∀ (A : ℕ → ℕ → ℂ) (B : ℝ), 0 ≤ B → (∀ i < d, ∀ j < d, v (A i j) ≤ B) → v (cmat.det d A) ≤ B ^ d
+  induction d with A B hB hA r ihr A B hB hA
+  · rw [cmat.det_zero_eq, pow_zero.real, hv.1.2.1]; linarith
+  · rw [succ_eq_add_one.nat] at hA ⊢; rw [cmat.det_succ_eq, pow_succ.real]
+    apply is_ultrametric_norm.csum_le v hv (r + 1) _ ((B ^ r) * B) (mul_nonneg.real _ _ (pow_nonneg.real B hB r) hB)
+    intro j hj
+    rw [hv.1.2.2.2, hv.1.2.2.2, is_ultrametric_norm.csign_eq_one v hv (r + j), one_mul.real]
+    have hmin_le : v (cmat.det r (minor_mat A r j)) ≤ B ^ r
+      apply ihr (minor_mat A r j) B hB
+      intro i hi c hc; unfold minor_mat; rw [if_pos hi]
+      by_cases hcj : c < j
+      · rw [if_pos hcj]; exact hA i (by omega) c (by omega)
+      · rw [if_neg hcj]; exact hA i (by omega) (c + 1) (by omega)
+    have hArj := hA r (by omega) j hj
+    have hm1 := mul_le_mul_of_nonneg_right.real (v (A r j)) B (v (cmat.det r (minor_mat A r j))) hArj (hv.1.2.2.1 _)
+    have hm2 := mul_le_mul_of_nonneg_left.real (v (cmat.det r (minor_mat A r j))) (B ^ r) B hmin_le hB
+    linarith
+
+-- ULTRAMETRIC AUERBACH DETERMINANT BOUND FOR COMPRESSED GRAM MATRIX K = k * (u^* u)^{-1} (u^* g g^* u)!
++ cmat.compressed_gram_ultrametric_det_le (N M d : ℕ) (k B_den : ℝ) (u g : ℕ → ℕ → ℂ)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (hB : 0 ≤ B_den)
+    (hGu : cmat.det d (cmat.gram_cols N u) ≠ complex.zero)
+    (hnondeg : ∀ z : ℂ, z ≠ complex.zero → 0 < v z)
+    (hproj_bd : ∀ b < M, ∀ a < M,
+      v (complex.mul (complex.of_real k)
+        (cmat.mul d (cmat.mul d (cmat.adj (cmat.mul N (cmat.adj u) g)) (cmat.inv d (cmat.gram_cols N u)))
+          (cmat.mul N (cmat.adj u) g) b a)) ≤ B_den) :
+    v (cmat.det d (cmat.compressed_gram N M d k u g)) ≤ B_den ^ d
+  set K := cmat.compressed_gram N M d k u g with hK_def
+  by_cases hK0 : cmat.det d K = complex.zero
+  · rw [hK0, hv.1.1]; exact pow_nonneg.real B_den hB d
+  · set P : ℕ → ℕ → ℂ := cmat.mul N (cmat.adj u) g with hP_def
+    set L : ℕ → ℕ → ℂ := cmat.adj P with hL_def
+    have hdet_PL_ne : cmat.det d (fun i j => csum M (fun a => complex.mul (P i a) (L a j))) ≠ complex.zero
+      intro hz; apply hK0; rw [hK_def, cmat.det_compressed_gram N M d k u g hGu, ← hP_def]
+      have hcon : cmat.det d (cmat.mul M P (cmat.adj P)) = cmat.det d (fun i j => csum M (fun a => complex.mul (P i a) (L a j)))
+        apply cmat.det_congr; intro i _ j _; rw [hL_def]; unfold cmat.mul; trivial
+      rw [hcon, hz, complex.mul_zero_r, complex.mul_zero_r]
+    obtain ⟨S0, hS0_lt, hS0_det_ne⟩ := cmat.exists_nonzero_minor_of_left_prod_det_ne_zero M d P L hdet_PL_ne
+    obtain ⟨S, Z, hS_lt, hvS_pos, hLZ_id, hLZ_le1⟩ := auerbach.exists_dual_basis M d L v hv.1 S0 hS0_lt (hnondeg _ hS0_det_ne)
+    set LS : ℕ → ℕ → ℂ := fun i j => L (S i) j with hLS_def
+    have hdet_LS_ne : cmat.det d LS ≠ complex.zero
+      intro hz; rw [hz, hv.1.1] at hvS_pos; linarith
+    have hdet_LSZ : complex.mul (cmat.det d LS) (cmat.det d Z) = complex.one
+      rw [← cmat.det_mul]
+      have hcon : cmat.det d (cmat.mul d LS Z) = cmat.det d cmat.id
+        apply cmat.det_congr; intro i hi j hj; unfold cmat.mul; rw [hLS_def]; exact hLZ_id i hi j hj
+      rw [hcon, cmat.det_id]
+    set X : ℕ → ℕ → ℂ := cmat.mul d (cmat.mul d LS K) Z with hX_def
+    have hdet_X_eq : cmat.det d X = cmat.det d K
+      rw [hX_def, cmat.det_mul, cmat.det_mul]
+      have hre : complex.mul (complex.mul (cmat.det d LS) (cmat.det d K)) (cmat.det d Z) =
+          complex.mul (complex.mul (cmat.det d LS) (cmat.det d Z)) (cmat.det d K)
+        apply complex.ext <;> simp <;> ring
+      rw [hre, hdet_LSZ, complex.mul_one_l]
+    rw [← hdet_X_eq]
+    apply is_ultrametric_norm.det_le v hv d X B_den hB
+    intro i hi j hj
+    -- Express X_{ij} = sum_{a < M} (k * (L * G_u^{-1} * P)_{S i, a}) * (L Z)_{a, j}!
+    have hX_ent : X i j = csum M (fun a =>
+        complex.mul
+          (complex.mul (complex.of_real k) (cmat.mul d (cmat.mul d L (cmat.inv d (cmat.gram_cols N u))) P (S i) a))
+          (csum d (fun r => complex.mul (L a r) (Z r j))))
+      rw [hX_def]
+      set Gi := cmat.inv d (cmat.gram_cols N u) with hGi_def
+      have hLSK : ∀ t < d, cmat.mul d LS K i t =
+          csum M (fun a => complex.mul (complex.mul (complex.of_real k) (cmat.mul d (cmat.mul d L Gi) P (S i) a)) (L a t))
+        intro t _
+        unfold cmat.mul
+        have h1 : csum d (fun s => complex.mul (LS i s) (K s t)) =
+            csum d (fun s => csum d (fun r => csum M (fun a =>
+              complex.mul (complex.mul (complex.of_real k) (complex.mul (complex.mul (L (S i) s) (Gi s r)) (P r a))) (L a t))))
+          apply csum.congr; intro s _
+          rw [hK_def]; unfold cmat.compressed_gram
+          rw [← hGi_def, ← hP_def, ← hL_def, hLS_def]; unfold cmat.mul
+          rw [← csum.scale_left, ← csum.scale_left]
+          apply csum.congr; intro r _
+          rw [← csum.scale_left, ← csum.scale_left, ← csum.scale_left]
+          apply csum.congr; intro a _; apply complex.ext <;> simp <;> ring
+        have hsw : csum d (fun s => csum d (fun r => csum M (fun a =>
+              complex.mul (complex.mul (complex.of_real k) (complex.mul (complex.mul (L (S i) s) (Gi s r)) (P r a))) (L a t)))) =
+            csum M (fun a => csum d (fun r => csum d (fun s =>
+              complex.mul (complex.mul (complex.of_real k) (complex.mul (complex.mul (L (S i) s) (Gi s r)) (P r a))) (L a t))))
+          have hs1 : csum d (fun s => csum d (fun r => csum M (fun a =>
+                complex.mul (complex.mul (complex.of_real k) (complex.mul (complex.mul (L (S i) s) (Gi s r)) (P r a))) (L a t)))) =
+              csum d (fun s => csum M (fun a => csum d (fun r =>
+                complex.mul (complex.mul (complex.of_real k) (complex.mul (complex.mul (L (S i) s) (Gi s r)) (P r a))) (L a t))))
+            apply csum.congr; intro s _; rw [csum.swap]
+          rw [hs1, csum.swap]; apply csum.congr; intro a _; rw [csum.swap]
+        rw [h1, hsw]; apply csum.congr; intro a _
+        rw [← csum.scale_left, ← csum.scale_right]
+        apply csum.congr; intro r _
+        rw [← csum.scale_right, ← csum.scale_left, ← csum.scale_right]
+      have h0 : cmat.mul d (cmat.mul d LS K) Z i j = csum d (fun t => complex.mul (cmat.mul d LS K i t) (Z t j))
+        unfold cmat.mul; trivial
+      have h2 : csum d (fun t => complex.mul (cmat.mul d LS K i t) (Z t j)) =
+          csum d (fun t => csum M (fun a => complex.mul (complex.mul (complex.of_real k) (cmat.mul d (cmat.mul d L Gi) P (S i) a)) (complex.mul (L a t) (Z t j))))
+        apply csum.congr; intro t ht; rw [hLSK t ht, ← csum.scale_right]
+        apply csum.congr; intro a _; apply complex.ext <;> simp <;> ring
+      rw [h0, h2, csum.swap]; apply csum.congr; intro a _; rw [csum.scale_left]
+    rw [hX_ent]
+    apply is_ultrametric_norm.csum_le v hv M _ B_den hB
+    intro a ha
+    rw [hv.1.2.2.2]
+    have hp1 := hproj_bd (S i) (hS_lt i hi) a ha
+    have hp2 := hLZ_le1 a ha j hj
+    have hm1 := mul_le_mul_of_nonneg_right.real _ B_den _ hp1 (hv.1.2.2.1 (csum d (fun r => complex.mul (L a r) (Z r j))))
+    have hm2 := mul_le_mul_of_nonneg_left.real _ 1 B_den hp2 hB
+    linarith
+
+-- SPECIALIZATION: WHEN COMPARISON FORMS LIE IN `im(u)` (`g = u * C`), THE PROJECTED GRAM
+-- `L * G_u^{-1} * P` SIMPLIFIES IDENTICALLY TO THE COMPARISON-FORM GRAM `g^* g`!
++ cmat.projected_gram_eq_gram_of_in_span (N M d : ℕ) (u g C : ℕ → ℕ → ℂ)
+    (hGu : cmat.det d (cmat.gram_cols N u) ≠ complex.zero)
+    (hspan : ∀ r < N, ∀ a < M, g r a = cmat.mul d u C r a) :
+    ∀ b < M, ∀ a < M, cmat.mul d (cmat.mul d (cmat.adj (cmat.mul N (cmat.adj u) g)) (cmat.inv d (cmat.gram_cols N u))) (cmat.mul N (cmat.adj u) g) b a = cmat.mul N (cmat.adj g) g b a
+  intro b hb a ha
+  set G_u := cmat.gram_cols N u with hGu_def
+  set P := cmat.mul N (cmat.adj u) g with hP_def
+  have hP_eq : ∀ i < d, ∀ c < M, P i c = cmat.mul d G_u C i c
+    intro i _ c hc; rw [hP_def]; unfold cmat.mul
+    have h1 : csum N (fun r => complex.mul (cmat.adj u i r) (g r c)) =
+        csum N (fun r => csum d (fun t => complex.mul (complex.mul (cmat.adj u i r) (u r t)) (C t c)))
+      apply csum.congr; intro r hr; rw [hspan r hr c hc]; unfold cmat.mul
+      rw [← csum.scale_left]; apply csum.congr; intro t _; apply complex.ext <;> simp <;> ring
+    rw [h1, csum.swap]; apply csum.congr; intro t _; rw [csum.scale_right, hGu_def]; unfold cmat.gram_cols cmat.mul; trivial
+  have hL_eq : ∀ c < M, ∀ j < d, cmat.adj P c j = cmat.mul d (cmat.adj C) G_u c j
+    intro c hc j hj
+    have hGu_herm : cmat.is_hermitian d G_u := by rw [hGu_def]; exact (cmat.gram_cols_is_psd N d u).1
+    unfold cmat.adj; rw [hP_eq j hj c hc]; unfold cmat.mul; rw [csum.conj]
+    apply csum.congr; intro t ht
+    rw [complex.conj_mul, complex.mul_comm, ← cmat.hermitian_entry d G_u hGu_herm t ht j hj]; unfold cmat.adj; trivial
+  have hLGi : ∀ t < d, cmat.mul d (cmat.adj P) (cmat.inv d G_u) b t = cmat.adj C b t
+    intro t ht
+    have h1 : cmat.mul d (cmat.adj P) (cmat.inv d G_u) b t = cmat.mul d (cmat.mul d (cmat.adj C) G_u) (cmat.inv d G_u) b t
+      apply cmat.mul_congr_left; intro s hs; exact hL_eq b hb s hs
+    rw [h1, cmat.mul_assoc]
+    have h2 : cmat.mul d (cmat.adj C) (cmat.mul d G_u (cmat.inv d G_u)) b t = cmat.mul d (cmat.adj C) cmat.id b t
+      apply cmat.mul_congr_right; intro s hs; exact cmat.mul_inv_eq_id d G_u hGu s hs t ht
+    rw [h2, cmat.mul_id_right d (cmat.adj C) b t ht]
+  have hLHS : cmat.mul d (cmat.mul d (cmat.adj P) (cmat.inv d G_u)) P b a = cmat.mul d (cmat.adj C) (cmat.mul d G_u C) b a
+    have h1 : cmat.mul d (cmat.mul d (cmat.adj P) (cmat.inv d G_u)) P b a = cmat.mul d (cmat.adj C) P b a
+      apply cmat.mul_congr_left; intro t ht; exact hLGi t ht
+    rw [h1]; apply cmat.mul_congr_right; intro t ht; exact hP_eq t ht a ha
+  have hRHS : cmat.mul N (cmat.adj g) g b a = cmat.mul d (cmat.adj C) (cmat.mul d G_u C) b a
+    unfold cmat.mul cmat.adj
+    have h1 : csum N (fun r => complex.mul (complex.conj (g r b)) (g r a)) =
+        csum N (fun r => csum d (fun t => csum d (fun s => complex.mul (complex.conj (C t b)) (complex.mul (complex.mul (complex.conj (u r t)) (u r s)) (C s a)))))
+      apply csum.congr; intro r hr; rw [hspan r hr b hb, hspan r hr a ha]; unfold cmat.mul
+      rw [csum.conj, ← csum.scale_right]; apply csum.congr; intro t _
+      rw [complex.conj_mul, ← csum.scale_left]; apply csum.congr; intro s _
+      apply complex.ext <;> simp <;> ring
+    have hsw : csum N (fun r => csum d (fun t => csum d (fun s => complex.mul (complex.conj (C t b)) (complex.mul (complex.mul (complex.conj (u r t)) (u r s)) (C s a))))) =
+        csum d (fun t => csum d (fun s => csum N (fun r => complex.mul (complex.conj (C t b)) (complex.mul (complex.mul (complex.conj (u r t)) (u r s)) (C s a)))))
+      rw [csum.swap]; apply csum.congr; intro t _; rw [csum.swap]
+    rw [h1, hsw]; apply csum.congr; intro t _
+    rw [← csum.scale_left]; apply csum.congr; intro s _
+    rw [csum.scale_left, csum.scale_right, hGu_def]; unfold cmat.gram_cols cmat.mul cmat.adj; trivial
+  rw [hLHS, hRHS]
+
++ cmat.compressed_gram_ultrametric_det_le_of_in_span (N M d : ℕ) (k B_den : ℝ) (u g C : ℕ → ℕ → ℂ)
+    (v : ℂ → ℝ) (hv : is_ultrametric_norm v) (hB : 0 ≤ B_den)
+    (hGu : cmat.det d (cmat.gram_cols N u) ≠ complex.zero)
+    (hnondeg : ∀ z : ℂ, z ≠ complex.zero → 0 < v z)
+    (hspan : ∀ r < N, ∀ a < M, g r a = cmat.mul d u C r a)
+    (hgram_bd : ∀ b < M, ∀ a < M, v (complex.mul (complex.of_real k) (cmat.mul N (cmat.adj g) g b a)) ≤ B_den) :
+    v (cmat.det d (cmat.compressed_gram N M d k u g)) ≤ B_den ^ d
+  apply cmat.compressed_gram_ultrametric_det_le N M d k B_den u g v hv hB hGu hnondeg
+  intro b hb a ha
+  rw [cmat.projected_gram_eq_gram_of_in_span N M d u g C hGu hspan b hb a ha]
+  exact hgram_bd b hb a ha
+
+-- ====================================================================================
+-- AXIOM AUDIT: ZERO CUSTOM AXIOMS!
+-- ====================================================================================
+
+#axioms cmat.rallis_chain_det_prod
+#axioms cmat.compressed_gram_det_identity
+#axioms cmat.compressed_gram_twist_ratio_seminorm
+#axioms cmat.op_norm_adj_le
+#axioms cmat.compressed_gram_arch_det_le
+#axioms cmat.compressed_gram_ultrametric_det_le
+#axioms cmat.compressed_gram_ultrametric_det_le_of_in_span

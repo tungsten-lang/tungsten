@@ -2,10 +2,12 @@
 -- Verifies cross-domain imports and ZERO custom axioms across all 6 promoted prelude libraries:
 -- algebra, analysis, combinatorics, modular, number_theory, padic.
 
+import algebra.auerbach_ostrowski
 import algebra.behrend_arakelov_seesaw
 import algebra.bourbaki_witt
 import algebra.char_p_frobenius
 import algebra.cholesky_hadamard
+import algebra.compressed_gram
 import algebra.finite_fourier
 import algebra.finite_weil
 import algebra.gram_legendre
@@ -81,3 +83,11 @@ import padic.mvps_pderiv_ult
 #axioms sernau.sum_sq_jacobi_poly_odd_le
 #axioms sernau.eventually_mul_norm_deriv_entireL_lt
 #axioms sernau.residue_prime_log_diverges
+#axioms cmat.psd_det_le_of_le
+#axioms cmat.mul_inv_eq_id
+#axioms cmat.ostrowski_taussky
+#axioms auerbach.exists_dual_basis
+#axioms cmat.exists_det_from_cols
+#axioms cmat.compressed_gram_det_identity
+#axioms cmat.compressed_gram_arch_det_le
+#axioms cmat.compressed_gram_ultrametric_det_le_of_in_span

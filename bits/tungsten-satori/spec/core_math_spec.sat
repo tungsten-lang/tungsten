@@ -1,4 +1,4 @@
--- Satori Core Mathlib Regression Spec
+-- Satori Core Math Library Regression Spec
 -- Verifies cross-domain imports and ZERO custom axioms across all 6 promoted prelude libraries:
 -- algebra, analysis, combinatorics, modular, number_theory, padic.
 

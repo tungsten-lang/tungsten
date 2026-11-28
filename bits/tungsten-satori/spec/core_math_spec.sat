@@ -45,6 +45,7 @@ import number_theory.classical_L
 import number_theory.classical_L_log_deriv
 import number_theory.dirichlet_nonvanishing
 import number_theory.minkowski_lattice
+import number_theory.one_determinant
 import number_theory.polya_vinogradov
 import number_theory.place_heights
 import number_theory.prime_rationals
@@ -180,3 +181,11 @@ import tested_denominators
 #axioms hecke.bi_inv_transpose_eq
 #axioms hecke.gelfand_convolution_comm
 #axioms hecke.gelfand_adjoint_sum
+#axioms cpadic_place.is_ultrametric_norm
+#axioms cpadic_place.conj
+#axioms height_le.prod
+#axioms height_le.of_prime_budget
+#axioms cmat.gram_recombine_det
+#axioms height_le.one_determinant
+#axioms height_le.one_determinant_of_lattice_oracle
+#axioms cdot.sum_group_shift_eq

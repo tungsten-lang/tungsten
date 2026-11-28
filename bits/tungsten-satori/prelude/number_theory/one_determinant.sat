@@ -1,0 +1,308 @@
+-- Place-Height Products (`HeightLe.prod`), Conjugated `p`-adic Places,
+-- Matrix Gram-Recombination Determinant Identity, the One-Determinant Height
+-- Theorem (`New/Heights/OneDeterminant.lean:124-149`), and Group-Shift
+-- Inner-Product Summation (`OneDeterminant.lean:22`).
+--
+-- Proved unconditionally on Satori's HOL kernel (0 custom axioms).
+
+import number_theory.place_heights
+import number_theory.denominator_budget
+import algebra.hilbert_comparison
+
+-- ====================================================================================
+-- SECTION 1: `cpadic_place` ULTRAMETRIC & CONJUGATION PROPERTIES, `height_le.prod`
+-- ====================================================================================
+
++ cpadic_place.is_ultrametric_norm (l : ℕ) (v : ℂ → ℝ) (h : cpadic_place l v) :
+    is_ultrametric_norm v
+  unfold cpadic_place at h
+  have hv := h.2.1
+  unfold sernau.is_padic_val_on_C at hv
+  unfold is_ultrametric_norm is_mult_seminorm
+  exact ⟨⟨hv.1, hv.2.1, hv.2.2.1, hv.2.2.2.2.2.1⟩, hv.2.2.2.1, hv.2.2.2.2.1⟩
+
++ cpadic_place.conj (l : ℕ) (v : ℂ → ℝ) (h : cpadic_place l v) :
+    cpadic_place l (fun z => v (complex.conj z))
+  unfold cpadic_place at h ⊢
+  have hv := h.2.1
+  unfold sernau.is_padic_val_on_C at hv ⊢
+  refine ⟨h.1, ?_, ?_⟩
+  · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    · have hc0 : complex.conj complex.zero = complex.zero := by apply complex.ext <;> simp
+      rw [hc0]; exact hv.1
+    · rw [complex.conj_one]; exact hv.2.1
+    · intro z; exact hv.2.2.1 (complex.conj z)
+    · intro z
+      have hcn : complex.conj (complex.neg z) = complex.neg (complex.conj z) := by apply complex.ext <;> simp
+      rw [hcn]; exact hv.2.2.2.1 (complex.conj z)
+    · intro w z
+      rw [complex.conj_add]; exact hv.2.2.2.2.1 (complex.conj w) (complex.conj z)
+    · intro w z
+      rw [complex.conj_mul]; exact hv.2.2.2.2.2.1 (complex.conj w) (complex.conj z)
+    · intro n
+      rw [complex.conj_of_real]; exact hv.2.2.2.2.2.2 n
+  · intro z hz
+    have hcz : complex.conj z ≠ complex.zero
+      intro h0
+      apply hz
+      rw [← complex.conj_conj z, h0]; apply complex.ext <;> simp
+    exact h.2.2 (complex.conj z) hcz
+
++ height_le.congr (p : α → ℕ) (v : α → ℂ → ℝ) (c : ℝ) (y y' : α → ℂ)
+    (h : height_le p v c y) (heq : ∀ s : α, y' s = y s) :
+    height_le p v c y'
+  obtain ⟨H, alpha, e, hH, harch, hloc, hev⟩ := h
+  have hloc' : ∀ s : α, v s (complex.mul H (y' s)) ≤ exp (e (p s))
+    intro s; rw [heq s]; exact hloc s
+  exact ⟨H, alpha, e, hH, harch, hloc', hev⟩
+
+-- Finite products of bounded-height families (`New/Heights/Heights.lean:54`, `HeightLe.prod`).
++ height_le.prod (p : α → ℕ) (v : α → ℂ → ℝ) (hpl : place_family p v)
+    (N : ℕ) (c : ℕ → ℝ) (y : ℕ → α → ℂ)
+    (h : ∀ i < N, height_le p v (c i) (y i)) :
+    height_le p v (∑ i < N, c i) (fun s => cprod_c N (fun i => y i s))
+  induction N with h r ihr h
+  · rw [sum_below_zero]
+    apply height_le.congr p v 0 (fun _ => complex.one) (fun s => cprod_c 0 (fun i => y i s)) (height_le.one p v hpl)
+    intro s; exact cprod_c.zero_eq (fun i => y i s)
+  · rw [succ_eq_add_one.nat] at h ⊢
+    rw [sum_below_succ]
+    have hprev := ihr (by intro i hi; exact h i (by omega))
+    have hlast := h r (by omega)
+    have hmul := height_le.mul p v hpl (∑ i < r, c i) (c r) (fun s => cprod_c r (fun i => y i s)) (y r) hprev hlast
+    apply height_le.congr p v ((∑ i < r, c i) + c r) _ _ hmul
+    intro s; exact cprod_c.succ_eq r (fun i => y i s)
+
+-- Bridge from `prime_budget.finite_bound` to initial-segment prime sums.
++ prime_budget.initial_segment_le (e : ℕ → ℝ) (delta : ℝ)
+    (he : prime_budget.finite_bound e delta) (M : ℕ) :
+    (∑ l < M, if is_prime_nat l then e l else 0) ≤ delta
+  obtain ⟨k, q, hq, hdist, hsum⟩ := prime_segment.enumerate e M
+  unfold prime_budget.finite_bound at he
+  rw [hsum]
+  exact he k q (by intro i hi; exact (hq i hi).1) hdist
+
++ height_le.of_prime_budget (p : α → ℕ) (v : α → ℂ → ℝ) (H : ℂ) (alpha delta : ℝ)
+    (e : ℕ → ℝ) (y : α → ℂ) (hH : H ≠ complex.zero)
+    (harch : ∀ f : ℂ → ℂ, cfield_aut f → complex.abs (f H) ≤ exp alpha)
+    (hloc : ∀ s : α, v s (complex.mul H (y s)) ≤ exp (e (p s)))
+    (he : prime_budget.finite_bound e delta) :
+    height_le p v (alpha + delta) y
+  have hev : ∃ M0 : ℕ, ∀ M : ℕ, M0 ≤ M → alpha + (∑ l < M, if is_prime_nat l then e l else 0) ≤ alpha + delta
+    use 0; intro M _
+    have hseg := prime_budget.initial_segment_le e delta he M
+    linarith
+  exact ⟨H, alpha, e, hH, harch, hloc, hev⟩
+
+-- ====================================================================================
+-- SECTION 2: MATRIX GRAM RECOMBINATION & `one_determinant` (`OneDeterminant.lean:124`)
+-- ====================================================================================
+
+-- Bilinear recombination identity (`OneDeterminant.lean:143-144`):
+-- Given `U : N × d` and coefficient matrices `m_left, m_right : d × d`, the Gram pairing
+-- between `∑_a m_left_{i,a} U_a` and `∑_b m_right_{j,b} U_b` equals
+-- `(entry_conj m_left) * (U^* U) * (transpose m_right)`.
++ cmat.gram_recombine_entry (N d : ℕ) (U m_left m_right : ℕ → ℕ → ℂ) (i j : ℕ) :
+    cdot N (fun r => csum d (fun a => complex.mul (m_left i a) (U r a))) (fun r => csum d (fun b => complex.mul (m_right j b) (U r b))) =
+    cmat.mul d (cmat.mul d (cmat.entry_conj m_left) (cmat.gram_cols N U)) (cmat.transpose m_right) i j
+  unfold cdot cmat.mul cmat.entry_conj cmat.gram_cols cmat.adj cmat.transpose
+  have h1 : csum N (fun r => complex.mul (complex.conj (csum d (fun a => complex.mul (m_left i a) (U r a)))) (csum d (fun b => complex.mul (m_right j b) (U r b)))) =
+      csum N (fun r => csum d (fun a => csum d (fun b => complex.mul (complex.mul (complex.conj (m_left i a)) (complex.mul (complex.conj (U r a)) (U r b))) (m_right j b))))
+    apply csum.congr; intro r _
+    rw [csum.conj, ← csum.scale_right]
+    apply csum.congr; intro a _
+    rw [← csum.scale_left]
+    apply csum.congr; intro b _
+    apply complex.ext <;> simp <;> ring
+  have hsw1 : csum N (fun r => csum d (fun a => csum d (fun b => complex.mul (complex.mul (complex.conj (m_left i a)) (complex.mul (complex.conj (U r a)) (U r b))) (m_right j b)))) =
+      csum d (fun b => csum d (fun a => csum N (fun r => complex.mul (complex.mul (complex.conj (m_left i a)) (complex.mul (complex.conj (U r a)) (U r b))) (m_right j b))))
+    have ha : csum N (fun r => csum d (fun a => csum d (fun b => complex.mul (complex.mul (complex.conj (m_left i a)) (complex.mul (complex.conj (U r a)) (U r b))) (m_right j b)))) =
+        csum N (fun r => csum d (fun b => csum d (fun a => complex.mul (complex.mul (complex.conj (m_left i a)) (complex.mul (complex.conj (U r a)) (U r b))) (m_right j b))))
+      apply csum.congr; intro r _; rw [csum.swap d d]
+    rw [ha, csum.swap N d]
+    apply csum.congr; intro b _; rw [csum.swap N d]
+  rw [h1, hsw1]
+  apply csum.congr; intro b _
+  rw [← csum.scale_right]
+  apply csum.congr; intro a _
+  rw [csum.scale_right, csum.scale_left]
+
++ cmat.gram_recombine_det (N d : ℕ) (U m_left m_right : ℕ → ℕ → ℂ) :
+    cmat.det d (fun i j => cdot N (fun r => csum d (fun a => complex.mul (m_left i a) (U r a))) (fun r => csum d (fun b => complex.mul (m_right j b) (U r b)))) =
+    complex.mul (complex.mul (complex.conj (cmat.det d m_left)) (cmat.det d (cmat.gram_cols N U))) (cmat.det d m_right)
+  have hcon : cmat.det d (fun i j => cdot N (fun r => csum d (fun a => complex.mul (m_left i a) (U r a))) (fun r => csum d (fun b => complex.mul (m_right j b) (U r b)))) =
+      cmat.det d (cmat.mul d (cmat.mul d (cmat.entry_conj m_left) (cmat.gram_cols N U)) (cmat.transpose m_right))
+    apply cmat.det_congr; intro i _ j _; exact cmat.gram_recombine_entry N d U m_left m_right i j
+  rw [hcon, cmat.det_mul, cmat.det_mul, cmat.det_conj, cmat.det_transpose]
+
+-- One-Determinant Height Bound (`New/Heights/OneDeterminant.lean:124-149`):
+-- If a reference Gram determinant `det0 ≠ 0` has all conjugates bounded by `exp alpha`,
+-- `gam s ≠ 0` has `|gam s|^{-2}` of height ≤ `g`, `e` has prime-segment sums ≤ `delta`,
+-- and at every place `s` recombination matrices `m_conj s, m_dir s` satisfy
+-- `exp(-e(p s)) * v_s(gam s)^k ≤ v_s(det(m_dir s))`,
+-- `exp(-e(p s)) * v_s(conj(gam s))^k ≤ v_s(conj(det(m_conj s)))`,
+-- and `v_s(⟨∑ m_conj_{i,a} U_a, ∑ m_dir_{j,b} U_b⟩) ≤ 1`,
+-- then `det(U_s^* U_s) / det0` has height ≤ `alpha + 2 * delta + k * g`!
++ height_le.one_determinant (p : α → ℕ) (v : α → ℂ → ℝ) (hpl : place_family p v)
+    (d k : ℕ) (alpha delta g : ℝ) (e : ℕ → ℝ) (det0 : ℂ)
+    (hdet0_ne : det0 ≠ complex.zero)
+    (harch : ∀ f : ℂ → ℂ, cfield_aut f → complex.abs (f det0) ≤ exp alpha)
+    (he : ∀ M : ℕ, (∑ l < M, if is_prime_nat l then e l else 0) ≤ delta)
+    (N : α → ℕ) (U : α → ℕ → ℕ → ℂ) (gam : α → ℂ)
+    (hgam_ne : ∀ s : α, gam s ≠ complex.zero)
+    (hgam : height_le p v g (fun s => complex.inv (complex.of_real (complex.norm_sq (gam s)))))
+    (hm : ∀ s : α, ∃ m_conj m_dir : ℕ → ℕ → ℂ,
+      exp (0 - e (p s)) * (v s (gam s)) ^ k ≤ v s (cmat.det d m_dir) ∧
+      exp (0 - e (p s)) * (v s (complex.conj (gam s))) ^ k ≤ v s (complex.conj (cmat.det d m_conj)) ∧
+      ∀ i < d, ∀ j < d,
+        v s (cdot (N s) (fun r => csum d (fun a => complex.mul (m_conj i a) (U s r a))) (fun r => csum d (fun b => complex.mul (m_dir j b) (U s r b)))) ≤ 1) :
+    height_le p v (alpha + 2 * delta + (k : ℝ) * g) (fun s => complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (complex.inv det0))
+  have h1pow : ∀ m : ℕ, (1 : ℝ) ^ m = 1
+    intro m; induction m with r ihr; (exact pow_zero.real 1); (rw [succ_eq_add_one.nat, pow_succ.real, ihr]; ring)
+  have hpow_mul : ∀ (x y : ℝ) (m : ℕ), (x * y) ^ m = x ^ m * y ^ m
+    intro x y m; induction m with r ihr
+    · rw [pow_zero.real, pow_zero.real, pow_zero.real]; ring
+    · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, pow_succ.real, ihr]; ring
+  -- Local ultrametric bound at each place `s`:
+  -- `v_s(det(U_s^* U_s) * (|gam s|^2)^k) ≤ exp (2 * e (p s))`
+  have hloc : ∀ s : α,
+      v s (complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k)) ≤
+      exp (2 * e (p s))
+    intro s
+    obtain ⟨m_conj, m_dir, h1, h2, hint_s⟩ := hm s
+    have hps := place_family.at p v hpl s
+    have hult := cpadic_place.is_ultrametric_norm (p s) (v s) hps
+    have hdet_le1 : v s (cmat.det d (fun i j => cdot (N s) (fun r => csum d (fun a => complex.mul (m_conj i a) (U s r a))) (fun r => csum d (fun b => complex.mul (m_dir j b) (U s r b))))) ≤ 1
+      have h := is_ultrametric_norm.det_le (v s) hult d (fun i j => cdot (N s) (fun r => csum d (fun a => complex.mul (m_conj i a) (U s r a))) (fun r => csum d (fun b => complex.mul (m_dir j b) (U s r b)))) 1 (by linarith) hint_s
+      rw [h1pow d] at h; exact h
+    rw [cmat.gram_recombine_det (N s) d (U s) m_conj m_dir, hult.1.2.2.2, hult.1.2.2.2] at hdet_le1
+    have hgsq_v : v s (complex.of_real (complex.norm_sq (gam s))) = v s (gam s) * v s (complex.conj (gam s))
+      rw [← complex.mul_conj (gam s), hult.1.2.2.2]
+    have hgsq_pow : v s (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k) = (v s (gam s)) ^ k * (v s (complex.conj (gam s))) ^ k
+      rw [is_mult_seminorm.cpow_nat (v s) hult.1 (complex.of_real (complex.norm_sq (gam s))) k, hgsq_v, hpow_mul]
+    have hnn_c : 0 ≤ exp (0 - e (p s)) * (v s (complex.conj (gam s))) ^ k :=
+      mul_nonneg.real (exp (0 - e (p s))) ((v s (complex.conj (gam s))) ^ k) (exp_nonneg (0 - e (p s))) (pow_nonneg.real (v s (complex.conj (gam s))) (hult.1.2.2.1 (complex.conj (gam s))) k)
+    have hnn_md : 0 ≤ v s (cmat.det d m_dir) := hult.1.2.2.1 (cmat.det d m_dir)
+    have hprod_m : (exp (0 - e (p s)) * (v s (gam s)) ^ k) * (exp (0 - e (p s)) * (v s (complex.conj (gam s))) ^ k) ≤
+        v s (cmat.det d m_dir) * v s (complex.conj (cmat.det d m_conj))
+      have ha := mul_le_mul_of_nonneg_right.real _ _ _ h1 hnn_c
+      have hb := mul_le_mul_of_nonneg_left.real _ _ _ h2 hnn_md
+      linarith
+    have hexp_mul : exp (0 - e (p s)) * exp (0 - e (p s)) = exp (0 - 2 * e (p s))
+      rw [← exp_add]
+      have hz : (0 - e (p s)) + (0 - e (p s)) = 0 - 2 * e (p s) := by ring
+      rw [hz]
+    have hlow : exp (0 - 2 * e (p s)) * v s (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k) ≤
+        v s (cmat.det d m_dir) * v s (complex.conj (cmat.det d m_conj))
+      rw [hgsq_pow]
+      have hre : exp (0 - 2 * e (p s)) * ((v s (gam s)) ^ k * (v s (complex.conj (gam s))) ^ k) =
+          (exp (0 - e (p s)) * (v s (gam s)) ^ k) * (exp (0 - e (p s)) * (v s (complex.conj (gam s))) ^ k)
+        rw [← hexp_mul]; ring
+      linarith
+    have hdetU_nn : 0 ≤ v s (cmat.det d (cmat.gram_cols (N s) (U s))) := hult.1.2.2.1 (cmat.det d (cmat.gram_cols (N s) (U s)))
+    have hmul_U := mul_le_mul_of_nonneg_left.real _ _ _ hlow hdetU_nn
+    have hle1_re : v s (cmat.det d (cmat.gram_cols (N s) (U s))) * (v s (cmat.det d m_dir) * v s (complex.conj (cmat.det d m_conj))) ≤ 1 := by linarith
+    have hchain : exp (0 - 2 * e (p s)) * v s (complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k)) ≤ 1
+      rw [hult.1.2.2.2]; linarith
+    have hexp_pos : 0 ≤ exp (2 * e (p s)) := exp_nonneg (2 * e (p s))
+    have hscale := mul_le_mul_of_nonneg_left.real _ 1 (exp (2 * e (p s))) hchain hexp_pos
+    have hcancel : exp (2 * e (p s)) * (exp (0 - 2 * e (p s)) * v s (complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k))) =
+        v s (complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k))
+      have he1 : exp (2 * e (p s)) * exp (0 - 2 * e (p s)) = 1
+        rw [← exp_add]
+        have hz : 2 * e (p s) + (0 - 2 * e (p s)) = 0 := by ring
+        rw [hz, exp_zero]
+      calc exp (2 * e (p s)) * (exp (0 - 2 * e (p s)) * v s (complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k)))
+        = (exp (2 * e (p s)) * exp (0 - 2 * e (p s))) * v s (complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k)) := by ring
+        _ = v s (complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k)) := by rw [he1]; ring
+    linarith
+  -- Step 1: height of `(det(U_s^* U_s) * (|gam s|^2)^k) / det0` is ≤ `alpha + 2 * delta`.
+  have hev : ∃ M0 : ℕ, ∀ M : ℕ, M0 ≤ M → alpha + (∑ l < M, if is_prime_nat l then 2 * e l else 0) ≤ alpha + 2 * delta
+    use 0; intro M _
+    rw [sum_below.if_scale is_prime_nat 2 e M]
+    have hseg := he M; linarith
+  have h_ratio := height_le.of_ratio p v (alpha + 2 * delta) det0 alpha (fun l => 2 * e l) (fun s => complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k)) hdet0_ne harch hloc hev
+  -- Step 2: multiply by `(|gam s|^{-2})^k` (height ≤ `k * g`) and cancel!
+  have h_pow := height_le.pow p v hpl g (fun s => complex.inv (complex.of_real (complex.norm_sq (gam s)))) hgam k
+  have h_mul := height_le.mul p v hpl (alpha + 2 * delta) ((k : ℝ) * g) _ _ h_ratio h_pow
+  apply height_le.congr p v (alpha + 2 * delta + (k : ℝ) * g) _ _ h_mul
+  intro s
+  have hgsq_ne : complex.of_real (complex.norm_sq (gam s)) ≠ complex.zero :=
+    complex.of_real_norm_sq_ne_zero (gam s) (hgam_ne s)
+  have hcancel : complex.mul (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k) (cpow_nat (complex.inv (complex.of_real (complex.norm_sq (gam s)))) k) = complex.one
+    rw [← cpow_nat.mul_dist _ _ k, complex.mul_inv_cancel _ hgsq_ne, cpow_nat.one]
+  have hre : complex.mul (complex.mul (complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k)) (complex.inv det0)) (cpow_nat (complex.inv (complex.of_real (complex.norm_sq (gam s)))) k) =
+      complex.mul (complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (complex.inv det0)) (complex.mul (cpow_nat (complex.of_real (complex.norm_sq (gam s))) k) (cpow_nat (complex.inv (complex.of_real (complex.norm_sq (gam s)))) k))
+    apply complex.ext <;> simp <;> ring
+  rw [hre, hcancel, complex.mul_one_r]
+
+-- Exact Lean-style wrapper (`OneDeterminant.lean:129-149`) taking a single uniform
+-- recombination oracle across `v s` and `v s ∘ conj`, plus `prime_budget.finite_bound e delta`!
++ height_le.one_determinant_of_lattice_oracle (p : α → ℕ) (v : α → ℂ → ℝ) (hpl : place_family p v)
+    (d k : ℕ) (alpha delta g : ℝ) (e : ℕ → ℝ) (det0 : ℂ)
+    (hdet0_ne : det0 ≠ complex.zero)
+    (harch : ∀ f : ℂ → ℂ, cfield_aut f → complex.abs (f det0) ≤ exp alpha)
+    (he : prime_budget.finite_bound e delta)
+    (N : α → ℕ) (U : α → ℕ → ℕ → ℂ) (gam : α → ℂ)
+    (hgam_ne : ∀ s : α, gam s ≠ complex.zero)
+    (hgam : height_le p v g (fun s => complex.inv (complex.of_real (complex.norm_sq (gam s)))))
+    (Lam : α → (ℂ → ℝ) → (ℕ → ℂ) → Prop)
+    (hw : ∀ s : α, ∀ x y : ℕ → ℂ, Lam s (fun z => v s (complex.conj z)) x → Lam s (v s) y → v s (cdot (N s) x y) ≤ 1)
+    (hl : ∀ s : α, ∀ w : ℂ → ℝ, cpadic_place (p s) w →
+      ∃ m : ℕ → ℕ → ℂ,
+        exp (0 - e (p s)) * (w (gam s)) ^ k ≤ w (cmat.det d m) ∧
+        ∀ i < d, Lam s w (fun r => csum d (fun a => complex.mul (m i a) (U s r a)))) :
+    height_le p v (alpha + 2 * delta + (k : ℝ) * g) (fun s => complex.mul (cmat.det d (cmat.gram_cols (N s) (U s))) (complex.inv det0))
+  apply height_le.one_determinant p v hpl d k alpha delta g e det0 hdet0_ne harch (prime_budget.initial_segment_le e delta he) N U gam hgam_ne hgam
+  intro s
+  obtain ⟨m_dir, hm_dir_bd, hm_dir_lam⟩ := hl s (v s) (place_family.at p v hpl s)
+  obtain ⟨m_conj, hm_conj_bd, hm_conj_lam⟩ := hl s (fun z => v s (complex.conj z)) (cpadic_place.conj (p s) (v s) (place_family.at p v hpl s))
+  exact ⟨m_conj, m_dir, hm_dir_bd, hm_conj_bd, by intro i hi j hj; exact hw s _ _ (hm_conj_lam i hi) (hm_dir_lam j hj)⟩
+
+-- ====================================================================================
+-- SECTION 3: GROUP-SHIFT CORRELATION SUMMATION (`OneDeterminant.lean:22`)
+-- ====================================================================================
+
+-- `inner_sum_sum_eq_card_mul`: if `⟨u a, v b⟩ = f (a⁻¹ * b)` for a finite family indexed
+-- by `0, ..., G - 1` where `b ↦ a⁻¹ * b` is a bijection for every `a < G`, then
+-- `⟨∑_{a < G} u a, ∑_{b < G} v b⟩ = G * ∑_{s < G} f s`.
++ cdot.sum_group_shift_eq (N G : ℕ) (u v : ℕ → ℕ → ℂ) (f : ℕ → ℂ)
+    (shift inv_shift : ℕ → ℕ → ℕ)
+    (hshift_lt : ∀ a < G, ∀ b < G, shift a b < G)
+    (hinv_lt : ∀ a < G, ∀ b < G, inv_shift a b < G)
+    (hleft : ∀ a < G, ∀ b < G, inv_shift a (shift a b) = b)
+    (hright : ∀ a < G, ∀ b < G, shift a (inv_shift a b) = b)
+    (hcorr : ∀ a < G, ∀ b < G, cdot N (u a) (v b) = f (shift a b)) :
+    cdot N (fun r => csum G (fun a => u a r)) (fun r => csum G (fun b => v b r)) =
+    complex.mul (complex.of_real (G : ℝ)) (csum G f)
+  have h1 : cdot N (fun r => csum G (fun a => u a r)) (fun r => csum G (fun b => v b r)) =
+      csum G (fun a => csum G (fun b => cdot N (u a) (v b)))
+    unfold cdot
+    have ha : csum N (fun r => complex.mul (complex.conj (csum G (fun a => u a r))) (csum G (fun b => v b r))) =
+        csum N (fun r => csum G (fun a => csum G (fun b => complex.mul (complex.conj (u a r)) (v b r))))
+      apply csum.congr; intro r _
+      rw [csum.conj, ← csum.scale_right]
+      apply csum.congr; intro a _; rw [← csum.scale_left]
+    rw [ha, csum.swap N G]
+    apply csum.congr; intro a _; rw [csum.swap N G]
+  rw [h1]
+  have h2 : csum G (fun a => csum G (fun b => cdot N (u a) (v b))) = csum G (fun _ => csum G f)
+    apply csum.congr; intro a ha
+    have hinner : csum G (fun b => cdot N (u a) (v b)) = csum G (fun b => f (shift a b))
+      apply csum.congr; intro b hb; exact hcorr a ha b hb
+    rw [hinner]
+    exact csum.bij G (shift a) (inv_shift a) f (hshift_lt a ha) (hinv_lt a ha) (hleft a ha) (hright a ha)
+  rw [h2, csum.const]; apply complex.ext <;> simp <;> ring
+
+-- ====================================================================================
+-- AXIOM AUDIT: ZERO CUSTOM AXIOMS!
+-- ====================================================================================
+
+#axioms cpadic_place.is_ultrametric_norm
+#axioms cpadic_place.conj
+#axioms height_le.prod
+#axioms height_le.of_prime_budget
+#axioms cmat.gram_recombine_det
+#axioms height_le.one_determinant
+#axioms height_le.one_determinant_of_lattice_oracle
+#axioms cdot.sum_group_shift_eq

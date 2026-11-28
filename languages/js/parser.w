@@ -175,10 +175,11 @@ JS_PREC = js_prec_table()
 # of a block, the JaRef of an identifier. (The eleventh ivar costs nothing: a JsNode was
 # already an 88-byte request in a 96-byte malloc block.)
 + JsNode
-  rw :kind, :pos, :fin, :str, :a, :b, :c, :d, :list, :flags, :x
+  rw :kind, :pos, :fin, :str, :a, :b, :c, :d, :list, :flags, :x, :osr_fp
   -> new(@kind, @pos, @fin, @str, @a, @b, @c, @list, @flags)
     @d = nil
     @x = nil
+    @osr_fp = 0
 
   -> has?(f)
     (@flags & f) != 0

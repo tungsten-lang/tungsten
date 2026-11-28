@@ -133,7 +133,15 @@ JS_DOM_HOOK = [nil]
   -> call_obj(this, args)
     JS_NULL
 
+JS_HAS_HTMLDDA = [false]
+JS_HTMLDDA_FLAG = i64[1]
+JS_HTMLDDA_FLAG[0] = 0
+
 -> js_new_htmldda(proto)
+  if !JS_HAS_HTMLDDA[0]
+    JS_HAS_HTMLDDA[0] = true
+    JS_HTMLDDA_FLAG[0] = 1
+    JS_EPOCH[0] += 1
   JS:HtmlDda.new(js_root_shape(proto, 0, 2))
 
 -> js_htmldda?(v)
@@ -228,7 +236,7 @@ JS_DOM_HOOK = [nil]
 -> js_to_int32(v)
   x = js_to_number(v)
   b = jsr_i32(wvalue_bits(x) ## i64)
-  return b if b != JSR_NOI32
+  return b if b != (1099511627776 ## i64)
   return 0 if x != x || x == ~1.0 / ~0.0 || x == ~-1.0 / ~0.0
   t = x < ~0.0 ? Math.ceil(x) : Math.floor(x)
   m = t % ~4294967296.0

@@ -124,22 +124,29 @@ WK_PARSE_CACHE_HOOK = [nil, nil]
       an = hit[1]
   if an == nil
     t_parse0 = WK_PARSE_CACHE_HOOK[1] != nil && mode == nil ? clock() : ~0.0
-    p = JsParser.new(src, false)
+    # Large script AST + semantic analysis allocates almost 100% live nodes until done;
+    # pause Tungsten GC during parse+analyze to avoid stop-the-world cycles walking live ASTs.
+    pause_gc = src.size >= 65536 && GC.enabled?
+    GC.disable if pause_gc
     begin
-      prog = p.parse_program()
-    rescue e
+      p = JsParser.new(src, false)
+      begin
+        prog = p.parse_program()
+      rescue e
+        p.release_simd_lex
+        js_throw(js_make_error("SyntaxError", p.error == nil ? e.to_s : p.error.msg + " (line " + p.error.line.to_s + ", column " + p.error.col.to_s + ")"))
       p.release_simd_lex
-      js_throw(js_make_error("SyntaxError", p.error == nil ? e.to_s : p.error.msg + " (line " + p.error.line.to_s + ", column " + p.error.col.to_s + ")"))
-    p.release_simd_lex
-    an = JaAnalysis.new(prog, false)
-    an.src = src
-    an.url = url
-    an.eval_mode = mode != nil
-    an.run
+      an = JaAnalysis.new(prog, false)
+      an.src = src
+      an.url = url
+      an.eval_mode = mode != nil
+      an.run
+    ensure
+      GC.enable if pause_gc
     if mode == nil && WK_PARSE_CACHE_HOOK[1] != nil
       WK_PARSE_CACHE_HOOK[1].call(src, url, [prog, an], (clock() - t_parse0) * ~1000.0)
   r0 = JS_REALM[0]
-  r0.analyses.push(an) if r0 != nil && r0.analyses != nil
+  r0.analyses.push(an) if !JS_GC_ON[0] && r0 != nil && r0.analyses != nil
   # (the host may load the script's compiled unit here: runtime/units.w)
   WK_PRE_RUN[0].call(an) if WK_PRE_RUN[0] != nil && mode == nil
   f = an.funcs[0]
@@ -152,16 +159,23 @@ WK_PARSE_CACHE_HOOK = [nil, nil]
   act = wk_act(f, nil, nil, js_realm().global, f.nlocals)
   act.caller = JS_CUR_ACT[0]
   JS_CUR_ACT[0] = act
+  rv = nil
   begin
     wk_hoist_script(f, act)
     wk_scope_enter(f.scope, act)
     wk_hoist_functions(prog.list, act)
     wk_stmts(prog.list, act)
-  rescue e
+    rv = act.rv
+  ensure
     JS_CUR_ACT[0] = act.caller
-    raise e
-  JS_CUR_ACT[0] = act.caller
-  act.rv
+    if JS_GC_ON[0]
+      has_inner = an.funcs != nil && an.funcs.size > 1
+      an.program = nil
+      f.node = nil
+      an.funcs = nil
+      an.src = nil if !has_inner
+    wk_release(act)
+  rv
 
 # The JS stack as JavaScriptCore prints it (Blade presents as Safari): one
 # "name@url:line:col" per frame, innermost first, scripts as "global code@...".
@@ -312,10 +326,24 @@ WK_JIT_OSR_THRESH = 16
   if c.jit_fp != 0
     return jit_enter_fn(c, f, this, argc, a0, a1, a2, a3, more)
   if c.jit_state == 0
+    if JS_ARENA_STATE[2] == 0
+      if this.is_a?(JS:Object) && !this.shape.dict && this.shape.count == 0 && this.shape.inline == OBJ_INLINE && this.shape.ibase == OBJ_IBASE
+        prev_rsh = c.ctor_rsh
+        if prev_rsh == nil
+          c.ctor_rsh = this.shape
+        elsif prev_rsh != this.shape
+          c.ctor_rsh = false
+      else
+        c.ctor_rsh = false
+    c.warm_args = [a0, a1, a2, a3] if c.warm_args == nil && argc > 0 && JS_ARENA_STATE[2] == 0
     h = c.jit_hits + 1
     c.jit_hits = h
     if h >= WK_JIT_FN_THRESH
-      if jit_compile_and_install(c, argc > 0 ? [a0, a1, a2, a3] : nil)
+      wargs = argc > 0 && JS_ARENA_STATE[2] == 0 ? [a0, a1, a2, a3] : c.warm_args
+      ok_jit = jit_compile_and_install(c, wargs)
+      c.warm_args = nil
+      c.ctor_rsh = nil
+      if ok_jit
         return jit_enter_fn(c, f, this, argc, a0, a1, a2, a3, more)
   wk_call_tier0(f, this, argc, a0, a1, a2, a3, more)
 
@@ -420,6 +448,26 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
     JS_CUR_ACT[0] = act.caller
     wk_release(act)
     if r != WK_TAIL
+      if JS_GC_ON[0] && jf.one_shot
+        jf.one_shot = false
+        jf.node = nil
+        if jf.scopes != nil
+          si = 0
+          while si < jf.scopes.size
+            sc = jf.scopes[si]
+            if sc != nil
+              sc.order = nil
+              sc.names = nil
+              sc.tdz_bindings = nil
+            si += 1
+          jf.scopes = nil
+        jf.param_nodes = nil
+        jf.param_copies = nil
+        jf.params = nil
+        jf.free = nil
+        if f.code != nil
+          f.code.warm_args = nil
+          f.code.ctor_rsh = nil
       JS_CALL_DEPTH[0] = d - 1
       JS_REALM[0] = saved_realm
       return r
@@ -1262,14 +1310,19 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
   false
 
 -> wk_while(s, act, labels)
+  ofp = s.osr_fp
+  if ofp > 0 && labels == nil && JS_DEADLINE_SEC[0] <= ~0.0 && JS_UI_PUMP_HOOK[0] == nil && !(JS_GC_ON[0] && JS_GC_HEAP.size >= JS_GC_NEXT[0])
+    rc = jit_run_osr_fp(ofp, act)
+    return nil if rc == 0 || rc == 2
   it = 0
-  thr = wk_loop_heavy?(s.b) ? 2 : WK_JIT_OSR_THRESH
+  thr = ofp > 0 ? 0 : (wk_loop_heavy?(s.b) ? 2 : WK_JIT_OSR_THRESH)
   while true
     js_check_deadline() if JS_DEADLINE_SEC[0] > ~0.0
     js_ui_pump_maybe() if JS_UI_PUMP_HOOK[0] != nil
     js_gc_backedge(act) if JS_GC_ON[0] && JS_GC_HEAP.size >= JS_GC_NEXT[0]
-    if it == thr && labels == nil && JS_DEADLINE_SEC[0] <= ~0.0
+    if ofp >= 0 && it == thr && labels == nil && JS_DEADLINE_SEC[0] <= ~0.0
       rc = jit_try_osr(s, act)
+      ofp = s.osr_fp
       break if rc == 0
       return nil if rc == 2
     break if !js_truthy(wk_ev(s.a, act))
@@ -1308,14 +1361,21 @@ WK_TC = [nil, nil, 0, nil, nil, nil, nil, nil]
       else
         wk_ev(s.a, act)
     act.env = js_env_copy(act.env) if per
+    ofp = s.osr_fp
+    if ofp > 0 && !has_disp && !per && labels == nil && JS_DEADLINE_SEC[0] <= ~0.0 && JS_UI_PUMP_HOOK[0] == nil && !(JS_GC_ON[0] && JS_GC_HEAP.size >= JS_GC_NEXT[0])
+      rc = jit_run_osr_fp(ofp, act)
+      if rc == 0 || rc == 2
+        act.env = saved
+        return nil
     it = 0
-    thr = wk_loop_heavy?(s.d) ? 2 : WK_JIT_OSR_THRESH
+    thr = ofp > 0 ? 0 : (wk_loop_heavy?(s.d) ? 2 : WK_JIT_OSR_THRESH)
     while true
       js_check_deadline() if JS_DEADLINE_SEC[0] > ~0.0
       js_ui_pump_maybe() if JS_UI_PUMP_HOOK[0] != nil
       js_gc_backedge(act) if JS_GC_ON[0] && JS_GC_HEAP.size >= JS_GC_NEXT[0]
-      if !has_disp && it == thr && !per && labels == nil && JS_DEADLINE_SEC[0] <= ~0.0
+      if ofp >= 0 && !has_disp && it == thr && !per && labels == nil && JS_DEADLINE_SEC[0] <= ~0.0
         rc = jit_try_osr(s, act)
+        ofp = s.osr_fp
         break if rc == 0
         if rc == 2
           act.env = saved
@@ -2112,21 +2172,80 @@ WK_AOPS = {"+=" => 1, "-=" => 2, "*=" => 3, "/=" => 4, "%=" => 5, "|=" => 14, "&
 
 
 # Record up to 4 (shape, fn) pairs on a method call node for JIT polymorphic inlining.
+WK_POLY_COUNTS = {}
+WK_POLY_JIT_CNTS = {}
+
 -> wk_record_poly_site(e, sh, fn)
   p = e.x
   if p == nil
     e.x = [sh, fn]
+    WK_POLY_COUNTS[e] = [1]
     jit_keep(fn)
     return nil
-  return nil if !p.is_a?(Array) || p.size >= 8
+  return nil if !p.is_a?(Array)
+  cnts = WK_POLY_COUNTS[e]
   i = 0
   while i < p.size
-    return nil if p[i] == sh
+    if p[i] == sh
+      if cnts != nil
+        idx = i / 2
+        cnts[idx] = cnts[idx] + 1 if idx < cnts.size
+      return nil
     i += 2
+  return nil if p.size >= 8
   p.push(sh)
   p.push(fn)
+  if cnts != nil
+    cnts.push(1)
   jit_keep(fn)
   nil
+
+-> wk_sort_poly_prof(e, prof)
+  return prof if prof == nil || prof.size < 4
+  cnts = WK_POLY_COUNTS[e]
+  jrec = WK_POLY_JIT_CNTS[e]
+  return prof if cnts == nil && jrec == nil
+  np = prof.size / 2
+  eff = []
+  i = 0
+  while i < np
+    c = (cnts != nil && i < cnts.size) ? cnts[i] : 0
+    if jrec != nil
+      shb = wvalue_bits(prof[i * 2]) ## i64
+      jshs = jrec[0]
+      jarr = jrec[1]
+      ji = 0
+      while ji < jshs.size
+        if jshs[ji] == shb
+          c = c + jarr[ji]
+          break
+        ji += 1
+    eff.push(c)
+    i += 1
+  order = []
+  i = 0
+  while i < np
+    order.push(i)
+    i += 1
+  # Insertion sort descending by combined Tier-0 + Tier-1 PGO hit count (np <= 4)
+  i = 1
+  while i < np
+    k = order[i]
+    kc = eff[k]
+    j = i - 1
+    while j >= 0 && eff[order[j]] < kc
+      order[j + 1] = order[j]
+      j -= 1
+    order[j + 1] = k
+    i += 1
+  out = []
+  i = 0
+  while i < np
+    oi = order[i]
+    out.push(prof[oi * 2])
+    out.push(prof[oi * 2 + 1])
+    i += 1
+  out
 
 -> wk_call_expr(e, act)
   c = e.a
@@ -2201,7 +2320,7 @@ WK_AOPS = {"+=" => 1, "-=" => 2, "*=" => 3, "/=" => 4, "%=" => 5, "|=" => 14, "&
   an.eval_mode = true
   f = an.run_direct(sc)
   r0 = JS_REALM[0]
-  r0.analyses.push(an) if r0 != nil && r0.analyses != nil
+  r0.analyses.push(an) if !JS_GC_ON[0] && r0 != nil && r0.analyses != nil
   bad = nil
   an.funcs.each ->(g) bad = g.unsupported0 if bad == nil && g.unsupported0 != nil
   if bad != nil

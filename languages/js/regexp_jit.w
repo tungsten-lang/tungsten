@@ -103,7 +103,7 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
   [:bitset, m]
 
 # Check if greedy RX_REP1(body) is provably disjoint from its continuation `nxt`.
--> rx_rep1_disjoint?(rep, icase, dotall)
+-> rx_rep1_disjoint?(rep, icase, dotall, multiline = false)
   return false if !rep.greedy
   m1 = rx_jit_ascii_mask(rep.body, icase, dotall)
   return false if m1 == nil
@@ -112,6 +112,7 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
   while cur != nil && steps < 16
     k = cur.kind
     return true if k == RX_MATCH
+    return true if k == RX_EOL && !multiline
     if k == RX_EMPTY || k == RX_OPEN || k == RX_CLOSE
       cur = cur.nxt
       steps += 1
@@ -125,12 +126,13 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
     return false
   false
 
-# Check if an entire JS:Regex is eligible for native linear ARM64 compilation!
-# (Zero backtracking: no RX_ALT, no RX_REP, no RX_BACKREF, no RX_LOOK, every RX_REP1 disjoint!)
+# Check if an entire JS:Regex is eligible for native ARM64 compilation!
+# Supports linear regexes PLUS up to 1 greedy backtracking RX_REP1 (e.g. `/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i`)!
 -> rx_jit_is_linear?(rx)
   return false if rx.unicode || rx.vmode || rx.ngroups > 15
   n = rx.prog
   seen = 0
+  bt_cnt = 0
   while n != nil && seen < 256
     k = n.kind
     if k == RX_MATCH
@@ -144,7 +146,9 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
       n = n.nxt
     elsif k == RX_REP1
       return false if n.body.kind == RX_CLASS && n.body.props != nil
-      return false if !rx_rep1_disjoint?(n, rx.icase, rx.dotall)
+      if !rx_rep1_disjoint?(n, rx.icase, rx.dotall, rx.multiline)
+        return false if !n.greedy || rx_jit_ascii_mask(n.body, rx.icase, rx.dotall) == nil || bt_cnt >= 1
+        bt_cnt += 1
       n = n.nxt
     else
       return false
@@ -228,13 +232,14 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
 -> rx_jit_compile(rx)
   return 0 if !jit_mem_ready?() || !rx_jit_is_linear?(rx)
   a = JS:A64.new(256)
-  # Prologue: save fp, lr, x19..x24 (64 bytes)
-  a.sub_i(R_SP, R_SP, 64)
+  # Prologue: save fp, lr, x19..x26 (80 bytes; x25/x26 hold 1-level greedy backtrack min/cur!)
+  a.sub_i(R_SP, R_SP, 80)
   a.stp_x(R_FP, R_LR, R_SP, 0)
   a.mov_sp(R_FP, R_SP)
   a.stp_x(R_X19, R_X20, R_SP, 16)
   a.stp_x(R_X21, R_X22, R_SP, 32)
   a.stp_x(R_X23, R_X24, R_SP, 48)
+  a.stp_x(R_X25, R_X26, R_SP, 64)
   # Pin args:
   #   x19 = src_ptr, x20 = len, x21 = cur_start, x22 = caps_ptr, x23 = sticky
   a.mov_r(R_X19, R_X0)
@@ -287,7 +292,9 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
   a.bind(l_try)
   a.mov_r(R_X24, R_X21)   # x24 = pos = cur_start
 
-  # Emit straight-line sequence of RxNodes!
+  # Emit straight-line sequence of RxNodes (with optional 1-level greedy RX_REP1 backtracking)!
+  cur_fail = l_fail
+  bt_info = nil
   n = rx.prog
   while n != nil
     k = n.kind
@@ -307,24 +314,25 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
       a.str_x(R_X24, R_X22, n.group * 16 + 8)
     elsif k == RX_CHAR || k == RX_ANY || k == RX_CLASS
       a.cmp_r(R_X24, R_X20)
-      a.b_cond(CC_GE, l_fail)
+      a.b_cond(CC_GE, cur_fail)
       a.ldrb_idx(R_X9, R_X19, R_X24)
       cl = rx_mask_classify(rx_jit_ascii_mask(n, rx.icase, rx.dotall))
-      rx_emit_char_test(a, R_X9, cl, l_fail, false)
+      rx_emit_char_test(a, R_X9, cl, cur_fail, false)
       a.add_i(R_X24, R_X24, 1)
     elsif k == RX_STR
       us = n.str
       j = 0
       while j < us.size
         a.cmp_r(R_X24, R_X20)
-        a.b_cond(CC_GE, l_fail)
+        a.b_cond(CC_GE, cur_fail)
         a.ldrb_idx(R_X9, R_X19, R_X24)
         a.cmp_wi(R_X9, us[j])
-        a.b_cond(CC_NE, l_fail)
+        a.b_cond(CC_NE, cur_fail)
         a.add_i(R_X24, R_X24, 1)
         j += 1
     elsif k == RX_REP1
-      # Provably disjoint greedy repeat of single-char node!
+      # Greedy repeat of single-char node (disjoint OR 1-level backtracking)!
+      is_disj = rx_rep1_disjoint?(n, rx.icase, rx.dotall, rx.multiline)
       cl = rx_mask_classify(rx_jit_ascii_mask(n.body, rx.icase, rx.dotall))
       mn = n.min
       mx = n.max
@@ -346,17 +354,34 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
       a.add_i(R_X24, R_X24, 1)
       a.b(l_rlp)
       a.bind(l_rdone)
-      if mn > 0
+      if !is_disj
+        # 1-level greedy backtrack: x25 = min_end = rep_start + mn, x26 = cur_bt = pos!
+        if mn == 0
+          a.mov_r(R_X25, R_X13)
+        elsif mn <= 4095
+          a.add_i(R_X25, R_X13, mn)
+        else
+          a.mov_imm64(R_X11, mn)
+          a.add_r(R_X25, R_X13, R_X11)
+        a.cmp_r(R_X24, R_X25)
+        a.b_cond(CC_LT, cur_fail)
+        a.mov_r(R_X26, R_X24)
+        l_bt_cont = a.new_label
+        l_bt_retry = a.new_label
+        bt_info = [l_bt_retry, l_bt_cont, cur_fail]
+        cur_fail = l_bt_retry
+        a.bind(l_bt_cont)
+      elsif mn > 0
         a.sub_r(R_X10, R_X24, R_X13)
         if mn <= 4095
           a.cmp_i(R_X10, mn)
         else
           a.mov_imm64(R_X11, mn)
           a.cmp_r(R_X10, R_X11)
-        a.b_cond(CC_LT, l_fail)
+        a.b_cond(CC_LT, cur_fail)
     elsif k == RX_BOL
       if !rx.multiline
-        a.cbnz_x(R_X24, l_fail)
+        a.cbnz_x(R_X24, cur_fail)
       else
         l_bok = a.new_label
         a.cbz_x(R_X24, l_bok)
@@ -365,12 +390,12 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
         a.cmp_wi(R_X9, 10)
         a.b_cond(CC_EQ, l_bok)
         a.cmp_wi(R_X9, 13)
-        a.b_cond(CC_NE, l_fail)
+        a.b_cond(CC_NE, cur_fail)
         a.bind(l_bok)
     elsif k == RX_EOL
       if !rx.multiline
         a.cmp_r(R_X24, R_X20)
-        a.b_cond(CC_NE, l_fail)
+        a.b_cond(CC_NE, cur_fail)
       else
         l_eok = a.new_label
         a.cmp_r(R_X24, R_X20)
@@ -379,7 +404,7 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
         a.cmp_wi(R_X9, 10)
         a.b_cond(CC_EQ, l_eok)
         a.cmp_wi(R_X9, 13)
-        a.b_cond(CC_NE, l_fail)
+        a.b_cond(CC_NE, cur_fail)
         a.bind(l_eok)
     elsif k == RX_WORDB || k == RX_NWORDB
       # prev_w in x13, cur_w in x14
@@ -404,8 +429,16 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
       a.movz_x(R_X14, 0)
       a.bind(l_cd)
       a.cmp_r(R_X13, R_X14)
-      a.b_cond(k == RX_WORDB ? CC_EQ : CC_NE, l_fail)
+      a.b_cond(k == RX_WORDB ? CC_EQ : CC_NE, cur_fail)
     n = n.nxt
+
+  if bt_info != nil
+    a.bind(bt_info[0])
+    a.sub_i(R_X26, R_X26, 1)
+    a.cmp_r(R_X26, R_X25)
+    a.b_cond(CC_LT, bt_info[2])
+    a.mov_r(R_X24, R_X26)
+    a.b(bt_info[1])
 
   # Fail at cur_start: if sticky -> nomatch, else cur_start++ and retry!
   a.bind(l_fail)
@@ -417,10 +450,11 @@ fn jit_raw_call5(fp, a0, a1, a2, a3, a4) (i64 i64 i64 i64 i64 i64) i64
   a.movn_x(R_X0, 0)   # return -1
 
   a.bind(l_ret)
+  a.ldp_x(R_X25, R_X26, R_SP, 64)
   a.ldp_x(R_X23, R_X24, R_SP, 48)
   a.ldp_x(R_X21, R_X22, R_SP, 32)
   a.ldp_x(R_X19, R_X20, R_SP, 16)
   a.ldp_x(R_FP, R_LR, R_SP, 0)
-  a.add_i(R_SP, R_SP, 64)
+  a.add_i(R_SP, R_SP, 80)
   a.ret
   a.finalize

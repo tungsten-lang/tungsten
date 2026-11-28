@@ -471,20 +471,175 @@ fn jmap_rehash_raw(nbptr, nmask, kptr, hptr, len, hole_bits) (i64 i64 i64 i64 i6
     ret i64 0
   IR
 
+# Pure LLVM Map#delete / Set#delete for canonical bit-exact keys (ZERO boxing, ~3 ns/delete!).
+# Returns: 1 if found & deleted, 0 if not found, -2 if slow key (long string / BigInt).
+fn jmap_del_imm_raw(meta_p, kbits, hole_bits, bi_clsid) (i64 i64 i64 i64) i64
+  ll <<~IR
+    %x = sub i64 %kbits, 281474976710656
+    %isn = icmp ult i64 %x, u0xFFF0000000000001
+    br i1 %isn, label %c_num, label %c_not_num
+  c_num:
+    %is_nz = icmp eq i64 %kbits, u0x8001000000000000
+    br i1 %is_nz, label %c_pz, label %c_nan
+  c_pz:
+    br label %c_done
+  c_nan:
+    %d = bitcast i64 %x to double
+    %isnan = fcmp uno double %d, %d
+    %cb_n = select i1 %isnan, i64 u0x7FF9000000000000, i64 %kbits
+    br label %c_done
+  c_not_num:
+    %st = and i64 %kbits, u0xFFFF000000000001
+    %iss = icmp eq i64 %st, u0xFFF9000000000000
+    br i1 %iss, label %c_str, label %c_other
+  c_str:
+    %m0 = lshr i64 %kbits, 1
+    %mode = and i64 %m0, 7
+    %isinl = icmp ule i64 %mode, 5
+    br i1 %isinl, label %c_done, label %ret_slow
+  c_other:
+    %lo = and i64 %kbits, u0xFFFF00000000000F
+    %isgen = icmp eq i64 %lo, 0
+    %big = icmp uge i64 %kbits, 16
+    %mr = and i1 %isgen, %big
+    br i1 %mr, label %c_rope, label %c_obj
+  c_rope:
+    %rq = inttoptr i64 %kbits to ptr
+    %rty = load i8, ptr %rq, align 8
+    %isr = icmp eq i8 %rty, 9
+    br i1 %isr, label %ret_slow, label %c_done
+  c_obj:
+    %isinst = icmp eq i64 %lo, 4
+    %obig = and i1 %isinst, %big
+    br i1 %obig, label %c_bi, label %c_done
+  c_bi:
+    %op = and i64 %kbits, 140737488355312
+    %oq = inttoptr i64 %op to ptr
+    %cid16 = load i16, ptr %oq, align 2
+    %cid = zext i16 %cid16 to i64
+    %isbi = icmp eq i64 %cid, %bi_clsid
+    br i1 %isbi, label %ret_slow, label %c_done
+  c_done:
+    %cb = phi i64 [ 281474976710656, %c_pz ], [ %cb_n, %c_nan ], [ %kbits, %c_str ], [ %kbits, %c_rope ], [ %kbits, %c_obj ], [ %kbits, %c_bi ]
+    %mp = inttoptr i64 %meta_p to ptr
+    %maskp = getelementptr i64, ptr %mp, i64 1
+    %mask = load i64, ptr %maskp, align 8
+    %zmask = icmp eq i64 %mask, 0
+    br i1 %zmask, label %ret_miss, label %probe_init
+  probe_init:
+    %baddr = load i64, ptr %mp, align 8
+    %bptr = inttoptr i64 %baddr to ptr
+    %kptrp = getelementptr i64, ptr %mp, i64 2
+    %kaddr = load i64, ptr %kptrp, align 8
+    %kptr = inttoptr i64 %kaddr to ptr
+    %h1 = lshr i64 %cb, 32
+    %h2 = xor i64 %cb, %h1
+    %h3 = mul i64 %h2, -4658895280553007687
+    %h4 = lshr i64 %h3, 32
+    %h = and i64 %h4, 2147483647
+    %idx0 = and i64 %h, %mask
+    br label %loop
+  loop:
+    %idx = phi i64 [ %idx0, %probe_init ], [ %nidx, %step ]
+    %bp = getelementptr i32, ptr %bptr, i64 %idx
+    %b32 = load i32, ptr %bp, align 4
+    %b = sext i32 %b32 to i64
+    %is0 = icmp eq i64 %b, 0
+    br i1 %is0, label %ret_miss, label %chk_pos
+  chk_pos:
+    %pos = icmp sgt i64 %b, 0
+    br i1 %pos, label %cmp_key, label %step
+  cmp_key:
+    %ei = sub i64 %b, 1
+    %kp = getelementptr i64, ptr %kptr, i64 %ei
+    %ek = load i64, ptr %kp, align 8
+    %eq = icmp eq i64 %ek, %cb
+    br i1 %eq, label %do_del, label %step
+  step:
+    %idx1 = add i64 %idx, 1
+    %nidx = and i64 %idx1, %mask
+    br label %loop
+  do_del:
+    store i32 -1, ptr %bp, align 4
+    store i64 %hole_bits, ptr %kp, align 8
+    %vptrp = getelementptr i64, ptr %mp, i64 3
+    %vaddr = load i64, ptr %vptrp, align 8
+    %vptr = inttoptr i64 %vaddr to ptr
+    %vp = getelementptr i64, ptr %vptr, i64 %ei
+    store i64 0, ptr %vp, align 8
+    %szp = getelementptr i64, ptr %mp, i64 7
+    %sz = load i64, ptr %szp, align 8
+    %nsz = sub i64 %sz, 1
+    store i64 %nsz, ptr %szp, align 8
+    %flp = getelementptr i64, ptr %mp, i64 9
+    %fl = load i64, ptr %flp, align 8
+    %is_fl = icmp eq i64 %ei, %fl
+    br i1 %is_fl, label %adv_fl, label %ret_hit
+  adv_fl:
+    %nfl = add i64 %fl, 1
+    store i64 %nfl, ptr %flp, align 8
+    br label %ret_hit
+  ret_hit:
+    ret i64 1
+  ret_miss:
+    ret i64 0
+  ret_slow:
+    ret i64 -2
+  IR
+
+# Pure-LLVM prefix shift: compacts dead leading tombstones [0..fl-1] out of keys/vals/hashes in O(len - fl).
+fn jmap_shift_prefix_raw(kptr, vptr, hptr, fl, len, hole_bits) (i64 i64 i64 i64 i64 i64) i64
+  ll <<~IR
+    %kp = inttoptr i64 %kptr to ptr
+    %vp = inttoptr i64 %vptr to ptr
+    %hp = inttoptr i64 %hptr to ptr
+    %rem = sub i64 %len, %fl
+    br label %shift_cond
+  shift_cond:
+    %i = phi i64 [ 0, %0 ], [ %ni, %shift_body ]
+    %more = icmp slt i64 %i, %rem
+    br i1 %more, label %shift_body, label %clear_cond
+  shift_body:
+    %si = add i64 %i, %fl
+    %sk = getelementptr i64, ptr %kp, i64 %si
+    %dk = getelementptr i64, ptr %kp, i64 %i
+    %kv = load i64, ptr %sk, align 8
+    store i64 %kv, ptr %dk, align 8
+    %sv = getelementptr i64, ptr %vp, i64 %si
+    %dv = getelementptr i64, ptr %vp, i64 %i
+    %vv = load i64, ptr %sv, align 8
+    store i64 %vv, ptr %dv, align 8
+    %sh = getelementptr i32, ptr %hp, i64 %si
+    %dh = getelementptr i32, ptr %hp, i64 %i
+    %hv = load i32, ptr %sh, align 4
+    store i32 %hv, ptr %dh, align 4
+    %ni = add i64 %i, 1
+    br label %shift_cond
+  clear_cond:
+    %ci = phi i64 [ %rem, %shift_cond ], [ %nci, %clear_body ]
+    %cmore = icmp slt i64 %ci, %len
+    br i1 %cmore, label %clear_body, label %done
+  clear_body:
+    %ck = getelementptr i64, ptr %kp, i64 %ci
+    store i64 %hole_bits, ptr %ck, align 8
+    %cv = getelementptr i64, ptr %vp, i64 %ci
+    store i64 0, ptr %cv, align 8
+    %nci = add i64 %ci, 1
+    br label %clear_cond
+  done:
+    ret i64 %rem
+  IR
+
 # Pure-LLVM zero of i32 bucket array.
 fn jmap_zero_i32(p, n) (i64 i64) i64
   ll <<~IR
+    %gt0 = icmp sgt i64 %n, 0
+    br i1 %gt0, label %go, label %done
+  go:
     %bp = inttoptr i64 %p to ptr
-    br label %cond
-  cond:
-    %i = phi i64 [ 0, %0 ], [ %ni, %body ]
-    %more = icmp slt i64 %i, %n
-    br i1 %more, label %body, label %done
-  body:
-    %ep = getelementptr i32, ptr %bp, i64 %i
-    store i32 0, ptr %ep, align 4
-    %ni = add i64 %i, 1
-    br label %cond
+    %nb = shl i64 %n, 2
+    call void @llvm.memset.p0.i64(ptr align 4 %bp, i8 0, i64 %nb, i1 false)
+    br label %done
   done:
     ret i64 0
   IR
@@ -497,20 +652,21 @@ JS_BIGINT_CLSID = i64[1]
   JS_BIGINT_CLSID[0]
 
 + MapData
-  rw :meta_ptr, :keys_cap, :keys, :vals, :buckets, :hashes, :meta, :big, :gen, :bi_clsid, :first_live
+  rw :meta_ptr, :keys_cap, :keys, :vals, :buckets, :hashes, :meta, :big, :gen, :bi_clsid, :first_live, :base_idx, :site_hint
 
-  -> new
-    @keys = Array.new(8, JS_HOLE)
-    @vals = Array.new(8, nil)
-    @buckets = i32[16]
-    @hashes = i32[8]
-    @meta = i64[9]
+  -> new(init_kc = 8, init_bc = 16, @site_hint = nil)
+    @keys = Array.new(init_kc, nil)
+    @vals = Array.new(init_kc, nil)
+    @buckets = i32[init_bc]
+    @hashes = i32[init_kc]
+    @meta = i64[14]
     @meta_ptr = jit_arr_slots_ptr(wvalue_bits(@meta) ## i64)
-    @keys_cap = 8
+    @keys_cap = init_kc
     @big = nil
     @gen = 0
     @bi_clsid = js_bigint_clsid()
     @first_live = 0
+    @base_idx = 0
     sync_meta(0, 0, 0)
 
   -> sync_meta(len, used, sz)
@@ -523,6 +679,11 @@ JS_BIGINT_CLSID = i64[1]
     @meta[6] = used ## i64
     @meta[7] = sz ## i64
     @meta[8] = @keys_cap ## i64
+    @meta[9] = 0 ## i64
+    @meta[10] = (wvalue_bits(@vals) ## i64) & 140737488355312
+    @meta[11] = (wvalue_bits(@keys) ## i64) & 140737488355312
+    @meta[12] = @gen ## i64
+    @meta[13] = @base_idx ## i64
     nil
 
   -> size
@@ -531,12 +692,36 @@ JS_BIGINT_CLSID = i64[1]
   -> len
     @meta[5]
 
+  -> advance_first_live
+    fl = @meta[9]
+    l = @meta[5]
+    ks = @keys
+    while fl < l && ks[fl] == JS_HOLE
+      fl += 1
+    @meta[9] = fl
+    fl
+
+  -> compact_prefix
+    return nil if @big != nil
+    fl = advance_first_live()
+    return nil if fl <= 0
+    l = @meta[5]
+    rem = jmap_shift_prefix_raw(@meta[2], @meta[3], @meta[4], fl, l, wvalue_bits(JS_HOLE) ## i64)
+    @base_idx += fl
+    @meta[5] = rem
+    @meta[9] = 0
+    @meta[13] = @base_idx ## i64
+    @first_live = 0
+    nil
+
   -> ensure_entries_cap(need)
     return nil if need <= @keys_cap
-    nc = @keys_cap <= 16384 ? @keys_cap * 4 : @keys_cap * 2
+    nc = @keys_cap < 512 ? @keys_cap * 4 : @keys_cap * 2
     while nc < need
       nc = nc * 2
-    nk = Array.new(nc, JS_HOLE)
+    if @site_hint != nil && nc > @site_hint[0] && nc <= 2048
+      @site_hint[0] = nc ## i64
+    nk = Array.new(nc, nil)
     nv = Array.new(nc, nil)
     nh = i32[nc]
     l = @meta[5]
@@ -556,10 +741,21 @@ JS_BIGINT_CLSID = i64[1]
     @meta[3] = nvp
     @meta[4] = nhp
     @meta[8] = nc ## i64
+    @meta[10] = (wvalue_bits(nv) ## i64) & 140737488355312
+    @meta[11] = (wvalue_bits(nk) ## i64) & 140737488355312
     nil
 
   -> rehash(new_bcap)
+    compact_prefix()
+    if new_bcap == @buckets.size
+      nbp = @meta[0]
+      jmap_zero_i32(nbp, new_bcap ## i64)
+      jmap_rehash_raw(nbp, (new_bcap - 1) ## i64, @meta[2], @meta[4], @meta[5], wvalue_bits(JS_HOLE) ## i64)
+      @meta[6] = @meta[7]
+      return nil
     nb = i32[new_bcap]
+    if @site_hint != nil && new_bcap > @site_hint[1] && new_bcap <= 4096
+      @site_hint[1] = new_bcap ## i64
     nbp = jit_arr_slots_ptr(wvalue_bits(nb) ## i64)
     jmap_rehash_raw(nbp, (new_bcap - 1) ## i64, @meta[2], @meta[4], @meta[5], wvalue_bits(JS_HOLE) ## i64)
     @buckets = nb
@@ -680,6 +876,14 @@ JS_NAN_KEY = JS:NanKey.new
     d.meta[7] = d.meta[7] + 1
     return nil
   # General path (heap object/string key or needs grow/rehash)
+  if d.meta[5] >= d.keys_cap && d.big == nil
+    fl = d.advance_first_live()
+    if fl >= 32 || (fl > 0 && fl * 2 >= d.keys_cap)
+      cur_bcap = d.meta[1] + 1
+      ncap = d.meta[7] * 2 >= cur_bcap ? (cur_bcap <= 32768 ? cur_bcap * 4 : cur_bcap * 2) : cur_bcap
+      ncap = 16 if ncap < 16
+      d.rehash(ncap)
+      return nil if jmap_put_imm_raw(d.meta_ptr, wvalue_bits(k) ## i64, wvalue_bits(v) ## i64, d.keys_cap ## i64, d.bi_clsid) != 0
   if (d.meta[6] + 1) * 4 > (d.meta[1] + 1) * 3
     cur_bcap = d.meta[1] + 1
     if d.meta[7] * 2 >= cur_bcap
@@ -688,6 +892,7 @@ JS_NAN_KEY = JS:NanKey.new
       ncap = cur_bcap
     ncap = 16 if ncap < 16
     d.rehash(ncap)
+    return nil if jmap_put_imm_raw(d.meta_ptr, wvalue_bits(k) ## i64, wvalue_bits(v) ## i64, d.keys_cap ## i64, d.bi_clsid) != 0
   is_s = jmap_is_slow_str(wvalue_bits(k) ## i64) != 0
   h = is_s ? js_map_key_hash(k) : js_map_canon_hash(wvalue_bits(k) ## i64)
   mask = d.meta[1]
@@ -721,6 +926,8 @@ JS_NAN_KEY = JS:NanKey.new
   nil
 
 -> js_map_remove(d, k)
+  dr = jmap_del_imm_raw(d.meta_ptr, wvalue_bits(k) ## i64, wvalue_bits(JS_HOLE) ## i64, d.bi_clsid)
+  return dr != 0 if dr != -2
   if k.is_a?(JS:BigIntValue)
     return false if d.big == nil
     e = d.big[k.v]
@@ -729,6 +936,7 @@ JS_NAN_KEY = JS:NanKey.new
     d.keys[e] = JS_HOLE
     d.vals[e] = nil
     d.meta[7] = d.meta[7] - 1
+    d.meta[9] = e + 1 if e == d.meta[9]
     return true
   is_s = jmap_is_slow_str(wvalue_bits(k) ## i64) != 0
   h = is_s ? js_map_key_hash(k) : js_map_canon_hash(wvalue_bits(k) ## i64)
@@ -747,6 +955,7 @@ JS_NAN_KEY = JS:NanKey.new
         ks[e] = JS_HOLE
         d.vals[e] = nil
         d.meta[7] = d.meta[7] - 1
+        d.meta[9] = e + 1 if e == d.meta[9]
         return true
     idx = (idx + 1) & mask
   false
@@ -764,9 +973,13 @@ JS_NAN_KEY = JS:NanKey.new
   d.meta[5] = 0
   d.meta[6] = 0
   d.meta[7] = 0
+  d.meta[9] = 0
   d.first_live = 0
+  d.base_idx = 0
   d.big = nil
   d.gen += 1
+  d.meta[12] = d.gen ## i64
+  d.meta[13] = 0 ## i64
   nil
 
 # Legacy compatibility shim (returns truthy/nil for internal checks)
@@ -780,6 +993,60 @@ JS_NAN_KEY = JS:NanKey.new
 
 -> js_map_new
   js_coll_new(js_realm().intrinsic("Map.prototype"), "Map")
+
+-> js_arena_recycle_maps(can_pool)
+  i = 0
+  n = JS_ARENA_USED_MAPS.size
+  while i < n
+    m = JS_ARENA_USED_MAPS[i]
+    d = m.internal
+    if d.meta[7] > 0
+      js_map_clear(d)
+    else
+      jmap_zero_i32(d.meta[0], d.buckets.size ## i64)
+      d.meta[5] = 0
+      d.meta[6] = 0
+      d.meta[9] = 0
+      d.first_live = 0
+      d.base_idx = 0
+      d.big = nil
+      d.gen += 1
+      d.meta[12] = d.gen ## i64
+      d.meta[13] = 0 ## i64
+    if can_pool && !m.shape.dict && m.shape.count == 0 && JS_ARENA_MAP_POOL.size < 32 && jmap_arr_is_old(wvalue_bits(d.vals) ## i64) == 0 && jmap_arr_is_old(wvalue_bits(d.keys) ## i64) == 0
+      JS_ARENA_MAP_POOL.push(m)
+    i += 1
+  JS_ARENA_USED_MAPS.clear
+  nil
+
+-> js_map_new_site(hint)
+  kc = hint[0]
+  bc = hint[1]
+  kc = 8 if kc < 8
+  bc = 16 if bc < 16
+  if JS_ARENA_STATE[2] > 0
+    while JS_ARENA_MAP_POOL.size > 0
+      pm = JS_ARENA_MAP_POOL.pop
+      pd = pm.internal
+      if jmap_arr_is_old(wvalue_bits(pd.vals) ## i64) == 0 && jmap_arr_is_old(wvalue_bits(pd.keys) ## i64) == 0
+        pd.site_hint = hint
+        pd.ensure_entries_cap(kc.to_i) if pd.keys_cap < kc.to_i
+        pd.rehash(bc.to_i) if pd.buckets.size < bc.to_i
+        JS_ARENA_USED_MAPS.push(pm)
+        return pm
+  m = js_new_special(js_realm().intrinsic("Map.prototype"), "Map")
+  m.internal = JS:MapData.new(kc.to_i, bc.to_i, hint)
+  JS_ARENA_USED_MAPS.push(m) if JS_ARENA_STATE[2] > 0 && JS_ARENA_USED_MAPS.size < 32
+  m
+
+-> js_set_new_site(hint)
+  kc = hint[0]
+  bc = hint[1]
+  kc = 8 if kc < 8
+  bc = 16 if bc < 16
+  s = js_new_special(js_realm().intrinsic("Set.prototype"), "Set")
+  s.internal = JS:MapData.new(kc.to_i, bc.to_i, hint)
+  s
 
 -> js_map_set(m, k, v)
   js_map_put(m.internal, k, v)
@@ -845,11 +1112,11 @@ JS_NAN_KEY = JS:NanKey.new
     i += 1
   false
 
-# A Map or Set iterator's state (integer index into keys/vals + clear-epoch tracking).
+# A Map or Set iterator's state (logical index into keys/vals + clear-epoch tracking).
 + MapIterState
   rw :map, :idx, :kind, :gen, :done
   -> new(@map, @kind)
-    @idx = 0
+    @idx = @map.internal.base_idx
     @gen = @map.internal.gen
     @done = false
 
@@ -865,21 +1132,23 @@ JS_NAN_KEY = JS:NanKey.new
   d = it.map.internal
   if it.gen != d.gen
     it.gen = d.gen
-    it.idx = 0
-  idx = it.idx
-  at_head = idx == 0
-  idx = d.first_live if at_head && d.first_live > 0
+    it.idx = d.base_idx
+  phys = it.idx - d.base_idx
+  at_head = phys <= 0
+  phys = 0 if phys < 0
+  fl = d.meta[9]
+  phys = fl if at_head && fl > phys
   len = d.meta[5]
   ks = d.keys
-  while idx < len && ks[idx] == JS_HOLE
-    idx += 1
-  d.first_live = idx if at_head
-  if idx >= len
+  while phys < len && ks[phys] == JS_HOLE
+    phys += 1
+  d.meta[9] = phys if at_head
+  if phys >= len
     it.done = true
     return js_iter_result(nil, true)
-  ek = ks[idx]
-  ev = d.vals[idx]
-  it.idx = idx + 1
+  ek = ks[phys]
+  ev = d.vals[phys]
+  it.idx = d.base_idx + phys + 1
   k = it.kind
   return js_iter_result(ek, false) if k == :keys
   return js_iter_result(ev, false) if k == :values
@@ -889,16 +1158,20 @@ JS_NAN_KEY = JS:NanKey.new
   d = js_this_map(m, cls)
   js_throw_type(js_err_display(f) + " is not a function") if !js_callable?(f)
   g = d.gen
-  i = 0
-  while i < d.meta[5]
+  log_i = d.base_idx
+  while true
     if d.gen != g
       g = d.gen
-      i = 0
+      log_i = d.base_idx
       next
-    ek = d.keys[i]
+    phys = log_i - d.base_idx
+    phys = 0 if phys < 0
+    break if phys >= d.meta[5]
+    ek = d.keys[phys]
+    ev = d.vals[phys]
+    log_i = d.base_idx + phys + 1
     if ek != JS_HOLE
-      js_call(f, t, 3, d.vals[i], ek, m, nil, JS_NO_ARGS)
-    i += 1
+      js_call(f, t, 3, ev, ek, m, nil, JS_NO_ARGS)
   nil
 
 # GetSetRecord (§24.2.1.2): [size, has, keys].
@@ -1090,7 +1363,8 @@ js_install(->(r) js_install_collections(r))
   sd = r.method(sp, "delete", 1, ->(this, args, nt) js_map_remove(js_this_map(this, "Set"), js_arg(args, 0)))
   r.set_intrinsic("%Set_delete%", sd)
   r.method(sp, "clear", 0, ->(this, args, nt) js_map_clear(js_this_map(this, "Set")))
-  r.method(sp, "forEach", 1, ->(this, args, nt) js_coll_for_each(this, "Set", js_arg(args, 0), js_arg(args, 1)))
+  sfe = r.method(sp, "forEach", 1, ->(this, args, nt) js_coll_for_each(this, "Set", js_arg(args, 0), js_arg(args, 1)))
+  r.set_intrinsic("%Set_forEach%", sfe)
   r.getter(sp, "size", ->(this, args, nt) js_this_map(this, "Set").size + ~0.0)
   r.method(sp, "entries", 0, ->(this, args, nt) js_map_iter_checked(this, "Set", :entries))
   sv = r.method(sp, "values", 0, ->(this, args, nt) js_map_iter_checked(this, "Set", :keys))

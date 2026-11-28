@@ -49,24 +49,712 @@ in JS
     i += 1
   s
 
+# Fast pure-LLVM allocators (1-malloc inline WArray & direct w_object_new JS:Object!)
+JS_OBJ_CLS_B = i64[1]
+
+-> js_obj_cls_bits
+  cb = JS_OBJ_CLS_B[0]
+  if cb == 0
+    cb = wvalue_bits(JS:Object) ## i64
+    JS_OBJ_CLS_B[0] = cb
+  cb
+
+fn jsr_new_obj_raw(cls_b, sh_b) (i64 i64) i64
+  ll <<~IR
+    %ob = call i64 @w_object_new(i64 %cls_b)
+    %raw = sub i64 %ob, 4
+    %p = inttoptr i64 %raw to ptr
+    %kp = getelementptr i8, ptr %p, i64 4
+    store i8 1, ptr %kp, align 1
+    %sp = getelementptr i64, ptr %p, i64 1
+    store i64 %sh_b, ptr %sp, align 8
+    ret i64 %ob
+  IR
+
+# Pure-LLVM 6-slot inline literal allocation + fill (1 calloc, ZERO w_construct_cached or nil overwrites!).
+fn jsr_lit6_new_raw(cls_b, sh_b, a, b, c, d, e, g) (i64 i64 i64 i64 i64 i64 i64 i64) i64
+  ll <<~IR
+    %ob = call i64 @w_object_new(i64 %cls_b)
+    %raw = sub i64 %ob, 4
+    %p = inttoptr i64 %raw to ptr
+    %kp = getelementptr i8, ptr %p, i64 4
+    store i8 1, ptr %kp, align 1
+    %sp = getelementptr i64, ptr %p, i64 1
+    store i64 %sh_b, ptr %sp, align 8
+    %p0 = getelementptr i64, ptr %p, i64 3
+    %p1 = getelementptr i64, ptr %p, i64 4
+    %p2 = getelementptr i64, ptr %p, i64 5
+    %p3 = getelementptr i64, ptr %p, i64 6
+    %p4 = getelementptr i64, ptr %p, i64 7
+    %p5 = getelementptr i64, ptr %p, i64 8
+    store i64 %a, ptr %p0, align 8
+    store i64 %b, ptr %p1, align 8
+    store i64 %c, ptr %p2, align 8
+    store i64 %d, ptr %p3, align 8
+    store i64 %e, ptr %p4, align 8
+    store i64 %g, ptr %p5, align 8
+    ret i64 %ob
+  IR
+
+# Single-malloc inline JS Arrays (w_array_new_inline(65, cap) -> 1 malloc + cap>=4 avoids realloc on first pushes!).
+# Ensure `@w_array_new_inline` is always declared in emitted LLVM IR even for programs without inline Tungsten array literals.
+-> js_decl_w_array_new_inline_shim
+  ccall_nobox("w_array_new_inline", 65 ## i64, 1 ## i64) ## i64
+
+fn jsr_arr0_raw() () i64
+  ll <<~IR
+    %ab = call i64 @w_array_new_inline(i64 65, i64 4)
+    %p = and i64 %ab, 140737488355312
+    %q = inttoptr i64 %p to ptr
+    %fp = getelementptr i8, ptr %q, i64 2
+    store i8 1, ptr %fp, align 1
+    %szp = getelementptr i8, ptr %q, i64 8
+    store i32 0, ptr %szp, align 4
+    ret i64 %ab
+  IR
+
+fn jsr_arr1_raw(a0) (i64) i64
+  ll <<~IR
+    %ab = call i64 @w_array_new_inline(i64 65, i64 4)
+    %p = and i64 %ab, 140737488355312
+    %q = inttoptr i64 %p to ptr
+    %fp = getelementptr i8, ptr %q, i64 2
+    store i8 1, ptr %fp, align 1
+    %szp = getelementptr i8, ptr %q, i64 8
+    store i32 1, ptr %szp, align 4
+    %slp = getelementptr i8, ptr %q, i64 16
+    %sl = load ptr, ptr %slp, align 8
+    store i64 %a0, ptr %sl, align 8
+    ret i64 %ab
+  IR
+
+fn jsr_arr2_raw(a0, a1) (i64 i64) i64
+  ll <<~IR
+    %ab = call i64 @w_array_new_inline(i64 65, i64 2)
+    %p = and i64 %ab, 140737488355312
+    %q = inttoptr i64 %p to ptr
+    %fp = getelementptr i8, ptr %q, i64 2
+    store i8 1, ptr %fp, align 1
+    %slp = getelementptr i8, ptr %q, i64 16
+    %sl = load ptr, ptr %slp, align 8
+    store i64 %a0, ptr %sl, align 8
+    %s1 = getelementptr i64, ptr %sl, i64 1
+    store i64 %a1, ptr %s1, align 8
+    ret i64 %ab
+  IR
+
+fn jsr_arr3_raw(a0, a1, a2) (i64 i64 i64) i64
+  ll <<~IR
+    %ab = call i64 @w_array_new_inline(i64 65, i64 3)
+    %p = and i64 %ab, 140737488355312
+    %q = inttoptr i64 %p to ptr
+    %fp = getelementptr i8, ptr %q, i64 2
+    store i8 1, ptr %fp, align 1
+    %slp = getelementptr i8, ptr %q, i64 16
+    %sl = load ptr, ptr %slp, align 8
+    store i64 %a0, ptr %sl, align 8
+    %s1 = getelementptr i64, ptr %sl, i64 1
+    store i64 %a1, ptr %s1, align 8
+    %s2 = getelementptr i64, ptr %sl, i64 2
+    store i64 %a2, ptr %s2, align 8
+    ret i64 %ab
+  IR
+
+fn jsr_arr_holey_raw(n, hole_b) (i64 i64) i64
+  ll <<~IR
+    %ab = call i64 @w_array_new_inline(i64 65, i64 %n)
+    %p = and i64 %ab, 140737488355312
+    %q = inttoptr i64 %p to ptr
+    %fp = getelementptr i8, ptr %q, i64 2
+    store i8 3, ptr %fp, align 1
+    %slp = getelementptr i8, ptr %q, i64 16
+    %sl = load ptr, ptr %slp, align 8
+    br label %loop
+  loop:
+    %i = phi i64 [ 0, %0 ], [ %ni, %body ]
+    %done = icmp sge i64 %i, %n
+    br i1 %done, label %fin, label %body
+  body:
+    %ep = getelementptr i64, ptr %sl, i64 %i
+    store i64 %hole_b, ptr %ep, align 8
+    %ni = add i64 %i, 1
+    br label %loop
+  fin:
+    ret i64 %ab
+  IR
+
+fn jsr_arr_dup_raw(src_b) (i64) i64
+  ll <<~IR
+    %sp = and i64 %src_b, 140737488355312
+    %sq = inttoptr i64 %sp to ptr
+    %stp = getelementptr i8, ptr %sq, i64 4
+    %st32 = load i32, ptr %stp, align 4
+    %st = sext i32 %st32 to i64
+    %szp = getelementptr i8, ptr %sq, i64 8
+    %sz32 = load i32, ptr %szp, align 4
+    %sz = sext i32 %sz32 to i64
+    %lt4 = icmp slt i64 %sz, 4
+    %cap = select i1 %lt4, i64 4, i64 %sz
+    %ab = call i64 @w_array_new_inline(i64 65, i64 %cap)
+    %dp = and i64 %ab, 140737488355312
+    %dq = inttoptr i64 %dp to ptr
+    %fp = getelementptr i8, ptr %dq, i64 2
+    store i8 1, ptr %fp, align 1
+    %dszp = getelementptr i8, ptr %dq, i64 8
+    store i32 %sz32, ptr %dszp, align 4
+    %gt0 = icmp sgt i64 %sz, 0
+    br i1 %gt0, label %copy, label %fin
+  copy:
+    %sslp = getelementptr i8, ptr %sq, i64 16
+    %ssl0 = load ptr, ptr %sslp, align 8
+    %ssl = getelementptr i64, ptr %ssl0, i64 %st
+    %dslp = getelementptr i8, ptr %dq, i64 16
+    %dsl = load ptr, ptr %dslp, align 8
+    %nb = shl i64 %sz, 3
+    call void @llvm.memcpy.p0.p0.i64(ptr align 8 %dsl, ptr align 8 %ssl, i64 %nb, i1 false)
+    br label %fin
+  fin:
+    ret i64 %ab
+  IR
+
+fn jsr_arr_from_buf_raw(src_p, start, cnt) (i64 i64 i64) i64
+  ll <<~IR
+    %ab = call i64 @w_array_new_inline(i64 65, i64 %cnt)
+    %dp = and i64 %ab, 140737488355312
+    %dq = inttoptr i64 %dp to ptr
+    %fp = getelementptr i8, ptr %dq, i64 2
+    store i8 1, ptr %fp, align 1
+    %gt0 = icmp sgt i64 %cnt, 0
+    br i1 %gt0, label %copy, label %fin
+  copy:
+    %s0 = inttoptr i64 %src_p to ptr
+    %src = getelementptr i64, ptr %s0, i64 %start
+    %dslp = getelementptr i8, ptr %dq, i64 16
+    %dsl = load ptr, ptr %dslp, align 8
+    %nb = shl i64 %cnt, 3
+    call void @llvm.memcpy.p0.p0.i64(ptr align 8 %dsl, ptr align 8 %src, i64 %nb, i1 false)
+    br label %fin
+  fin:
+    ret i64 %ab
+  IR
+
+fn jsr_str_slice_raw(sb, start, len) (i64 i64 i64) i64
+  ll <<~IR
+    %r = call i64 @w_string_slice_raw(i64 %sb, i64 %start, i64 %len)
+    ret i64 %r
+  IR
+
+# Escape-scoped bump-pointer nursery arena for proven-non-escaping JS regions (100% GC-safe & leak-free!).
+# Backing slabs are polymorphic WArrays (ebits == 65, 524288 qwords = 4 MiB each) so Tungsten's GC
+# automatically traces every WValue stored inside arena-allocated JS:Objects and fixed-size WArrays!
+# State layout (i64[8]):
+#   [0] cur_ptr (0 when inactive)  [1] end_ptr  [2] depth  [3] slab_idx
+#   [4] cur_base  [5] arr_on (0/1) [6] wobj_hdr [7] arena_state_ptr
+JS_ARENA_SLAB_QW = 524288
+JS_ARENA_SLAB_BYTES = 4194288
+JS_ARENA_STATE = i64[8]
+JS_ARENA_SLABS = []
+JS_ARENA_BASES = i64[32]
+JS_ARENA_EXT_ARRS = []
+
+fn jsr_arena_alloc_arr0_raw(st_p) (i64) i64
+  ll <<~IR
+    %st = inttoptr i64 %st_p to ptr
+    %aop = getelementptr i64, ptr %st, i64 5
+    %ao = load i64, ptr %aop, align 8
+    %aok = icmp ne i64 %ao, 0
+    br i1 %aok, label %chk, label %miss
+  chk:
+    %cur = load i64, ptr %st, align 8
+    %act = icmp ne i64 %cur, 0
+    br i1 %act, label %chk2, label %miss
+  chk2:
+    %ep = getelementptr i64, ptr %st, i64 1
+    %end = load i64, ptr %ep, align 8
+    %nxt = add i64 %cur, 64
+    %ok = icmp ule i64 %nxt, %end
+    br i1 %ok, label %hit, label %miss
+  hit:
+    store i64 %nxt, ptr %st, align 8
+    %ap = inttoptr i64 %cur to ptr
+    store i64 82370, ptr %ap, align 8
+    %p1 = getelementptr i64, ptr %ap, i64 1
+    store i64 17179869184, ptr %p1, align 8
+    %slp = add i64 %cur, 32
+    %p2 = getelementptr i64, ptr %ap, i64 2
+    store i64 %slp, ptr %p2, align 8
+    %ab = or i64 %cur, u0xFFF4000000000000
+    ret i64 %ab
+  miss:
+    ret i64 0
+  IR
+
+# Grow an arena-allocated WArray's slots directly inside the bump arena (zero malloc, zero leak!).
+# Returns new_size (>0) on hit, -1 if arena slab needs grow, 0 if not an arena array or > 16384 elems.
+fn jsr_arena_grow_push_raw(st_p, ab, vb) (i64 i64 i64) i64
+  ll <<~IR
+    %ap_i = and i64 %ab, 140737488355312
+    %ap = inttoptr i64 %ap_i to ptr
+    %fl = load i8, ptr %ap, align 1
+    %is_np = and i8 %fl, 192
+    %ok_np = icmp eq i8 %is_np, 192
+    br i1 %ok_np, label %chk_st, label %no
+  chk_st:
+    %st = inttoptr i64 %st_p to ptr
+    %cur = load i64, ptr %st, align 8
+    %act = icmp ne i64 %cur, 0
+    br i1 %act, label %chk_cap, label %no
+  chk_cap:
+    %stp = getelementptr i8, ptr %ap, i64 4
+    %st32 = load i32, ptr %stp, align 4
+    %st64 = sext i32 %st32 to i64
+    %szp = getelementptr i8, ptr %ap, i64 8
+    %sz32 = load i32, ptr %szp, align 4
+    %sz = sext i32 %sz32 to i64
+    %cp = getelementptr i8, ptr %ap, i64 12
+    %c32 = load i32, ptr %cp, align 4
+    %cap = sext i32 %c32 to i64
+    %fit = icmp slt i64 %sz, %cap
+    br i1 %fit, label %fast_put, label %need_grow
+  fast_put:
+    %slp0 = getelementptr i8, ptr %ap, i64 16
+    %sl0 = load ptr, ptr %slp0, align 8
+    %idx0 = add i64 %st64, %sz
+    %dst0 = getelementptr i64, ptr %sl0, i64 %idx0
+    store i64 %vb, ptr %dst0, align 8
+    %nsz0 = add i64 %sz, 1
+    %nsz0_32 = trunc i64 %nsz0 to i32
+    store i32 %nsz0_32, ptr %szp, align 4
+    ret i64 %nsz0
+  need_grow:
+    %nc0 = shl i64 %cap, 1
+    %lt4 = icmp slt i64 %nc0, 4
+    %nc = select i1 %lt4, i64 4, i64 %nc0
+    %big = icmp sgt i64 %nc, 16384
+    br i1 %big, label %no, label %chk_room
+  chk_room:
+    %nb = shl i64 %nc, 3
+    %ep = getelementptr i64, ptr %st, i64 1
+    %end = load i64, ptr %ep, align 8
+    %nxt = add i64 %cur, %nb
+    %ok = icmp ule i64 %nxt, %end
+    br i1 %ok, label %do_grow, label %slab_full
+  do_grow:
+    store i64 %nxt, ptr %st, align 8
+    %nsl = inttoptr i64 %cur to ptr
+    %slp1 = getelementptr i8, ptr %ap, i64 16
+    %osl0 = load ptr, ptr %slp1, align 8
+    %has_old = icmp sgt i64 %sz, 0
+    br i1 %has_old, label %docopy, label %after_copy
+  docopy:
+    %osl = getelementptr i64, ptr %osl0, i64 %st64
+    %cpy_b = shl i64 %sz, 3
+    call void @llvm.memcpy.p0.p0.i64(ptr align 8 %nsl, ptr align 8 %osl, i64 %cpy_b, i1 false)
+    br label %after_copy
+  after_copy:
+    %vslot = getelementptr i64, ptr %nsl, i64 %sz
+    store i64 %vb, ptr %vslot, align 8
+    store ptr %nsl, ptr %slp1, align 8
+    store i32 0, ptr %stp, align 4
+    %nsz1 = add i64 %sz, 1
+    %nsz1_32 = trunc i64 %nsz1 to i32
+    store i32 %nsz1_32, ptr %szp, align 4
+    %nc32 = trunc i64 %nc to i32
+    store i32 %nc32, ptr %cp, align 4
+    ret i64 %nsz1
+  slab_full:
+    ret i64 -1
+  no:
+    ret i64 0
+  IR
+
+fn jsr_arr_is_arena(ab) (i64) i64
+  ll <<~IR
+    %ap_i = and i64 %ab, 140737488355312
+    %ap = inttoptr i64 %ap_i to ptr
+    %fl = load i8, ptr %ap, align 1
+    %m = and i8 %fl, 128
+    %r = icmp ne i8 %m, 0
+    %r64 = zext i1 %r to i64
+    ret i64 %r64
+  IR
+
+fn jsr_arena_attach_buf(ab, buf_slots_p, new_cap, vb) (i64 i64 i64 i64) i64
+  ll <<~IR
+    %ap_i = and i64 %ab, 140737488355312
+    %ap = inttoptr i64 %ap_i to ptr
+    %stp = getelementptr i8, ptr %ap, i64 4
+    %st32 = load i32, ptr %stp, align 4
+    %st64 = sext i32 %st32 to i64
+    %szp = getelementptr i8, ptr %ap, i64 8
+    %sz32 = load i32, ptr %szp, align 4
+    %sz = sext i32 %sz32 to i64
+    %cp = getelementptr i8, ptr %ap, i64 12
+    %slp = getelementptr i8, ptr %ap, i64 16
+    %osl0 = load ptr, ptr %slp, align 8
+    %nsl = inttoptr i64 %buf_slots_p to ptr
+    %has_old = icmp sgt i64 %sz, 0
+    br i1 %has_old, label %docopy, label %after_copy
+  docopy:
+    %osl = getelementptr i64, ptr %osl0, i64 %st64
+    %nb = shl i64 %sz, 3
+    call void @llvm.memcpy.p0.p0.i64(ptr align 8 %nsl, ptr align 8 %osl, i64 %nb, i1 false)
+    br label %after_copy
+  after_copy:
+    %vslot = getelementptr i64, ptr %nsl, i64 %sz
+    store i64 %vb, ptr %vslot, align 8
+    store ptr %nsl, ptr %slp, align 8
+    store i32 0, ptr %stp, align 4
+    %nsz = add i64 %sz, 1
+    %nsz32 = trunc i64 %nsz to i32
+    store i32 %nsz32, ptr %szp, align 4
+    %nc32 = trunc i64 %new_cap to i32
+    store i32 %nc32, ptr %cp, align 4
+    ret i64 %nsz
+  IR
+
+fn jsr_arr_set_size_raw(arr_bits, sz) (i64 i64) i64
+  ll <<~IR
+    %p = and i64 %arr_bits, 140737488355312
+    %q = inttoptr i64 %p to ptr
+    %sp = getelementptr i8, ptr %q, i64 8
+    %s32 = trunc i64 %sz to i32
+    store i32 %s32, ptr %sp, align 4
+    ret i64 0
+  IR
+
+fn jsr_memset_zero(ptr_i, nbytes) (i64 i64) i64
+  ll <<~IR
+    %gt0 = icmp sgt i64 %nbytes, 0
+    br i1 %gt0, label %go, label %done
+  go:
+    %p = inttoptr i64 %ptr_i to ptr
+    call void @llvm.memset.p0.i64(ptr align 16 %p, i8 0, i64 %nbytes, i1 false)
+    br label %done
+  done:
+    ret i64 0
+  IR
+
+fn jsr_arena_alloc_obj_raw(st_p, sh_b) (i64 i64) i64
+  ll <<~IR
+    %st = inttoptr i64 %st_p to ptr
+    %cur = load i64, ptr %st, align 8
+    %act = icmp ne i64 %cur, 0
+    br i1 %act, label %chk, label %miss
+  chk:
+    %ep = getelementptr i64, ptr %st, i64 1
+    %end = load i64, ptr %ep, align 8
+    %nxt = add i64 %cur, 96
+    %ok = icmp ule i64 %nxt, %end
+    br i1 %ok, label %hit, label %miss
+  hit:
+    store i64 %nxt, ptr %st, align 8
+    %hp = getelementptr i64, ptr %st, i64 6
+    %hdr = load i64, ptr %hp, align 8
+    %op = inttoptr i64 %cur to ptr
+    store i64 %hdr, ptr %op, align 8
+    %sp = getelementptr i64, ptr %op, i64 1
+    store i64 %sh_b, ptr %sp, align 8
+    %ob = add i64 %cur, 4
+    ret i64 %ob
+  miss:
+    ret i64 0
+  IR
+
+fn jsr_arena_alloc_arr_raw(st_p, n, aflags) (i64 i64 i64) i64
+  ll <<~IR
+    %st = inttoptr i64 %st_p to ptr
+    %aop = getelementptr i64, ptr %st, i64 5
+    %ao = load i64, ptr %aop, align 8
+    %aok = icmp ne i64 %ao, 0
+    br i1 %aok, label %chk_n, label %miss
+  chk_n:
+    %n1 = icmp sge i64 %n, 1
+    %n8 = icmp sle i64 %n, 8
+    %nok = and i1 %n1, %n8
+    br i1 %nok, label %chk, label %miss
+  chk:
+    %cur = load i64, ptr %st, align 8
+    %act = icmp ne i64 %cur, 0
+    br i1 %act, label %chk2, label %miss
+  chk2:
+    %np1 = add i64 %n, 1
+    %cap = and i64 %np1, -2
+    %pl = shl i64 %cap, 3
+    %sz = add i64 %pl, 32
+    %ep = getelementptr i64, ptr %st, i64 1
+    %end = load i64, ptr %ep, align 8
+    %nxt = add i64 %cur, %sz
+    %ok = icmp ule i64 %nxt, %end
+    br i1 %ok, label %hit, label %miss
+  hit:
+    store i64 %nxt, ptr %st, align 8
+    %ap = inttoptr i64 %cur to ptr
+    %af16 = shl i64 %aflags, 16
+    %h0 = or i64 %af16, 16834
+    store i64 %h0, ptr %ap, align 8
+    %cap32 = shl i64 %cap, 32
+    %h1 = or i64 %cap32, %n
+    %p1 = getelementptr i64, ptr %ap, i64 1
+    store i64 %h1, ptr %p1, align 8
+    %slp = add i64 %cur, 32
+    %p2 = getelementptr i64, ptr %ap, i64 2
+    store i64 %slp, ptr %p2, align 8
+    %ab = or i64 %cur, u0xFFF4000000000000
+    ret i64 %ab
+  miss:
+    ret i64 0
+  IR
+
+fn jsr_arena_dup_arr_raw(st_p, src_b) (i64 i64) i64
+  ll <<~IR
+    %st = inttoptr i64 %st_p to ptr
+    %aop = getelementptr i64, ptr %st, i64 5
+    %ao = load i64, ptr %aop, align 8
+    %aok = icmp ne i64 %ao, 0
+    br i1 %aok, label %chk_src, label %miss
+  chk_src:
+    %sp = and i64 %src_b, 140737488355312
+    %sq = inttoptr i64 %sp to ptr
+    %szp = getelementptr i8, ptr %sq, i64 8
+    %sz32 = load i32, ptr %szp, align 4
+    %sz = sext i32 %sz32 to i64
+    %le64 = icmp sle i64 %sz, 64
+    %ge0 = icmp sge i64 %sz, 0
+    %sok = and i1 %le64, %ge0
+    br i1 %sok, label %chk_cur, label %miss
+  chk_cur:
+    %cur = load i64, ptr %st, align 8
+    %act = icmp ne i64 %cur, 0
+    br i1 %act, label %chk_fit, label %miss
+  chk_fit:
+    %lt4 = icmp slt i64 %sz, 4
+    %szp1 = add i64 %sz, 1
+    %even = and i64 %szp1, -2
+    %cap = select i1 %lt4, i64 4, i64 %even
+    %pl = shl i64 %cap, 3
+    %bytes = add i64 %pl, 32
+    %ep = getelementptr i64, ptr %st, i64 1
+    %end = load i64, ptr %ep, align 8
+    %nxt = add i64 %cur, %bytes
+    %ok = icmp ule i64 %nxt, %end
+    br i1 %ok, label %hit, label %miss
+  hit:
+    store i64 %nxt, ptr %st, align 8
+    %ap = inttoptr i64 %cur to ptr
+    store i64 82370, ptr %ap, align 8
+    %cap32 = shl i64 %cap, 32
+    %h1 = or i64 %cap32, %sz
+    %p1 = getelementptr i64, ptr %ap, i64 1
+    store i64 %h1, ptr %p1, align 8
+    %slp = add i64 %cur, 32
+    %p2 = getelementptr i64, ptr %ap, i64 2
+    store i64 %slp, ptr %p2, align 8
+    %gt0 = icmp sgt i64 %sz, 0
+    br i1 %gt0, label %copy, label %fin
+  copy:
+    %stp = getelementptr i8, ptr %sq, i64 4
+    %st32 = load i32, ptr %stp, align 4
+    %st64 = sext i32 %st32 to i64
+    %sslp = getelementptr i8, ptr %sq, i64 16
+    %ssl0 = load ptr, ptr %sslp, align 8
+    %ssl = getelementptr i64, ptr %ssl0, i64 %st64
+    %dsl = inttoptr i64 %slp to ptr
+    %nb = shl i64 %sz, 3
+    call void @llvm.memcpy.p0.p0.i64(ptr align 8 %dsl, ptr align 8 %ssl, i64 %nb, i1 false)
+    br label %fin
+  fin:
+    %ab = or i64 %cur, u0xFFF4000000000000
+    ret i64 %ab
+  miss:
+    ret i64 0
+  IR
+
+-> js_arena_owns_ptr?(ptr_i)
+  last_si = JS_ARENA_STATE[3]
+  si = 0
+  while si <= last_si
+    b = JS_ARENA_BASES[si]
+    return true if ptr_i >= b && ptr_i < b + JS_ARENA_SLAB_BYTES
+    si += 1
+  false
+
+-> js_arena_ensure_hdr
+  if JS_ARENA_STATE[6] == 0
+    tmp = JS:Object.new(nil)
+    clsid = jit_obj_clsid(wvalue_bits(tmp) ## i64)
+    # WObject header: class_id(u16) | ivar_count=10(u8)<<16 | W_FLAG_GC_NO_POOL=128(u8)<<24 | KIND_OBJECT=1(u8)<<32
+    JS_ARENA_STATE[6] = clsid | (10 << 16) | (128 << 24) | (1 << 32)
+    JS_ARENA_STATE[7] = jit_arr_slots_ptr(wvalue_bits(JS_ARENA_STATE) ## i64)
+  JS_ARENA_STATE[7]
+
+-> js_arena_ensure_slab(idx)
+  while JS_ARENA_SLABS.size <= idx
+    sl = Array.new(JS_ARENA_SLAB_QW, nil)
+    raw = jit_arr_slots_ptr(wvalue_bits(sl) ## i64)
+    aligned = (raw + 15) & -16
+    JS_ARENA_BASES[JS_ARENA_SLABS.size] = aligned
+    JS_ARENA_SLABS.push(sl)
+  sl = JS_ARENA_SLABS[idx]
+  jsr_arr_set_size_raw(wvalue_bits(sl) ## i64, JS_ARENA_SLAB_QW)
+  JS_ARENA_BASES[idx]
+
+JS_ARENA_MAP_POOL = []
+JS_ARENA_USED_MAPS = []
+
+fn jmap_arr_is_old(arr_bits) (i64) i64
+  ll <<~IR
+    %p = and i64 %arr_bits, 140737488355312
+    %q = inttoptr i64 %p to ptr
+    %fp = getelementptr i8, ptr %q, i64 3
+    %fl = load i8, ptr %fp, align 1
+    %o = and i8 %fl, 4
+    %is = icmp ne i8 %o, 0
+    %r = zext i1 %is to i64
+    ret i64 %r
+  IR
+
+-> js_arena_enter(allow_arr)
+  d = JS_ARENA_STATE[2]
+  if d == 0
+    js_arena_ensure_hdr()
+    b0 = js_arena_ensure_slab(0)
+    JS_ARENA_STATE[0] = b0
+    JS_ARENA_STATE[1] = b0 + JS_ARENA_SLAB_BYTES
+    JS_ARENA_STATE[3] = 0
+    JS_ARENA_STATE[4] = b0
+    JS_ARENA_STATE[5] = allow_arr ? 1 : 0
+  JS_ARENA_STATE[2] = d + 1
+  nil
+
+-> js_arena_next_slab
+  si = JS_ARENA_STATE[3] + 1
+  return false if si >= 32
+  b = js_arena_ensure_slab(si)
+  JS_ARENA_STATE[0] = b
+  JS_ARENA_STATE[1] = b + JS_ARENA_SLAB_BYTES
+  JS_ARENA_STATE[3] = si
+  JS_ARENA_STATE[4] = b
+  true
+
+-> js_arena_leave(promote_cells = nil)
+  d = JS_ARENA_STATE[2]
+  return nil if d <= 0
+  d -= 1
+  JS_ARENA_STATE[2] = d
+  return nil if d > 0
+  if promote_cells != nil
+    pi = 0
+    while pi < promote_cells.size
+      gc = promote_cells[pi]
+      v = gc.value
+      if v.is_a?(JS:Object) && js_arena_owns_ptr?((wvalue_bits(v) ## i64) - 4)
+        sh = v.shape
+        cp = wvalue_from_bits(jsr_new_obj_raw(js_obj_cls_bits(), wvalue_bits(sh) ## i64))
+        cp.ext = v.ext.dup if v.ext != nil
+        ki = 0
+        while ki < sh.inline && ki < sh.count
+          cp.slot_set(ki, v.slot_get(ki))
+          ki += 1
+        gc.value = cp
+      pi += 1
+  last_si = JS_ARENA_STATE[3]
+  cur = JS_ARENA_STATE[0]
+  cur_base = JS_ARENA_STATE[4]
+  JS_ARENA_STATE[0] = 0
+  JS_ARENA_STATE[1] = 0
+  JS_ARENA_STATE[3] = 0
+  JS_ARENA_STATE[4] = 0
+  JS_ARENA_STATE[5] = 0
+  JS_ARENA_EXT_ARRS.clear if JS_ARENA_EXT_ARRS.size > 0
+  js_arena_recycle_maps(promote_cells == nil) if JS_ARENA_USED_MAPS.size > 0
+  si = 0
+  while si <= last_si
+    base_i = JS_ARENA_BASES[si]
+    used = si < last_si ? JS_ARENA_SLAB_BYTES : (cur - cur_base)
+    jsr_memset_zero(base_i, used) if used > 0
+    jsr_arr_set_size_raw(wvalue_bits(JS_ARENA_SLABS[si]) ## i64, 0)
+    si += 1
+  while JS_ARENA_SLABS.size > 6
+    JS_ARENA_SLABS.pop
+  nil
+
+-> js_arena_alloc_arr0_slow
+  st_p = JS_ARENA_STATE[7]
+  if st_p != 0 && JS_ARENA_STATE[0] != 0 && JS_ARENA_STATE[5] != 0 && js_arena_next_slab()
+    ab = jsr_arena_alloc_arr0_raw(st_p)
+    return wvalue_from_bits(ab) if ab != 0
+  js_arr0_fast()
+
+-> js_arena_push_one(a, v)
+  ab = wvalue_bits(a) ## i64
+  vb = wvalue_bits(v) ## i64
+  st_p = JS_ARENA_STATE[7]
+  if st_p != 0 && JS_ARENA_STATE[0] != 0
+    r = jsr_arena_grow_push_raw(st_p, ab, vb)
+    return r if r > 0
+    if r == -1 && js_arena_next_slab()
+      r2 = jsr_arena_grow_push_raw(st_p, ab, vb)
+      return r2 if r2 > 0
+  if jsr_arr_is_arena(ab) != 0
+    nc = a.size < 4 ? 8 : (a.size * 2)
+    buf = Array.new(nc, nil)
+    JS_ARENA_EXT_ARRS.push(buf)
+    return jsr_arena_attach_buf(ab, jit_arr_slots_ptr(wvalue_bits(buf) ## i64), nc ## i64, vb)
+  a.push(v)
+  a.size ## i64
+
+-> js_arena_alloc_obj_slow(sh)
+  st_p = JS_ARENA_STATE[7]
+  if st_p != 0 && JS_ARENA_STATE[0] != 0 && js_arena_next_slab()
+    ob = jsr_arena_alloc_obj_raw(st_p, wvalue_bits(sh) ## i64)
+    return wvalue_from_bits(ob) if ob != 0
+  js_new_obj_fast(sh)
+
+-> js_arena_alloc_arr_slow(n)
+  ni = js_to_int32(n)
+  st_p = JS_ARENA_STATE[7]
+  if st_p != 0 && JS_ARENA_STATE[0] != 0 && JS_ARENA_STATE[5] != 0 && js_arena_next_slab()
+    ab = jsr_arena_alloc_arr_raw(st_p, ni ## i64, JS_AF_ARRAY ## i64)
+    return wvalue_from_bits(ab) if ab != 0
+  js_mark_array(Array.new(ni, nil))
+
+-> js_new_obj_fast(shape)
+  if JS_ARENA_STATE[0] != 0
+    ob = jsr_arena_alloc_obj_raw(JS_ARENA_STATE[7], wvalue_bits(shape) ## i64)
+    return wvalue_from_bits(ob) if ob != 0
+    return js_arena_alloc_obj_slow(shape)
+  o = wvalue_from_bits(jsr_new_obj_raw(js_obj_cls_bits(), wvalue_bits(shape) ## i64))
+  JS_GC_ON[0] ? js_gc_reg(o) : o
+
+-> js_arr0_fast
+  return js_mark_array([]) if JS_MULTI_REALM[0] || JS_GC_ON[0]
+  wvalue_from_bits(jsr_arr0_raw())
+
+-> js_arr1_fast(a0)
+  return js_mark_array([a0]) if JS_MULTI_REALM[0] || JS_GC_ON[0]
+  wvalue_from_bits(jsr_arr1_raw(wvalue_bits(a0) ## i64))
+
+-> js_arr2_fast(a0, a1)
+  return js_mark_array([a0, a1]) if JS_MULTI_REALM[0] || JS_GC_ON[0]
+  wvalue_from_bits(jsr_arr2_raw(wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64))
+
+-> js_arr3_fast(a0, a1, a2)
+  return js_mark_array([a0, a1, a2]) if JS_MULTI_REALM[0] || JS_GC_ON[0]
+  wvalue_from_bits(jsr_arr3_raw(wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64))
+
 # An object literal of up to six properties: one block.
 -> js_lit(shape, a, b, c, d, e, g)
-  o = JS:Object.new(shape)
-  o.s0 = a
-  o.s1 = b
-  o.s2 = c
-  o.s3 = d
-  o.s4 = e
-  o.s5 = g
+  o = wvalue_from_bits(jsr_lit6_new_raw(js_obj_cls_bits(), wvalue_bits(shape) ## i64, wvalue_bits(a) ## i64, wvalue_bits(b) ## i64, wvalue_bits(c) ## i64, wvalue_bits(d) ## i64, wvalue_bits(e) ## i64, wvalue_bits(g) ## i64))
   JS_GC_ON[0] ? js_gc_reg(o) : o
 
 -> js_lit_n(shape, vals)
-  o = JS:Object.new(shape)
+  o = js_new_obj_fast(shape)
   i = 0
   while i < vals.size
     o.slot_set(i, vals[i])
     i += 1
-  JS_GC_ON[0] ? js_gc_reg(o) : o
+  o
 
 -> js_define_literal(o, key, v)
   o.define(key, v, ATTR_DEFAULT)

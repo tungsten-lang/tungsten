@@ -61,7 +61,7 @@ JSU_MAN_CACHE = {}
 # js_getp, js_setp, js_call_method and js_new with the unit's own cache table.
 -> js_getp_t(o, key, ic, k)
   r = jsr_ic_get(ic, k, wvalue_bits(o) ## i64, JS_EPOCH[0])
-  return wvalue_from_bits(r) if r != JSR_SLOW
+  return wvalue_from_bits(r) if r != (6 ## i64)
   js_get_miss(o, key, ic, k)
 
 -> js_setp_t(o, key, v, ic, k)

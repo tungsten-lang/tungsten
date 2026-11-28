@@ -79,7 +79,7 @@ JS_ARR_REALM_PROTO = {}
   ix = jsr_index(wvalue_bits(i) ## i64)
   if ix >= 0
     r = jsr_aget(wvalue_bits(a) ## i64, ix)
-    if r != JSR_SLOW
+    if r != (6 ## i64)
       v = wvalue_from_bits(r)
       return v if v != JS_HOLE
   js_array_get(a, js_to_property_key(i))

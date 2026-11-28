@@ -11,12 +11,30 @@ JS_SLOW_SENTINEL = wvalue_from_bits(6)
 fn js_is_slow_bits(b) (i64) i64
   b == 6 ? 1 : 0
 
+# Fast 4-insn check: is WValue `b` a Number OR undefined/false/true (<= 2)?
+fn js_is_prim_num_or_small(b) (i64) i64
+  ll <<~IR
+    %x = sub i64 %b, 281474976710656
+    %isn = icmp ult i64 %x, u0xFFF0000000000001
+    %iss = icmp ule i64 %b, 2
+    %ok = or i1 %isn, %iss
+    %r = zext i1 %ok to i64
+    ret i64 %r
+  IR
+
 # Reaction slot modes on JS:Promise (@rx_kind):
 #   0 = none
 #   1 = single intrinsic .then() target: @rx_target = target JS:Promise (or nil), @rx_on_f, @rx_on_r
 #   2 = single general JS:Reaction pair: @rx_on_f = fr, @rx_on_r = rr
 #   3 = multiple reactions in @reactions: array of [kind, a, b, c]
 #   4 = single stackless SmFrame awaiting this promise: @rx_target = frame
+#   5 = zero-closure Promise.all waiter: @rx_target = PromiseAllState, @rx_on_f = idx
+#   6 = zero-frame 2-await async chain: @rx_target = target JS:Promise, @rx_on_f = fn2
+
++ PromiseAllState
+  rw :target, :values, :rem, :settled
+  -> new(@target, @values, @rem)
+    @settled = false
 
 + Promise < JS:Base
   rw :state, :value, :reactions, :handled, :rx_kind, :rx_target, :rx_on_f, :rx_on_r
@@ -57,9 +75,10 @@ JS_UNHANDLED = []
 JS_PROM_PRISTINE = i64[2]
 
 # Dynamically discovered byte offsets for pure-LLVM Promise chain draining:
-#   [0]=state, [1]=value, [2]=rx_kind, [3]=rx_target, [4]=rx_on_f, [5]=rx_on_r, [6]=q_head, [7]=q_tail
-JS_PROM_OFFS = i64[8]
+#   [0]=state, [1]=value, [2]=rx_kind, [3]=rx_target, [4]=rx_on_f, [5]=rx_on_r, [6]=q_head, [7]=q_tail, [8]=q_mask
+JS_PROM_OFFS = i64[9]
 JS_PROM_DRAIN_OUT = i64[4]   # [cur_target_bits, next_target_bits, next_handler_bits, last_res_bits]
+JS_PIPE_ARGS = i64[20]       # param block for js_drain_async_pipe_all_ll
 
 -> js_prom_offs_init(q)
   return nil if JS_PROM_OFFS[0] != 0
@@ -80,9 +99,11 @@ JS_PROM_DRAIN_OUT = i64[4]   # [cur_target_bits, next_target_bits, next_handler_
   q2 = JS:JobQueue.new
   q2.head = 11111
   q2.tail = 22222
+  q2.mask = 33333
   qb = wvalue_bits(q2) ## i64
   JS_PROM_OFFS[6] = js_find_ivar_off(qb, wvalue_bits(11111) ## i64)
   JS_PROM_OFFS[7] = js_find_ivar_off(qb, wvalue_bits(22222) ## i64)
+  JS_PROM_OFFS[8] = js_find_ivar_off(qb, wvalue_bits(33333) ## i64)
   nil
 
 # Pure-LLVM tight drain for consecutive same-handler JITted intrinsic Promise chains when queue is empty!
@@ -189,6 +210,559 @@ fn js_drain_prom_chain_ll(target_bits, fp, fn_bits, val_bits, pend_bits, fulf_bi
     store i64 %cur_v, ptr %out3, align 8
     ret i64 3
   ret_done:
+    ret i64 0
+  IR
+
+# Pure-LLVM atomic batch drain for JOB_ASYNC_PIPE jobs targeting one Promise.all with a pure compiled stage2!
+# Returns 1 if ALL n_total items verified, executed cleanly, settled their promises, and cleared the queue; 0 otherwise (ZERO promise/queue mutations!).
+fn js_drain_async_pipe_all_ll(args_p) (i64) i64
+  ll <<~IR
+    %ap = inttoptr i64 %args_p to ptr
+    %p0 = load i64, ptr %ap, align 8
+    %a1 = getelementptr i64, ptr %ap, i64 1
+    %v0 = load i64, ptr %a1, align 8
+    %a2 = getelementptr i64, ptr %ap, i64 2
+    %st_b = load i64, ptr %a2, align 8
+    %a3 = getelementptr i64, ptr %ap, i64 3
+    %cell_b = load i64, ptr %a3, align 8
+    %a4 = getelementptr i64, ptr %ap, i64 4
+    %fp2 = load i64, ptr %a4, align 8
+    %a5 = getelementptr i64, ptr %ap, i64 5
+    %fn2_b = load i64, ptr %a5, align 8
+    %a6 = getelementptr i64, ptr %ap, i64 6
+    %pend_b = load i64, ptr %a6, align 8
+    %a7 = getelementptr i64, ptr %ap, i64 7
+    %fulf_b = load i64, ptr %a7, align 8
+    %a8 = getelementptr i64, ptr %ap, i64 8
+    %vals_pi = load i64, ptr %a8, align 8
+    %a9 = getelementptr i64, ptr %ap, i64 9
+    %offs_pi = load i64, ptr %a9, align 8
+    %a10 = getelementptr i64, ptr %ap, i64 10
+    %qk_pi = load i64, ptr %a10, align 8
+    %a11 = getelementptr i64, ptr %ap, i64 11
+    %qf_pi = load i64, ptr %a11, align 8
+    %a12 = getelementptr i64, ptr %ap, i64 12
+    %qa_pi = load i64, ptr %a12, align 8
+    %a13 = getelementptr i64, ptr %ap, i64 13
+    %qb_pi = load i64, ptr %a13, align 8
+    %a14 = getelementptr i64, ptr %ap, i64 14
+    %qc_pi = load i64, ptr %a14, align 8
+    %a15 = getelementptr i64, ptr %ap, i64 15
+    %qh = load i64, ptr %a15, align 8
+    %a16 = getelementptr i64, ptr %ap, i64 16
+    %qmask = load i64, ptr %a16, align 8
+    %a17 = getelementptr i64, ptr %ap, i64 17
+    %ntot = load i64, ptr %a17, align 8
+    %a18 = getelementptr i64, ptr %ap, i64 18
+    %rk5_b = load i64, ptr %a18, align 8
+    %a19 = getelementptr i64, ptr %ap, i64 19
+    %int0_b = load i64, ptr %a19, align 8
+
+    %f2 = inttoptr i64 %fp2 to ptr
+    %vals_p = inttoptr i64 %vals_pi to ptr
+    %op = inttoptr i64 %offs_pi to ptr
+    %off_st = load i64, ptr %op, align 8
+    %op1 = getelementptr i64, ptr %op, i64 1
+    %off_vl = load i64, ptr %op1, align 8
+    %op2 = getelementptr i64, ptr %op, i64 2
+    %off_rk = load i64, ptr %op2, align 8
+    %op3 = getelementptr i64, ptr %op, i64 3
+    %off_tg = load i64, ptr %op3, align 8
+    %op4 = getelementptr i64, ptr %op, i64 4
+    %off_of = load i64, ptr %op4, align 8
+    %op5 = getelementptr i64, ptr %op, i64 5
+    %off_or = load i64, ptr %op5, align 8
+    %qk_p = inttoptr i64 %qk_pi to ptr
+    %qf_p = inttoptr i64 %qf_pi to ptr
+    %qa_p = inttoptr i64 %qa_pi to ptr
+    %qb_p = inttoptr i64 %qb_pi to ptr
+    %qc_p = inttoptr i64 %qc_pi to ptr
+    br label %v_loop
+
+  v_loop:
+    %k = phi i64 [ 0, %0 ], [ %k_next, %v_ok ]
+    %v_done = icmp sge i64 %k, %ntot
+    br i1 %v_done, label %c_loop, label %v_body
+
+  v_body:
+    %is_k0 = icmp eq i64 %k, 0
+    br i1 %is_k0, label %v_use0, label %v_loadq
+
+  v_use0:
+    br label %v_chk
+
+  v_loadq:
+    %km1 = sub i64 %k, 1
+    %s0 = add i64 %qh, %km1
+    %slot = and i64 %s0, %qmask
+    %kptr = getelementptr i64, ptr %qk_p, i64 %slot
+    %jk = load i64, ptr %kptr, align 8
+    %ok_jk = icmp eq i64 %jk, 8
+    br i1 %ok_jk, label %v_chk_fl, label %bail
+
+  v_chk_fl:
+    %fptr = getelementptr i64, ptr %qf_p, i64 %slot
+    %jfl = load i64, ptr %fptr, align 8
+    %ok_fl = icmp eq i64 %jfl, 3
+    br i1 %ok_fl, label %v_chk_cb, label %bail
+
+  v_chk_cb:
+    %bptr = getelementptr i64, ptr %qb_p, i64 %slot
+    %jcb = load i64, ptr %bptr, align 8
+    %ok_cb = icmp eq i64 %jcb, %cell_b
+    br i1 %ok_cb, label %v_ld_pv, label %bail
+
+  v_ld_pv:
+    %aptr = getelementptr i64, ptr %qa_p, i64 %slot
+    %pq = load i64, ptr %aptr, align 8
+    %cptr = getelementptr i64, ptr %qc_p, i64 %slot
+    %vq = load i64, ptr %cptr, align 8
+    br label %v_chk
+
+  v_chk:
+    %cp = phi i64 [ %p0, %v_use0 ], [ %pq, %v_ld_pv ]
+    %cv = phi i64 [ %v0, %v_use0 ], [ %vq, %v_ld_pv ]
+    ; Check cv is Number or nil/false/true (<=2) so pure stage2 cannot throw or invoke valueOf!
+    %vx = sub i64 %cv, 281474976710656
+    %visn = icmp ult i64 %vx, u0xFFF0000000000001
+    br i1 %visn, label %v_chk_p, label %v_chk_v2
+
+  v_chk_v2:
+    %vsm = icmp ule i64 %cv, 2
+    br i1 %vsm, label %v_chk_p, label %bail
+
+  v_chk_p:
+    ; Verify cp is a WObject pointer with state==:pending, rx_kind==5, rx_target==st_b, 0<=idx<ntot!
+    %ptag = and i64 %cp, 7
+    %isp = icmp eq i64 %ptag, 4
+    br i1 %isp, label %v_chk_p2, label %bail
+
+  v_chk_p2:
+    %p_hi = and i64 %cp, u0xFFFF000000000000
+    %p_hiz = icmp eq i64 %p_hi, 0
+    br i1 %p_hiz, label %v_chk_p3, label %bail
+
+  v_chk_p3:
+    %praw = sub i64 %cp, 4
+    %pp = inttoptr i64 %praw to ptr
+    %stp = getelementptr i8, ptr %pp, i64 %off_st
+    %pst = load i64, ptr %stp, align 8
+    %ok_st = icmp eq i64 %pst, %pend_b
+    br i1 %ok_st, label %v_chk_rk, label %bail
+
+  v_chk_rk:
+    %rkp = getelementptr i8, ptr %pp, i64 %off_rk
+    %prk = load i64, ptr %rkp, align 8
+    %ok_rk = icmp eq i64 %prk, %rk5_b
+    br i1 %ok_rk, label %v_chk_tg, label %bail
+
+  v_chk_tg:
+    %tgp = getelementptr i8, ptr %pp, i64 %off_tg
+    %ptg = load i64, ptr %tgp, align 8
+    %ok_tg = icmp eq i64 %ptg, %st_b
+    br i1 %ok_tg, label %v_chk_ix, label %bail
+
+  v_chk_ix:
+    %ofp = getelementptr i8, ptr %pp, i64 %off_of
+    %pof = load i64, ptr %ofp, align 8
+    %idx = sub i64 %pof, %int0_b
+    %ok_ix = icmp ult i64 %idx, %ntot
+    br i1 %ok_ix, label %v_call, label %bail
+
+  v_call:
+    %res = call i64 %f2(i64 %fn2_b, i64 0, i64 1, i64 %cv, i64 0, i64 0, i64 0, i64 0)
+    %is_slow = icmp eq i64 %res, 6
+    br i1 %is_slow, label %bail, label %v_chk_res
+
+  v_chk_res:
+    %rx = sub i64 %res, 281474976710656
+    %risn = icmp ult i64 %rx, u0xFFF0000000000001
+    br i1 %risn, label %v_store, label %v_chk_r2
+
+  v_chk_r2:
+    %rsm = icmp ule i64 %res, 2
+    br i1 %rsm, label %v_store, label %v_chk_rs
+
+  v_chk_rs:
+    %rst = and i64 %res, u0xFFFF000000000001
+    %riss = icmp eq i64 %rst, u0xFFF9000000000000
+    br i1 %riss, label %v_store, label %bail
+
+  v_store:
+    %vp = getelementptr i64, ptr %vals_p, i64 %idx
+    store i64 %res, ptr %vp, align 8
+    br label %v_ok
+
+  v_ok:
+    %k_next = add i64 %k, 1
+    br label %v_loop
+
+  ; Pass 2: ALL n_total items succeeded! Commit promise fulfillments and clear queue slots!
+  c_loop:
+    %j = phi i64 [ 0, %v_loop ], [ %j_next, %c_next ]
+    %c_done = icmp sge i64 %j, %ntot
+    br i1 %c_done, label %ret_ok, label %c_body
+
+  c_body:
+    %is_j0 = icmp eq i64 %j, 0
+    br i1 %is_j0, label %c_use0, label %c_loadq
+
+  c_use0:
+    br label %c_settle
+
+  c_loadq:
+    %jm1 = sub i64 %j, 1
+    %cs0 = add i64 %qh, %jm1
+    %cslot = and i64 %cs0, %qmask
+    %captr = getelementptr i64, ptr %qa_p, i64 %cslot
+    %cpq = load i64, ptr %captr, align 8
+    store i64 0, ptr %captr, align 8
+    %cbptr = getelementptr i64, ptr %qb_p, i64 %cslot
+    store i64 0, ptr %cbptr, align 8
+    %ccptr = getelementptr i64, ptr %qc_p, i64 %cslot
+    store i64 0, ptr %ccptr, align 8
+    br label %c_settle
+
+  c_settle:
+    %sp = phi i64 [ %p0, %c_use0 ], [ %cpq, %c_loadq ]
+    %sraw = sub i64 %sp, 4
+    %spp = inttoptr i64 %sraw to ptr
+    %sofp = getelementptr i8, ptr %spp, i64 %off_of
+    %spof = load i64, ptr %sofp, align 8
+    %sidx = sub i64 %spof, %int0_b
+    %svp = getelementptr i64, ptr %vals_p, i64 %sidx
+    %sval = load i64, ptr %svp, align 8
+    %sstp = getelementptr i8, ptr %spp, i64 %off_st
+    %svlp = getelementptr i8, ptr %spp, i64 %off_vl
+    %srkp = getelementptr i8, ptr %spp, i64 %off_rk
+    %stgp = getelementptr i8, ptr %spp, i64 %off_tg
+    %sorp = getelementptr i8, ptr %spp, i64 %off_or
+    store i64 %fulf_b, ptr %sstp, align 8
+    store i64 %sval, ptr %svlp, align 8
+    store i64 %int0_b, ptr %srkp, align 8
+    store i64 0, ptr %stgp, align 8
+    store i64 0, ptr %sofp, align 8
+    store i64 0, ptr %sorp, align 8
+    br label %c_next
+
+  c_next:
+    %j_next = add i64 %j, 1
+    br label %c_loop
+
+  ret_ok:
+    ret i64 1
+
+  bail:
+    ret i64 0
+  IR
+
+# Pure-LLVM atomic batch drain for SM_AWAIT_PROMISE_ALL when queue holds ONLY the n matching JOB_ASYNC_PIPE jobs!
+# Verifies every arr[k] == q.qa[(qh+k)&mask] is pending with rx_kind == 0 (zero external observers), runs pure fp2,
+# fills values[k], settles all arr[k], clears q slots, and returns 1 (else 0 with ZERO promise/queue mutations!).
+fn js_drain_async_pipe_arr_ll(args_p) (i64) i64
+  ll <<~IR
+    %ap = inttoptr i64 %args_p to ptr
+    %arr_pi = load i64, ptr %ap, align 8
+    %a1 = getelementptr i64, ptr %ap, i64 1
+    %cell_b = load i64, ptr %a1, align 8
+    %a2 = getelementptr i64, ptr %ap, i64 2
+    %fp2 = load i64, ptr %a2, align 8
+    %a3 = getelementptr i64, ptr %ap, i64 3
+    %fn2_b = load i64, ptr %a3, align 8
+    %a4 = getelementptr i64, ptr %ap, i64 4
+    %pend_b = load i64, ptr %a4, align 8
+    %a5 = getelementptr i64, ptr %ap, i64 5
+    %fulf_b = load i64, ptr %a5, align 8
+    %a6 = getelementptr i64, ptr %ap, i64 6
+    %vals_pi = load i64, ptr %a6, align 8
+    %a7 = getelementptr i64, ptr %ap, i64 7
+    %offs_pi = load i64, ptr %a7, align 8
+    %a8 = getelementptr i64, ptr %ap, i64 8
+    %qk_pi = load i64, ptr %a8, align 8
+    %a9 = getelementptr i64, ptr %ap, i64 9
+    %qf_pi = load i64, ptr %a9, align 8
+    %a10 = getelementptr i64, ptr %ap, i64 10
+    %qa_pi = load i64, ptr %a10, align 8
+    %a11 = getelementptr i64, ptr %ap, i64 11
+    %qb_pi = load i64, ptr %a11, align 8
+    %a12 = getelementptr i64, ptr %ap, i64 12
+    %qc_pi = load i64, ptr %a12, align 8
+    %a13 = getelementptr i64, ptr %ap, i64 13
+    %qh = load i64, ptr %a13, align 8
+    %a14 = getelementptr i64, ptr %ap, i64 14
+    %qmask = load i64, ptr %a14, align 8
+    %a15 = getelementptr i64, ptr %ap, i64 15
+    %ntot = load i64, ptr %a15, align 8
+    %a16 = getelementptr i64, ptr %ap, i64 16
+    %int0_b = load i64, ptr %a16, align 8
+    %a17 = getelementptr i64, ptr %ap, i64 17
+    %psh_b = load i64, ptr %a17, align 8
+
+    %f2 = inttoptr i64 %fp2 to ptr
+    %arr_p = inttoptr i64 %arr_pi to ptr
+    %vals_p = inttoptr i64 %vals_pi to ptr
+    %op = inttoptr i64 %offs_pi to ptr
+    %off_st = load i64, ptr %op, align 8
+    %op1 = getelementptr i64, ptr %op, i64 1
+    %off_vl = load i64, ptr %op1, align 8
+    %op2 = getelementptr i64, ptr %op, i64 2
+    %off_rk = load i64, ptr %op2, align 8
+    %qk_p = inttoptr i64 %qk_pi to ptr
+    %qf_p = inttoptr i64 %qf_pi to ptr
+    %qa_p = inttoptr i64 %qa_pi to ptr
+    %qb_p = inttoptr i64 %qb_pi to ptr
+    %qc_p = inttoptr i64 %qc_pi to ptr
+    br label %v_loop
+
+  v_loop:
+    %k = phi i64 [ 0, %0 ], [ %k_next, %v_ok ]
+    %v_done = icmp sge i64 %k, %ntot
+    br i1 %v_done, label %c_loop, label %v_body
+
+  v_body:
+    %s0 = add i64 %qh, %k
+    %slot = and i64 %s0, %qmask
+    %kptr = getelementptr i64, ptr %qk_p, i64 %slot
+    %jk = load i64, ptr %kptr, align 8
+    %ok_jk = icmp eq i64 %jk, 8
+    br i1 %ok_jk, label %v_fl, label %bail
+
+  v_fl:
+    %fptr = getelementptr i64, ptr %qf_p, i64 %slot
+    %jfl = load i64, ptr %fptr, align 8
+    %ok_fl = icmp eq i64 %jfl, 3
+    br i1 %ok_fl, label %v_cb, label %bail
+
+  v_cb:
+    %bptr = getelementptr i64, ptr %qb_p, i64 %slot
+    %jcb = load i64, ptr %bptr, align 8
+    %ok_cb = icmp eq i64 %jcb, %cell_b
+    br i1 %ok_cb, label %v_match, label %bail
+
+  v_match:
+    %aptr = getelementptr i64, ptr %qa_p, i64 %slot
+    %pq = load i64, ptr %aptr, align 8
+    %arr_ep = getelementptr i64, ptr %arr_p, i64 %k
+    %pa = load i64, ptr %arr_ep, align 8
+    %ok_eq = icmp eq i64 %pq, %pa
+    br i1 %ok_eq, label %v_chk_v, label %bail
+
+  v_chk_v:
+    %cptr = getelementptr i64, ptr %qc_p, i64 %slot
+    %cv = load i64, ptr %cptr, align 8
+    %vx = sub i64 %cv, 281474976710656
+    %visn = icmp ult i64 %vx, u0xFFF0000000000001
+    br i1 %visn, label %v_chk_p, label %v_chk_v2
+
+  v_chk_v2:
+    %vsm = icmp ule i64 %cv, 2
+    br i1 %vsm, label %v_chk_p, label %bail
+
+  v_chk_p:
+    %ptag = and i64 %pq, 7
+    %isp = icmp eq i64 %ptag, 4
+    br i1 %isp, label %v_chk_p2, label %bail
+
+  v_chk_p2:
+    %p_hi = and i64 %pq, u0xFFFF000000000000
+    %p_hiz = icmp eq i64 %p_hi, 0
+    br i1 %p_hiz, label %v_chk_p3, label %bail
+
+  v_chk_p3:
+    %praw = sub i64 %pq, 4
+    %pp = inttoptr i64 %praw to ptr
+    %shp = getelementptr i8, ptr %pp, i64 8
+    %shv = load i64, ptr %shp, align 8
+    %ok_sh = icmp eq i64 %shv, %psh_b
+    br i1 %ok_sh, label %v_chk_st, label %bail
+
+  v_chk_st:
+    %stp = getelementptr i8, ptr %pp, i64 %off_st
+    %pst = load i64, ptr %stp, align 8
+    %ok_st = icmp eq i64 %pst, %pend_b
+    br i1 %ok_st, label %v_chk_rk, label %bail
+
+  v_chk_rk:
+    %rkp = getelementptr i8, ptr %pp, i64 %off_rk
+    %prk = load i64, ptr %rkp, align 8
+    %ok_rk = icmp eq i64 %prk, %int0_b
+    br i1 %ok_rk, label %v_call, label %bail
+
+  v_call:
+    %res = call i64 %f2(i64 %fn2_b, i64 0, i64 1, i64 %cv, i64 0, i64 0, i64 0, i64 0)
+    %is_slow = icmp eq i64 %res, 6
+    br i1 %is_slow, label %bail, label %v_chk_res
+
+  v_chk_res:
+    %rx = sub i64 %res, 281474976710656
+    %risn = icmp ult i64 %rx, u0xFFF0000000000001
+    br i1 %risn, label %v_store, label %v_chk_r2
+
+  v_chk_r2:
+    %rsm = icmp ule i64 %res, 2
+    br i1 %rsm, label %v_store, label %v_chk_rs
+
+  v_chk_rs:
+    %rst = and i64 %res, u0xFFFF000000000001
+    %riss = icmp eq i64 %rst, u0xFFF9000000000000
+    br i1 %riss, label %v_store, label %bail
+
+  v_store:
+    %vp = getelementptr i64, ptr %vals_p, i64 %k
+    store i64 %res, ptr %vp, align 8
+    br label %v_ok
+
+  v_ok:
+    %k_next = add i64 %k, 1
+    br label %v_loop
+
+  c_loop:
+    %j = phi i64 [ 0, %v_loop ], [ %j_next, %c_next ]
+    %c_done = icmp sge i64 %j, %ntot
+    br i1 %c_done, label %ret_ok, label %c_body
+
+  c_body:
+    %cs0 = add i64 %qh, %j
+    %cslot = and i64 %cs0, %qmask
+    %captr = getelementptr i64, ptr %qa_p, i64 %cslot
+    %sp = load i64, ptr %captr, align 8
+    store i64 0, ptr %captr, align 8
+    %cbptr = getelementptr i64, ptr %qb_p, i64 %cslot
+    store i64 0, ptr %cbptr, align 8
+    %ccptr = getelementptr i64, ptr %qc_p, i64 %cslot
+    store i64 0, ptr %ccptr, align 8
+    %svp = getelementptr i64, ptr %vals_p, i64 %j
+    %sval = load i64, ptr %svp, align 8
+    %sraw = sub i64 %sp, 4
+    %spp = inttoptr i64 %sraw to ptr
+    %sstp = getelementptr i8, ptr %spp, i64 %off_st
+    %svlp = getelementptr i8, ptr %spp, i64 %off_vl
+    store i64 %fulf_b, ptr %sstp, align 8
+    store i64 %sval, ptr %svlp, align 8
+    br label %c_next
+
+  c_next:
+    %j_next = add i64 %j, 1
+    br label %c_loop
+
+  ret_ok:
+    ret i64 1
+
+  bail:
+    ret i64 0
+  IR
+
+# Pure-LLVM zero-dispatch fast enqueue for `fast_kind == 2` 2-await async functions with pure compiled stage1!
+# Verifies epoch, cell1==fn1, q.mask unchanged, q not full, x0 primitive -> calls fp1(x0) -> writes JOB_ASYNC_PIPE!
+fn js_sm_fast2_enq_ll(cache_p, prom_b, x0_b) (i64 i64 i64) i64
+  ll <<~IR
+    %vx = sub i64 %x0_b, 281474976710656
+    %visn = icmp ult i64 %vx, u0xFFF0000000000001
+    %vsm = icmp ule i64 %x0_b, 2
+    %vok = or i1 %visn, %vsm
+    br i1 %vok, label %chk_ep, label %bail
+
+  chk_ep:
+    %cp = inttoptr i64 %cache_p to ptr
+    %ep_pi = load i64, ptr %cp, align 8
+    %ep_p = inttoptr i64 %ep_pi to ptr
+    %ep_cur = load i64, ptr %ep_p, align 8
+    %c1 = getelementptr i64, ptr %cp, i64 1
+    %ep_exp = load i64, ptr %c1, align 8
+    %ep_ok = icmp eq i64 %ep_cur, %ep_exp
+    br i1 %ep_ok, label %chk_c1, label %bail
+
+  chk_c1:
+    %c2 = getelementptr i64, ptr %cp, i64 2
+    %c1_pi = load i64, ptr %c2, align 8
+    %c1_p = inttoptr i64 %c1_pi to ptr
+    %c1_vp = getelementptr i8, ptr %c1_p, i64 8
+    %fn1_cur = load i64, ptr %c1_vp, align 8
+    %c3 = getelementptr i64, ptr %cp, i64 3
+    %fn1_exp = load i64, ptr %c3, align 8
+    %fn1_ok = icmp eq i64 %fn1_cur, %fn1_exp
+    br i1 %fn1_ok, label %chk_q, label %bail
+
+  chk_q:
+    %c6 = getelementptr i64, ptr %cp, i64 6
+    %q_pi = load i64, ptr %c6, align 8
+    %qp = inttoptr i64 %q_pi to ptr
+    %c15 = getelementptr i64, ptr %cp, i64 15
+    %int0_b = load i64, ptr %c15, align 8
+    %c16 = getelementptr i64, ptr %cp, i64 16
+    %off_qm = load i64, ptr %c16, align 8
+    %qmp = getelementptr i8, ptr %qp, i64 %off_qm
+    %qm_box = load i64, ptr %qmp, align 8
+    %qm_cur = sub i64 %qm_box, %int0_b
+    %c9 = getelementptr i64, ptr %cp, i64 9
+    %qm_exp = load i64, ptr %c9, align 8
+    %qm_ok = icmp eq i64 %qm_cur, %qm_exp
+    br i1 %qm_ok, label %chk_space, label %bail
+
+  chk_space:
+    %c7 = getelementptr i64, ptr %cp, i64 7
+    %off_qh = load i64, ptr %c7, align 8
+    %c8 = getelementptr i64, ptr %cp, i64 8
+    %off_qt = load i64, ptr %c8, align 8
+    %qhp = getelementptr i8, ptr %qp, i64 %off_qh
+    %qtp = getelementptr i8, ptr %qp, i64 %off_qt
+    %qh_box = load i64, ptr %qhp, align 8
+    %qt_box = load i64, ptr %qtp, align 8
+    %qh = sub i64 %qh_box, %int0_b
+    %qt = sub i64 %qt_box, %int0_b
+    %qt1 = add i64 %qt, 1
+    %nt = and i64 %qt1, %qm_exp
+    %full = icmp eq i64 %nt, %qh
+    br i1 %full, label %bail, label %do_call
+
+  do_call:
+    %c5 = getelementptr i64, ptr %cp, i64 5
+    %fp1_i = load i64, ptr %c5, align 8
+    %fp1 = inttoptr i64 %fp1_i to ptr
+    %val = call i64 %fp1(i64 %fn1_exp, i64 0, i64 1, i64 %x0_b, i64 0, i64 0, i64 0, i64 0)
+    %is_slow = icmp eq i64 %val, 6
+    br i1 %is_slow, label %bail, label %chk_val
+
+  chk_val:
+    %rx = sub i64 %val, 281474976710656
+    %risn = icmp ult i64 %rx, u0xFFF0000000000001
+    %rsm = icmp ule i64 %val, 2
+    %rok = or i1 %risn, %rsm
+    br i1 %rok, label %enq, label %bail
+
+  enq:
+    %c4 = getelementptr i64, ptr %cp, i64 4
+    %cell2_b = load i64, ptr %c4, align 8
+    %c10 = getelementptr i64, ptr %cp, i64 10
+    %qk_pi = load i64, ptr %c10, align 8
+    %qk_p = inttoptr i64 %qk_pi to ptr
+    %c11 = getelementptr i64, ptr %cp, i64 11
+    %qf_pi = load i64, ptr %c11, align 8
+    %qf_p = inttoptr i64 %qf_pi to ptr
+    %c12 = getelementptr i64, ptr %cp, i64 12
+    %qa_pi = load i64, ptr %c12, align 8
+    %qa_p = inttoptr i64 %qa_pi to ptr
+    %c13 = getelementptr i64, ptr %cp, i64 13
+    %qb_pi = load i64, ptr %c13, align 8
+    %qb_p = inttoptr i64 %qb_pi to ptr
+    %c14 = getelementptr i64, ptr %cp, i64 14
+    %qc_pi = load i64, ptr %c14, align 8
+    %qc_p = inttoptr i64 %qc_pi to ptr
+    %kp = getelementptr i64, ptr %qk_p, i64 %qt
+    store i64 8, ptr %kp, align 8
+    %fp = getelementptr i64, ptr %qf_p, i64 %qt
+    store i64 3, ptr %fp, align 8
+    %ap = getelementptr i64, ptr %qa_p, i64 %qt
+    store i64 %prom_b, ptr %ap, align 8
+    %bp = getelementptr i64, ptr %qb_p, i64 %qt
+    store i64 %cell2_b, ptr %bp, align 8
+    %cp2 = getelementptr i64, ptr %qc_p, i64 %qt
+    store i64 %val, ptr %cp2, align 8
+    %nt_box = add i64 %int0_b, %nt
+    store i64 %nt_box, ptr %qtp, align 8
+    ret i64 1
+
+  bail:
     ret i64 0
   IR
 
@@ -332,6 +906,20 @@ fn js_drain_prom_chain_ll(target_bits, fp, fn_bits, val_bits, pend_bits, fulf_bi
     p.rx_target = nil
     q.push_async(fr, v, 0)
     return nil
+  if rk == 5
+    st = p.rx_target
+    idx = p.rx_on_f
+    p.rx_target = nil
+    p.rx_on_f = nil
+    q.push_all_settle(st, idx, v, 0)
+    return nil
+  if rk == 6
+    t = p.rx_target
+    fn2 = p.rx_on_f
+    p.rx_target = nil
+    p.rx_on_f = nil
+    q.push_async_chain(t, fn2, v, 0)
+    return nil
   if rk == 2
     fr = p.rx_on_f
     p.rx_on_f = nil
@@ -349,6 +937,10 @@ fn js_drain_prom_chain_ll(target_bits, fp, fn_bits, val_bits, pend_bits, fulf_bi
         q.push_rx_prom(e[1], e[2], v, 0)
       elsif ek == 4
         q.push_async(e[1], v, 0)
+      elsif ek == 5
+        q.push_all_settle(e[1], e[2], v, 0)
+      elsif ek == 6
+        q.push_async_chain(e[1], e[2], v, 0)
       else
         q.push_rx_cap(e[2], v)
       i += 1
@@ -378,6 +970,19 @@ fn js_drain_prom_chain_ll(target_bits, fp, fn_bits, val_bits, pend_bits, fulf_bi
     p.rx_target = nil
     q.push_async(fr, v, 1)
     return nil
+  if rk == 5
+    st = p.rx_target
+    idx = p.rx_on_f
+    p.rx_target = nil
+    p.rx_on_f = nil
+    q.push_all_settle(st, idx, v, 1)
+    return nil
+  if rk == 6
+    t = p.rx_target
+    p.rx_target = nil
+    p.rx_on_f = nil
+    q.push_async_chain(t, nil, v, 1)
+    return nil
   if rk == 2
     rr = p.rx_on_r
     p.rx_on_f = nil
@@ -395,6 +1000,10 @@ fn js_drain_prom_chain_ll(target_bits, fp, fn_bits, val_bits, pend_bits, fulf_bi
         q.push_rx_prom(e[1], e[3], v, 1)
       elsif ek == 4
         q.push_async(e[1], v, 1)
+      elsif ek == 5
+        q.push_all_settle(e[1], e[2], v, 1)
+      elsif ek == 6
+        q.push_async_chain(e[1], nil, v, 1)
       else
         q.push_rx_cap(e[3], v)
       i += 1
@@ -733,7 +1342,114 @@ fn js_drain_prom_chain_ll(target_bits, fp, fn_bits, val_bits, pend_bits, fulf_bi
 
 # ---- combinators ----
 
+-> js_prom_all_settle(st, idx, v, is_rej, q)
+  return nil if st.settled
+  if is_rej != 0
+    st.settled = true
+    js_promise_reject_fast(st.target, v, q)
+    return nil
+  st.values[idx] = v
+  rem = st.rem - 1
+  st.rem = rem
+  if rem == 0
+    st.settled = true
+    js_promise_fulfill_fast(st.target, js_realm().adopt_array(st.values), q)
+  nil
+
+-> js_prom_async_chain_step(target, fn2, val, is_rej, q)
+  if is_rej != 0
+    js_promise_reject_fast(target, val, q)
+    return nil
+  r = js_realm()
+  p2 = nil
+  if !JS_MULTI_REALM[0] && fn2.is_a?(JS:Function) && fn2.code != nil && fn2.code.sm_code != nil && fn2.code.sm_code.fast_kind == 1
+    p2 = js_sm_fast1_call(fn2.code.sm_code, fn2, 1, val, nil, nil, nil, r)
+  p2 = js_call(fn2, nil, 1, val, nil, nil, nil, nil) if p2 == nil
+  if js_promise_pristine?(r)
+    if !js_object?(p2)
+      q.push_rx_prom(target, nil, p2, 0)
+      return nil
+    if js_promise?(p2) && p2.shape == r.promise_shape
+      st = p2.state
+      if st == :pending
+        js_promise_attach_raw(p2, 1, target, nil, nil)
+        p2.handled = true
+        return nil
+      if st == :fulfilled
+        p2.handled = true
+        q.push_rx_prom(target, nil, p2.value, 0)
+        return nil
+      if !p2.handled
+        ui = JS_UNHANDLED.index(p2)
+        JS_UNHANDLED.delete_at(ui) if ui != nil
+      p2.handled = true
+      q.push_rx_prom(target, nil, p2.value, 1)
+      return nil
+  p2r = js_promise_resolve_value(p2)
+  if js_promise?(p2r) && p2r.shape == r.promise_shape && js_promise_then_pristine?()
+    js_promise_adopt(target, p2r)
+  else
+    js_promise_resolve_with(target, p2r)
+  nil
+
 -> js_promise_combinator(c, iterable, mode)
+  r = js_realm()
+  # Zero-closure pristine dense-array Promise.all fast path (100% ECMA-262 tick-exact!)
+  if mode == :all && c == r.promise_ctor && js_promise_pristine?(r) && js_array?(iterable) && (js_array_flags(iterable) & 15) == JS_AF_ARRAY && js_array_iter_pristine?(iterable)
+    n = js_arr_len(iterable)
+    target = JS:Promise.new(r.promise_shape)
+    q = r.jobs
+    if n == 0
+      js_promise_fulfill_fast(target, r.adopt_array([]), q)
+      return target
+    values = Array.new(n, nil)
+    st = JS:PromiseAllState.new(target, values, n)
+    ps = r.promise_shape
+    i = 0
+    while i < n
+      x = iterable[i]
+      if js_promise?(x) && x.shape == ps
+        xst = x.state
+        if xst == :pending
+          js_promise_attach_raw(x, 5, st, i, nil)
+          x.handled = true
+        elsif xst == :fulfilled
+          x.handled = true
+          q.push_all_settle(st, i, x.value, 0)
+        else
+          if !x.handled
+            ui = JS_UNHANDLED.index(x)
+            JS_UNHANDLED.delete_at(ui) if ui != nil
+          x.handled = true
+          q.push_all_settle(st, i, x.value, 1)
+      elsif !js_object?(x)
+        q.push_all_settle(st, i, x, 0)
+      else
+        begin
+          px = js_promise_resolve_value(x)
+          if js_promise?(px) && px.shape == ps
+            pxst = px.state
+            if pxst == :pending
+              js_promise_attach_raw(px, 5, st, i, nil)
+              px.handled = true
+            elsif pxst == :fulfilled
+              px.handled = true
+              q.push_all_settle(st, i, px.value, 0)
+            else
+              if !px.handled
+                ui = JS_UNHANDLED.index(px)
+                JS_UNHANDLED.delete_at(ui) if ui != nil
+              px.handled = true
+              q.push_all_settle(st, i, px.value, 1)
+          else
+            idx_c = i
+            ok_f = r.native("", 1, ->(this, args, nt) js_prom_all_settle(st, idx_c, js_arg(args, 0), 0, js_realm().jobs))
+            bad_f = r.native("", 1, ->(this, args, nt) js_prom_all_settle(st, idx_c, js_arg(args, 0), 1, js_realm().jobs))
+            js_invoke(px, "then", [ok_f, bad_f])
+        rescue ex
+          js_prom_all_settle(st, i, js_error_value(ex), 1, q)
+      i += 1
+    return target
   cap = js_new_capability_from(c)
   rec = nil
   begin

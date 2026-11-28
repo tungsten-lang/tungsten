@@ -216,7 +216,7 @@ in JS
 
 -> js_int32_of(v)
   b = jsr_i32(wvalue_bits(v) ## i64)
-  return b if b != JSR_NOI32 && js_number?(v)
+  return b if b != (1099511627776 ## i64) && js_number?(v)
   js_to_int32(v)
 
 -> js_bitor(a, b)
@@ -225,7 +225,7 @@ in JS
   if jsr_nn(ab, bb) != 0
     x = jsr_i32(ab)
     y = jsr_i32(bb)
-    return wvalue_from_bits(jsr_box_int(x | y)) if x != JSR_NOI32 && y != JSR_NOI32
+    return wvalue_from_bits(jsr_box_int(x | y)) if x != (1099511627776 ## i64) && y != (1099511627776 ## i64)
   x = js_numeric_value(a)
   y = js_numeric_value(b)
   return js_big_op(14, x, y) if x.is_a?(JS:BigIntValue) || y.is_a?(JS:BigIntValue)
@@ -237,7 +237,7 @@ in JS
   if jsr_nn(ab, bb) != 0
     x = jsr_i32(ab)
     y = jsr_i32(bb)
-    return wvalue_from_bits(jsr_box_int(x & y)) if x != JSR_NOI32 && y != JSR_NOI32
+    return wvalue_from_bits(jsr_box_int(x & y)) if x != (1099511627776 ## i64) && y != (1099511627776 ## i64)
   x = js_numeric_value(a)
   y = js_numeric_value(b)
   return js_big_op(15, x, y) if x.is_a?(JS:BigIntValue) || y.is_a?(JS:BigIntValue)
@@ -249,7 +249,7 @@ in JS
   if jsr_nn(ab, bb) != 0
     x = jsr_i32(ab)
     y = jsr_i32(bb)
-    return wvalue_from_bits(jsr_box_int(x ^ y)) if x != JSR_NOI32 && y != JSR_NOI32
+    return wvalue_from_bits(jsr_box_int(x ^ y)) if x != (1099511627776 ## i64) && y != (1099511627776 ## i64)
   x = js_numeric_value(a)
   y = js_numeric_value(b)
   return js_big_op(16, x, y) if x.is_a?(JS:BigIntValue) || y.is_a?(JS:BigIntValue)
@@ -305,5 +305,5 @@ in JS
   ab = wvalue_bits(a) ## i64
   if jsr_num(ab) != 0
     x = jsr_i32(ab)
-    return wvalue_from_bits(jsr_box_int(x)) if x != JSR_NOI32
+    return wvalue_from_bits(jsr_box_int(x)) if x != (1099511627776 ## i64)
   wvalue_from_bits(jsr_box_int(js_to_int32(a) ## i64))

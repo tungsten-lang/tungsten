@@ -823,6 +823,13 @@ JS_JOIN_GUARD = []
 
 -> js_arr_push(this, args)
   if js_growable_array?(this)
+    if JS_ARENA_STATE[0] != 0 && jsr_arr_is_arena(wvalue_bits(this) ## i64) != 0
+      i = 0
+      n_out = this.size ## i64
+      while i < args.size
+        n_out = js_arena_push_one(this, args[i])
+        i += 1
+      return n_out + ~0.0
     i = 0
     while i < args.size
       this.push(args[i])

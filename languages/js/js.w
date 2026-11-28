@@ -44,7 +44,6 @@ use t/compiler
       return jr if jr != JS_HOLE
     return js_unit_enter(c, f, this, argc, a0, a1, a2, a3, more) if c.entry != 0
     if c.jit_fp != 0
-      JS_NEW_TARGET[0] = nil
       return jit_enter_fn(c, f, this, argc, a0, a1, a2, a3, more)
   wk_call(f, this, argc, a0, a1, a2, a3, more)
 

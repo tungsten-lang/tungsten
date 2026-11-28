@@ -354,7 +354,7 @@ JS_MOD_NS_SHAPE = [nil]
   an.src = src
   an.url = url
   an.run_module(mod)
-  realm.analyses.push(an) if realm != nil && realm.analyses != nil
+  realm.analyses.push(an) if !JS_GC_ON[0] && realm != nil && realm.analyses != nil
   an.funcs.each ->(g)
     js_throw(js_make_error("SyntaxError", g.unsupported0.to_s)) if g.unsupported0 != nil
   mod.analysis = an

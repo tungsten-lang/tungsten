@@ -46,6 +46,7 @@ JS_DICT_KEYS = 64
 
 # Bumped when an object that is some shape's prototype changes layout.
 JS_EPOCH = i64[1]
+JS_FN_OWN_CALL = [false]
 
 # Global 512-entry direct-mapped secondary property cache for polymorphic/megamorphic sites
 # and Array/String prototype method lookups (List 2 #3 & #7):
@@ -183,6 +184,7 @@ JS_IC_SCRATCH = 0
           out.push(k) if js_string?(k) && (attrs_of(k) & ATTR_E) != 0
           i += 1
         @enum_keys = out
+      jsr_set_aflags(wvalue_bits(@enum_keys) ## i64, JS_AF_ARRAY) if @enum_keys != nil
     @enum_keys
 
   # The child shape adding key with attrs.
@@ -526,6 +528,9 @@ JS_PROTO_INDEX = [false]
     if js_is_proto?(self)
       js_bump_epoch()
       JS_PROTO_INDEX[0] = true if key.is_a?(String) && js_array_index?(key)
+    if key == "call" && (jsr_kind(wvalue_bits(self) ## i64) & 15) == KIND_FUNCTION
+      JS_FN_OWN_CALL[0] = true
+      js_bump_epoch()
     if s.dict
       i = s.count
       s.index[key] = i
@@ -676,6 +681,9 @@ JS_PROTO_INDEX = [false]
       break if js_exotic_bits?(wvalue_bits(q) ## i64) || js_array?(q)
       q = q.proto
     js_bump_epoch() if js_is_proto?(self)
+    if (jsr_kind(wvalue_bits(self) ## i64) & 15) == KIND_FUNCTION
+      JS_FN_OWN_CALL[0] = true
+      js_bump_epoch()
     @shape = @shape.with_proto(p)
     true
 
@@ -751,8 +759,7 @@ OBJ_IBASE = 2
 
 # A new ordinary object with the given prototype (nil: null prototype).
 -> js_new_object(proto)
-  o = JS:Object.new(js_root_shape(proto, OBJ_INLINE, OBJ_IBASE))
-  JS_GC_ON[0] ? js_gc_reg(o) : o
+  js_new_obj_fast(js_root_shape(proto, OBJ_INLINE, OBJ_IBASE))
 
 # A property descriptor (§6.2.6); nil fields are absent.
 + PropDesc
@@ -1030,7 +1037,7 @@ fn jsr_poly_ic_get(pic, pep, ob, kb, epoch) (i64[] i64[] i64 i64 i64) i64
   kb = wvalue_bits(key) ## i64
   ep = JS_EPOCH[0]
   r = jsr_poly_ic_get(JS_POLY_IC, JS_POLY_EP, pb, kb, ep)
-  return wvalue_from_bits(r) if r != JSR_SLOW
+  return wvalue_from_bits(r) if r != (6 ## i64)
   s = proto.shape
   if !s.dict && js_ivar_cacheable?(proto)
     i = s.slot_of(key)
@@ -1045,10 +1052,10 @@ fn jsr_poly_ic_get(pic, pep, ob, kb, epoch) (i64[] i64[] i64 i64 i64) i64
   ob = wvalue_bits(o) ## i64
   ep = JS_EPOCH[0]
   r = jsr_ic_get(JS_IC, k, ob, ep)
-  return wvalue_from_bits(r) if r != JSR_SLOW
+  return wvalue_from_bits(r) if r != (6 ## i64)
   if JS_IC[k] != 0
     r2 = jsr_poly_ic_get(JS_POLY_IC, JS_POLY_EP, ob, wvalue_bits(key) ## i64, ep)
-    return wvalue_from_bits(r2) if r2 != JSR_SLOW
+    return wvalue_from_bits(r2) if r2 != (6 ## i64)
   js_get_miss(o, key, JS_IC, k)
 
 # The same with a cache of the caller's own (tier 0 keeps one per property node).
@@ -1056,10 +1063,10 @@ fn jsr_poly_ic_get(pic, pep, ob, kb, epoch) (i64[] i64[] i64 i64 i64) i64
   ob = wvalue_bits(o) ## i64
   ep = JS_EPOCH[0]
   r = jsr_ic_get(ic, 0, ob, ep)
-  return wvalue_from_bits(r) if r != JSR_SLOW
+  return wvalue_from_bits(r) if r != (6 ## i64)
   if ic[0] != 0
     r2 = jsr_poly_ic_get(JS_POLY_IC, JS_POLY_EP, ob, wvalue_bits(key) ## i64, ep)
-    return wvalue_from_bits(r2) if r2 != JSR_SLOW
+    return wvalue_from_bits(r2) if r2 != (6 ## i64)
   js_get_miss(o, key, ic, 0)
 
 -> js_get_miss(o, key, ic, k)

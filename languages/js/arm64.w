@@ -289,6 +289,10 @@ FX_ADR   = 4   # ADR (21-bit signed byte offset: immlo[30:29], immhi[23:5])
   -> cmp_r(rn, rm)
     subs_r(R_XZR, rn, rm)
 
+  # CCMP Xn, Xm, #nzcv, cond  (if cond holds, sets flags from Xn - Xm; else sets NZCV = nzcv!)
+  -> ccmp_r(rn, rm, nzcv, cond)
+    emit(0xFA400000 | (rm << 16) | ((cond & 15) << 12) | (rn << 5) | (nzcv & 15))
+
   # MUL Xd, Xn, Xm  (MADD Xd, Xn, Xm, XZR)
   -> mul_x(rd, rn, rm)
     emit(0x9B007C00 | (rm << 16) | (rn << 5) | rd)
@@ -404,10 +408,18 @@ FX_ADR   = 4   # ADR (21-bit signed byte offset: immlo[30:29], immhi[23:5])
   # 32-bit
   -> and_w(rd, rn, rm)
     emit(0x0A000000 | (rm << 16) | (rn << 5) | rd)
+  -> bic_w(rd, rn, rm)
+    emit(0x0A200000 | (rm << 16) | (rn << 5) | rd)
   -> orr_w(rd, rn, rm)
     emit(0x2A000000 | (rm << 16) | (rn << 5) | rd)
   -> eor_w(rd, rn, rm)
     emit(0x4A000000 | (rm << 16) | (rn << 5) | rd)
+  # EOR Wd, Wn, Wm, LSR #sh
+  -> eor_w_lsr(rd, rn, rm, sh)
+    emit(0x4A400000 | (rm << 16) | ((sh & 31) << 10) | (rn << 5) | rd)
+  # EOR Wd, Wn, Wm, ROR #sh
+  -> eor_w_ror(rd, rn, rm, sh)
+    emit(0x4AC00000 | (rm << 16) | ((sh & 31) << 10) | (rn << 5) | rd)
   -> mvn_w(rd, rm)
     emit(0x2A2003E0 | (rm << 16) | rd)
   -> tst_w(rn, rm)
@@ -471,6 +483,30 @@ FX_ADR   = 4   # ADR (21-bit signed byte offset: immlo[30:29], immhi[23:5])
       mov_w(rd, rn)
     else
       emit(0x13007C00 | (s << 16) | (rn << 5) | rd)
+  # ROR Wd, Wn, #sh  (EXTR Wd, Wn, Wn, #sh)
+  -> ror_wi(rd, rn, sh)
+    s = sh & 31
+    if s == 0
+      mov_w(rd, rn)
+    else
+      emit(0x13800000 | (rn << 16) | (s << 10) | (rn << 5) | rd)
+
+  # ROR Xd, Xn, #sh  (EXTR Xd, Xn, Xn, #sh)
+  -> ror_xi(rd, rn, sh)
+    s = sh & 63
+    if s == 0
+      mov_r(rd, rn)
+    else
+      emit(0x93C00000 | (rn << 16) | (s << 10) | (rn << 5) | rd)
+  # REV Wd, Wn (32-bit byte-reverse for big-endian loads!)
+  -> rev_w(rd, rn)
+    emit(0x5AC00800 | (rn << 5) | rd)
+  # RBIT Wd, Wn (32-bit bit-reverse for fast CTZ = CLZ(RBIT(x))!)
+  -> rbit_w(rd, rn)
+    emit(0x5AC00000 | (rn << 5) | rd)
+  # RBIT Xd, Xn (64-bit bit-reverse for fast 64-bit CTZ = CLZ(RBIT(x))!)
+  -> rbit_x(rd, rn)
+    emit(0xDAC00000 | (rn << 5) | rd)
 
   # Immediate shifts (64-bit)
   -> lsl_xi(rd, rn, sh)
@@ -503,6 +539,9 @@ FX_ADR   = 4   # ADR (21-bit signed byte offset: immlo[30:29], immhi[23:5])
   # CLZ Wd, Wn
   -> clz_w(rd, rn)
     emit(0x5AC01000 | (rn << 5) | rd)
+  # CLZ Xd, Xn
+  -> clz_x(rd, rn)
+    emit(0xDAC01000 | (rn << 5) | rd)
 
   # ---- Conditional Select / Set ----
 
@@ -517,6 +556,14 @@ FX_ADR   = 4   # ADR (21-bit signed byte offset: immlo[30:29], immhi[23:5])
   # CSEL Wd, Wn, Wm, cond
   -> csel_w(rd, rn, rm, cc)
     emit(0x1A800000 | (rm << 16) | (cc << 12) | (rn << 5) | rd)
+
+  # CNEG Wd, Wn, cond  (CSNEG Wd, Wn, Wn, invert(cond))
+  -> cneg_w(rd, rn, cc)
+    emit(0x5A800400 | (rn << 16) | ((cc ^ 1) << 12) | (rn << 5) | rd)
+
+  # CNEG Xd, Xn, cond  (CSNEG Xd, Xn, Xn, invert(cond))
+  -> cneg_x(rd, rn, cc)
+    emit(0xDA800400 | (rn << 16) | ((cc ^ 1) << 12) | (rn << 5) | rd)
 
   # CINC Wd, Wn, cond  (CSINC Wd, Wn, Wn, invert(cond))
   -> cinc_w(rd, rn, cc)
@@ -536,6 +583,10 @@ FX_ADR   = 4   # ADR (21-bit signed byte offset: immlo[30:29], immhi[23:5])
   -> fmov_d(dd, dn)
     return nil if dd == dn
     emit(0x1E604000 | (dn << 5) | dd)
+
+  # FMOV Dd, #1.0
+  -> fmov_d_one(dd)
+    emit(0x1E6E1000 | (dd & 31))
 
   -> fadd_d(dd, dn, dm)
     emit(0x1E602800 | (dm << 16) | (dn << 5) | dd)
@@ -741,6 +792,18 @@ FX_ADR   = 4   # ADR (21-bit signed byte offset: immlo[30:29], immhi[23:5])
   # LDR Wt, [Xn, Xm, LSL #2]
   -> ldr_w_idx(rt, rn, rm)
     emit(0xB8607800 | (rm << 16) | (rn << 5) | rt)
+  # LDR Wt, [Xn, Xm] (unscaled byte-offset 32-bit load!)
+  -> ldr_w_byte(rt, rn, rm)
+    emit(0xB8606800 | (rm << 16) | (rn << 5) | rt)
+  # STR Wt, [Xn, Xm] (unscaled byte-offset 32-bit store!)
+  -> str_w_byte(rt, rn, rm)
+    emit(0xB8206800 | (rm << 16) | (rn << 5) | rt)
+  # LDR Xt, [Xn, Xm] (unscaled byte-offset 64-bit load!)
+  -> ldr_x_byte(rt, rn, rm)
+    emit(0xF8606800 | (rm << 16) | (rn << 5) | rt)
+  # STR Xt, [Xn, Xm] (unscaled byte-offset 64-bit store!)
+  -> str_x_byte(rt, rn, rm)
+    emit(0xF8206800 | (rm << 16) | (rn << 5) | rt)
   # STR Wt, [Xn, Xm, LSL #2]
   -> str_w_idx(rt, rn, rm)
     emit(0xB8207800 | (rm << 16) | (rn << 5) | rt)

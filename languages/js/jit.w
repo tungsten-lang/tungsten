@@ -59,6 +59,8 @@ OSR_RETURN = 2
   rw :promoted_rw, :promoted_rw_list, :promoted_owner, :promoted_other_lis, :promoted_bail_lbl
   rw :slim_g_hi, :slim_f_hi, :mono_arr_shape, :mono_arr_num, :d_bias_reg, :prom_cached_fns
   rw :hoisted_global_tas, :hoisted_gta_regs, :known_vs_sh
+  rw :inline_ret_mode, :const_loop_bounds, :in_cs_promo, :const_i_vals, :scoped_ta_ub, :guarded_ub_locals, :vs_entry_off, :in_vs_entry, :l_vs_entry_lbl
+  rw :mono_inline_depth, :inline_this_sh, :inlining_jfs, :this_mono_sh, :hoisted_garrs, :this_prop_shapes, :epoch_verified_now, :l_fast_entry, :for_in_ctx, :hoisted_gobj_shapes, :in_cold_stub
 
   -> new(@info)
     @a = JS:A64.new(512)
@@ -68,10 +70,63 @@ OSR_RETURN = 2
     @max_tmp = 0
     @loops = []
     @inline_env = nil      # nil, or Hash: JaBinding -> [:reg_x, r] | [:reg_w, r] | [:reg_d, r] | [:slot, vslot] | [:this_reg, r]
+    @inline_ret_mode = nil # nil (function), or :void | :i32 | :u32 | :f64 | :any for inlined local helper!
+    @const_loop_bounds = {} # lidx -> [c0, c1] for constant-range counted loops!
+    @in_cs_promo = false   # true while R_X1..R_X8 hold loop-promoted locals/TA-ptrs!
+    @const_i_vals = {}     # lidx -> constant int32 value during tiny full-unrolled counted loops!
+    @scoped_ta_ub = {}     # idx_lidx -> [ta_lidx_or_m1, max_off, ta_len_ub] for branch/while-guarded TA BCE!
+    @guarded_ub_locals = {} # lim_lidx -> ta_len_ub (proven 0 <= lim <= ta_len_ub in current while loop!)
+    @vs_entry_off = -1     # byte offset of unboxed value-struct entry (`jit_vs_fp`)
+    @in_vs_entry = false   # true while compiling `l_vs_entry` body
+    @l_vs_entry_lbl = nil  # label of `l_vs_entry` for direct self-recursion!
+    @mono_inline_depth = 0 # current nesting depth of multi-stmt monomorphic method inlining
+    @in_cold_stub = false  # true while emitting out-of-line cold stubs (disables recursive versioning/inlining!)
+    @inline_this_sh = nil  # active JS:Shape of `this` inside an inlined monomorphic method
+    @inlining_jfs = []     # active JaFunc stack to prevent recursive inlining
+    @this_mono_sh = 0      # entry-verified monomorphic `this` shape_bits (for while-loop shape check hoisting)
+    @hoisted_garrs = {}    # JaBinding -> [r_slots, r_len, bounded_idx_li] for loop-hoisted global dense WArrays!
+    @this_prop_shapes = {} # prop_name -> JS:Shape (or :conflict) inferred from warm `this.prop.m(...)` sites!
+    @epoch_verified_now = false # true after verifying JS_EPOCH[0] until an opaque JS call could mutate a prototype!
+    @hoisted_marr = nil    # [obj_lidx, prop_name, slots_r_or_off, len_r_or_off, is_gpr, bounded_idx_li]
+    @live_cur_reg = nil    # [cur_name, reg] when `this.<cur_name>` is live in a scratch GPR across fused skip->run!
+    @live_cur_prop = nil   # [slot_enc, reg] when `this.<state>` from l_skip_loop is live in R_X10 at entry to TCB.run!
+    @while_dirty_off = -1  # stack slot set non-zero by any cold stub call/shape-trans inside specialized while body
+    @while_fast_clean = false # true while fast path of specialized while body has ZERO calls/shape-transitions
+    @while_this_arr = nil  # [prop_name, sl_off, ln_off, dirty_off, enc_arr] for read-only `this.<arr>` hoisted across while!
+    @in_tail_call_e = nil  # active tail-return call JsNode inside an inlined method (enables dead parent GPR reuse!)
+    @tail_ret_emitted = false # set true when a tail-return call jumped directly to parent `@l_ret`!
+    @cur_arm_owned_gprs = nil # callee-saved GPRs owned by current inlined arm (reclaimable on tail-return calls!)
+    @l_fast_entry = nil
+    @for_in_ctx = nil      # nil, or [k_binding, sh_off, idx_off, dir_off] for direct-slot `for..in`!
     @known_shapes = {}     # lidx -> [shape_bits, ptr_known]
+    @known_null = {}       # shape_key -> true (proven nullish read-only param/local)
+    @known_nonnull = {}    # shape_key -> true (proven non-nullish read-only param/local)
+    @top_tail_loop_ret = nil # direct backedge label for top-level fused while tail-call!
+    @top_tail_loop_call = nil # AST call node eligible for @top_tail_loop_ret!
+    @inline_this_is_outer = false # true inside inlined callee whose `this === outer_this` & `dirty == 0`!
+    @while_outer_cur = nil # [cur_name, sh_nd_b] when outer_this.<cur_name> is guaranteed sh_nd_b while dirty == 0!
+    @while_cnt_props = nil # Hash: prop_name -> [pname, cnt_off, enc_p] for unboxed write-only `this.<p>++`!
+    @while_cnt_list = nil  # Array of [pname, cnt_off, enc_p] for flushing on dirty/exit!
+    @while_loop_back_lbl = nil # l_loop_back label for active fused while loop!
+    @while_skip_loop_lbl = nil # l_skip_loop label for direct zero-dirty jump from hold/suspend!
+    @while_skip_run_lbl = nil  # l_skip_run label for direct fast-run return on proven runnable nodes!
+    @while_skip_run_s3 = nil   # split entry stub for direct fast-run with state == cmp_bits!
+    @while_skip_run_s01 = nil  # split entry stub for direct fast-run with state != cmp_bits!
+    @while_sr_hdr = nil        # [enc_cur, enc_s0_s, enc_d0_s] for inline fall-through l_sr_s3/l_sr_s01 binding!
+    @while_s3_bound = false    # true once l_sr_s3 was bound inline right before got_ts3!
+    @while_s01_bound = false   # true once l_sr_s01 was bound inline right before got_ts01!
+    @while_tcb_s3_lbl = nil    # target label inside TCB.run after `state == cmp_bits` true!
+    @while_tcb_s01_lbl = nil   # target label inside TCB.run after `state == cmp_bits` false!
+    @while_tcb_cmp_bits = 0    # boxed f64 bits of `state == C` in TCB.run!
+    @while_tcb_this_reg = nil  # GPR holding TCB.run's `:this`!
+    @while_skip_tail = nil # [sh_nd_b, enc_state, enc_nxt, iv1, iv2] when R_X6/R_X7/R_X8 hold live CCMP skip constants!
+    @last_stmt_exited = false  # set true when a statically-folded stmt unconditionally exited!
     @hoisted_tas = {}      # lidx -> [off_ptr, off_len, kind]
     @hoisted_arrs = {}     # lidx -> [off_slots, off_len]
     @hoisted_cells = {}    # cell_bits -> expected_val_bits
+    @hoisted_gobj_shapes = {} # cell_bits -> [gv, gsh] (both cell==gv AND gv.@shape==gsh verified in prologue!)
+    @hoisted_gprops = {}   # "cell_bits:enc" -> [obs_b, reg_or_nil] (guarded before pure loop!)
+    @loop_cs_reloads = nil # nil, or [[:imm, reg, val] | [:gprop, reg, gv_ptr, enc, obs_b], ...] reloaded after cold calls!
     @hoisted_arr_regs = {} # lidx -> [slots_reg_or_nil, len_reg_or_nil]
     @hoisted_ta_regs = {}  # lidx -> [ptr_reg_or_nil, len_reg_or_nil]
     @hoisted_global_tas = {} # JaBinding -> [off_ptr, off_len, kind, cell, gv]
@@ -131,36 +186,35 @@ OSR_RETURN = 2
     ccall("w_value_free_w", used_gprs)
     # Layout after local spills
     sp = @info.frame_size - 128
-    # Reserve 16 bytes per hoisted TypedArray + 16 bytes per hoisted Array / read-only param Array
+    # Reserve 16 bytes per hoisted TypedArray + 16 bytes per hoisted Array / read-only param Array.
+    # Allocate base pointers FIRST (prioritizing data pointers over lengths, skipping len reg when constant!).
     @info.ta_invariants.keys.each ->(li)
       @hoisted_tas[li] = [sp, sp + 8, @info.ta_invariants[li]]
-      r_ptr = @free_gprs.size > 0 ? @free_gprs.pop : nil
-      r_len = @free_gprs.size > 0 ? @free_gprs.pop : nil
-      @hoisted_ta_regs[li] = [r_ptr, r_len]
+      @hoisted_ta_regs[li] = [@free_gprs.size > 0 ? @free_gprs.pop : nil, nil]
       sp += 16
     @info.arr_invariants.keys.each ->(li)
       @hoisted_arrs[li] = [sp, sp + 8]
-      r_sl = @free_gprs.size > 0 ? @free_gprs.pop : nil
-      r_ln = @free_gprs.size > 0 ? @free_gprs.pop : nil
-      @hoisted_arr_regs[li] = [r_sl, r_ln]
+      @hoisted_arr_regs[li] = [@free_gprs.size > 0 ? @free_gprs.pop : nil, nil]
       sp += 16
     @info.param_arrs.keys.each ->(li)
       if @hoisted_arrs[li] == nil
         @hoisted_arrs[li] = [sp, sp + 8]
-        r_sl = @free_gprs.size > 0 ? @free_gprs.pop : nil
-        r_ln = @free_gprs.size > 0 ? @free_gprs.pop : nil
-        @hoisted_arr_regs[li] = [r_sl, r_ln]
+        @hoisted_arr_regs[li] = [@free_gprs.size > 0 ? @free_gprs.pop : nil, nil]
         sp += 16
     @info.global_tas.each ->(gb, ginfo)
       @hoisted_global_tas[gb] = [sp, sp + 8, ginfo[0], ginfo[1], ginfo[2]]
-      r_ptr = @free_gprs.size > 0 ? @free_gprs.pop : nil
-      r_len = @free_gprs.size > 0 ? @free_gprs.pop : nil
-      @hoisted_gta_regs[gb] = [r_ptr, r_len]
+      @hoisted_gta_regs[gb] = [@free_gprs.size > 0 ? @free_gprs.pop : nil, nil]
       sp += 16
+    @info.ta_invariants.keys.each ->(li)
+      @hoisted_ta_regs[li][1] = @free_gprs.pop if @free_gprs.size > 0 && @info.local_ta_lens[li] == nil
+    @info.arr_invariants.keys.each ->(li)
+      @hoisted_arr_regs[li][1] = @free_gprs.pop if @free_gprs.size > 0
+    @info.param_arrs.keys.each ->(li)
+      @hoisted_arr_regs[li][1] = @free_gprs.pop if @free_gprs.size > 0 && @hoisted_arr_regs[li][1] == nil
     @ta_info_slot = sp
     sp += 32
     @tmp_base = sp
-    @info.frame_size = ((sp + 192 + 15) / 16) * 16
+    @info.frame_size = ((sp + 512 + 15) / 16) * 16
     @l_deopt = @a.new_label
     @l_ret = @a.new_label
 
@@ -206,11 +260,60 @@ OSR_RETURN = 2
     nil
 
   # ---- Runtime call helpers ----
+  -> emit_flush_while_cnts(cnt_list)
+    return nil if cnt_list == nil || cnt_list.size == 0
+    @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+    @a.sub_i(R_X9, R_X9, 4)
+    fi_wc = 0
+    while fi_wc < cnt_list.size
+      ci_wc = cnt_list[fi_wc]
+      @a.ldr_x(R_X10, R_SP, ci_wc[1])
+      @a.scvtf_d_x(R_D0, R_X10)
+      @a.fmov_x_d(R_X10, R_D0)
+      @a.add_r(R_X10, R_X10, R_X20)
+      emit_slot_store(R_X9, ci_wc[2], R_X10)
+      fi_wc += 1
+    nil
+
+  -> mark_while_dirty
+    if @while_dirty_off >= 0
+      if @while_cnt_list != nil && @while_cnt_list.size > 0
+        l_mwd_skip = @a.new_label
+        @a.ldr_x(R_X10, R_SP, @while_dirty_off)
+        @a.cbnz_x(R_X10, l_mwd_skip)
+        emit_flush_while_cnts(@while_cnt_list)
+        @a.str_x(R_X19, R_SP, @while_dirty_off)
+        @a.bind(l_mwd_skip)
+      else
+        @a.str_x(R_X19, R_SP, @while_dirty_off)
+      @while_fast_clean = false if !@in_cold_stub
+    nil
+
+  -> emit_blr_x16
+    mark_while_dirty()
+    @a.blr(R_X16)
+    if @loop_cs_reloads != nil
+      ri_cs = 0
+      while ri_cs < @loop_cs_reloads.size
+        rc_it = @loop_cs_reloads[ri_cs]
+        if rc_it[0] == :imm
+          @a.mov_imm64(rc_it[1], rc_it[2])
+        elsif rc_it[0] == :gprop
+          # Reload global object property; if mutated away from obs_b during call, poison reg with 6 (JSR_SLOW)!
+          @a.mov_imm64(R_X9, rc_it[2])
+          emit_slot_load(R_X9, R_X9, rc_it[3])
+          @a.mov_imm64(rc_it[1], rc_it[4])
+          @a.movz_x(R_X14, 6)
+          @a.cmp_r(R_X9, rc_it[1])
+          @a.csel_x(rc_it[1], rc_it[1], R_X14, CC_EQ)
+        ri_cs += 1
+    nil
+
   # Calls JIT_RT_TBL[rt_idx] with captures=0 in x0, args already in x1..xN. Result in x0.
   -> call_rt(rt_idx)
     @a.movz_x(R_X0, 0)
     @a.ldr_x(R_X16, R_X19, rt_idx * 8)
-    @a.blr(R_X16)
+    emit_blr_x16()
     nil
 
   # ---- Prologue & Epilogue ----
@@ -326,21 +429,59 @@ OSR_RETURN = 2
     @a.add_r(xr, xr, R_X20)
     nil
 
-  # Queue a cold slow-path stub to be emitted after the function epilogue (preserving @tmp_depth!).
+  # Box unsigned uint32 in `wr` -> WValue double in `xr` (never NaN, 3 instructions!)
+  -> emit_box_u32(xr, wr)
+    @a.ucvtf_d_w(R_D16, wr)
+    @a.fmov_x_d(xr, R_D16)
+    @a.add_r(xr, xr, R_X20)
+    nil
+
+  # Queue a cold slow-path stub to be emitted after the function epilogue (preserving @tmp_depth, @inline_env, @l_ret, & while dirty/cnt state!).
   -> add_cold_stub(fn_body)
     td = @tmp_depth
-    @cold_stubs.push([td, fn_body])
+    ie = @inline_env
+    ish = @inline_this_sh
+    lcr = @loop_cs_reloads
+    lr = @l_ret
+    irm = @inline_ret_mode
+    wdo = @while_dirty_off
+    wcl = @while_cnt_list
+    @cold_stubs.push([td, fn_body, ie, ish, lcr, lr, irm, wdo, wcl])
     nil
 
   -> emit_cold_stubs
+    saved_cs = @in_cold_stub
+    @in_cold_stub = true
     i = 0
     while i < @cold_stubs.size
       st = @cold_stubs[i]
       saved_td = @tmp_depth
+      saved_ie = @inline_env
+      saved_ish = @inline_this_sh
+      saved_lcr = @loop_cs_reloads
+      saved_lr = @l_ret
+      saved_irm = @inline_ret_mode
+      saved_wdo = @while_dirty_off
+      saved_wcl = @while_cnt_list
       @tmp_depth = st[0]
+      @inline_env = st[2]
+      @inline_this_sh = st[3]
+      @loop_cs_reloads = st[4]
+      @l_ret = st[5]
+      @inline_ret_mode = st[6]
+      @while_dirty_off = st[7]
+      @while_cnt_list = st[8]
       st[1].call()
       @tmp_depth = saved_td
+      @inline_env = saved_ie
+      @inline_this_sh = saved_ish
+      @loop_cs_reloads = saved_lcr
+      @l_ret = saved_lr
+      @inline_ret_mode = saved_irm
+      @while_dirty_off = saved_wdo
+      @while_cnt_list = saved_wcl
       i += 1
+    @in_cold_stub = saved_cs
     nil
 
   # Box f64 in `dr` -> WValue double in `xr` (4 straight-line insns, 0 taken branches; NaN stub out-of-line!).
@@ -414,6 +555,10 @@ OSR_RETURN = 2
       load_slot_i32(R_X14, slot)
       emit_box_i32(dst_x, R_X14)
       return nil
+    if ty == JT_U32
+      load_slot_i32(R_X14, slot)
+      emit_box_u32(dst_x, R_X14)
+      return nil
     if ty == JT_F64
       load_slot_f64(R_D16, slot)
       emit_box_f64(dst_x, R_D16)
@@ -429,6 +574,11 @@ OSR_RETURN = 2
     ty = @info.types[slot]
     if ty == JT_I32
       emit_unbox_exact_i32(R_X14, src_x, @l_deopt)
+      store_slot_i32(slot, R_X14)
+      return nil
+    if ty == JT_U32
+      emit_unbox_f64(R_D16, src_x, @l_deopt)
+      emit_f64_to_i32(R_X14, R_D16)
       store_slot_i32(slot, R_X14)
       return nil
     if ty == JT_F64
@@ -453,6 +603,10 @@ OSR_RETURN = 2
         load_slot_i32(R_X14, i)
         emit_box_i32(R_X12, R_X14)
         @a.str_x(R_X12, R_X13, i * 8)
+      elsif ty == JT_U32
+        load_slot_i32(R_X14, i)
+        emit_box_u32(R_X12, R_X14)
+        @a.str_x(R_X12, R_X13, i * 8)
       elsif ty == JT_F64
         load_slot_f64(R_D16, i)
         emit_box_f64(R_X12, R_D16)
@@ -474,15 +628,218 @@ OSR_RETURN = 2
       i += 1
     nil
 
+  # ---- Compile Value-Struct Unboxed Function (`jit_vs_fp`: zero-allocation vstruct params & return!) ----
+  -> compile_vs_fn
+    sig = @info.vs_fn_sig
+    pspecs = sig[0]
+    ret_ci = sig[1]
+    ret_sh = ret_ci[4]
+    ret_keys = ret_ci[2]
+    ret_m = ret_keys.size
+    jit_keep(ret_sh)
+    l_fast_entry = @a.new_label
+    @l_fast_entry = l_fast_entry
+    l_vs_entry = @a.new_label
+    # 1. Standard Tungsten entry (offset 0 = jit_fp): pin x19..x21, call l_fast_entry
+    @a.stp_pre(R_FP, R_LR, R_SP, -48)
+    @a.stp_x(R_X19, R_X20, R_SP, 16)
+    @a.str_x(R_X21, R_SP, 32)
+    rt_ptr = jit_rt_init()
+    @a.mov_imm64(R_X19, rt_ptr)
+    @a.mov_imm64(R_X20, 281474976710656)
+    @a.mov_imm64(R_X21, -4503599627370495)
+    @a.bl(l_fast_entry)
+    @a.ldr_x(R_X21, R_SP, 32)
+    @a.ldp_x(R_X19, R_X20, R_SP, 16)
+    @a.ldp_post(R_FP, R_LR, R_SP, 48)
+    @a.ret
+
+    # 2. Boxed JIT-to-JIT wrapper (`jit_fast_fp`): unbox params -> bl l_vs_entry -> box return via RT_LIT!
+    @a.bind(l_fast_entry)
+    @fast_entry_off = @a.pos * 4
+    l_fast_slow = @a.new_label
+    @a.sub_i(R_SP, R_SP, 80)
+    @a.stp_x(R_FP, R_LR, R_SP, 0)
+    @a.mov_sp(R_FP, R_SP)
+    @a.str_x(R_X3, R_SP, 16)
+    @a.str_x(R_X4, R_SP, 24)
+    @a.str_x(R_X5, R_SP, 32)
+    @a.str_x(R_X6, R_SP, 40)
+    @a.cmp_i(R_X2, pspecs.size)
+    @a.b_cond(CC_LT, l_fast_slow)
+    fp_i = 0
+    int_i = 0
+    pi = 0
+    while pi < pspecs.size
+      ps = pspecs[pi]
+      @a.ldr_x(R_X10, R_SP, 16 + pi * 8)
+      if ps[0] == :vs
+        pci = ps[1]
+        psh = pci[4]
+        pkeys = pci[2]
+        jit_keep(psh)
+        @a.sub_i(R_X9, R_X10, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_fast_slow)
+        @a.cbz_x(R_X9, l_fast_slow)
+        @a.ldr_x(R_X11, R_X9, 8)
+        @a.mov_imm64(R_X12, wvalue_bits(psh) ## i64)
+        @a.cmp_r(R_X11, R_X12)
+        @a.b_cond(CC_NE, l_fast_slow)
+        q = 0
+        while q < pkeys.size
+          sl = psh.slot_of(pkeys[q])
+          enc = sl < psh.inline ? (psh.ibase + sl) : (0 - (sl - psh.inline) - 1)
+          emit_slot_load(R_X11, R_X9, enc)
+          emit_unbox_f64(R_D0 + fp_i, R_X11, l_fast_slow)
+          fp_i += 1
+          q += 1
+      elsif ps[0] == :i32
+        emit_unbox_exact_i32(R_X1 + int_i, R_X10, l_fast_slow)
+        int_i += 1
+      else
+        emit_unbox_f64(R_D0 + fp_i, R_X10, l_fast_slow)
+        fp_i += 1
+      pi += 1
+    @a.bl(l_vs_entry)
+    @a.cbnz_w(R_X0, l_fast_slow)
+    @a.mov_imm64(R_X1, wvalue_bits(ret_sh) ## i64)
+    @a.movz_x(R_X2, 0)
+    @a.movz_x(R_X3, 0)
+    @a.movz_x(R_X4, 0)
+    @a.movz_x(R_X5, 0)
+    @a.movz_x(R_X6, 0)
+    @a.movz_x(R_X7, 0)
+    q = 0
+    while q < ret_m
+      emit_box_f64(R_X2 + q, R_D0 + q)
+      q += 1
+    call_rt(RT_LIT)
+    @a.ldp_x(R_FP, R_LR, R_SP, 0)
+    @a.add_i(R_SP, R_SP, 80)
+    @a.ret
+    @a.bind(l_fast_slow)
+    @a.movz_x(R_X0, 6)
+    @a.ldp_x(R_FP, R_LR, R_SP, 0)
+    @a.add_i(R_SP, R_SP, 80)
+    @a.ret
+
+    # 3. Unboxed Value-Struct Entry (`jit_vs_fp`): D0..D(nf-1) + W1.. -> D0..D(ret_m-1), W0=0 (ok) or 1 (bail)!
+    @a.bind(l_vs_entry)
+    @vs_entry_off = @a.pos * 4
+    l_sp_ok = @a.new_label
+    @a.ldr_x(R_X9, R_X19, RT_K_SP_LIMIT * 8)
+    @a.mov_sp(R_X10, R_SP)
+    @a.cmp_r(R_X10, R_X9)
+    @a.b_cond(CC_HS, l_sp_ok)
+    @a.movz_x(R_X0, 1)
+    @a.ret
+    @a.bind(l_sp_ok)
+    @is_slim_epilogue = true
+    @slim_g_hi = R_X28
+    @slim_f_hi = R_D15
+    emit_slim_prologue()
+    l_vs_bail = @a.new_label
+    l_vs_ret = @a.new_label
+    @l_deopt = l_vs_bail
+    @l_ret = l_vs_ret
+    @in_vs_entry = true
+    @l_vs_entry_lbl = l_vs_entry
+    # Store incoming unboxed params into their slots FIRST!
+    param_set = {}
+    fp_i = 0
+    int_i = 0
+    pi = 0
+    while pi < pspecs.size
+      ps = pspecs[pi]
+      pli = binding_slot(@jf.params[pi])
+      param_set[pli] = true if pli >= 0
+      if ps[0] == :vs
+        vs_p = @info.sra_vs[pli]
+        pkeys = ps[1][2]
+        q = 0
+        while q < pkeys.size
+          store_slot_f64(vs_p.field_slots[pkeys[q]], R_D0 + fp_i)
+          fp_i += 1
+          q += 1
+      elsif ps[0] == :i32
+        store_slot_i32(pli, R_X1 + int_i)
+        int_i += 1
+      else
+        store_slot_f64(pli, R_D0 + fp_i)
+        fp_i += 1
+      pi += 1
+    # Guard read-only globals & JS_EPOCH ONCE at entry!
+    @info.global_i32s.each ->(gb, gi)
+      gcell = gi[1]
+      gwv = gi[2]
+      jit_keep(gcell)
+      @a.mov_imm64(R_X9, (wvalue_bits(gcell) ## i64) - 4)
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.mov_imm64(R_X11, wvalue_bits(gwv) ## i64)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_vs_bail)
+    @info.global_objs.each ->(gb, go)
+      gcell = go[0]
+      gwv = go[1]
+      jit_keep(gcell)
+      jit_keep(gwv)
+      @a.mov_imm64(R_X9, (wvalue_bits(gcell) ## i64) - 4)
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.mov_imm64(R_X11, wvalue_bits(gwv) ## i64)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_vs_bail)
+    ep_now = JS_EPOCH[0]
+    @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+    @a.ldr_x(R_X10, R_X9, 0)
+    @a.mov_imm64(R_X11, ep_now)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_NE, l_vs_bail)
+    @hoisted_epoch = true if vs_stmts_pure_epoch?(@jf.node.b)
+    # Zero-init non-parameter base slots
+    i = 0
+    while i < @info.nbase_slots
+      if !param_set[i]
+        ty = @info.types[i]
+        if ty == JT_ANY || ty == JT_I32 || ty == JT_U32
+          r = @info.reg_gpr[i]
+          if r != nil
+            @a.movz_x(r, 0)
+          elsif ty == JT_ANY
+            @a.str_x(R_XZR, R_SP, @info.spill_off[i])
+          else
+            @a.str_w(R_XZR, R_SP, @info.spill_off[i])
+        elsif ty == JT_F64
+          r = @info.reg_fpr[i]
+          if r != nil
+            @a.fmov_d_x(r, R_XZR)
+          else
+            @a.str_x(R_XZR, R_SP, @info.spill_off[i])
+      i += 1
+    gen_stmts(@jf.node.b)
+    @a.b(l_vs_bail)
+    @a.bind(l_vs_ret)
+    emit_epilogue()
+    @a.ret
+    @a.bind(l_vs_bail)
+    @a.movz_x(R_X0, 1)
+    emit_epilogue()
+    @a.ret
+    emit_cold_stubs()
+    @a.finalize
+
   # ---- Compile Full Function ----
   -> compile_fn
     # Special fast path: self-recursive numeric function (e.g. fib(n))
     if @info.fast_rec
       return compile_fast_rec_fn()
+    if @info.vs_fn_sig != nil
+      return compile_vs_fn()
     # Dual entry:
     #   offset 0 (code.jit_fp): standard entry called from Tungsten (sets x19..x21, calls l_fast_entry)
     #   @fast_entry_off (code.jit_fast_fp): JIT-to-JIT entry assuming x19..x21 are ALREADY pinned!
     l_fast_entry = @a.new_label
+    @l_fast_entry = l_fast_entry
     @a.stp_pre(R_FP, R_LR, R_SP, -48)
     @a.stp_x(R_X19, R_X20, R_SP, 16)
     @a.str_x(R_X21, R_SP, 32)
@@ -490,6 +847,17 @@ OSR_RETURN = 2
     @a.mov_imm64(R_X19, rt_ptr)
     @a.mov_imm64(R_X20, 281474976710656)
     @a.mov_imm64(R_X21, -4503599627370495)   # 0xFFF0000000000001 signed
+    if @jf.params.size == 5
+      l_m0 = @a.new_label
+      @a.cmp_i(R_X2, 5)
+      @a.b_cond(CC_LT, l_m0)
+      @a.cbz_x(R_X7, l_m0)
+      @a.and_x_ptr47(R_X9, R_X7)
+      @a.ldr_x(R_X10, R_X9, 16)
+      @a.ldrsw(R_X11, R_X9, 4)
+      @a.add_i(R_X11, R_X11, 4)
+      @a.ldr_x_idx(R_X7, R_X10, R_X11)
+      @a.bind(l_m0)
     @a.bl(l_fast_entry)
     @a.ldr_x(R_X21, R_SP, 32)
     @a.ldp_x(R_X19, R_X20, R_SP, 16)
@@ -521,29 +889,117 @@ OSR_RETURN = 2
     if can_repeat_cand
       @a.movz_x(R_X7, 1)
       @repeat_entry_off = @a.pos * 4
+    # Shrink-wrap `if (p0 === p1) return;` BEFORE prologue: 7-insn (1.5ns) fast exit for identical non-number args!
+    if !can_repeat_cand && !@jf.uses_this && !@info.uses_env && !@jf.scope.has_env? && @jf.params.size >= 2 && @jf.node.list.size == @jf.params.size && @jf.node.list[0].kind == :ident && @jf.node.list[1].kind == :ident && @jf.node.b.is_a?(Array) && @jf.node.b.size >= 2
+      st0 = @jf.node.b[0]
+      if st0.kind == :if && st0.c == nil && st0.a != nil && st0.a.kind == :binary && st0.a.str == "===" && st0.a.a != nil && st0.a.a.kind == :ident && st0.a.a.x != nil && st0.a.b != nil && st0.a.b.kind == :ident && st0.a.b.x != nil
+        pb0 = @jf.params[0]
+        pb1 = @jf.params[1]
+        ba = st0.a.a.x.binding
+        bb = st0.a.b.x.binding
+        if (ba == pb0 && bb == pb1) || (ba == pb1 && bb == pb0)
+          ret_st = st0.b
+          if ret_st != nil && ret_st.kind == :block && ret_st.list != nil && ret_st.list.size == 1
+            ret_st = ret_st.list[0]
+          if ret_st != nil && ret_st.kind == :return && ret_st.a == nil
+            l_sw_full = @a.new_label
+            @a.cmp_i(R_X2, 2)
+            @a.b_cond(CC_LT, l_sw_full)
+            @a.cmp_r(R_X3, R_X4)
+            @a.b_cond(CC_NE, l_sw_full)
+            # Non-number WValues are never NaN -> x === x is always true!
+            @a.sub_r(R_X9, R_X3, R_X20)
+            @a.cmp_r(R_X9, R_X21)
+            @a.b_cond(CC_LO, l_sw_full)
+            @a.movz_x(R_X0, 0)
+            @a.ret
+            @a.bind(l_sw_full)
+    # Shrink-wrap `if (!gvar) return;` BEFORE prologue: 9-insn (~1.5ns) fast exit when global cell is null/undefined/false!
+    if !can_repeat_cand && !@jf.uses_this && !@info.uses_env && !@jf.scope.has_env? && @jf.node.b.is_a?(Array) && @jf.node.b.size >= 2
+      st0_g = @jf.node.b[0]
+      if st0_g.kind == :if && st0_g.c == nil && st0_g.a != nil && st0_g.a.kind == :unary && st0_g.a.str == "!" && st0_g.a.a != nil && st0_g.a.a.kind == :ident && st0_g.a.a.x != nil && st0_g.a.a.x.binding != nil && st0_g.a.a.x.binding.global?
+        ret_g = st0_g.b
+        ret_g = ret_g.list[0] if ret_g != nil && ret_g.kind == :block && ret_g.list != nil && ret_g.list.size == 1
+        if ret_g != nil && ret_g.kind == :return && ret_g.a == nil
+          cg_sw = wk_cell(st0_g.a.a.x.binding)
+          jit_keep(cg_sw)
+          cgb_sw = wvalue_bits(cg_sw) ## i64
+          l_sw_ret = @a.new_label
+          l_sw_gfull = @a.new_label
+          @a.mov_imm64(R_X9, cgb_sw - 4)
+          @a.ldr_x(R_X10, R_X9, 8)
+          @a.cbz_x(R_X10, l_sw_ret)
+          @a.cmp_i(R_X10, 1)
+          @a.b_cond(CC_EQ, l_sw_ret)
+          @a.ldr_x(R_X11, R_X19, RT_K_NULL_BITS * 8)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_sw_gfull)
+          @a.bind(l_sw_ret)
+          @a.movz_x(R_X0, 0)
+          @a.ret
+          @a.bind(l_sw_gfull)
     @is_slim_epilogue = true
-    # Compute tightest callee-saved GPR/FPR bounds for slim prologue!
-    if !@info.has_loop && @info.reg_gpr.size == 0 && @info.reg_fpr.size == 0 && @hoisted_arr_regs.size == 0 && @hoisted_ta_regs.size == 0 && @hoisted_gta_regs.size == 0
-      @slim_g_hi = 0
-      @slim_f_hi = 0
-    else
-      @slim_g_hi = R_X28
-      # Only save d14..d15 if >= 7 FPR locals or a loop needs R_D15 scratch
+    # Compute exact tightest callee-saved GPR/FPR bounds for slim prologue (saves 6-7 stp/ldp pairs on small methods!)
+    max_g = 0
+    @info.reg_gpr.values.each ->(r) max_g = r if r >= R_X22 && r > max_g
+    @hoisted_arr_regs.values.each ->(p)
+      max_g = p[0] if p[0] != nil && p[0] >= R_X22 && p[0] > max_g
+      max_g = p[1] if p[1] != nil && p[1] >= R_X22 && p[1] > max_g
+    @hoisted_ta_regs.values.each ->(p)
+      max_g = p[0] if p[0] != nil && p[0] >= R_X22 && p[0] > max_g
+      max_g = p[1] if p[1] != nil && p[1] >= R_X22 && p[1] > max_g
+    @hoisted_gta_regs.values.each ->(p)
+      max_g = p[0] if p[0] != nil && p[0] >= R_X22 && p[0] > max_g
+      max_g = p[1] if p[1] != nil && p[1] >= R_X22 && p[1] > max_g
+    has_reg_loop = @info.has_loop && stmts_has_reg_loop?(@jf.node.b)
+    keep_free_oop = @jf.uses_this && @info.uses_calls
+    max_g = R_X28 if has_reg_loop || keep_free_oop
+    @slim_g_hi = max_g
+    max_f = 0
+    @info.reg_fpr.values.each ->(r) max_f = r if r >= R_D8 && r > max_f
+    if max_f > 0 || @info.ta_invariants.size > 0 || @info.global_tas.size > 0 || @info.param_arrs.size > 0 || @info.mono_arr_num_sh != 0 || (@info.has_loop && !@info.uses_calls)
       @slim_f_hi = R_D15
+    else
+      @slim_f_hi = 0
+    @free_gprs = [] if !has_reg_loop && !keep_free_oop
     emit_slim_prologue()
-    needs_sloppy_this = @jf.uses_this && !@jf.strict && !@jf.arrow
+    # Detect monomorphic `this` shape early so we skip duplicate WObject checks in sloppy-this prologue!
+    th_sh = [0, 0, false]   # [observed_sh, count, conflict]
+    if @jf.uses_this && !@jf.arrow && @jf.node.b.is_a?(Array)
+      collect_this_mono_shape(@jf.node.b, th_sh)
+    has_mono_this = !th_sh[2] && th_sh[0] != 0 && th_sh[1] >= 2
+    cap_this = @jf.this_binding != nil && @jf.this_binding.in_env?
+    arrow_this_b = nil
+    if @jf.arrow
+      g_th = @jf.parent
+      while g_th != nil && g_th.arrow
+        g_th = g_th.parent
+      arrow_this_b = g_th.this_binding if g_th != nil && g_th.this_binding != nil && @jf.free[g_th.this_binding.id] != nil
+    needs_sloppy_this = (@jf.uses_this || cap_this) && !@jf.strict && !@jf.arrow
+    need_fn_env = @jf.scope.has_env? && !@info.demote_env
     # Save standard entry args only when needed (or save repeat count in unused JF_SLOT_ARG0!)
-    if @info.uses_env || @info.uses_calls
+    if @info.uses_env || need_fn_env || arrow_this_b != nil
       @a.str_x(R_X0, R_SP, JF_SLOT_ARG0)
     elsif can_repeat_cand
       @a.str_x(R_X7, R_SP, JF_SLOT_ARG0)
-    @a.str_x(R_X1, R_SP, JF_SLOT_THIS) if @jf.uses_this
-    @a.str_x(R_X2, R_SP, JF_SLOT_EXTRA) if needs_sloppy_this || @info.uses_calls
-    # Extract f.@env (ivar 3, offset 32 of WObject; x0 = ptr | 4)
-    if @info.uses_env || @info.uses_calls
+    @a.str_x(R_X1, R_SP, JF_SLOT_THIS) if (@jf.uses_this || cap_this) && arrow_this_b == nil
+    # Extract f.@env (ivar 3, offset 32 of WObject; x0 = ptr | 4) ONLY when env is actually used!
+    if @info.uses_env || need_fn_env || arrow_this_b != nil
       @a.sub_i(R_X9, R_X0, 4)
       @a.ldr_x(R_X9, R_X9, 32)
       @a.str_x(R_X9, R_SP, JF_SLOT_ENV)
+      if arrow_this_b != nil
+        if @jf.single == arrow_this_b
+          @a.str_x(R_X9, R_SP, JF_SLOT_THIS)
+        else
+          h_at = @jf.analysis.env_hops(@jf.scope, arrow_this_b.scope) - (@jf.scope.has_env? ? 1 : 0)
+          while h_at > 0
+            @a.sub_i(R_X9, R_X9, 4)
+            @a.ldr_x(R_X9, R_X9, 8)
+            h_at -= 1
+          @a.sub_i(R_X9, R_X9, 4)
+          @a.ldr_x(R_X9, R_X9, (arrow_this_b.slot + 1) * 8 + 8)
+          @a.str_x(R_X9, R_SP, JF_SLOT_THIS)
     # Fast inline WObject guard for sloppy `this`: skips RT_SLOPPY_THIS & x3..x6 spills on 99.9% of method calls!
     if needs_sloppy_this
       l_sloppy_ok = @a.new_label
@@ -560,6 +1016,7 @@ OSR_RETURN = 2
         @a.str_x(R_X4, R_SP, @tmp_base + 16)
         @a.str_x(R_X5, R_SP, @tmp_base + 24)
         @a.str_x(R_X6, R_SP, @tmp_base + 32)
+        @a.str_x(R_X7, R_SP, @tmp_base + 40) if @jf.params.size >= 5
         @a.ldr_x(R_X1, R_SP, JF_SLOT_THIS)
         call_rt(RT_SLOPPY_THIS)
         @a.str_x(R_X0, R_SP, JF_SLOT_THIS)
@@ -568,6 +1025,7 @@ OSR_RETURN = 2
         @a.ldr_x(R_X4, R_SP, @tmp_base + 16)
         @a.ldr_x(R_X5, R_SP, @tmp_base + 24)
         @a.ldr_x(R_X6, R_SP, @tmp_base + 32)
+        @a.ldr_x(R_X7, R_SP, @tmp_base + 40) if @jf.params.size >= 5
         @a.b(l_sloppy_ok)
       add_cold_stub(cb_sl)
     # Mark parameter slots so we don't pointlessly zero-initialize them before binding!
@@ -575,15 +1033,17 @@ OSR_RETURN = 2
     pi = 0
     while pi < @jf.params.size
       pb = @jf.params[pi]
-      param_set[pb.lidx] = true if pb.lidx >= 0
+      pli = binding_slot(pb)
+      param_set[pli] = true if pli >= 0
       pi += 1
-    # Allocate function scope JS:Env / JS:EnvN when nested closures capture locals/params!
-    if @jf.scope.has_env?
+    # Allocate function scope JS:Env / JS:EnvN when nested closures capture locals/params (skipped when env demoted!)
+    if need_fn_env
       @a.str_x(R_X2, R_SP, @tmp_base)
       @a.str_x(R_X3, R_SP, @tmp_base + 8)
       @a.str_x(R_X4, R_SP, @tmp_base + 16)
       @a.str_x(R_X5, R_SP, @tmp_base + 24)
       @a.str_x(R_X6, R_SP, @tmp_base + 32)
+      @a.str_x(R_X7, R_SP, @tmp_base + 40) if @jf.params.size >= 5
       @a.ldr_x(R_X1, R_SP, JF_SLOT_ENV)
       if @jf.scope.env_count > 7
         @a.mov_imm64(R_X2, wvalue_bits(@jf.scope.env_count) ## i64)
@@ -591,15 +1051,19 @@ OSR_RETURN = 2
       else
         call_rt(RT_ENV_NEW)
       @a.str_x(R_X0, R_SP, JF_SLOT_ENV)
+      if cap_this
+        @a.ldr_x(R_X0, R_SP, JF_SLOT_THIS)
+        emit_write_binding(@jf.this_binding, R_X0, true)
       @a.ldr_x(R_X2, R_SP, @tmp_base)
       @a.ldr_x(R_X3, R_SP, @tmp_base + 8)
       @a.ldr_x(R_X4, R_SP, @tmp_base + 16)
       @a.ldr_x(R_X5, R_SP, @tmp_base + 24)
       @a.ldr_x(R_X6, R_SP, @tmp_base + 32)
-    # Bind simple parameters directly from x3..x6!
+      @a.ldr_x(R_X7, R_SP, @tmp_base + 40) if @jf.params.size >= 5
+    # Bind simple parameters directly from x3..x7!
     l_fn_slow = @a.new_label
     r_argc = R_X2
-    if @jf.scope.has_env?
+    if need_fn_env
       i = 0
       while i < @jf.params.size
         pb = @jf.params[i]
@@ -608,10 +1072,17 @@ OSR_RETURN = 2
         @a.cmp_i(R_X10, i)
         @a.csel_x(R_X9, R_X9, R_XZR, CC_GT)
         if pb.slot >= 0
-          emit_write_binding(pb, R_X9, true)
+          @a.mov_r(R_X0, R_X9)
+          emit_write_binding(pb, R_X0, true)
         elsif pb.lidx >= 0
           if @info.param_ints[pb.lidx]
             emit_unbox_exact_i32(R_X10, R_X9, l_fn_slow)
+            if @info.param_nonneg_ints[pb.lidx] != nil
+              @a.cmp_wi(R_X10, @info.param_nonneg_ints[pb.lidx] == 2 ? 1 : 0)
+              @a.b_cond(CC_LT, l_fn_slow)
+              @a.mov_imm32(R_X11, 1048576)
+              @a.cmp_w(R_X10, R_X11)
+              @a.b_cond(CC_GT, l_fn_slow)
             store_slot_i32(pb.lidx, R_X10)
           elsif @info.param_nums[pb.lidx]
             emit_unbox_f64(R_D16, R_X9, l_fn_slow)
@@ -619,25 +1090,123 @@ OSR_RETURN = 2
           else
             store_slot_any(pb.lidx, R_X9)
         i += 1
+    elsif @jf.params.size >= 2
+      # Fast path: single `argc >= nparams` check eliminates per-param `cmp + csel` (saves 2 insns/param on 99.9% of calls!)
+      l_bind_short = @a.new_label
+      l_bind_done = @a.new_label
+      @a.cmp_i(r_argc, @jf.params.size)
+      @a.b_cond(CC_LT, l_bind_short)
+      i = 0
+      while i < @jf.params.size
+        pb = @jf.params[i]
+        pli = binding_slot(pb)
+        if pli >= 0
+          if @info.param_ints[pli]
+            emit_unbox_exact_i32(R_X10, R_X3 + i, l_fn_slow)
+            if @info.param_nonneg_ints[pli] != nil
+              @a.cmp_wi(R_X10, @info.param_nonneg_ints[pli] == 2 ? 1 : 0)
+              @a.b_cond(CC_LT, l_fn_slow)
+              @a.mov_imm32(R_X11, 1048576)
+              @a.cmp_w(R_X10, R_X11)
+              @a.b_cond(CC_GT, l_fn_slow)
+            store_slot_i32(pli, R_X10)
+          elsif @info.param_nums[pli]
+            emit_unbox_f64(R_D16, R_X3 + i, l_fn_slow)
+            store_slot_f64(pli, R_D16)
+          else
+            store_slot_any(pli, R_X3 + i)
+        i += 1
+      @a.bind(l_bind_done)
+      cb_bs = ->()
+        @a.bind(l_bind_short)
+        i2 = 0
+        while i2 < @jf.params.size
+          pb2 = @jf.params[i2]
+          pli2 = binding_slot(pb2)
+          if pli2 >= 0
+            @a.mov_r(R_X9, R_X3 + i2)
+            @a.cmp_i(r_argc, i2)
+            @a.csel_x(R_X9, R_X9, R_XZR, CC_GT)
+            if @info.param_ints[pli2]
+              emit_unbox_exact_i32(R_X10, R_X9, l_fn_slow)
+              if @info.param_nonneg_ints[pli2] != nil
+                @a.cmp_wi(R_X10, @info.param_nonneg_ints[pli2] == 2 ? 1 : 0)
+                @a.b_cond(CC_LT, l_fn_slow)
+                @a.mov_imm32(R_X11, 1048576)
+                @a.cmp_w(R_X10, R_X11)
+                @a.b_cond(CC_GT, l_fn_slow)
+              store_slot_i32(pli2, R_X10)
+            elsif @info.param_nums[pli2]
+              emit_unbox_f64(R_D16, R_X9, l_fn_slow)
+              store_slot_f64(pli2, R_D16)
+            else
+              store_slot_any(pli2, R_X9)
+          i2 += 1
+        @a.b(l_bind_done)
+      add_cold_stub(cb_bs)
     else
       i = 0
       while i < @jf.params.size
         pb = @jf.params[i]
-        if pb.lidx >= 0
+        pli = binding_slot(pb)
+        if pli >= 0
           @a.mov_r(R_X9, R_X3 + i)
           @a.cmp_i(r_argc, i)
           @a.csel_x(R_X9, R_X9, R_XZR, CC_GT)
-          if @info.param_ints[pb.lidx]
+          if @info.param_ints[pli]
             # Unbox read-only integer loop-bound param ONCE in prologue (fallback to tier 0 if non-int32!)
             emit_unbox_exact_i32(R_X10, R_X9, l_fn_slow)
-            store_slot_i32(pb.lidx, R_X10)
-          elsif @info.param_nums[pb.lidx]
+            if @info.param_nonneg_ints[pli] != nil
+              @a.cmp_wi(R_X10, @info.param_nonneg_ints[pli] == 2 ? 1 : 0)
+              @a.b_cond(CC_LT, l_fn_slow)
+              @a.mov_imm32(R_X11, 1048576)
+              @a.cmp_w(R_X10, R_X11)
+              @a.b_cond(CC_GT, l_fn_slow)
+            store_slot_i32(pli, R_X10)
+          elsif @info.param_nums[pli]
             # Unbox read-only numeric param ONCE in prologue (fallback to tier 0 if non-number!)
             emit_unbox_f64(R_D16, R_X9, l_fn_slow)
-            store_slot_f64(pb.lidx, R_D16)
+            store_slot_f64(pli, R_D16)
           else
-            store_slot_any(pb.lidx, R_X9)
+            store_slot_any(pli, R_X9)
         i += 1
+    # Record observed monomorphic `this` shape for while-loop hoisting (NEVER bail polymorphic prototype methods to Tier 0!)
+    @this_mono_sh = th_sh[0] if has_mono_this
+    # Pre-scan warmed polymorphic callees for read-only global int32 & object constants (hoisted ONCE in prologue!)
+    if !@is_osr && @jf.node.b.is_a?(Array)
+      collect_callee_global_i32s(@jf.node.b, {}, 0, @info.has_loop ? 5 : 3)
+    # Guard read-only global int32 constants ONCE in prologue (fallback to l_fn_slow if mutated!)
+    @info.global_i32s.each ->(gb, gi)
+      gcell = gi[1]
+      gwv = gi[2]
+      jit_keep(gcell)
+      @hoisted_cells[wvalue_bits(gcell) ## i64] = wvalue_bits(gwv) ## i64
+      @a.mov_imm64(R_X9, (wvalue_bits(gcell) ## i64) - 4)
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.mov_imm64(R_X11, wvalue_bits(gwv) ## i64)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_fn_slow)
+    collect_this_prop_shapes(@jf.node.b, @this_prop_shapes) if @jf.uses_this && @jf.node.b.is_a?(Array)
+    # Guard read-only global objects/arrays/functions ONCE in prologue (e.g. `spheres`, `light`, `Direction`, `Strength`!)
+    @info.global_objs.each ->(gb, go)
+      gcell = go[0]
+      gwv = go[1]
+      jit_keep(gcell)
+      jit_keep(gwv)
+      @a.mov_imm64(R_X9, (wvalue_bits(gcell) ## i64) - 4)
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.mov_imm64(R_X11, wvalue_bits(gwv) ## i64)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_fn_slow)
+      if gwv.is_a?(JS:Base) && !gwv.shape.dict && !gwv.exotic?
+        gsh_h = gwv.shape
+        jit_keep(gsh_h)
+        @a.sub_i(R_X9, R_X11, 4)
+        @a.ldr_x(R_X10, R_X9, 8)
+        @a.mov_imm64(R_X11, wvalue_bits(gsh_h) ## i64)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_fn_slow)
+        @hoisted_gobj_shapes[wvalue_bits(gcell) ## i64] = [gwv, gsh_h]
     # Guard global TypedArray constructors for @info.local_tas ONCE at entry (zero mutations on fallback!)
     if @info.local_tas.size > 0
       r_cur = js_realm()
@@ -678,10 +1247,10 @@ OSR_RETURN = 2
     # Initialize non-parameter locals to undefined (0), deduplicating coalesced registers!
     zeroed_gprs = {}
     i = 0
-    while i < @jf.nlocals
+    while i < @info.nbase_slots
       if !param_set[i]
         ty = @info.types[i]
-        if ty == JT_ANY || ty == JT_I32
+        if ty == JT_ANY || ty == JT_I32 || ty == JT_U32
           r = @info.reg_gpr[i]
           if r != nil
             if !zeroed_gprs[r]
@@ -771,6 +1340,13 @@ OSR_RETURN = 2
       @a.ldrsw(R_X10, R_X9, 8)   # size
       @a.str_x(R_X10, R_SP, h[1])
       @a.mov_r(ar[1], R_X10) if ar != nil && ar[1] != nil
+    # Guard read-only String parameters ONCE in prologue (fallback to tier 0 if non-string!)
+    @info.param_strs.keys.each ->(li)
+      load_slot_any(R_X9, li)
+      @a.lsr_xi(R_X10, R_X9, 48)
+      @a.movz_x(R_X11, 0xFFF9)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_fn_slow)
     # Hoist observed warm monomorphic shapes into free GPRs (or 1-LDR stack spill slots when GPRs are full)!
     mono_sh = 0
     if @jf.node.b.is_a?(Array)
@@ -778,21 +1354,43 @@ OSR_RETURN = 2
       collect_warm_shape_uses(@jf.node.b, mc)
       sh_sp_idx = 0
       n_sh = 0
+      res_gprs = @info.uses_calls ? 4 : 0
+      sh_sp_max = @info.has_loop ? 4 : 0
       mc.values.each ->(e)
         if e[2] && e[0] != 0
           mono_sh = e[0]
           n_sh += 1
           if @hoisted_shapes[e[0]] == nil && @sh_spill_slots[e[0]] == nil
-            if @free_gprs.size > 0
+            if @free_gprs.size > res_gprs
               rg = @free_gprs.pop
               @a.mov_imm64(rg, e[0])
               @hoisted_shapes[e[0]] = rg
-            elsif sh_sp_idx < 4
+            elsif sh_sp_idx < sh_sp_max
               off = @ta_info_slot + sh_sp_idx * 8
               @a.mov_imm64(R_X9, e[0])
               @a.str_x(R_X9, R_SP, off)
               @sh_spill_slots[e[0]] = off
               sh_sp_idx += 1
+      # Also hoist top polymorphic dispatch shapes (including inlined callees!) into remaining free GPRs / spill slots!
+      if @free_gprs.size > res_gprs || sh_sp_idx < sh_sp_max
+        poly_shs_fn = []
+        collect_poly_shapes_deep(@jf.node.b, poly_shs_fn, {}, 0, @info.has_loop ? 4 : 2)
+        psi = 0
+        while psi < poly_shs_fn.size
+          psh_b = wvalue_bits(poly_shs_fn[psi]) ## i64
+          if @hoisted_shapes[psh_b] == nil && @sh_spill_slots[psh_b] == nil
+            jit_keep(poly_shs_fn[psi])
+            if @free_gprs.size > res_gprs
+              rg = @free_gprs.pop
+              @a.mov_imm64(rg, psh_b)
+              @hoisted_shapes[psh_b] = rg
+            elsif sh_sp_idx < sh_sp_max
+              off = @ta_info_slot + sh_sp_idx * 8
+              @a.mov_imm64(R_X9, psh_b)
+              @a.str_x(R_X9, R_SP, off)
+              @sh_spill_slots[psh_b] = off
+              sh_sp_idx += 1
+          psi += 1
       # If function has a read-only dense Array param, no non-Math calls, and one unique element shape:
       # verify ONCE in prologue that every arr[0..len-1] has `mono_sh` (else JSR_SLOW -> tier 0, zero mutations)!
       mono_sh = @info.mono_arr_num_sh if @info.mono_arr_num_sh != 0
@@ -891,7 +1489,7 @@ OSR_RETURN = 2
       @repeat_entry_off = -1 if can_repeat_cand && @mono_arr_shape.size == 0
       # Hoist up to 3 FP literal constants (e.g. `1.00000001`, `0.0000001`, `0.01`) into free callee-saved FPRs ONCE!
       avail_fc = 7 - @info.reg_fpr.size   # leaves R_D15 free for scratch!
-      if avail_fc >= 1
+      if avail_fc >= 1 && @slim_f_hi >= R_D14
         fcs = []
         @jf.node.b.each ->(st) collect_fp_consts(st, fcs)
         fci = 0
@@ -906,6 +1504,58 @@ OSR_RETURN = 2
     if !@info.uses_calls && @info.has_loop
       @a.fmov_d_x(R_D17, R_X20)
       @d_bias_reg = R_D17
+    # Constructor entry root-shape & super-call hoisting (`new Sub(...)` -> zero-check shape transitions + monomorphic `this.m()`!):
+    if !@is_osr && @jf.uses_this && !@jf.arrow && !@jf.script && !@info.has_loop && @jf.node.b.is_a?(Array)
+      warm_rsh = wk_code(@jf).ctor_rsh
+      if warm_rsh.is_a?(JS:Shape) && !warm_rsh.dict && warm_rsh.count == 0 && warm_rsh.inline == OBJ_INLINE && warm_rsh.ibase == OBJ_IBASE
+        r_cr = js_realm()
+        orig_fc_cr = r_cr != nil ? r_cr.intrinsics["%FunctionProto_call%"] : nil
+        if !@hoisted_epoch && !@epoch_verified_now
+          ep_cr = JS_EPOCH[0]
+          @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+          @a.ldr_x(R_X10, R_X9, 0)
+          @a.mov_imm64(R_X11, ep_cr)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_fn_slow)
+        @epoch_verified_now = true
+        @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+        @a.sub_i(R_X9, R_X9, 4)
+        if !needs_sloppy_this
+          @a.tst_wobj_bad(R_X9)
+          @a.b_cond(CC_NE, l_fn_slow)
+          @a.cbz_x(R_X9, l_fn_slow)
+        @a.ldr_x(R_X10, R_X9, 8)
+        @a.mov_imm64(R_X11, wvalue_bits(warm_rsh) ## i64)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_fn_slow)
+        jit_keep(warm_rsh)
+        @known_shapes[-2] = wvalue_bits(warm_rsh) ## i64
+        if !JS_FN_OWN_CALL[0] && orig_fc_cr != nil && r_cr.function_proto != nil && r_cr.function_proto.get_own("call") == orig_fc_cr
+          sc_hoist = []
+          collect_ctor_super_calls(@jf.node.b, sc_hoist, {}, 0)
+          shi = 0
+          while shi < sc_hoist.size
+            sci = sc_hoist[shi]
+            sc_cell = sci[0]
+            sc_fv = sci[1]
+            sc_fsh = sci[2]
+            sc_cb = wvalue_bits(sc_cell) ## i64
+            if @hoisted_gobj_shapes[sc_cb] == nil
+              jit_keep(sc_cell)
+              jit_keep(sc_fv)
+              jit_keep(sc_fsh)
+              @a.mov_imm64(R_X9, sc_cb - 4)
+              @a.ldr_x(R_X10, R_X9, 8)
+              @a.mov_imm64(R_X11, wvalue_bits(sc_fv) ## i64)
+              @a.cmp_r(R_X10, R_X11)
+              @a.b_cond(CC_NE, l_fn_slow)
+              @a.sub_i(R_X9, R_X11, 4)
+              @a.ldr_x(R_X10, R_X9, 8)
+              @a.mov_imm64(R_X11, wvalue_bits(sc_fsh) ## i64)
+              @a.cmp_r(R_X10, R_X11)
+              @a.b_cond(CC_NE, l_fn_slow)
+              @hoisted_gobj_shapes[sc_cb] = [sc_fv, sc_fsh]
+            shi += 1
     # Body
     n = @jf.node
     if @jf.arrow && n.has?(F_EXPR_BODY)
@@ -1318,6 +1968,9 @@ OSR_RETURN = 2
       if s.kind == :function_decl && s.str != nil
         jf = s.x
         b = jf.binding
+        if @info.inlined_fns[b] != nil
+          i += 1
+          next
         code = wk_code(jf)
         jit_keep(code)
         if jf.single != nil
@@ -1508,15 +2161,1229 @@ OSR_RETURN = 2
     @a.cinc_w(rc, rc, cc)
     true
 
+  # Batch 2..4 consecutive `arr.push(e_k)` statements on a non-escaping `local_arrs` array
+  # into 1 epoch guard + 1 capacity check + k direct stores + 1 size update!
+  -> match_local_arr_push_stmt(s)
+    return nil if s == nil || s.kind != :expr_stmt || s.a == nil || s.a.kind != :call
+    c = s.a.a
+    return nil if c == nil || c.kind != :member || c.has?(F_COMPUTED) || c.b.str != "push" || s.a.list.size != 1
+    bli = local_idx(c.a)
+    return nil if bli < 0 || @info.local_arrs[bli] != true
+    [bli, s.a.list[0]]
+
+  -> try_gen_batched_local_push(list, idx)
+    p0 = match_local_arr_push_stmt(list[idx])
+    return 0 if p0 == nil
+    bli = p0[0]
+    vals = [p0[1]]
+    j = idx + 1
+    while j < list.size && vals.size < 4
+      pj = match_local_arr_push_stmt(list[j])
+      break if pj == nil || pj[0] != bli
+      vals.push(pj[1])
+      j += 1
+    return 0 if vals.size < 2
+    k = vals.size
+    # Zero-spill register-passed path for 2..3 pure i32 pushes (kills 5-cycle store-to-load stalls & FP boxing of `0`!)
+    use_reg_bp = k <= 3
+    qi_ck = 0
+    while qi_ck < k && use_reg_bp
+      ve_c = vals[qi_ck]
+      use_reg_bp = false if !can_i32?(ve_c) || ast_has_call?(ve_c)
+      qi_ck += 1
+    v_regs = [R_X3, R_X4, R_X5]
+    v_offs = []
+    if use_reg_bp
+      q = 0
+      while q < k
+        ve = vals[q]
+        if ve.kind == :num && ve.a == ~0.0
+          @a.mov_r(v_regs[q], R_X20)
+        elsif ve.kind == :num && jit_int32_lit?(ve)
+          @a.mov_imm64(v_regs[q], wvalue_bits(ve.a) ## i64)
+        else
+          gen_expr_i32(ve)
+          emit_box_i32(v_regs[q], R_X0)
+        q += 1
+    else
+      # Evaluate all k values onto tmp stack first (preserves exact left-to-right JS evaluation order!)
+      q = 0
+      while q < k
+        ve = vals[q]
+        if can_i32?(ve)
+          gen_expr_i32(ve)
+          emit_box_i32(R_X0, R_X0)
+        else
+          gen_expr_any(ve)
+        v_offs.push(push_x(R_X0))
+        q += 1
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch && !@epoch_verified_now
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    load_slot_any(R_X9, bli)
+    @a.and_x_ptr47(R_X9, R_X9)
+    @a.ldrsw(R_X11, R_X9, 8)            # size
+    @a.ldrsw(R_X14, R_X9, 12)           # cap
+    @a.add_wi(R_X15, R_X11, k)          # size + k
+    @a.cmp_r(R_X15, R_X14)
+    @a.b_cond(CC_GT, l_slow)
+    @a.ldr_x(R_X14, R_X9, 16)           # slots
+    @a.add_r(R_X14, R_X14, R_X11, 3)    # &slots[size]
+    q = 0
+    while q < k
+      if use_reg_bp
+        @a.str_x(v_regs[q], R_X14, q * 8)
+      else
+        @a.ldr_x(R_X12, R_SP, v_offs[q])
+        @a.str_x(R_X12, R_X14, q * 8)
+      q += 1
+    @a.str_w(R_X15, R_X9, 8)            # size = size + k
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      s_offs = v_offs
+      if use_reg_bp
+        s_offs = []
+        qs = 0
+        while qs < k
+          s_offs.push(push_x(v_regs[qs]))
+          qs += 1
+      q2 = 0
+      while q2 < k
+        load_slot_any(R_X1, bli)
+        @a.ldr_x(R_X2, R_SP, s_offs[q2])
+        call_rt(RT_ARR_PUSH)
+        q2 += 1
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= k if !use_reg_bp
+    k
+
+  # Match `for (var k in b) { if (!(k in a)) ... }` (no else) returning [b_li, a_li] or nil.
+  -> match_for_in_only_missing(s)
+    return nil if s == nil || s.kind != :for_in
+    b_li = local_idx(s.b)
+    return nil if b_li < 0
+    lhs = s.a.kind == :var_decl ? s.a.list[0].a : s.a
+    k_b = (lhs.kind == :ident && lhs.x != nil) ? lhs.x.binding : nil
+    return nil if k_b == nil
+    b1 = (s.d != nil && s.d.kind == :block && s.d.list != nil && s.d.list.size == 1) ? s.d.list[0] : s.d
+    return nil if b1 == nil || b1.kind != :if || b1.c != nil
+    c = b1.a
+    return nil if c == nil || c.kind != :unary || c.str != "!" || c.a == nil || c.a.kind != :binary || c.a.str != "in"
+    in_e = c.a
+    return nil if in_e.a.kind != :ident || in_e.a.x == nil || in_e.a.x.binding != k_b
+    a_li = local_idx(in_e.b)
+    return nil if a_li < 0 || a_li == local_idx(lhs) || a_li == b_li
+    [b_li, a_li]
+
+  -> jit_ic_valid?(ic)
+    ic != nil && ic.is_a?(Array) && ic.size >= 3 && ic[0].is_a?(Int)
+
+  -> stmt_always_exits?(s)
+    return false if s == nil || !s.is_a?(JsNode)
+    k = s.kind
+    return true if k == :return || k == :throw || k == :break || k == :continue
+    if k == :block
+      return false if !s.list.is_a?(Array) || s.list.size == 0
+      return stmt_always_exits?(s.list[s.list.size - 1])
+    if k == :if && s.c != nil
+      return stmt_always_exits?(s.b) && stmt_always_exits?(s.c)
+    false
+
+  -> count_this_prop_uses(n)
+    return 0 if n == nil
+    if n.is_a?(Array)
+      tot = 0
+      i = 0
+      while i < n.size
+        tot += count_this_prop_uses(n[i])
+        i += 1
+      return tot
+    return 0 if !n.is_a?(JsNode)
+    k = n.kind
+    return 0 if k == :function || k == :arrow || k == :class
+    c = (k == :member && !n.has?(F_COMPUTED) && n.a != nil && n.a.kind == :this) ? 1 : 0
+    c + count_this_prop_uses(n.a) + count_this_prop_uses(n.b) + count_this_prop_uses(n.c) + count_this_prop_uses(n.d) + count_this_prop_uses(n.list)
+
+  # Check if `e` is guaranteed side-effect-free & non-throwing for Constructor Shape-Chain Fusion.
+  # Records any `[gcell, go, gsh]` global-object property guards needed before the chain into `g_guards`.
+  -> sc_chain_rhs_pure?(e, g_guards)
+    return false if e == nil || !e.is_a?(JsNode)
+    k = e.kind
+    return true if k == :num || k == :true || k == :false || k == :null || k == :string || k == :undef || k == :this
+    if k == :ident && e.x != nil && e.x.binding != nil
+      b = e.x.binding
+      return true if @inline_env != nil && @inline_env[b] != nil
+      return true if binding_slot(b) >= 0 && b.kind != :lexical
+      return true if b.global? && b.kind != :lexical
+      return false
+    if k == :logical
+      return sc_chain_rhs_pure?(e.a, nil) && sc_chain_rhs_pure?(e.b, nil)
+    if g_guards != nil && k == :member && !e.has?(F_COMPUTED) && e.a != nil && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && e.a.x.binding.global?
+      gc = wk_cell(e.a.x.binding)
+      return false if gc == nil
+      go = gc.value
+      return false if !go.is_a?(JS:Base) || go.shape.dict || go.exotic?
+      gsh = go.shape
+      sl = gsh.slot_of(e.b.str)
+      return false if sl < 0 || (gsh.attrs_of(e.b.str) & ATTR_ACCESSOR) != 0
+      gcb = wvalue_bits(gc) ## i64
+      if g_guards[gcb] == nil
+        g_guards[gcb] = [gc, go, gsh]
+      else
+        return false if g_guards[gcb][1] != go || g_guards[gcb][2] != gsh
+      return true
+    false
+
+  # Collect static `Super.call(this, ...)` global constructor targets for prologue hoisting.
+  -> collect_ctor_super_calls(stmts, out, seen, depth)
+    return nil if !stmts.is_a?(Array) || depth >= 3
+    r_sc = js_realm()
+    return nil if r_sc == nil || r_sc.function_proto == nil
+    i = 0
+    while i < stmts.size
+      st = stmts[i]
+      if st.is_a?(JsNode) && st.kind == :expr_stmt && st.a != nil && st.a.kind == :call
+        ce = st.a
+        if ce.a != nil && ce.a.kind == :member && !ce.a.has?(F_COMPUTED) && ce.a.b.str == "call" && ce.list.size >= 1 && ce.list.size <= 4 && ce.list[0].kind == :this && ce.a.a != nil && ce.a.a.kind == :ident && ce.a.a.x != nil && ce.a.a.x.binding != nil && ce.a.a.x.binding.global? && ce.a.a.x.binding.writes <= 1
+          cell = wk_cell(ce.a.a.x.binding)
+          fv = cell != nil ? cell.value : nil
+          if fv.is_a?(JS:Function) && !fv.shape.dict && fv.shape.proto == r_sc.function_proto && fv.shape.slot_of("call") < 0 && fv.code != nil && fv.code.node.is_a?(JaFunc)
+            cb = wvalue_bits(cell) ## i64
+            if !seen[cb]
+              seen[cb] = true
+              out.push([cell, fv, fv.shape])
+              collect_ctor_super_calls(fv.code.node.node.b, out, seen, depth + 1)
+      i += 1
+    nil
+
+  # Constructor Shape-Chain Fusion: fuses >= 2 consecutive warm inline shape transitions `this.<p_j> = <pure_rhs_j>`
+  # (`sh_0 -> sh_1 -> ... -> sh_k`, all matching current JS_EPOCH) into ONE epoch/tag/shape check + direct stores + ONE final shape store!
+  -> try_gen_this_shape_chain(list, idx)
+    return 0 if @in_cs_promo || @in_cold_stub || @inline_env != nil || (@known_shapes[-2] != nil && (@hoisted_epoch || @epoch_verified_now)) || idx + 1 >= list.size
+    ep_now = JS_EPOCH[0]
+    g_guards = {}
+    steps = []
+    chain_stmts = []
+    cur_sh = 0 ## i64
+    j = idx
+    while j < list.size
+      st = list[j]
+      break if st == nil || st.kind != :expr_stmt || st.a == nil || st.a.kind != :assign || st.a.str != "="
+      t = st.a.a
+      break if t == nil || t.kind != :member || t.has?(F_COMPUTED) || t.a == nil || t.a.kind != :this
+      nic = t.x
+      break if !jit_ic_valid?(nic) || nic.size < 4 || nic[0] == 0 || nic[2] == 0 || nic[1] <= 0 || nic[3] != ep_now
+      break if steps.size > 0 && nic[0] != cur_sh
+      break if !sc_chain_rhs_pure?(st.a.b, g_guards)
+      steps.push([t.b.str, nic[0], nic[1], nic[2], st.a.b])
+      chain_stmts.push(st)
+      cur_sh = nic[2]
+      j += 1
+    return 0 if steps.size < 2
+    sh0 = steps[0][1]
+    ns_last = steps[steps.size - 1][3]
+    jit_keep(wvalue_from_bits(sh0))
+    jit_keep(wvalue_from_bits(ns_last))
+    sv_sh_sc = @known_shapes.dup
+    sv_ep_sc = @epoch_verified_now
+    l_sc_unspec = @a.new_label
+    l_sc_end = @a.new_label
+    # 1. Single JS_EPOCH check (if not already verified)
+    if !@hoisted_epoch && !@epoch_verified_now
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_sc_unspec)
+    # 2. Guard any global objects read inside the chain (`Strength.WEAKEST`, `Direction.NONE`) BEFORE any store to `this`!
+    g_guards.each ->(gcb, gi)
+      gc = gi[0]
+      go = gi[1]
+      gsh = gi[2]
+      jit_keep(gc)
+      jit_keep(go)
+      jit_keep(gsh)
+      hgo_sc = @hoisted_gobj_shapes[gcb]
+      if !(hgo_sc != nil && hgo_sc[0] == go && hgo_sc[1] == gsh)
+        @a.mov_imm64(R_X9, gcb - 4)
+        @a.ldr_x(R_X10, R_X9, 8)
+        @a.mov_imm64(R_X11, wvalue_bits(go) ## i64)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_sc_unspec)
+        @a.sub_i(R_X9, R_X10, 4)
+        @a.ldr_x(R_X10, R_X9, 8)
+        emit_cmp_shape(R_X10, wvalue_bits(gsh) ## i64)
+        @a.b_cond(CC_NE, l_sc_unspec)
+    # 3. Single tag + `this.@shape == sh0` check (skipped if `@known_shapes[-2] == sh0`!)
+    if @known_shapes[-2] != sh0
+      if @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+        @a.sub_i(R_X9, @inline_env[:this][1], 4)
+      elsif @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :spill_x
+        @a.ldr_x(R_X9, R_SP, @inline_env[:this][1])
+        @a.sub_i(R_X9, R_X9, 4)
+      else
+        @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+        @a.sub_i(R_X9, R_X9, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_sc_unspec)
+      @a.cbz_x(R_X9, l_sc_unspec)
+      @a.ldr_x(R_X10, R_X9, 8)
+      emit_cmp_shape(R_X10, sh0)
+      @a.b_cond(CC_NE, l_sc_unspec)
+    # 4. Direct stores for all K inline slots + ONE final `this.@shape = ns_last`!
+    mark_while_dirty()
+    si = 0
+    while si < steps.size
+      stp = steps[si]
+      rhs_s = stp[4]
+      if rhs_s.kind == :member
+        gc_r = wk_cell(rhs_s.a.x.binding)
+        gi_r = g_guards[wvalue_bits(gc_r) ## i64]
+        go_r = gi_r[1]
+        gsh_r = gi_r[2]
+        sl_r = gsh_r.slot_of(rhs_s.b.str)
+        enc_r = sl_r < gsh_r.inline ? (gsh_r.ibase + sl_r) : (0 - (sl_r - gsh_r.inline) - 1)
+        @a.mov_imm64(R_X9, (wvalue_bits(go_r) ## i64) - 4)
+        emit_slot_load(R_X0, R_X9, enc_r)
+      else
+        gen_expr_any(rhs_s)
+      if @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+        @a.sub_i(R_X9, @inline_env[:this][1], 4)
+      elsif @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :spill_x
+        @a.ldr_x(R_X9, R_SP, @inline_env[:this][1])
+        @a.sub_i(R_X9, R_X9, 4)
+      else
+        @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+        @a.sub_i(R_X9, R_X9, 4)
+      emit_slot_store(R_X9, stp[2], R_X0)
+      @known_shapes.delete("this." + stp[0])
+      si += 1
+    @a.mov_imm64(R_X11, ns_last)
+    @a.str_x(R_X11, R_X9, 8)
+    @a.bind(l_sc_end)
+    cb_sc = ->()
+      @a.bind(l_sc_unspec)
+      @known_shapes = sv_sh_sc.dup
+      @epoch_verified_now = sv_ep_sc
+      gen_stmts(chain_stmts)
+      @a.b(l_sc_end)
+    add_cold_stub(cb_sc)
+    @known_shapes.delete(-2)
+    steps.size
+
+  # General 2-statement `this.<prop>` update/store + immediate use fusion (eliminates store-to-load stalls & 2nd unbox!):
+  #   Pattern A: `this.p--; if (this.p == 0) then_s` (single unbox, `fcmp d0, #0.0`!)
+  #   Pattern B: `this.p++; if (this.p > K) this.p = C;` (branchless `fadd + fcmp + fcsel`, ZERO reload!)
+  #   Pattern C: `this.p1 = rhs; this.p2 = this.p1 == null ? c1 : c2;` (ZERO reload of `this.p1`!)
+  -> try_gen_this_prop_pair_fuse(st0, st1)
+    return false if @in_cs_promo || @in_cold_stub || @known_shapes[-2] == nil || st0 == nil || st1 == nil
+    th_f = (@inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64)) ? @inline_this_sh : wvalue_from_bits(@known_shapes[-2])
+    return false if !th_f.is_a?(JS:Shape) || th_f.dict
+    load_th = ->(dst)
+      if @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+        @a.sub_i(dst, @inline_env[:this][1], 4)
+      elsif @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :spill_x
+        @a.ldr_x(dst, R_SP, @inline_env[:this][1])
+        @a.sub_i(dst, dst, 4)
+      else
+        @a.ldr_x(dst, R_SP, JF_SLOT_THIS)
+        @a.sub_i(dst, dst, 4)
+    # Pattern A & B: `this.p++` / `this.p--` followed by `if (this.p == 0) then_s` OR `if (this.p > K) this.p = C`
+    if st0.kind == :expr_stmt && st0.a != nil && st0.a.kind == :update && (st0.a.str == "++" || st0.a.str == "--") && st0.a.a != nil && st0.a.a.kind == :member && !st0.a.a.has?(F_COMPUTED) && st0.a.a.a != nil && st0.a.a.a.kind == :this && st1.kind == :if && st1.c == nil && st1.a != nil && st1.a.kind == :binary
+      prop_f = st0.a.a.b.str
+      sl_f = th_f.slot_of(prop_f)
+      if sl_f >= 0 && th_f.attrs_of(prop_f) == ATTR_DEFAULT && st1.a.a != nil && st1.a.a.kind == :member && !st1.a.a.has?(F_COMPUTED) && st1.a.a.a != nil && st1.a.a.a.kind == :this && st1.a.a.b.str == prop_f
+        enc_f = sl_f < th_f.inline ? (th_f.ibase + sl_f) : (0 - (sl_f - th_f.inline) - 1)
+        is_inc_f = st0.a.str == "++"
+        # Pattern B: `this.p++; if (this.p > K) this.p = C;` (branchless `fcsel_d`!)
+        if is_inc_f && st1.a.str == ">" && st1.a.b != nil && st1.a.b.kind == :num && st1.a.b.a == st1.a.b.a
+          b_st = st1.b.kind == :block && st1.b.list.size == 1 ? st1.b.list[0] : st1.b
+          if b_st != nil && b_st.kind == :expr_stmt && b_st.a != nil && b_st.a.kind == :assign && b_st.a.str == "=" && b_st.a.a != nil && b_st.a.a.kind == :member && !b_st.a.a.has?(F_COMPUTED) && b_st.a.a.a != nil && b_st.a.a.a.kind == :this && b_st.a.a.b.str == prop_f && b_st.a.b != nil && b_st.a.b.kind == :num && b_st.a.b.a == b_st.a.b.a
+            k_f_bits = jit_f64_bits(wvalue_bits(st1.a.b.a) ## i64)
+            c_f_bits = jit_f64_bits(wvalue_bits(b_st.a.b.a) ## i64)
+            l_slow_f = @a.new_label
+            l_done_f = @a.new_label
+            load_th.call(R_X9)
+            emit_slot_load(R_X12, R_X9, enc_f)
+            @a.sub_r(R_X15, R_X12, R_X20)
+            @a.cmp_r(R_X15, R_X21)
+            @a.b_cond(CC_HS, l_slow_f)
+            @a.fmov_d_x(R_D0, R_X15)
+            @a.fmov_d_one(R_D1)
+            @a.fadd_d(R_D0, R_D0, R_D1)
+            @a.mov_imm64(R_X10, k_f_bits)
+            @a.fmov_d_x(R_D1, R_X10)
+            if b_st.a.b.a == ~1.0
+              @a.fmov_d_one(R_D2)
+            else
+              @a.mov_imm64(R_X10, c_f_bits)
+              @a.fmov_d_x(R_D2, R_X10)
+            @a.fcmp_d(R_D0, R_D1)
+            @a.fcsel_d(R_D0, R_D2, R_D0, CC_GT)
+            emit_box_f64_nonan(R_X13, R_D0)
+            emit_slot_store(R_X9, enc_f, R_X13)
+            @a.bind(l_done_f)
+            sv_sh_f = @known_shapes.dup; sv_ep_f = @epoch_verified_now
+            cb_fb = ->()
+              @a.bind(l_slow_f)
+              @known_shapes = sv_sh_f.dup; @epoch_verified_now = sv_ep_f
+              gen_stmt(st0)
+              gen_stmt(st1)
+              @a.b(l_done_f)
+            add_cold_stub(cb_fb)
+            @known_shapes.delete("this." + prop_f)
+            return true
+        # Pattern A: `this.p--; if (this.p == 0) then_s` (or `=== 0`)
+        if !is_inc_f && (st1.a.str == "==" || st1.a.str == "===") && st1.a.b != nil && st1.a.b.kind == :num && st1.a.b.a == ~0.0
+          l_slow_f = @a.new_label
+          l_done_f = @a.new_label
+          load_th.call(R_X9)
+          emit_slot_load(R_X12, R_X9, enc_f)
+          @a.sub_r(R_X15, R_X12, R_X20)
+          @a.cmp_r(R_X15, R_X21)
+          @a.b_cond(CC_HS, l_slow_f)
+          @a.fmov_d_x(R_D0, R_X15)
+          @a.fmov_d_one(R_D1)
+          @a.fsub_d(R_D0, R_D0, R_D1)
+          emit_box_f64_nonan(R_X13, R_D0)
+          emit_slot_store(R_X9, enc_f, R_X13)
+          @a.fcmp_d0(R_D0)
+          @a.b_cond(CC_NE, l_done_f)
+          sv_sh_f = @known_shapes.dup; sv_ep_f = @epoch_verified_now
+          @known_shapes.delete("this." + prop_f)
+          sv_sh_post = @known_shapes.dup; sv_ep_post = @epoch_verified_now
+          gen_stmt(st1.b)
+          @a.bind(l_done_f)
+          cb_fa = ->()
+            @a.bind(l_slow_f)
+            @known_shapes = sv_sh_f.dup; @epoch_verified_now = sv_ep_f
+            gen_stmt(st0)
+            gen_stmt(st1)
+            @a.b(l_done_f)
+          add_cold_stub(cb_fa)
+          if stmt_always_exits?(st1.b)
+            @known_shapes = sv_sh_post
+            @epoch_verified_now = sv_ep_post
+          else
+            @known_shapes = {}
+            @epoch_verified_now = false
+          return true
+    # Pattern C: `this.p1 = rhs; this.p2 = this.p1 == null ? c1 : c2;` (kills store-to-load stall on `this.queue` in TCB.run!)
+    if st0.kind == :expr_stmt && st0.a != nil && st0.a.kind == :assign && st0.a.str == "=" && st0.a.a != nil && st0.a.a.kind == :member && !st0.a.a.has?(F_COMPUTED) && st0.a.a.a != nil && st0.a.a.a.kind == :this && st1.kind == :expr_stmt && st1.a != nil && st1.a.kind == :assign && st1.a.str == "=" && st1.a.a != nil && st1.a.a.kind == :member && !st1.a.a.has?(F_COMPUTED) && st1.a.a.a != nil && st1.a.a.a.kind == :this && st1.a.b != nil && st1.a.b.kind == :cond
+      p1 = st0.a.a.b.str
+      p2 = st1.a.a.b.str
+      ce = st1.a.b
+      sl1 = th_f.slot_of(p1)
+      sl2 = th_f.slot_of(p2)
+      if p1 != p2 && sl1 >= 0 && th_f.attrs_of(p1) == ATTR_DEFAULT && sl2 >= 0 && th_f.attrs_of(p2) == ATTR_DEFAULT && !ast_has_call?(st0.a.b) && ce.a != nil && ce.a.kind == :binary && (ce.a.str == "==" || ce.a.str == "===" || ce.a.str == "!=" || ce.a.str == "!==") && ce.a.b != nil && ce.a.b.kind == :null && ce.a.a != nil && ce.a.a.kind == :member && !ce.a.a.has?(F_COMPUTED) && ce.a.a.a != nil && ce.a.a.a.kind == :this && ce.a.a.b.str == p1
+        ia_c = pure_cond_arm_info(ce.b)
+        ib_c = pure_cond_arm_info(ce.c)
+        if ia_c != nil && ib_c != nil && ia_c[0] == :bits && ib_c[0] == :bits
+          enc1 = sl1 < th_f.inline ? (th_f.ibase + sl1) : (0 - (sl1 - th_f.inline) - 1)
+          enc2 = sl2 < th_f.inline ? (th_f.ibase + sl2) : (0 - (sl2 - th_f.inline) - 1)
+          is_eq_c = ce.a.str == "==" || ce.a.str == "==="
+          is_str_c = ce.a.str == "===" || ce.a.str == "!=="
+          gen_expr_any(st0.a.b)
+          load_th.call(R_X9)
+          emit_slot_store(R_X9, enc1, R_X0)
+          l_slow_c = nil
+          l_done_c = nil
+          if !is_str_c && !(!JS_HAS_HTMLDDA[0] && (@hoisted_epoch || @epoch_verified_now))
+            l_slow_c = @a.new_label
+            l_done_c = @a.new_label
+            @a.ldr_x(R_X10, R_X19, RT_K_HTMLDDA_PTR * 8)
+            @a.ldr_x(R_X10, R_X10, 0)
+            @a.cbnz_x(R_X10, l_slow_c)
+          @a.mov_imm64(R_X14, is_eq_c ? ia_c[1] : ib_c[1])
+          @a.mov_imm64(R_X15, is_eq_c ? ib_c[1] : ia_c[1])
+          @a.ldr_x(R_X10, R_X19, RT_K_NULL_BITS * 8)
+          @a.cmp_r(R_X0, R_X10)
+          if is_str_c
+            @a.csel_x(R_X12, R_X14, R_X15, CC_EQ)
+          else
+            @a.csel_x(R_X12, R_X14, R_X15, CC_EQ)
+            @a.cmp_i(R_X0, 0)
+            @a.csel_x(R_X12, R_X14, R_X12, CC_EQ)
+          emit_slot_store(R_X9, enc2, R_X12)
+          if l_slow_c != nil
+            @a.bind(l_done_c)
+            sv_sh_c = @known_shapes.dup; sv_ep_c = @epoch_verified_now
+            cb_fc = ->()
+              @a.bind(l_slow_c)
+              @known_shapes = sv_sh_c.dup; @epoch_verified_now = sv_ep_c
+              gen_stmt(st1)
+              @a.b(l_done_c)
+            add_cold_stub(cb_fc)
+          @known_shapes.delete("this." + p1)
+          @known_shapes.delete("this." + p2)
+          return true
+    false
+
+  -> stmt_reads_member_on_binding?(n, target_b)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if stmt_reads_member_on_binding?(n[i], target_b)
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return false if k == :function || k == :arrow || k == :class || k == :if || k == :while || k == :for || k == :do_while || k == :switch || k == :try
+    if k == :logical || k == :cond
+      return stmt_reads_member_on_binding?(n.a, target_b)
+    if k == :member && !n.has?(F_OPTIONAL) && n.a != nil && n.a.kind == :ident && n.a.x != nil && n.a.x.binding == target_b
+      return true
+    return true if stmt_reads_member_on_binding?(n.a, target_b) || stmt_reads_member_on_binding?(n.b, target_b) || stmt_reads_member_on_binding?(n.c, target_b) || stmt_reads_member_on_binding?(n.d, target_b)
+    stmt_reads_member_on_binding?(n.list, target_b)
+
+  -> emit_sr_hdr_stub(enc_cur, enc_s0_s, enc_d0_s, dst_tr)
+    @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+    if enc_s0_s > 0 && enc_s0_s <= 31
+      @a.ldr_x(R_X14, R_X12, (enc_s0_s + 1) * 8 - 4)
+    else
+      @a.sub_i(R_X9, R_X12, 4)
+      emit_slot_load(R_X14, R_X9, enc_s0_s)
+    if enc_cur > 0 && enc_cur <= 31 && enc_d0_s > 0 && enc_d0_s <= 31
+      @a.str_x(R_X12, R_X13, (enc_cur + 1) * 8 - 4)
+      @a.str_x(R_X14, R_X13, (enc_d0_s + 1) * 8 - 4)
+    else
+      @a.sub_i(R_X13, R_X13, 4)
+      emit_slot_store(R_X13, enc_cur, R_X12)
+      emit_slot_store(R_X13, enc_d0_s, R_X14)
+    @a.mov_r(dst_tr, R_X12)
+    nil
+
+  # General jump-threading / tail-duplication of:
+  #   `if (cond) { ... (uses x.<prop> -> proves x != null!) ... } else { x = null; } return recv.m(x);`
+  # Pushes the polymorphic tail call into both branches with `@known_nonnull` / `@known_null`!
+  -> try_gen_if_null_tail_thread(st0, st1)
+    return false if @in_cold_stub || @in_cs_promo || @inline_env == nil || @inline_ret_mode != :any || @mono_inline_depth > 2 || @l_ret == nil
+    return false if st0 == nil || st1 == nil || st0.kind != :if || st0.c == nil || st1.kind != :return || st1.a == nil
+    ce = st1.a
+    return false if ce.kind != :call || ce.list.size != 1 || ce.a == nil || ce.a.kind != :member || ce.a.has?(F_COMPUTED)
+    return false if !ce.x.is_a?(Array) || ce.x.size < 4
+    ae = ce.list[0]
+    return false if ae.kind != :ident || ae.x == nil || ae.x.binding == nil
+    arg_b = ae.x.binding
+    arg_sk = shape_key(ae)
+    return false if arg_sk == -1
+    # Check else branch is `x = null;` (single stmt) and then branch unconditionally dereferences `x.<prop>` (proving `x != null`)!
+    es = (st0.c.kind == :block && st0.c.list != nil && st0.c.list.size == 1) ? st0.c.list[0] : st0.c
+    return false if es == nil || es.kind != :expr_stmt || es.a == nil || es.a.kind != :assign || es.a.str != "="
+    return false if es.a.a == nil || es.a.a.kind != :ident || es.a.a.x == nil || es.a.a.x.binding != arg_b || es.a.b == nil || es.a.b.kind != :null
+    return false if !stmt_reads_member_on_binding?(st0.b, arg_b)
+    # Ensure `st0.b` does not assign `arg_b` AFTER reading `arg_b.<prop>` (only first assignment allowed before member read!)
+    ts_l = (st0.b.kind == :block && st0.b.list.is_a?(Array)) ? st0.b.list : [st0.b]
+    saw_mem = false
+    ti_jt = 0
+    while ti_jt < ts_l.size
+      st_t = ts_l[ti_jt]
+      if saw_mem && inline_stmt_writes_binding?(st_t, arg_b)
+        return false
+      saw_mem = true if stmt_reads_member_on_binding?(st_t, arg_b)
+      ti_jt += 1
+    return false if !saw_mem
+    sv_sh_jt = @known_shapes.dup
+    sv_ep_jt = @epoch_verified_now
+    sv_kn_jt = @known_null.dup
+    sv_knn_jt = @known_nonnull.dup
+    l_else_jt = @a.new_label
+    gen_cond_branch(st0.a, l_else_jt, false)
+    did_split_tcb_jt = false
+    # Expose split direct-entry targets (`s3` vs `s01`) for fast-run returns when top-level TCB.run branches on `this.<state> == C`!
+    if @while_skip_run_s3 != nil && @while_tcb_s3_lbl == nil && @mono_inline_depth == 1 && @while_skip_tail != nil && @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x && st0.a != nil && st0.a.kind == :binary && (st0.a.str == "==" || st0.a.str == "===") && st0.a.a != nil && st0.a.a.kind == :member && !st0.a.a.has?(F_COMPUTED) && st0.a.a.a != nil && st0.a.a.a.kind == :this && st0.a.b != nil
+      if ts_l.size >= 1 && ts_l[0] != nil && ts_l[0].kind == :expr_stmt && ts_l[0].a != nil && ts_l[0].a.kind == :assign && ts_l[0].a.str == "=" && ts_l[0].a.a != nil && ts_l[0].a.a.kind == :ident && ts_l[0].a.a.x != nil && ts_l[0].a.a.x.binding == arg_b
+        sh_tcb_c = @inline_this_sh
+        if sh_tcb_c.is_a?(JS:Shape) && !sh_tcb_c.dict
+          sl_tc = sh_tcb_c.slot_of(st0.a.a.b.str)
+          enc_tc = sl_tc >= 0 ? (sl_tc < sh_tcb_c.inline ? (sh_tcb_c.ibase + sl_tc) : (0 - (sl_tc - sh_tcb_c.inline) - 1)) : 0
+          if enc_tc == @while_skip_tail[1]
+            cmp_b_jt = 0
+            if st0.a.b.kind == :num && st0.a.b.a == st0.a.b.a && st0.a.b.a != ~0.0
+              cmp_b_jt = wvalue_bits(st0.a.b.a) ## i64
+            elsif st0.a.b.kind == :ident && st0.a.b.x != nil && st0.a.b.x.binding != nil && @info.global_i32s[st0.a.b.x.binding] != nil
+              gv_jt = @info.global_i32s[st0.a.b.x.binding][2]
+              if gv_jt != ~0.0
+                cmp_b_jt = wvalue_bits(gv_jt) ## i64
+            if cmp_b_jt != 0
+              @while_tcb_s3_lbl = @a.new_label
+              @while_tcb_s01_lbl = l_else_jt
+              @while_tcb_cmp_bits = cmp_b_jt
+              @while_tcb_this_reg = @inline_env[:this][1]
+              did_split_tcb_jt = true
+              if @while_sr_hdr != nil && !@while_s3_bound
+                @a.b(@while_tcb_s3_lbl)
+                @a.bind(@while_skip_run_s3)
+                emit_sr_hdr_stub(@while_sr_hdr[0], @while_sr_hdr[1], @while_sr_hdr[2], @while_tcb_this_reg)
+                @while_s3_bound = true
+              @a.bind(@while_tcb_s3_lbl)
+    # Check if `ts_l[0]` assigns `arg_b = <rhs>` and `ts_l[1..]` reads a mono-IC member on `arg_b` (e.g. `packet = this.queue; this.queue = packet.link;`)!
+    # Guarding `arg_b.@shape` ONCE here propagates `Packet` shape into `ts_l[1..]` AND into `st1` (`this.task.run(packet)`), killing all duplicate checks!
+    did_arg_sh_guard = false
+    if ts_l.size >= 2
+      t0_a = ts_l[0]
+      if t0_a != nil && t0_a.kind == :expr_stmt && t0_a.a != nil && t0_a.a.kind == :assign && t0_a.a.str == "=" && t0_a.a.a != nil && t0_a.a.a.kind == :ident && t0_a.a.a.x != nil && t0_a.a.a.x.binding == arg_b
+        rest_ts = []
+        ri_ts = 1
+        while ri_ts < ts_l.size
+          rest_ts.push(ts_l[ri_ts])
+          ri_ts += 1
+        if !inline_stmt_writes_binding?(rest_ts, arg_b)
+          ng_t = [0 ## i64, 0, true, 0]
+          scan_null_guard_obj_shape(rest_ts, false, arg_b, nil, ng_t)
+          if ng_t[2] && ng_t[0] != 0 && ng_t[1] >= 1
+            sh_arg_t = ng_t[0]
+            l_arg_unspec = @a.new_label
+            gen_stmt(t0_a)
+            sv_sh_t0 = @known_shapes.dup
+            sv_ep_t0 = @epoch_verified_now
+            if @inline_env[arg_b] != nil && @inline_env[arg_b][0] == :reg_x
+              @a.sub_i(R_X9, @inline_env[arg_b][1], 4)
+            else
+              gen_expr_any(ae)
+              @a.sub_i(R_X9, R_X0, 4)
+            @a.tst_wobj_bad(R_X9)
+            @a.b_cond(CC_NE, l_arg_unspec)
+            @a.cbz_x(R_X9, l_arg_unspec)
+            @a.ldr_x(R_X10, R_X9, 8)
+            emit_cmp_shape(R_X10, sh_arg_t)
+            @a.b_cond(CC_NE, l_arg_unspec)
+            @known_shapes[arg_sk] = sh_arg_t
+            @known_null.delete(arg_sk)
+            @known_nonnull[arg_sk] = true
+            gen_stmts(rest_ts)
+            gen_stmt(st1)
+            cb_au = ->()
+              @a.bind(l_arg_unspec)
+              @known_shapes = sv_sh_t0.dup
+              @epoch_verified_now = sv_ep_t0
+              @known_null = sv_kn_jt.dup
+              @known_nonnull = sv_knn_jt.dup
+              gen_stmts(rest_ts)
+              @known_null.delete(arg_sk)
+              @known_nonnull[arg_sk] = true
+              gen_stmt(st1)
+            add_cold_stub(cb_au)
+            did_arg_sh_guard = true
+    if !did_arg_sh_guard
+      gen_stmt(st0.b)
+      @known_null.delete(arg_sk)
+      @known_nonnull[arg_sk] = true
+      gen_stmt(st1)
+    if did_split_tcb_jt && @while_skip_run_s01 != nil && @while_sr_hdr != nil && !@while_s01_bound
+      @a.bind(@while_skip_run_s01)
+      emit_sr_hdr_stub(@while_sr_hdr[0], @while_sr_hdr[1], @while_sr_hdr[2], @while_tcb_this_reg)
+      @while_s01_bound = true
+    @a.bind(l_else_jt)
+    @known_shapes = sv_sh_jt.dup
+    @epoch_verified_now = sv_ep_jt
+    @known_null = sv_kn_jt.dup
+    @known_nonnull = sv_knn_jt.dup
+    gen_stmt(st0.c)
+    @known_nonnull.delete(arg_sk)
+    @known_null[arg_sk] = true
+    gen_stmt(st1)
+    @known_shapes = {}
+    @known_null = sv_kn_jt
+    @known_nonnull = sv_knn_jt
+    true
+
+  # Zero-stall 6-insn fast path for `o.markAsX(); return o;` (`suspendCurrent`) AND `o.markAsX(); return o.<nxt>;` (`holdCurrent`)
+  # inside a fused `while` skip-loop: when `state == 0` and `(0 | iv)` is guaranteed skipped, writes `new_state`, loads `o.link` into R_X12,
+  # and jumps DIRECTLY to `l_skip_loop` (zero `l_loop_back` dirty check, zero `ccmp`, zero reload of `o`!)
+  -> try_gen_set_bit_tail_skip(st0, st1)
+    return false if @in_cold_stub || @in_cs_promo || @while_skip_tail == nil || @while_loop_back_lbl == nil || @l_ret != @while_loop_back_lbl
+    return false if st0 == nil || st1 == nil || st0.kind != :expr_stmt || st0.a == nil || st0.a.kind != :call || st0.a.list.size != 0
+    return false if st1.kind != :return || st1.a == nil
+    ce = st0.a
+    return false if ce.a == nil || ce.a.kind != :member || ce.a.has?(F_COMPUTED) || !ce.x.is_a?(Array) || ce.x.size < 2
+    oe0 = ce.a.a
+    oe1 = st1.a
+    is_ret_nxt = false
+    same_o = false
+    if oe0.kind == :member && !oe0.has?(F_COMPUTED) && oe0.a != nil && oe0.a.kind == :this && oe1.kind == :member && !oe1.has?(F_COMPUTED) && oe1.a != nil && oe1.a.kind == :this && oe0.b.str == oe1.b.str
+      same_o = true
+    elsif oe0.kind == :ident && oe0.x != nil && oe1.kind == :ident && oe1.x != nil && oe0.x.binding == oe1.x.binding && !oe0.x.binding.global?
+      same_o = true
+    elsif oe1.kind == :member && !oe1.has?(F_COMPUTED) && oe1.a != nil && oe1.b != nil
+      ret_o = oe1.a
+      if oe0.kind == :member && !oe0.has?(F_COMPUTED) && oe0.a != nil && oe0.a.kind == :this && ret_o.kind == :member && !ret_o.has?(F_COMPUTED) && ret_o.a != nil && ret_o.a.kind == :this && oe0.b.str == ret_o.b.str
+        same_o = true
+        is_ret_nxt = true
+      elsif oe0.kind == :ident && oe0.x != nil && ret_o.kind == :ident && ret_o.x != nil && oe0.x.binding == ret_o.x.binding && !oe0.x.binding.global?
+        same_o = true
+        is_ret_nxt = true
+    return false if !same_o
+    osk = shape_key(oe0)
+    sh_skip_b = @while_skip_tail[0]
+    return false if osk == -1 || @known_shapes[osk] != sh_skip_b
+    mname_ts = ce.a.b.str
+    sh_o = nil
+    tjf_o = nil
+    plan_o = nil
+    qi = 0
+    while qi < ce.x.size
+      sh_c = ce.x[qi]
+      fn_c = ce.x[qi + 1]
+      if sh_c.is_a?(JS:Shape) && (wvalue_bits(sh_c) ## i64) == sh_skip_b && !sh_c.dict && sh_c.slot_of(mname_ts) < 0 && fn_c.is_a?(JS:Function) && fn_c.code != nil && fn_c.code.node.is_a?(JaFunc) && js_shape_proto_method_eq?(sh_c, mname_ts, fn_c)
+        pl_c = poly_classify_method(fn_c.code.node, sh_c, 0)
+        if pl_c != nil && pl_c[0] == :set_bit && pl_c[1] == @while_skip_tail[1]
+          sh_o = sh_c
+          tjf_o = fn_c.code.node
+          plan_o = pl_c
+          break
+      qi += 2
+    return false if plan_o == nil
+    if is_ret_nxt
+      sl_rn = sh_o.slot_of(oe1.b.str)
+      return false if sl_rn < 0 || (sh_o.attrs_of(oe1.b.str) & ATTR_ACCESSOR) != 0
+      enc_rn = sl_rn < sh_o.inline ? (sh_o.ibase + sl_rn) : (0 - (sl_rn - sh_o.inline) - 1)
+      return false if enc_rn != @while_skip_tail[2]
+    jit_keep(sh_o)
+    jit_keep(mname_ts)
+    l_slow = @a.new_label
+    if !@hoisted_epoch && !@epoch_verified_now
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    iv_ts = plan_o[3][0] == :gnum ? plan_o[3][3] : plan_o[3][2]
+    is_and_ts = plan_o[2] == "&"
+    iv1_w = @while_skip_tail[3]
+    iv2_w = @while_skip_tail[4]
+    zero_res_ts = is_and_ts ? (0 & iv_ts) : (0 | iv_ts)
+    zero_skips_ts = ((zero_res_ts & iv1_w) != 0) || (zero_res_ts == iv2_w)
+    if @inline_this_is_outer && @while_skip_loop_lbl != nil && !is_and_ts && zero_res_ts >= 1 && zero_res_ts <= 7 && (is_ret_nxt || zero_skips_ts)
+      # Ultra-fast direct-to-`l_skip_loop` path (zero `l_loop_back` dirty check!):
+      # - `is_ret_nxt` (`holdCurrent`): handles BOTH `state == 0` and `state == 1` branchlessly!
+      # - `!is_ret_nxt` (`suspendCurrent`): `state == 0` -> 6 insns straight to `o.link` -> `l_skip_loop`!
+      emit_poly_const_load(R_X10, plan_o[3], l_slow, false)
+      gen_expr_any(oe0)
+      @a.sub_i(R_X9, R_X0, 4)
+      emit_slot_load(R_X10, R_X9, plan_o[1])
+      one_res_ts = 1 | iv_ts
+      one_skips_ts = ((one_res_ts & iv1_w) != 0) || (one_res_ts == iv2_w)
+      if one_res_ts >= 1 && one_res_ts <= 7 && (is_ret_nxt || one_skips_ts)
+        @a.mov_imm64(R_X15, wvalue_bits(~1.0) ## i64)
+        @a.cmp_r(R_X10, R_X20)
+        @a.ccmp_r(R_X10, R_X15, 4, CC_NE)
+        @a.b_cond(CC_NE, l_slow)
+        @a.mov_imm64(R_X14, wvalue_bits(zero_res_ts.to_f) ## i64)
+        @a.mov_imm64(R_X15, wvalue_bits(one_res_ts.to_f) ## i64)
+        @a.cmp_r(R_X10, R_X20)
+        @a.csel_x(R_X10, R_X14, R_X15, CC_EQ)
+        emit_slot_store(R_X9, plan_o[1], R_X10)
+        emit_slot_load(R_X12, R_X9, @while_skip_tail[2])
+        @a.b(@while_skip_loop_lbl)
+      else
+        dst_one_ts = nil
+        one_bits_ts = 0
+        if !is_ret_nxt && one_res_ts >= 1 && one_res_ts <= 7 && !one_skips_ts
+          one_bits_ts = wvalue_bits(one_res_ts.to_f) ## i64
+          if @while_skip_run_s3 != nil && @while_skip_run_s01 != nil && @while_tcb_cmp_bits != 0
+            dst_one_ts = (one_bits_ts == @while_tcb_cmp_bits) ? @while_skip_run_s3 : @while_skip_run_s01
+          elsif @while_skip_run_lbl != nil
+            dst_one_ts = @while_skip_run_lbl
+        if dst_one_ts != nil
+          l_st1_chk = @a.new_label
+          @a.cmp_r(R_X10, R_X20)
+          @a.b_cond(CC_NE, l_st1_chk)
+          @a.mov_imm64(R_X10, wvalue_bits(zero_res_ts.to_f) ## i64)
+          emit_slot_store(R_X9, plan_o[1], R_X10)
+          emit_slot_load(R_X12, R_X9, @while_skip_tail[2])
+          @a.b(@while_skip_loop_lbl)
+          @a.bind(l_st1_chk)
+          @a.mov_imm64(R_X15, wvalue_bits(~1.0) ## i64)
+          @a.cmp_r(R_X10, R_X15)
+          @a.b_cond(CC_NE, l_slow)
+          @a.mov_imm64(R_X10, one_bits_ts)
+          emit_slot_store(R_X9, plan_o[1], R_X10)
+          @a.mov_r(R_X12, R_X0)
+          @a.b(dst_one_ts)
+        else
+          @a.cmp_r(R_X10, R_X20)
+          @a.b_cond(CC_NE, l_slow)
+          @a.mov_imm64(R_X10, wvalue_bits(zero_res_ts.to_f) ## i64)
+          emit_slot_store(R_X9, plan_o[1], R_X10)
+          emit_slot_load(R_X12, R_X9, @while_skip_tail[2])
+          @a.b(@while_skip_loop_lbl)
+    else
+      gen_expr_any(oe0)
+      @a.mov_r(R_X13, R_X0)
+      emit_poly_plan(plan_o, sh_o, -1, tjf_o, [], l_slow)
+      emit_slot_load(R_X11, R_X9, @while_skip_tail[2])
+      if is_ret_nxt
+        @a.mov_r(R_X0, R_X11)
+        @a.b(@l_ret)
+      else
+        @a.sub_r(R_X14, R_X10, R_X20)
+        @a.mov_r(R_X0, R_X13)
+        @a.cmp_r(R_X14, R_X6)
+        @a.b_cond(CC_HS, @l_ret)
+        @a.cmp_r(R_X14, R_X7)
+        @a.ccmp_r(R_X14, R_X8, 4, CC_LO)
+        @a.csel_x(R_X0, R_X11, R_X13, CC_EQ)
+        @a.b(@l_ret)
+    sv_sh_ts = @known_shapes.dup
+    sv_ep_ts = @epoch_verified_now
+    cb_ts = ->()
+      @a.bind(l_slow)
+      @known_shapes = {}
+      @epoch_verified_now = false
+      gen_stmt(st0)
+      gen_stmt(st1)
+    add_cold_stub(cb_ts)
+    @known_shapes = sv_sh_ts
+    @epoch_verified_now = sv_ep_ts
+    true
+
+  # Direct 13-slot monomorphic table lookup + fused null-check elimination for:
+  #   `var t = this.<wta_arr>[idx]; if (t == null) return t; <rest>`
+  # Eliminates 16-insn nibble LUT, bounds check, HOLE_BITS check, `if (t == null)`, AND `t.@shape == sh_nd_b`!
+  -> try_gen_wta_mono_lookup_guard(list, i)
+    return false if @in_cold_stub || @in_cs_promo || !@inline_this_is_outer || @while_this_arr == nil || @while_this_arr.size < 7 || @while_this_arr[5] < 0
+    return false if i + 2 >= list.size
+    st0 = list[i]
+    st1 = list[i + 1]
+    return false if st0 == nil || st1 == nil || st0.kind != :var_decl || !st0.list.is_a?(Array) || st0.list.size != 1
+    d0 = st0.list[0]
+    return false if d0 == nil || d0.a == nil || d0.a.kind != :ident || d0.a.x == nil || d0.a.x.binding == nil || d0.b == nil
+    tb = d0.a.x.binding
+    return false if tb.global?
+    rhs = d0.b
+    return false if rhs.kind != :member || !rhs.has?(F_COMPUTED) || rhs.a == nil || rhs.a.kind != :member || rhs.a.has?(F_COMPUTED) || rhs.a.a == nil || rhs.a.a.kind != :this || rhs.a.b.str != @while_this_arr[0]
+    idx_e = rhs.b
+    return false if idx_e == nil || ast_has_call?(idx_e)
+    use_i32_w = can_i32?(idx_e)
+    eb_pure_w = idx_e.kind == :num || idx_e.kind == :ident || (idx_e.kind == :member && !idx_e.has?(F_COMPUTED) && idx_e.a != nil && shape_key(idx_e.a) != -1 && @known_shapes[shape_key(idx_e.a)] != nil)
+    return false if !use_i32_w && !eb_pure_w
+    # Match `if (t == null) return t;` (or `=== null`, with or without block)
+    return false if st1.kind != :if || st1.c != nil || st1.a == nil || st1.a.kind != :binary || (st1.a.str != "==" && st1.a.str != "===") || st1.a.b == nil || st1.a.b.kind != :null
+    return false if st1.a.a == nil || st1.a.a.kind != :ident || st1.a.a.x == nil || st1.a.a.x.binding != tb
+    ret_b = (st1.b.kind == :block && st1.b.list.is_a?(Array) && st1.b.list.size == 1) ? st1.b.list[0] : st1.b
+    return false if ret_b == nil || ret_b.kind != :return || ret_b.a == nil || ret_b.a.kind != :ident || ret_b.a.x == nil || ret_b.a.x.binding != tb
+    tsk = binding_shape_key(tb)
+    return false if tsk == -1
+    wta_w = @while_this_arr
+    tbl_off_w = wta_w[5]
+    sh_elem_w = wta_w[6]
+    l_wm_miss = @a.new_label
+    l_wm_end = @a.new_label
+    sv_sh_w = @known_shapes.dup
+    sv_ep_w = @epoch_verified_now
+    sv_it_w = @inline_this_is_outer
+    if use_i32_w
+      gen_expr_i32(idx_e)
+      @a.sxtw(R_X11, R_X0)
+      @a.ldr_x(R_X10, R_SP, tbl_off_w + 96)
+      @a.cbz_x(R_X10, l_wm_miss)
+      @a.ldr_x(R_X10, R_SP, wta_w[2])
+      @a.cmp_r(R_X11, R_X10)
+      @a.b_cond(CC_HS, l_wm_miss)
+      @a.ldr_x(R_X9, R_SP, wta_w[1])
+      @a.ldr_x_idx(R_X0, R_X9, R_X11)
+    else
+      gen_expr_any(idx_e)
+      @a.mov_r(R_X12, R_X0)
+      @a.sub_r(R_X9, R_X12, R_X20)
+      @a.ror_xi(R_X10, R_X9, 50)
+      @a.sub_i(R_X10, R_X10, 4092)
+      @a.movz_x(R_X14, 12)
+      @a.cmp_r(R_X12, R_X20)
+      @a.csel_x(R_X10, R_X14, R_X10, CC_EQ)
+      @a.cmp_i(R_X10, 12)
+      @a.b_cond(CC_HI, l_wm_miss)
+      @a.add_i(R_X9, R_SP, tbl_off_w)
+      @a.ldr_x_idx(R_X0, R_X9, R_X10)
+      @a.cbz_x(R_X0, l_wm_miss)
+    emit_write_binding(tb, R_X0, st0.str != "var")
+    @known_shapes[tsk] = sh_elem_w
+    rest_w = []
+    ri_w = i + 2
+    while ri_w < list.size
+      rest_w.push(list[ri_w])
+      ri_w += 1
+    gen_stmts(rest_w)
+    @a.bind(l_wm_end)
+    cb_wm = ->()
+      @a.bind(l_wm_miss)
+      @known_shapes = sv_sh_w.dup
+      @epoch_verified_now = sv_ep_w
+      @inline_this_is_outer = sv_it_w
+      gen_stmt(st0)
+      gen_stmt(st1)
+      gen_stmts(rest_w)
+      @a.b(l_wm_end)
+    add_cold_stub(cb_wm)
+    @known_shapes = {}
+    @epoch_verified_now = false
+    true
+
   -> gen_stmts(list)
     return nil if list == nil
     i = 0
     while i < list.size
-      if i + 1 < list.size && try_gen_prereserved_push_loop(list[i], list[i + 1])
+      if i + 2 < list.size && try_gen_wta_mono_lookup_guard(list, i)
+        return nil
+      elsif i + 1 == list.size - 1 && try_gen_if_null_tail_thread(list[i], list[i + 1])
+        i += 2
+      elsif i + 1 == list.size - 1 && try_gen_set_bit_tail_skip(list[i], list[i + 1])
+        i += 2
+      elsif i + 1 < list.size && try_gen_prereserved_push_loop(list[i], list[i + 1])
+        i += 2
+      elsif i + 1 < list.size && list[i].kind == :for_in && list[i + 1].kind == :for_in && match_for_in_only_missing(list[i + 1]) != nil
+        m2 = match_for_in_only_missing(list[i + 1])
+        l_skip2 = @a.new_label
+        gen_for_in_loop(list[i], m2, l_skip2)
+        gen_for_in_loop(list[i + 1])
+        @a.bind(l_skip2)
         i += 2
       else
-        gen_stmt(list[i])
+        bp = i + 1 < list.size ? try_gen_batched_local_push(list, i) : 0
+        if bp >= 2
+          i += bp
+        elsif i + 1 < list.size && try_gen_this_prop_pair_fuse(list[i], list[i + 1])
+          i += 2
+        else
+          sc_n = i + 1 < list.size ? try_gen_this_shape_chain(list, i) : 0
+          if sc_n >= 2
+            i += sc_n
+            next
+          st_cur = list[i]
+          had_this_sh = @known_shapes[-2]
+          @last_stmt_exited = false
+          gen_stmt(st_cur)
+          break if @last_stmt_exited || stmt_always_exits?(st_cur)
+          @inline_this_is_outer = false if @known_shapes[-2] == nil || !@epoch_verified_now
+          # Post-`if` monomorphic `this` shape recovery (100% sound 4-insn check):
+          # If an `if` branch cleared `@known_shapes[-2]` (e.g. `if (p != null) p.addTo(...)` in HandlerTask.run),
+          # re-verify `this.@shape` ONCE for the rest of the block so all subsequent `this.v1`/`this.v2` & null-guards stay direct!
+          if !@in_cs_promo && !@in_cold_stub && i + 1 < list.size && st_cur.kind == :if && had_this_sh != nil && @known_shapes[-2] == nil
+            exp_th = @inline_this_sh != nil ? (wvalue_bits(@inline_this_sh) ## i64) : @this_mono_sh
+            if exp_th != 0 && exp_th == had_this_sh
+              rest_th = []
+              ri_th = i + 1
+              while ri_th < list.size
+                rest_th.push(list[ri_th])
+                ri_th += 1
+              if count_this_prop_uses(rest_th) >= 2
+                l_th_unspec = @a.new_label
+                l_th_end = @a.new_label
+                sv_sh_th = @known_shapes.dup
+                sv_ep_th = @epoch_verified_now
+                # `this` binding is immutable and was already proven to be a WObject when `had_this_sh` was set!
+                if @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+                  @a.sub_i(R_X9, @inline_env[:this][1], 4)
+                elsif @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :spill_x
+                  @a.ldr_x(R_X9, R_SP, @inline_env[:this][1])
+                  @a.sub_i(R_X9, R_X9, 4)
+                else
+                  @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+                  @a.sub_i(R_X9, R_X9, 4)
+                @a.ldr_x(R_X10, R_X9, 8)
+                emit_cmp_shape(R_X10, exp_th)
+                @a.b_cond(CC_NE, l_th_unspec)
+                @known_shapes[-2] = exp_th
+                gen_stmts(rest_th)
+                @a.bind(l_th_end)
+                cb_th = ->()
+                  @a.bind(l_th_unspec)
+                  @known_shapes = sv_sh_th.dup
+                  @epoch_verified_now = sv_ep_th
+                  gen_stmts(rest_th)
+                  @a.b(l_th_end)
+                add_cold_stub(cb_th)
+                @known_shapes.delete(-2)
+                return nil
+          # Post-early-return `if (e == null) return ...;` monomorphic shape guard for rest of block (`Scheduler.release`, `Scheduler.queue`, `WorkerTask.run`!)
+          if !@in_cs_promo && !@in_cold_stub && i + 1 < list.size && st_cur.kind == :if && st_cur.c == nil && stmt_always_exits?(st_cur.b) && st_cur.a != nil && st_cur.a.kind == :binary && (st_cur.a.str == "==" || st_cur.a.str == "===") && st_cur.a.b != nil && st_cur.a.b.kind == :null && st_cur.a.a != nil
+            ng_e = st_cur.a.a
+            cand_sk = shape_key(ng_e)
+            if cand_sk != -1 && @known_shapes[cand_sk] == nil
+              ng_is_tp = false
+              ng_b = nil
+              ng_p = nil
+              ng_ok = false
+              if ng_e.kind == :ident && ng_e.x != nil && ng_e.x.binding != nil && !ng_e.x.binding.global?
+                ng_b = ng_e.x.binding
+                ng_ok = true
+              elsif ng_e.kind == :member && !ng_e.has?(F_COMPUTED) && ng_e.a != nil && ng_e.a.kind == :this && @known_shapes[-2] != nil
+                th_o = @inline_this_sh != nil ? @inline_this_sh : wvalue_from_bits(@known_shapes[-2])
+                if th_o.is_a?(JS:Shape) && !th_o.dict
+                  tsl = th_o.slot_of(ng_e.b.str)
+                  if tsl >= 0 && (th_o.attrs_of(ng_e.b.str) & ATTR_ACCESSOR) == 0
+                    ng_is_tp = true
+                    ng_p = ng_e.b.str
+                    ng_ok = true
+              if ng_ok
+                rest = []
+                ri = i + 1
+                while ri < list.size
+                  rest.push(list[ri])
+                  ri += 1
+                ng_st = [0 ## i64, 0, true, 0]
+                scan_null_guard_obj_shape(rest, ng_is_tp, ng_b, ng_p, ng_st)
+                if ng_st[2] && ng_st[0] != 0 && ng_st[1] >= 1 && ng_st[3] >= 2
+                  l_rest_unspec = @a.new_label
+                  l_rest_end = @a.new_label
+                  sv_sh_r = @known_shapes.dup
+                  sv_ep_r = @epoch_verified_now
+                  gen_expr_any(ng_e)
+                  @a.sub_i(R_X9, R_X0, 4)
+                  @a.tst_wobj_bad(R_X9)
+                  @a.b_cond(CC_NE, l_rest_unspec)
+                  @a.cbz_x(R_X9, l_rest_unspec)
+                  @a.ldr_x(R_X10, R_X9, 8)
+                  emit_cmp_shape(R_X10, ng_st[0])
+                  @a.b_cond(CC_NE, l_rest_unspec)
+                  @known_shapes[cand_sk] = ng_st[0]
+                  gen_stmts(rest)
+                  @a.bind(l_rest_end)
+                  cb_nr = ->()
+                    @a.bind(l_rest_unspec)
+                    @known_shapes = sv_sh_r.dup
+                    @epoch_verified_now = sv_ep_r
+                    gen_stmts(rest)
+                    @a.b(l_rest_end)
+                  add_cold_stub(cb_nr)
+                  @known_shapes.delete(cand_sk)
+                  return nil
+          i += 1
+    nil
+
+  # Match pure 32-bit bitwise/shift expression of `this.<prop>` -> [:shr, k] | [:shr_xor, k, kv] | [:xor, kv] | [:and, kv] | [:or, kv] | nil
+  -> match_this_prop_bitop(rhs, prop)
+    return nil if rhs == nil || rhs.kind != :binary
+    op = rhs.str
+    if op == ">>" && rhs.a.kind == :member && !rhs.a.has?(F_COMPUTED) && rhs.a.a.kind == :this && rhs.a.b.str == prop && rhs.b.kind == :num && jit_int32_lit?(rhs.b)
+      return [:shr, rhs.b.a.to_i & 31]
+    if op == "^" && rhs.b.kind == :num && jit_int32_lit?(rhs.b)
+      if rhs.a.kind == :binary && rhs.a.str == ">>" && rhs.a.a.kind == :member && !rhs.a.a.has?(F_COMPUTED) && rhs.a.a.a.kind == :this && rhs.a.a.b.str == prop && rhs.a.b.kind == :num && jit_int32_lit?(rhs.a.b)
+        return [:shr_xor, rhs.a.b.a.to_i & 31, rhs.b.a.to_i]
+      if rhs.a.kind == :member && !rhs.a.has?(F_COMPUTED) && rhs.a.a.kind == :this && rhs.a.b.str == prop
+        return [:xor, rhs.b.a.to_i]
+    nil
+
+  -> emit_this_prop_bitop_w(dst_w, src_w, plan)
+    pk = plan[0]
+    if pk == :shr
+      if plan[1] > 0
+        @a.asr_wi(dst_w, src_w, plan[1])
+      else
+        @a.mov_w(dst_w, src_w) if dst_w != src_w
+    elsif pk == :shr_xor
+      if plan[1] > 0
+        @a.asr_wi(dst_w, src_w, plan[1])
+      else
+        @a.mov_w(dst_w, src_w) if dst_w != src_w
+      @a.mov_imm32(R_X10, plan[2])
+      @a.eor_w(dst_w, dst_w, R_X10)
+    elsif pk == :xor
+      @a.mov_imm32(R_X10, plan[1])
+      @a.eor_w(dst_w, src_w, R_X10)
+    nil
+
+  # General if-conversion + tail-call arg merging for:
+  #   `if ((this.p & 1) == 0) { this.p = op1(this.p); [return this.m.f(a1);] } else { this.p = op2(this.p); [return this.m.f(a2);] }`
+  # Eliminates unpredictable 50/50 branch mispredictions, redundant property load+unbox, and duplicate tail call code!
+  -> try_gen_branchless_bitop_if(s)
+    return false if s == nil || s.c == nil || @in_cs_promo || @in_cold_stub
+    cond = s.a
+    return false if cond == nil || cond.kind != :binary
+    cop = cond.str
+    return false if cop != "==" && cop != "===" && cop != "!=" && cop != "!=="
+    return false if cond.b == nil || cond.b.kind != :num || cond.b.a != ~0.0
+    return false if cond.a == nil || cond.a.kind != :binary || cond.a.str != "&"
+    return false if cond.a.b == nil || cond.a.b.kind != :num || cond.a.b.a != ~1.0
+    lhs_c = cond.a.a
+    return false if lhs_c == nil || lhs_c.kind != :member || lhs_c.has?(F_COMPUTED) || lhs_c.a == nil || lhs_c.a.kind != :this
+    prop = lhs_c.b.str
+    ts = s.b.kind == :block ? s.b.list : [s.b]
+    es = s.c.kind == :block ? s.c.list : [s.c]
+    return false if ts.size != es.size || (ts.size != 1 && ts.size != 2)
+    t0 = ts[0]
+    e0 = es[0]
+    return false if t0.kind != :expr_stmt || e0.kind != :expr_stmt
+    return false if t0.a.kind != :assign || t0.a.str != "=" || e0.a.kind != :assign || e0.a.str != "="
+    return false if t0.a.a.kind != :member || t0.a.a.has?(F_COMPUTED) || t0.a.a.a.kind != :this || t0.a.a.b.str != prop
+    return false if e0.a.a.kind != :member || e0.a.a.has?(F_COMPUTED) || e0.a.a.a.kind != :this || e0.a.a.b.str != prop
+    p_then = match_this_prop_bitop(t0.a.b, prop)
+    p_else = match_this_prop_bitop(e0.a.b, prop)
+    return false if p_then == nil || p_else == nil
+    # Resolve writable own slot on `this`!
+    sh_b = 0 ## i64
+    sl_enc = 0 ## i64
+    if @known_shapes[-2] != nil
+      sh_o = @inline_this_sh != nil ? @inline_this_sh : wvalue_from_bits(@known_shapes[-2])
+      if sh_o.is_a?(JS:Shape) && !sh_o.dict
+        sl_i = sh_o.slot_of(prop)
+        if sl_i >= 0 && sh_o.attrs_of(prop) == ATTR_DEFAULT
+          sh_b = wvalue_bits(sh_o) ## i64
+          sl_enc = sl_i < sh_o.inline ? (sh_o.ibase + sl_i) : (0 - (sl_i - sh_o.inline) - 1)
+    elsif jit_ic_valid?(lhs_c.x) && lhs_c.x[0] != 0 && lhs_c.x[2] == 0 && lhs_c.x[1] != 0
+      sh_o = wvalue_from_bits(lhs_c.x[0])
+      if sh_o.is_a?(JS:Shape) && !sh_o.dict && sh_o.attrs_of(prop) == ATTR_DEFAULT
+        sh_b = lhs_c.x[0]
+        sl_enc = lhs_c.x[1]
+    return false if sh_b == 0 || sl_enc == 0
+    # Optional common tail `return this.m.f(arg1)` / `return this.m.f(arg2)` with pure constant/global_i32 args!
+    tail_call = nil
+    ci1 = nil
+    ci2 = nil
+    if ts.size == 2
+      t1 = ts[1]
+      e1 = es[1]
+      return false if t1.kind != :return || e1.kind != :return || t1.a == nil || e1.a == nil
+      return false if t1.a.kind != :call || e1.a.kind != :call || t1.a.list.size != 1 || e1.a.list.size != 1
+      return false if t1.a.a.kind != :member || t1.a.a.has?(F_COMPUTED) || e1.a.a.kind != :member || e1.a.a.has?(F_COMPUTED) || t1.a.a.b.str != e1.a.a.b.str
+      return false if t1.a.a.a.kind != :member || t1.a.a.a.has?(F_COMPUTED) || t1.a.a.a.a.kind != :this
+      return false if e1.a.a.a.kind != :member || e1.a.a.a.has?(F_COMPUTED) || e1.a.a.a.a.kind != :this || t1.a.a.a.b.str != e1.a.a.a.b.str
+      ci1 = poly_const_info(t1.a.list[0])
+      ci2 = poly_const_info(e1.a.list[0])
+      return false if ci1 == nil || ci2 == nil
+      return false if (ci1[0] != :lit && ci1[0] != :gnum) || (ci2[0] != :lit && ci2[0] != :gnum)
+      tail_call = (t1.a.x.is_a?(Array) && t1.a.x.size >= 2) ? t1.a : e1.a
+    eq0 = cop == "==" || cop == "==="
+    cc_then = eq0 ? CC_EQ : CC_NE
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    # Guard any global_i32 tail-call constants BEFORE mutating `this.<prop>`!
+    if tail_call != nil
+      emit_poly_const_load(R_X10, ci1, l_slow, false)
+      emit_poly_const_load(R_X10, ci2, l_slow, false)
+    gen_expr_any(lhs_c.a)
+    @a.sub_i(R_X9, R_X0, 4)
+    if @known_shapes[-2] != sh_b
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X10, R_X9, 8)
+      emit_cmp_shape(R_X10, sh_b)
+      @a.b_cond(CC_NE, l_slow)
+    emit_slot_load(R_X12, R_X9, sl_enc)
+    emit_unbox_f64(R_D0, R_X12, l_slow)
+    emit_f64_to_i32(R_X12, R_D0)
+    emit_this_prop_bitop_w(R_X14, R_X12, p_then)
+    emit_this_prop_bitop_w(R_X15, R_X12, p_else)
+    @a.tst_x_lowmask(R_X12, 1)
+    @a.csel_w(R_X10, R_X14, R_X15, cc_then)
+    emit_box_i32(R_X10, R_X10)
+    emit_slot_store(R_X9, sl_enc, R_X10)
+    if tail_call != nil
+      iv1_b = ci1[0] == :gnum ? ci1[3] : ci1[2]
+      iv2_b = ci2[0] == :gnum ? ci2[3] : ci2[2]
+      @a.mov_imm32(R_X14, iv1_b)
+      @a.mov_imm32(R_X15, iv2_b)
+      @a.tst_x_lowmask(R_X12, 1)
+      @a.csel_w(R_X0, R_X14, R_X15, cc_then)
+      arg_off = push_x(R_X0)
+      sp_arg = JsNode.new(:jit_spill_w, 0, 0, "", arg_off, nil, nil, nil, 0)
+      syn_call = JsNode.new(:call, 0, 0, "", tail_call.a, nil, nil, [sp_arg], 0)
+      syn_call.x = tail_call.x
+      syn_ret = JsNode.new(:return, 0, 0, "", syn_call, nil, nil, nil, 0)
+      gen_stmt(syn_ret)
+      @tmp_depth -= 1
+    @a.bind(l_done)
+    cb_bi = ->()
+      @a.bind(l_slow)
+      sv_sh = @known_shapes
+      sv_ep = @epoch_verified_now
+      @known_shapes = {}
+      @epoch_verified_now = false
+      l_se = @a.new_label
+      gen_cond_branch(s.a, l_se, false)
+      gen_stmt(s.b)
+      @a.b(l_done)
+      @a.bind(l_se)
+      @known_shapes = {}
+      @epoch_verified_now = false
+      gen_stmt(s.c)
+      @known_shapes = sv_sh
+      @epoch_verified_now = sv_ep
+      @a.b(l_done)
+    add_cold_stub(cb_bi)
+    true
+
+  # Scan `n` for warm monomorphic own-slot reads/writes/calls on `target_e` (`ident` or `this.<prop>`).
+  # `st = [shape_bits, warm_cnt, consistent, total_uses]` (counts warm + cold member uses + alias copies `v = target_e`).
+  -> scan_null_guard_obj_shape(n, is_tp, key_b, prop_s, st)
+    return nil if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        scan_null_guard_obj_shape(n[i], is_tp, key_b, prop_s, st)
         i += 1
+      return nil
+    return nil if !n.is_a?(JsNode)
+    k = n.kind
+    return nil if k == :function || k == :arrow
+    if (k == :member && !n.has?(F_COMPUTED))
+      matched = false
+      if is_tp
+        matched = n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.a.a != nil && n.a.a.kind == :this && n.a.b.str == prop_s
+      else
+        matched = n.a != nil && n.a.kind == :ident && n.a.x != nil && n.a.x.binding == key_b
+      if matched
+        st[3] = st[3] + 1
+        if jit_ic_valid?(n.x) && n.x[0] != 0 && n.x[2] == 0 && n.x[1] != 0 && (n.x.size < 8 || n.x[4] == 0)
+          sh_b = n.x[0]
+          if st[0] == 0
+            st[0] = sh_b
+            st[1] = st[1] + 1
+          elsif st[0] == sh_b
+            st[1] = st[1] + 1
+          else
+            st[2] = false
+    if k == :assign && n.str == "=" && n.a != nil && n.a.kind == :ident && n.b != nil
+      m_al = false
+      if is_tp
+        m_al = n.b.kind == :member && !n.b.has?(F_COMPUTED) && n.b.a != nil && n.b.a.kind == :this && n.b.b.str == prop_s
+      else
+        m_al = n.b.kind == :ident && n.b.x != nil && n.b.x.binding == key_b
+      st[3] = st[3] + 1 if m_al
+    if k == :var_decl && n.list.is_a?(Array)
+      vi_ng = 0
+      while vi_ng < n.list.size
+        vd_ng = n.list[vi_ng]
+        if vd_ng != nil && vd_ng.b != nil
+          m_vd = false
+          if is_tp
+            m_vd = vd_ng.b.kind == :member && !vd_ng.b.has?(F_COMPUTED) && vd_ng.b.a != nil && vd_ng.b.a.kind == :this && vd_ng.b.b.str == prop_s
+          else
+            m_vd = vd_ng.b.kind == :ident && vd_ng.b.x != nil && vd_ng.b.x.binding == key_b
+          st[3] = st[3] + 1 if m_vd
+        vi_ng += 1
+    if k == :call && n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.x.is_a?(Array) && n.x.size == 2 && n.x[0].is_a?(JS:Shape)
+      matched = false
+      if is_tp
+        matched = n.a.a != nil && n.a.a.kind == :member && !n.a.a.has?(F_COMPUTED) && n.a.a.a != nil && n.a.a.a.kind == :this && n.a.a.b.str == prop_s
+      else
+        matched = n.a.a != nil && n.a.a.kind == :ident && n.a.a.x != nil && n.a.a.x.binding == key_b
+      if matched
+        sh_b = wvalue_bits(n.x[0]) ## i64
+        if st[0] == 0
+          st[0] = sh_b
+          st[1] = st[1] + 1
+        elsif st[0] == sh_b
+          st[1] = st[1] + 1
+        else
+          st[2] = false
+    scan_null_guard_obj_shape(n.a, is_tp, key_b, prop_s, st)
+    scan_null_guard_obj_shape(n.b, is_tp, key_b, prop_s, st)
+    scan_null_guard_obj_shape(n.c, is_tp, key_b, prop_s, st)
+    scan_null_guard_obj_shape(n.d, is_tp, key_b, prop_s, st)
+    scan_null_guard_obj_shape(n.list, is_tp, key_b, prop_s, st)
     nil
 
   -> gen_stmt(s)
@@ -1538,26 +3405,348 @@ OSR_RETURN = 2
     elsif k == :block
       gen_stmts(s.list)
     elsif k == :if
-      if try_gen_branchless_if_inc(s)
+      folded_nonnull_if = false
+      # Static constant-folding of `if (x == null)` / `if (x != null)` when `x` is proven null or non-null (jump-threaded callees!)
+      if s.a != nil && s.a.kind == :binary && (s.a.str == "==" || s.a.str == "!=" || s.a.str == "===" || s.a.str == "!==") && s.a.a != nil && s.a.b != nil && s.a.b.kind == :null
+        cf_sk = shape_key(s.a.a)
+        if cf_sk != -1
+          is_eq_cf = s.a.str == "==" || s.a.str == "==="
+          is_str_cf = s.a.str == "===" || s.a.str == "!=="
+          if @known_null[cf_sk]
+            if is_eq_cf
+              gen_stmt(s.b)
+              @last_stmt_exited = true if stmt_always_exits?(s.b)
+            elsif s.c != nil
+              gen_stmt(s.c)
+              @last_stmt_exited = true if stmt_always_exits?(s.c)
+            return nil
+          if @known_nonnull[cf_sk] && (is_str_cf || (!JS_HAS_HTMLDDA[0] && (@hoisted_epoch || @epoch_verified_now)))
+            if is_eq_cf
+              if s.c != nil
+                gen_stmt(s.c)
+                @last_stmt_exited = true if stmt_always_exits?(s.c)
+              return nil
+            folded_nonnull_if = true
+      if !folded_nonnull_if && try_gen_branchless_if_inc(s)
         return nil
+      if !folded_nonnull_if && try_gen_branchless_bitop_if(s)
+        return nil
+      # Fast monomorphic `if (rec.pred()) ... else ...` receiver-shape versioning (eliminates 3+ redundant shape checks on `rec`!)
+      if s.a != nil && s.a.kind == :call && s.a.list.size == 0 && s.a.a != nil && s.a.a.kind == :member && !s.a.a.has?(F_COMPUTED) && s.a.x.is_a?(Array) && s.a.x.size == 2 && !@in_cs_promo && !@in_cold_stub
+        rec_e = s.a.a.a
+        rec_sk = shape_key(rec_e)
+        if rec_sk != -1 && @known_shapes[rec_sk] == nil
+          rec_pure = false
+          if rec_e.kind == :ident && rec_e.x != nil && rec_e.x.binding != nil && !rec_e.x.binding.global?
+            rec_pure = true
+          elsif rec_e.kind == :member && !rec_e.has?(F_COMPUTED) && rec_e.a != nil && rec_e.a.kind == :this && @known_shapes[-2] != nil
+            th_sh_o = @inline_this_sh != nil ? @inline_this_sh : wvalue_from_bits(@known_shapes[-2])
+            if th_sh_o.is_a?(JS:Shape) && !th_sh_o.dict
+              tsl = th_sh_o.slot_of(rec_e.b.str)
+              rec_pure = tsl >= 0 && (th_sh_o.attrs_of(rec_e.b.str) & ATTR_ACCESSOR) == 0
+          sh0 = s.a.x[0]
+          fn0 = s.a.x[1]
+          mname0 = s.a.a.b.str
+          if rec_pure && sh0.is_a?(JS:Shape) && !sh0.dict && fn0.is_a?(JS:Function) && fn0.code != nil && fn0.code.node.is_a?(JaFunc) && js_shape_proto_method_eq?(sh0, mname0, fn0)
+            pl0 = poly_classify_method(fn0.code.node, sh0, 0)
+            if pl0 != nil && pl0[0] == :ret_held_or_susp
+              jit_keep(sh0)
+              sh0_b = wvalue_bits(sh0) ## i64
+              l_slow_if = @a.new_label
+              l_else = @a.new_label
+              l_end = @a.new_label
+              if !@hoisted_epoch && !@epoch_verified_now
+                ep_now = JS_EPOCH[0]
+                @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+                @a.ldr_x(R_X10, R_X9, 0)
+                @a.mov_imm64(R_X11, ep_now)
+                @a.cmp_r(R_X10, R_X11)
+                @a.b_cond(CC_NE, l_slow_if)
+              gen_expr_any(rec_e)
+              @a.sub_i(R_X9, R_X0, 4)
+              @a.tst_wobj_bad(R_X9)
+              @a.b_cond(CC_NE, l_slow_if)
+              @a.cbz_x(R_X9, l_slow_if)
+              @a.ldr_x(R_X12, R_X9, 8)
+              emit_cmp_shape(R_X12, sh0_b)
+              @a.b_cond(CC_NE, l_slow_if)
+              # Guard constants before evaluating predicate (no side effects yet -> l_slow_if is 100% clean!)
+              emit_poly_const_load(R_X10, pl0[2], l_slow_if, false)
+              emit_poly_const_load(R_X10, pl0[3], l_slow_if, false)
+              iv1 = pl0[2][0] == :gnum ? pl0[2][3] : pl0[2][2]
+              iv2 = pl0[3][0] == :gnum ? pl0[3][3] : pl0[3][2]
+              @a.sub_i(R_X9, R_X0, 4)
+              emit_slot_load(R_X10, R_X9, pl0[1])
+              l_then_fast = @a.new_label
+              l_false_dst = s.c != nil ? l_else : l_end
+              emit_held_or_susp_branch(R_X10, iv1, iv2, l_then_fast, l_false_dst, l_slow_if)
+              @a.bind(l_then_fast)
+              saved_shapes_f = @known_shapes.dup
+              saved_ep_f = @epoch_verified_now
+              @known_shapes[rec_sk] = sh0_b
+              @epoch_verified_now = true
+              gen_stmt(s.b)
+              then_sh_f = @known_shapes.dup
+              then_ep_f = @epoch_verified_now
+              if s.c != nil
+                @a.b(l_end)
+                @a.bind(l_else)
+                @known_shapes = saved_shapes_f.dup
+                @known_shapes[rec_sk] = sh0_b
+                @epoch_verified_now = true
+                gen_stmt(s.c)
+                else_sh_f = @known_shapes
+                else_ep_f = @epoch_verified_now
+              else
+                else_sh_f = saved_shapes_f
+                else_ep_f = saved_ep_f
+              @a.bind(l_end)
+              cb_if = ->()
+                @a.bind(l_slow_if)
+                sv_sh = @known_shapes
+                sv_ep = @epoch_verified_now
+                @known_shapes = {}
+                @epoch_verified_now = false
+                l_s_else = @a.new_label
+                gen_cond_branch(s.a, s.c != nil ? l_s_else : l_end, false)
+                gen_stmt(s.b)
+                if s.c != nil
+                  @a.b(l_end)
+                  @a.bind(l_s_else)
+                  @known_shapes = {}
+                  @epoch_verified_now = false
+                  gen_stmt(s.c)
+                @known_shapes = sv_sh
+                @epoch_verified_now = sv_ep
+                @a.b(l_end)
+              add_cold_stub(cb_if)
+              merged_f = {}
+              then_sh_f.each ->(sk, sv)
+                merged_f[sk] = sv if else_sh_f[sk] == sv && saved_shapes_f[sk] == sv
+              @known_shapes = merged_f
+              @epoch_verified_now = false
+              return nil
       l_else = @a.new_label
       l_end = @a.new_label
-      gen_cond_branch(s.a, s.c != nil ? l_else : l_end, false)
+      gen_cond_branch(s.a, s.c != nil ? l_else : l_end, false) if !folded_nonnull_if
       saved_shapes = @known_shapes.dup
+      saved_ep_v = @epoch_verified_now
+      # Scoped TA upper-bound BCE for `if (i + K < n)` / `if (i < n)` where `n == ta.length` & `i >= 0`!
+      sc_li = -1
+      sc_old = nil
+      if s.a != nil && s.a.kind == :binary && s.a.str == "<" && s.a.b != nil && s.a.b.kind == :ident
+        n_li = local_idx(s.a.b)
+        tli_if = n_li >= 0 ? @info.ta_len_locals[n_li] : nil
+        if tli_if != nil && @hoisted_tas[tli_if] != nil
+          ia = s.a.a
+          ili_if = -1
+          k_off = -1
+          if ia.kind == :ident
+            ili_if = local_idx(ia)
+            k_off = 0
+          elsif ia.kind == :binary && ia.str == "+" && ia.a.kind == :ident && jit_small_int_lit?(ia.b, 64) && ia.b.a.to_i >= 0
+            ili_if = local_idx(ia.a)
+            k_off = ia.b.a.to_i
+          if ili_if >= 0 && @info.nonneg_locals[ili_if] && !stmt_writes_local?(s.b, ili_if)
+            sc_li = ili_if
+            sc_old = @scoped_ta_ub[ili_if]
+            @scoped_ta_ub[ili_if] = [tli_if, k_off, -1]
+      # Monomorphic `if (e != null)` / `if (e !== null)` `then`-entry shape guard (`p != null`, `this.v1 != null`, `this.v2 != null`!)
+      ng_sk = -1
+      ng_sh = 0 ## i64
+      ng_l_unspec = nil
+      if !@in_cs_promo && !@in_cold_stub && s.a != nil && s.a.kind == :binary && (s.a.str == "!=" || s.a.str == "!==") && s.a.b != nil && s.a.b.kind == :null && s.a.a != nil
+        ng_e = s.a.a
+        cand_sk = shape_key(ng_e)
+        if cand_sk != -1 && @known_shapes[cand_sk] == nil
+          ng_is_tp = false
+          ng_b = nil
+          ng_p = nil
+          ng_ok = false
+          if ng_e.kind == :ident && ng_e.x != nil && ng_e.x.binding != nil && !ng_e.x.binding.global?
+            ng_b = ng_e.x.binding
+            ng_ok = true
+          elsif ng_e.kind == :member && !ng_e.has?(F_COMPUTED) && ng_e.a != nil && ng_e.a.kind == :this && @known_shapes[-2] != nil
+            th_o = @inline_this_sh != nil ? @inline_this_sh : wvalue_from_bits(@known_shapes[-2])
+            if th_o.is_a?(JS:Shape) && !th_o.dict
+              tsl = th_o.slot_of(ng_e.b.str)
+              if tsl >= 0 && (th_o.attrs_of(ng_e.b.str) & ATTR_ACCESSOR) == 0
+                ng_is_tp = true
+                ng_p = ng_e.b.str
+                ng_ok = true
+          if ng_ok
+            ng_st = [0 ## i64, 0, true, 0]
+            scan_null_guard_obj_shape(s.b, ng_is_tp, ng_b, ng_p, ng_st)
+            if ng_st[2] && ng_st[0] != 0 && ng_st[1] >= 1 && ng_st[3] >= 2
+              ng_sk = cand_sk
+              ng_sh = ng_st[0]
+              ng_l_unspec = @a.new_label
+              # `gen_cond_branch` for `ng_e != null` (fast path) already left `ng_e` in R_X0 — zero redundant memory load!
+              if folded_nonnull_if || s.a.str != "!=" || JS_HAS_HTMLDDA[0] || (!@hoisted_epoch && !@epoch_verified_now)
+                gen_expr_any(ng_e)
+              @a.sub_i(R_X9, R_X0, 4)
+              @a.tst_wobj_bad(R_X9)
+              @a.b_cond(CC_NE, ng_l_unspec)
+              @a.cbz_x(R_X9, ng_l_unspec)
+              @a.ldr_x(R_X10, R_X9, 8)
+              emit_cmp_shape(R_X10, ng_sh)
+              @a.b_cond(CC_NE, ng_l_unspec)
+              @known_shapes[ng_sk] = ng_sh
       gen_stmt(s.b)
-      if s.c != nil
+      if sc_li >= 0
+        sc_old == nil ? @scoped_ta_ub.delete(sc_li) : (@scoped_ta_ub[sc_li] = sc_old)
+      then_shapes = @known_shapes.dup
+      then_ep_v = @epoch_verified_now
+      if ng_l_unspec != nil
+        sv_sh_ng = saved_shapes.dup
+        sv_ep_ng = saved_ep_v
+        cb_ng = ->()
+          @a.bind(ng_l_unspec)
+          @known_shapes = sv_sh_ng.dup
+          @epoch_verified_now = sv_ep_ng
+          gen_stmt(s.b)
+          @a.b(l_end)
+        add_cold_stub(cb_ng)
+        then_shapes = {}
+        then_ep_v = false
+      if !folded_nonnull_if && s.c != nil
         @a.b(l_end)
         @a.bind(l_else)
         @known_shapes = saved_shapes.dup
+        @epoch_verified_now = saved_ep_v
         gen_stmt(s.c)
-      @a.bind(l_end)
-      @known_shapes = {}
-    elsif k == :return
-      if s.a == nil
-        @a.movz_x(R_X0, 0)
+        else_shapes = @known_shapes
+        else_ep_v = @epoch_verified_now
       else
-        gen_expr_any(s.a)
-      @a.b(@l_ret)
+        else_shapes = saved_shapes
+        else_ep_v = saved_ep_v
+      @a.bind(l_end)
+      if folded_nonnull_if
+        @known_shapes = then_shapes
+        @epoch_verified_now = then_ep_v
+      else
+        # Preserve shapes & epoch proof valid on reachable paths (ignore dead fallthrough after `return`/`throw`/`break`/`continue`!)
+        then_exits = stmt_always_exits?(s.b)
+        else_exits = s.c != nil && stmt_always_exits?(s.c)
+        if then_exits && !else_exits
+          @known_shapes = else_shapes
+          @epoch_verified_now = else_ep_v
+        elsif else_exits && !then_exits
+          @known_shapes = then_shapes
+          @epoch_verified_now = then_ep_v
+        else
+          merged_sh = {}
+          then_shapes.each ->(sk, sv)
+            merged_sh[sk] = sv if else_shapes[sk] == sv
+          @known_shapes = merged_sh
+          @epoch_verified_now = then_ep_v && else_ep_v
+    elsif k == :return
+      if @in_vs_entry && @inline_ret_mode == nil
+        ret_ci = @info.vs_fn_sig[1]
+        saved_td = @tmp_depth
+        rep = gen_vstruct_to_rep(s.a, ret_ci, @l_deopt)
+        rkeys = ret_ci[2]
+        rq = 0
+        while rq < rkeys.size
+          emit_vs_field_load(R_D0 + rq, rep, rkeys[rq])
+          rq += 1
+        @tmp_depth = saved_td
+        @a.movz_x(R_X0, 0)
+        @a.b(@l_ret)
+      elsif @inline_ret_mode == :void
+        gen_expr_void(s.a) if s.a != nil
+        @a.b(@l_ret)
+      elsif @inline_ret_mode == :i32
+        if s.a == nil
+          @a.movz_x(R_X0, 0)
+        else
+          gen_expr_i32(s.a)
+        @a.b(@l_ret)
+      elsif @inline_ret_mode == :u32
+        if s.a == nil
+          @a.movz_x(R_X0, 0)
+        else
+          gen_expr_to_i32(s.a)
+        @a.b(@l_ret)
+      elsif @inline_ret_mode == :f64
+        if s.a == nil
+          @a.fmov_d_x(R_D0, R_XZR)
+        else
+          gen_expr_f64(s.a)
+        @a.b(@l_ret)
+      else
+        if s.a == nil
+          @a.movz_x(R_X0, 0)
+          @a.b(@l_ret)
+        elsif @inline_env != nil && @inline_ret_mode == :any && s.a.kind == :call
+          old_tce = @in_tail_call_e
+          old_tre = @tail_ret_emitted
+          @in_tail_call_e = s.a
+          @tail_ret_emitted = false
+          gen_expr_any(s.a)
+          did_tre = @tail_ret_emitted
+          @in_tail_call_e = old_tce
+          @tail_ret_emitted = old_tre
+          @a.b(@l_ret) if !did_tre
+        else
+          ret_sh_fast = (!@in_cold_stub && @while_skip_run_lbl != nil && @while_skip_tail != nil && @while_loop_back_lbl != nil && @l_ret == @while_loop_back_lbl && @while_dirty_off >= 0) ? expr_known_shape_bits(s.a) : 0
+          gen_expr_any(s.a)
+          if ret_sh_fast != 0 && ret_sh_fast == @while_skip_tail[0]
+            # Direct fast-run jump to `l_sr_s3` / `l_sr_s01` / `l_skip_run` when returning a proven `sh_nd_b` node (`queue()`, `release()`!):
+            # Skips `l_loop_back`, TCB tag/shape check, `link` load, and `l_skip_loop`'s shared branch predictor!
+            enc_st_r = @while_skip_tail[1]
+            use_direct_s301 = false
+            r1_bits_r = 0
+            if @while_skip_run_s3 != nil && @while_skip_run_s01 != nil && @while_tcb_cmp_bits != 0
+              iv1_r = @while_skip_tail[3]
+              iv2_r = @while_skip_tail[4]
+              ro_r = []
+              cmp_ok_r = false
+              vi_r = 0
+              while vi_r < iv1_r * 2
+                if ((vi_r & iv1_r) == 0) && (vi_r != iv2_r)
+                  vb_r = wvalue_bits(vi_r.to_f) ## i64
+                  if vb_r == @while_tcb_cmp_bits
+                    cmp_ok_r = true
+                  else
+                    ro_r.push(vi_r)
+                vi_r += 1
+              if cmp_ok_r && ro_r.size == 2 && ro_r[0] == 0
+                use_direct_s301 = true
+                r1_bits_r = wvalue_bits(ro_r[1].to_f) ## i64
+            @a.ldr_x(R_X15, R_SP, @while_dirty_off)
+            if use_direct_s301 && enc_st_r > 0 && enc_st_r <= 31
+              @a.ldr_x(R_X10, R_X0, (enc_st_r + 1) * 8 - 4)
+              @a.mov_r(R_X12, R_X0)
+              @a.cbnz_x(R_X15, @l_ret)
+              @a.mov_imm64(R_X14, @while_tcb_cmp_bits)
+              @a.cmp_r(R_X10, R_X14)
+              @a.b_cond(CC_EQ, @while_skip_run_s3)
+              @a.mov_imm64(R_X14, r1_bits_r)
+              @a.cmp_r(R_X10, R_X20)
+              @a.ccmp_r(R_X10, R_X14, 4, CC_NE)
+              @a.b_cond(CC_EQ, @while_skip_run_s01)
+              @a.b(@l_ret)
+            else
+              @a.cbnz_x(R_X15, @l_ret)
+              @a.mov_r(R_X12, R_X0)
+              @a.sub_i(R_X9, R_X12, 4)
+              emit_slot_load(R_X10, R_X9, enc_st_r)
+              @a.sub_r(R_X14, R_X10, R_X20)
+              @a.cmp_r(R_X14, R_X6)
+              @a.b_cond(CC_HS, @l_ret)
+              @a.cmp_r(R_X14, R_X7)
+              @a.ccmp_r(R_X14, R_X8, 4, CC_LO)
+              @a.b_cond(CC_EQ, @l_ret)
+              if @while_skip_run_s3 != nil && @while_skip_run_s01 != nil && @while_tcb_cmp_bits != 0
+                @a.mov_imm64(R_X14, @while_tcb_cmp_bits)
+                @a.cmp_r(R_X10, R_X14)
+                @a.b_cond(CC_EQ, @while_skip_run_s3)
+                @a.b(@while_skip_run_s01)
+              else
+                @a.b(@while_skip_run_lbl)
+          else
+            @a.b(@l_ret)
     elsif k == :throw
       gen_expr_any(s.a)
       @a.mov_r(R_X1, R_X0)
@@ -1579,6 +3768,14 @@ OSR_RETURN = 2
     elsif k == :empty || k == :debugger || k == :function_decl
       nil
     nil
+
+  -> expr_known_shape_bits(e)
+    return 0 if e == nil
+    if e.kind == :cond
+      sa = expr_known_shape_bits(e.b)
+      return (sa != 0 && sa == expr_known_shape_bits(e.c)) ? sa : 0
+    sk = shape_key(e)
+    (sk != -1 && @known_shapes[sk] != nil) ? (@known_shapes[sk] ## i64) : 0
 
   -> find_loop(lbl)
     i = @loops.size - 1
@@ -1607,20 +3804,34 @@ OSR_RETURN = 2
   -> osr_loop_pure_epoch?(n)
     return true if !n.is_a?(JsNode)
     k = n.kind
-    return false if k == :new
+    if k == :new
+      # Guarded local TypedArray constructor (`new Int32Array(4096)`) cannot mutate JS_EPOCH!
+      if !@is_osr && @info.local_tas.size > 0 && n.a.is_a?(JsNode) && n.a.kind == :ident && n.a.x != nil && n.a.x.binding != nil && n.a.x.binding.global? && jit_ta_ctor_kind(n.a.str) >= 0 && n.list.size == 1 && can_i32?(n.list[0])
+        return osr_loop_pure_epoch?(n.list[0])
+      return false
     if k == :call
-      # Pure Math.* calls, arr.push(pure), and inlineable pure poly method calls cannot change JS_EPOCH!
+      # Inlined non-escaping nested helper calls!
+      if n.a.is_a?(JsNode) && n.a.kind == :ident && n.a.x != nil && n.a.x.binding != nil && @info.inlined_fns[n.a.x.binding] != nil
+        ih = @info.inlined_fns[n.a.x.binding]
+        ok_ih = true
+        n.list.each ->(ae) ok_ih = false if !osr_loop_pure_epoch?(ae)
+        ih[0].node.b.each ->(hs) ok_ih = false if !osr_loop_pure_epoch?(hs)
+        return ok_ih
+      # Pure Math.* calls, arr.push(pure), ta.fill(pure), and inlineable pure poly method calls cannot change JS_EPOCH!
       c = n.a
       if c.is_a?(JsNode) && c.kind == :member && !c.has?(F_COMPUTED)
         return true if c.a.is_a?(JsNode) && c.a.kind == :ident && c.a.str == "Math"
         if c.b.str == "push" && n.list.size == 1
           return osr_loop_pure_epoch?(c.a) && osr_loop_pure_epoch?(n.list[0])
+        if c.b.str == "fill" && n.list.size == 1 && local_idx(c.a) >= 0 && @hoisted_tas[local_idx(c.a)] != nil
+          return osr_loop_pure_epoch?(n.list[0])
         if (c.b.str == "indexOf" || c.b.str == "charCodeAt") && n.list.size == 1
           sli = local_idx(c.a)
           return osr_loop_pure_epoch?(n.list[0]) if sli >= 0 && @info.str_locals[sli]
         if c.b.str == "round" && c.a.is_a?(JsNode) && c.a.kind == :ident && c.a.str == "Math"
           return true
         if n.x.is_a?(Array) && n.x.size >= 2 && n.list.size == 0
+          return osr_loop_pure_epoch?(c.a) if jit_poly_call_pure?(n)
           ok = true
           q = 0
           while q < n.x.size
@@ -1643,19 +3854,571 @@ OSR_RETURN = 2
         i += 1
     true
 
+  # Pure Call-Free Loop Caller-Saved GPR Promotion (R_X1..R_X8):
+  # Verify AST `n` emits ZERO runtime calls (`call_rt`/`blr`) and NEVER touches R_X1..R_X8,
+  # even on out-of-line cold stubs (only numeric/bitwise/hoisted-TA ops & pure inlined helpers)!
+  -> expr_pure_cond_no_rt?(e)
+    return true if e == nil
+    k = e.kind
+    return true if k == :true || k == :false || k == :null
+    return expr_pure_cond_no_rt?(e.a) if k == :unary && e.str == "!"
+    return expr_pure_cond_no_rt?(e.a) && expr_pure_cond_no_rt?(e.b) if k == :logical
+    if k == :binary
+      op = e.str
+      if op == "<" || op == "<=" || op == ">" || op == ">=" || op == "===" || op == "!=="
+        return (can_i32?(e.a) || can_u32?(e.a) || can_f64?(e.a)) && (can_i32?(e.b) || can_u32?(e.b) || can_f64?(e.b)) && stmt_pure_no_rt_calls?(e.a) && stmt_pure_no_rt_calls?(e.b)
+      return false
+    (can_i32?(e) || can_u32?(e)) && stmt_pure_no_rt_calls?(e)
+
+  -> stmt_pure_no_rt_calls?(n)
+    return true if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return false if !stmt_pure_no_rt_calls?(n[i])
+        i += 1
+      return true
+    return true if !n.is_a?(JsNode)
+    k = n.kind
+    return true if k == :empty || k == :num || k == :true || k == :false || k == :null || k == :break || k == :continue
+    if k == :ident
+      li = local_idx(n)
+      if li >= 0
+        ty = @info.types[li]
+        return ty == JT_I32 || ty == JT_U32 || ty == JT_F64 || @hoisted_tas[li] != nil
+      if n.x != nil && n.x.binding != nil
+        return @info.global_i32s[n.x.binding] != nil || @hoisted_global_tas[n.x.binding] != nil
+      return false
+    if k == :var_decl
+      i = 0
+      while i < n.list.size
+        d = n.list[i]
+        li = local_idx(d.a)
+        return false if li < 0
+        ty = @info.types[li]
+        return false if ty != JT_I32 && ty != JT_U32 && ty != JT_F64
+        return false if d.b != nil && !stmt_pure_no_rt_calls?(d.b)
+        i += 1
+      return true
+    if k == :assign
+      op = n.str
+      if n.a.kind == :ident
+        li = local_idx(n.a)
+        return false if li < 0
+        ty = @info.types[li]
+        return false if ty != JT_I32 && ty != JT_U32 && ty != JT_F64
+        return false if op != "=" && op != "+=" && op != "-=" && op != "|=" && op != "&=" && op != "^=" && op != "<<=" && op != ">>="
+        return stmt_pure_no_rt_calls?(n.b)
+      if op == "=" && n.a.kind == :member && n.a.has?(F_COMPUTED)
+        bli = local_idx(n.a.a)
+        return false if bli < 0 || @hoisted_tas[bli] == nil
+        tk = @hoisted_tas[bli][2]
+        return false if tk == 2 || tk > 8
+        return (can_i32?(n.a.b) || can_u32?(n.a.b) || can_f64?(n.a.b)) && stmt_pure_no_rt_calls?(n.a.b) && stmt_pure_no_rt_calls?(n.b)
+      return false
+    if k == :update
+      li = local_idx(n.a)
+      return li >= 0 && @info.types[li] == JT_I32
+    if k == :unary
+      return (n.str == "!" || n.str == "~" || n.str == "-" || n.str == "+") && (can_i32?(n.a) || can_u32?(n.a) || can_f64?(n.a)) && stmt_pure_no_rt_calls?(n.a)
+    if k == :binary
+      op = n.str
+      return false if op != "+" && op != "-" && op != "*" && op != "/" && op != "|" && op != "&" && op != "^" && op != "<<" && op != ">>" && op != ">>>" && op != "<" && op != "<=" && op != ">" && op != ">=" && op != "===" && op != "!=="
+      return (can_i32?(n.a) || can_u32?(n.a) || can_f64?(n.a)) && (can_i32?(n.b) || can_u32?(n.b) || can_f64?(n.b)) && stmt_pure_no_rt_calls?(n.a) && stmt_pure_no_rt_calls?(n.b)
+    if k == :logical
+      return expr_pure_cond_no_rt?(n.a) && expr_pure_cond_no_rt?(n.b)
+    if k == :cond
+      return expr_pure_cond_no_rt?(n.a) && (can_i32?(n.b) || can_u32?(n.b) || can_f64?(n.b)) && (can_i32?(n.c) || can_u32?(n.c) || can_f64?(n.c)) && stmt_pure_no_rt_calls?(n.b) && stmt_pure_no_rt_calls?(n.c)
+    if k == :member
+      if !n.has?(F_COMPUTED)
+        bli = local_idx(n.a)
+        return n.b.str == "length" && bli >= 0 && @hoisted_tas[bli] != nil
+      bli = local_idx(n.a)
+      if bli >= 0 && @hoisted_tas[bli] != nil && @hoisted_tas[bli][2] <= 8
+        return (can_i32?(n.b) || can_u32?(n.b) || can_f64?(n.b)) && stmt_pure_no_rt_calls?(n.b)
+      if n.a.kind == :ident && n.a.x != nil && n.a.x.binding != nil && @hoisted_global_tas[n.a.x.binding] != nil && @hoisted_global_tas[n.a.x.binding][2] <= 8
+        return (can_i32?(n.b) || can_u32?(n.b) || can_f64?(n.b)) && stmt_pure_no_rt_calls?(n.b)
+      return false
+    if k == :call
+      c = n.a
+      if c.kind == :member && !c.has?(F_COMPUTED) && c.a.kind == :ident && c.a.str == "Math"
+        mn = c.b.str
+        if (mn == "abs" || mn == "sqrt" || mn == "floor" || mn == "ceil" || mn == "trunc") && n.list.size == 1
+          return (can_i32?(n.list[0]) || can_u32?(n.list[0]) || can_f64?(n.list[0])) && stmt_pure_no_rt_calls?(n.list[0])
+        if (mn == "min" || mn == "max") && n.list.size == 2
+          return (can_i32?(n.list[0]) || can_u32?(n.list[0]) || can_f64?(n.list[0])) && (can_i32?(n.list[1]) || can_u32?(n.list[1]) || can_f64?(n.list[1])) && stmt_pure_no_rt_calls?(n.list[0]) && stmt_pure_no_rt_calls?(n.list[1])
+        return false
+      if c.kind == :ident && c.x != nil && c.x.binding != nil && @info.inlined_fns[c.x.binding] != nil
+        ih = @info.inlined_fns[c.x.binding]
+        pvs = ih[1]
+        pi = 0
+        while pi < pvs.size
+          pty = @info.types[pvs[pi]]
+          return false if pty != JT_I32 && pty != JT_U32 && pty != JT_F64
+          pi += 1
+        i = 0
+        while i < n.list.size
+          return false if !stmt_pure_no_rt_calls?(n.list[i])
+          i += 1
+        return stmt_pure_no_rt_calls?(ih[0].node.b)
+      return false
+    if k == :if
+      return expr_pure_cond_no_rt?(n.a) && stmt_pure_no_rt_calls?(n.b) && stmt_pure_no_rt_calls?(n.c)
+    if k == :block
+      return stmt_pure_no_rt_calls?(n.list)
+    if k == :expr_stmt
+      return stmt_pure_no_rt_calls?(n.a)
+    if k == :return
+      return n.a == nil || ((can_i32?(n.a) || can_u32?(n.a) || can_f64?(n.a)) && stmt_pure_no_rt_calls?(n.a))
+    if k == :while
+      return expr_pure_cond_no_rt?(n.a) && stmt_pure_no_rt_calls?(n.b)
+    if k == :do_while
+      return stmt_pure_no_rt_calls?(n.a) && expr_pure_cond_no_rt?(n.b)
+    if k == :for
+      return stmt_pure_no_rt_calls?(n.a) && expr_pure_cond_no_rt?(n.b) && stmt_pure_no_rt_calls?(n.c) && stmt_pure_no_rt_calls?(n.d)
+    false
+
+  -> collect_cs_loop_uses(n, w, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+    return nil if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        collect_cs_loop_uses(n[i], w, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+        i += 1
+      return nil
+    return nil if !n.is_a?(JsNode)
+    k = n.kind
+    if k == :ident
+      li = local_idx(n)
+      if li >= 0
+        ty = @info.types[li]
+        if (ty == JT_I32 || ty == JT_U32) && @info.reg_gpr[li] == nil && @info.spill_off[li] != nil
+          loc_cnt[li] = (loc_cnt[li] == nil ? 0 : loc_cnt[li]) + w
+      return nil
+    if k == :var_decl
+      i = 0
+      while i < n.list.size
+        d = n.list[i]
+        li = local_idx(d.a)
+        if li >= 0 && (@info.types[li] == JT_I32 || @info.types[li] == JT_U32) && @info.reg_gpr[li] == nil && @info.spill_off[li] != nil
+          loc_cnt[li] = (loc_cnt[li] == nil ? 0 : loc_cnt[li]) + w
+          loc_w[li] = true
+        collect_cs_loop_uses(d.b, w, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+        i += 1
+      return nil
+    if k == :assign && n.a.kind == :ident
+      li = local_idx(n.a)
+      if li >= 0 && (@info.types[li] == JT_I32 || @info.types[li] == JT_U32) && @info.reg_gpr[li] == nil && @info.spill_off[li] != nil
+        loc_cnt[li] = (loc_cnt[li] == nil ? 0 : loc_cnt[li]) + w
+        loc_w[li] = true
+      collect_cs_loop_uses(n.b, w, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+      return nil
+    if k == :update && n.a.kind == :ident
+      li = local_idx(n.a)
+      if li >= 0 && (@info.types[li] == JT_I32 || @info.types[li] == JT_U32) && @info.reg_gpr[li] == nil && @info.spill_off[li] != nil
+        loc_cnt[li] = (loc_cnt[li] == nil ? 0 : loc_cnt[li]) + w * 2
+        loc_w[li] = true
+      return nil
+    if k == :member && n.has?(F_COMPUTED)
+      bli = local_idx(n.a)
+      if bli >= 0 && @hoisted_tas[bli] != nil && (@hoisted_ta_regs[bli] == nil || @hoisted_ta_regs[bli][0] == nil)
+        ta_cnt[bli] = (ta_cnt[bli] == nil ? 0 : ta_cnt[bli]) + w
+      elsif n.a.kind == :ident && n.a.x != nil && n.a.x.binding != nil && @hoisted_global_tas[n.a.x.binding] != nil
+        gb = n.a.x.binding
+        if @hoisted_gta_regs[gb] == nil || @hoisted_gta_regs[gb][0] == nil
+          gta_cnt[gb] = (gta_cnt[gb] == nil ? 0 : gta_cnt[gb]) + w
+      collect_cs_loop_uses(n.b, w, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+      return nil
+    if k == :call && n.a.kind == :ident && n.a.x != nil && n.a.x.binding != nil && @info.inlined_fns[n.a.x.binding] != nil
+      fb = n.a.x.binding
+      ih = @info.inlined_fns[fb]
+      ih[1].each ->(pv)
+        if (@info.types[pv] == JT_I32 || @info.types[pv] == JT_U32) && @info.reg_gpr[pv] == nil && @info.spill_off[pv] != nil
+          loc_cnt[pv] = (loc_cnt[pv] == nil ? 0 : loc_cnt[pv]) + w
+          loc_w[pv] = true
+      collect_cs_loop_uses(n.list, w, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+      if !seen_fns[fb]
+        seen_fns[fb] = true
+        collect_cs_loop_uses(ih[0].node.b, w, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+      return nil
+    nw = (k == :for || k == :while || k == :do_while) ? (w * 8) : w
+    collect_cs_loop_uses(n.a, nw, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+    collect_cs_loop_uses(n.b, nw, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+    collect_cs_loop_uses(n.c, nw, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+    collect_cs_loop_uses(n.d, nw, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+    collect_cs_loop_uses(n.list, nw, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns) if n.list.is_a?(Array)
+    nil
+
+  -> begin_cs_loop_promo(s)
+    return nil if @is_osr || @in_cs_promo
+    if s.kind == :for
+      return nil if !expr_pure_cond_no_rt?(s.b) || !stmt_pure_no_rt_calls?(s.c) || !stmt_pure_no_rt_calls?(s.d)
+    elsif s.kind == :while
+      return nil if !expr_pure_cond_no_rt?(s.a) || !stmt_pure_no_rt_calls?(s.b)
+    else
+      return nil
+    loc_cnt = {}
+    ta_cnt = {}
+    gta_cnt = {}
+    loc_w = {}
+    seen_fns = {}
+    if s.kind == :for
+      collect_cs_loop_uses(s.b, 2, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+      collect_cs_loop_uses(s.c, 2, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+      collect_cs_loop_uses(s.d, 2, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+    else
+      collect_cs_loop_uses(s.a, 2, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+      collect_cs_loop_uses(s.b, 2, loc_cnt, ta_cnt, gta_cnt, loc_w, seen_fns)
+    cands = []
+    loc_cnt.each ->(li, sc) cands.push([0, li, sc])
+    ta_cnt.each ->(li, sc) cands.push([1, li, sc * 2])
+    gta_cnt.each ->(gb, sc) cands.push([2, gb, sc * 2])
+    return nil if cands.size == 0
+    cands = cands.sort_by(->(x) 0 - x[2])
+    cs_regs = [R_X1, R_X2, R_X3, R_X4, R_X5, R_X6, R_X7, R_X8, R_X13, R_X14, R_X16, R_X17]
+    # Coalesce mutually-disjoint inlined helper locals (e.g. `push` vs `pop` in astar!) onto the SAME caller-saved GPRs!
+    reg_hmask = Array.new(cs_regs.size, 0)
+    next_r = 0
+    promo_locs = []
+    promo_tas = []
+    promo_gtas = []
+    i = 0
+    while i < cands.size
+      c = cands[i]
+      if c[0] == 0
+        li = c[1]
+        ho = @info.helper_owner[li]
+        assigned = -1
+        if ho != nil
+          hbit = 1 << ho
+          ri_c = 0
+          while ri_c < next_r
+            if reg_hmask[ri_c] > 0 && (reg_hmask[ri_c] & hbit) == 0
+              assigned = ri_c
+              reg_hmask[ri_c] = reg_hmask[ri_c] | hbit
+              break
+            ri_c += 1
+        if assigned < 0 && next_r < cs_regs.size
+          assigned = next_r
+          next_r += 1
+          reg_hmask[assigned] = ho != nil ? (1 << ho) : -1
+        if assigned >= 0
+          reg = cs_regs[assigned]
+          @a.ldr_w(reg, R_SP, @info.spill_off[li]) if ho == nil
+          @info.reg_gpr[li] = reg
+          promo_locs.push([li, reg, ho == nil && loc_w[li] == true])
+      elsif c[0] == 1
+        if next_r < cs_regs.size
+          reg = cs_regs[next_r]
+          reg_hmask[next_r] = -1
+          next_r += 1
+          li = c[1]
+          @a.ldr_x(reg, R_SP, @hoisted_tas[li][0])
+          tr = @hoisted_ta_regs[li]
+          if tr == nil
+            @hoisted_ta_regs[li] = [reg, nil]
+          else
+            tr[0] = reg
+          promo_tas.push(li)
+      else
+        if next_r < cs_regs.size
+          reg = cs_regs[next_r]
+          reg_hmask[next_r] = -1
+          next_r += 1
+          gb = c[1]
+          @a.ldr_x(reg, R_SP, @hoisted_global_tas[gb][0])
+          tr = @hoisted_gta_regs[gb]
+          if tr == nil
+            @hoisted_gta_regs[gb] = [reg, nil]
+          else
+            tr[0] = reg
+          promo_gtas.push(gb)
+      i += 1
+    @in_cs_promo = true
+    [promo_locs, promo_tas, promo_gtas]
+
+  -> end_cs_loop_promo(st)
+    return nil if st == nil
+    promo_locs = st[0]
+    promo_tas = st[1]
+    promo_gtas = st[2]
+    promo_locs.each ->(pl)
+      @a.str_w(pl[1], R_SP, @info.spill_off[pl[0]]) if pl[2]
+      @info.reg_gpr.delete(pl[0])
+    promo_tas.each ->(li)
+      @hoisted_ta_regs[li][0] = nil if @hoisted_ta_regs[li] != nil
+    promo_gtas.each ->(gb)
+      @hoisted_gta_regs[gb][0] = nil if @hoisted_gta_regs[gb] != nil
+    @in_cs_promo = false
+    nil
+
+  # Scan function AST to detect monomorphic `this` shape (`out = [sh, count, conflict]`).
+  -> collect_this_mono_shape(n, out)
+    return nil if n == nil || out[2]
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size && !out[2]
+        collect_this_mono_shape(n[i], out)
+        i += 1
+      return nil
+    return nil if !n.is_a?(JsNode)
+    k = n.kind
+    return nil if k == :function || k == :arrow || k == :class
+    if k == :member && !n.has?(F_COMPUTED) && n.a != nil && n.a.kind == :this
+      ic = n.x
+      if jit_ic_valid?(ic)
+        sh = ic[0]
+        h = ic[2]
+        sl = ic[1]
+        if sh != 0
+          if h != 0 || sl == 0
+            out[2] = true
+          elsif out[0] == 0
+            out[0] = sh
+            out[1] = out[1] + 1
+          elsif out[0] == sh
+            out[1] = out[1] + 1
+          else
+            out[2] = true
+      return nil
+    collect_this_mono_shape(n.a, out)
+    collect_this_mono_shape(n.b, out)
+    collect_this_mono_shape(n.c, out)
+    collect_this_mono_shape(n.d, out)
+    collect_this_mono_shape(n.list, out) if n.list.is_a?(Array)
+    nil
+
+  # Zero-BCE Uint8Array copy `for` loop: `for (var k = 0; k < len; k++) dst[o++] = dst[from + k];`!
+  # Guards bounds ONCE, uses 4-byte word copies when non-overlapping (o - from >= 4), else tight zero-BCE byte loop!
+  -> try_gen_u8_copy_for(s, run_init)
+    return false if !run_init || s.a == nil || s.b == nil || s.c == nil || s.d == nil
+    return false if s.b.kind != :binary || s.b.str != "<" || s.c.kind != :update || s.c.str != "++" || s.c.a.kind != :ident
+    k_li = local_idx(s.b.a)
+    len_li = local_idx(s.b.b)
+    return false if k_li < 0 || len_li < 0 || k_li != local_idx(s.c.a) || @info.types[k_li] != JT_I32 || @info.types[len_li] != JT_I32
+    # Check init `k = 0`
+    c0_ok = false
+    if s.a.kind == :var_decl && s.a.list.size == 1 && local_idx(s.a.list[0].a) == k_li && jit_int32_lit?(s.a.list[0].b) && s.a.list[0].b.a.to_i == 0
+      c0_ok = true
+    elsif s.a.kind == :assign && s.a.str == "=" && local_idx(s.a.a) == k_li && jit_int32_lit?(s.a.b) && s.a.b.a.to_i == 0
+      c0_ok = true
+    return false if !c0_ok
+    # Body must be `dst[o++] = dst[from + k]`
+    bd = s.d
+    bd = bd.list[0] if bd.kind == :block && bd.list.size == 1
+    return false if bd == nil || bd.kind != :expr_stmt || bd.a == nil || bd.a.kind != :assign || bd.a.str != "="
+    lhs = bd.a.a
+    rhs = bd.a.b
+    return false if lhs == nil || rhs == nil || lhs.kind != :member || !lhs.has?(F_COMPUTED) || rhs.kind != :member || !rhs.has?(F_COMPUTED)
+    ta_li = local_idx(lhs.a)
+    return false if ta_li < 0 || ta_li != local_idx(rhs.a) || @hoisted_tas[ta_li] == nil || @hoisted_tas[ta_li][2] != 1
+    return false if lhs.b.kind != :update || lhs.b.str != "++" || lhs.b.has?(F_PREFIX)
+    o_li = local_idx(lhs.b.a)
+    return false if o_li < 0 || o_li == k_li || o_li == len_li || @info.types[o_li] != JT_I32
+    return false if rhs.b.kind != :binary || rhs.b.str != "+" || local_idx(rhs.b.b) != k_li
+    from_li = local_idx(rhs.b.a)
+    from_ty = from_li >= 0 ? @info.types[from_li] : -1
+    return false if from_li < 0 || from_li == k_li || from_li == o_li || (from_ty != JT_I32 && from_ty != JT_F64)
+    h = @hoisted_tas[ta_li]
+    tr = @hoisted_ta_regs[ta_li]
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    l_wloop = @a.new_label
+    l_bloop = @a.new_label
+    l_finish = @a.new_label
+    # Load len -> w12; skip if len <= 0
+    load_slot_i32(R_X12, len_li)
+    @a.cmp_wi(R_X12, 0)
+    @a.b_cond(CC_LE, l_done)
+    # Load ta_len -> x10
+    if tr != nil && tr[1] != nil
+      @a.mov_r(R_X10, tr[1])
+    else
+      @a.ldr_x(R_X10, R_SP, h[1])
+    # Guard 0 <= from && from + len <= ta_len && 0 <= o && o + len <= ta_len
+    if from_ty == JT_I32
+      load_slot_i32(R_X13, from_li)
+    else
+      load_slot_f64(R_D16, from_li)
+      @a.fcvtzs_w_d(R_X13, R_D16)
+      @a.scvtf_d_w(R_D17, R_X13)
+      @a.fcmp_d(R_D16, R_D17)
+      @a.b_cond(CC_NE, l_slow)
+    @a.cmp_wi(R_X13, 0)
+    @a.b_cond(CC_LT, l_slow)
+    @a.sxtw(R_X13, R_X13)
+    @a.sxtw(R_X14, R_X12)
+    @a.add_r(R_X15, R_X13, R_X14)
+    @a.cmp_r(R_X15, R_X10)
+    @a.b_cond(CC_GT, l_slow)
+    load_slot_i32(R_X15, o_li)
+    @a.cmp_wi(R_X15, 0)
+    @a.b_cond(CC_LT, l_slow)
+    @a.sxtw(R_X15, R_X15)
+    @a.add_r(R_X9, R_X15, R_X14)
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_GT, l_slow)
+    # Compute base pointers: x13 = ta_ptr + from, x15 = ta_ptr + o; w11 = k = 0
+    if tr != nil && tr[0] != nil
+      @a.add_r(R_X13, tr[0], R_X13)
+      @a.add_r(R_X15, tr[0], R_X15)
+    else
+      @a.ldr_x(R_X9, R_SP, h[0])
+      @a.add_r(R_X13, R_X9, R_X13)
+      @a.add_r(R_X15, R_X9, R_X15)
+    @a.movz_x(R_X11, 0)
+    # Check non-overlapping 8-byte copy: (o - from >= 8) OR (from - o >= len) -> 64-bit loop!
+    l_xloop = @a.new_label
+    @a.sub_r(R_X9, R_X15, R_X13)
+    @a.cmp_i(R_X9, 8)
+    @a.b_cond(CC_GE, l_xloop)
+    @a.sub_r(R_X10, R_X13, R_X15)
+    @a.cmp_r(R_X10, R_X14)
+    @a.b_cond(CC_GE, l_xloop)
+    @a.cmp_i(R_X9, 4)
+    @a.b_cond(CC_LT, l_bloop)
+    @a.b(l_wloop)
+    @a.bind(l_xloop)
+    @a.add_wi(R_X9, R_X11, 8)
+    @a.cmp_w(R_X9, R_X12)
+    @a.b_cond(CC_GT, l_wloop)
+    @a.ldr_x_byte(R_X10, R_X13, R_X11)
+    @a.str_x_byte(R_X10, R_X15, R_X11)
+    @a.add_wi(R_X11, R_X11, 8)
+    @a.b(l_xloop)
+    @a.bind(l_wloop)
+    @a.add_wi(R_X9, R_X11, 4)
+    @a.cmp_w(R_X9, R_X12)
+    @a.b_cond(CC_GT, l_bloop)
+    @a.ldr_w_byte(R_X10, R_X13, R_X11)
+    @a.str_w_byte(R_X10, R_X15, R_X11)
+    @a.add_wi(R_X11, R_X11, 4)
+    @a.b(l_wloop)
+    @a.bind(l_bloop)
+    @a.cmp_w(R_X11, R_X12)
+    @a.b_cond(CC_GE, l_finish)
+    @a.ldrb_idx(R_X10, R_X13, R_X11)
+    @a.strb_idx(R_X10, R_X15, R_X11)
+    @a.add_wi(R_X11, R_X11, 1)
+    @a.b(l_bloop)
+    @a.bind(l_finish)
+    # Update o += len and k = len
+    load_slot_i32(R_X9, o_li)
+    @a.add_w(R_X9, R_X9, R_X12)
+    store_slot_i32(o_li, R_X9)
+    store_slot_i32(k_li, R_X12)
+    @a.bind(l_done)
+    cb_u8c = ->()
+      @a.bind(l_slow)
+      l_shead = @a.new_label
+      @a.bind(l_shead)
+      gen_cond_branch(s.b, l_done, false)
+      gen_stmt(s.d)
+      gen_expr_void(s.c)
+      @a.b(l_shead)
+    add_cold_stub(cb_u8c)
+    true
+
+  -> inline_stmt_writes_binding?(n, b)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if inline_stmt_writes_binding?(n[i], b)
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return false if k == :function || k == :arrow
+    if (k == :assign || k == :update) && n.a != nil && n.a.kind == :ident && n.a.x != nil && n.a.x.binding == b
+      return true
+    return true if inline_stmt_writes_binding?(n.a, b) || inline_stmt_writes_binding?(n.b, b) || inline_stmt_writes_binding?(n.c, b) || inline_stmt_writes_binding?(n.d, b)
+    inline_stmt_writes_binding?(n.list, b)
+
+  -> inline_stmt_has_cf?(n)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if inline_stmt_has_cf?(n[i])
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return true if k == :break || k == :continue || k == :return || k == :throw || k == :for || k == :while || k == :do_while || k == :for_in || k == :switch || k == :function || k == :arrow
+    return true if inline_stmt_has_cf?(n.a) || inline_stmt_has_cf?(n.b) || inline_stmt_has_cf?(n.c) || inline_stmt_has_cf?(n.d)
+    inline_stmt_has_cf?(n.list)
+
   -> gen_for_loop(s, run_init)
+    # Full unroll of tiny 1..4-trip constant counted `for (var i = c0; i < c1; i++)` inside inlined methods (`@inline_env != nil`)!
+    # Turns `i` into an immediate `[:const_i32, uk]`, killing all loop overhead & boxed index conversion!
+    if run_init && @inline_env != nil && s.a != nil && s.b != nil && s.c != nil && s.b.kind == :binary && s.b.str == "<" && s.c.kind == :update && s.c.str == "++" && s.c.a != nil && s.c.a.kind == :ident && s.b.a != nil && s.b.a.kind == :ident && s.b.a.x != nil && s.c.a.x != nil && s.b.a.x.binding == s.c.a.x.binding && jit_int32_lit?(s.b.b)
+      ub = s.b.a.x.binding
+      uiv = @inline_env[ub]
+      if uiv != nil && (uiv[0] == :spill_x || uiv[0] == :reg_x)
+        c0 = -1
+        if s.a.kind == :var_decl && s.a.list.size == 1 && s.a.list[0].a != nil && s.a.list[0].a.x != nil && s.a.list[0].a.x.binding == ub && jit_int32_lit?(s.a.list[0].b)
+          c0 = s.a.list[0].b.a.to_i
+        elsif s.a.kind == :assign && s.a.str == "=" && s.a.a != nil && s.a.a.x != nil && s.a.a.x.binding == ub && jit_int32_lit?(s.a.b)
+          c0 = s.a.b.a.to_i
+        c1 = s.b.b.a.to_i
+        if c0 >= 0 && c1 > c0 && (c1 - c0) <= 4 && !inline_stmt_writes_binding?(s.d, ub) && !inline_stmt_has_cf?(s.d)
+          uk = c0
+          while uk < c1
+            @inline_env[ub] = [:const_i32, uk]
+            gen_stmt(s.d)
+            uk += 1
+          @inline_env[ub] = uiv
+          if uiv[0] == :reg_x
+            @a.mov_imm64(uiv[1], wvalue_bits(c1.to_f) ## i64)
+          else
+            @a.mov_imm64(R_X9, wvalue_bits(c1.to_f) ## i64)
+            @a.str_x(R_X9, R_SP, uiv[1])
+          return nil
     if run_init && s.a != nil
       if s.a.kind == :var_decl
         gen_stmt(s.a)
       else
         gen_expr_void(s.a)
+    if try_gen_u8_copy_for(s, run_init)
+      @known_shapes = {}
+      return nil
+    # Record constant loop induction range `[c0, c1)` for `for (var i = c0; i < c1; i++ / i += K)` (enables TA BCE on `W[i-15]`, `K[i]`, `SRC[i]`!)
+    clb_li = -1
+    clb_old = nil
+    if run_init && s.a != nil && s.b != nil && s.c != nil && s.b.kind == :binary && s.b.str == "<"
+      li0 = local_idx(s.b.a)
+      step_ok_clb = (s.c.kind == :update && s.c.str == "++" && s.c.a.kind == :ident && local_idx(s.c.a) == li0) || (s.c.kind == :assign && s.c.str == "+=" && s.c.a.kind == :ident && local_idx(s.c.a) == li0 && jit_int32_lit?(s.c.b) && s.c.b.a.to_i >= 1 && s.c.b.a.to_i <= 4095)
+      c1_clb = -1
+      if jit_int32_lit?(s.b.b)
+        c1_clb = s.b.b.a.to_i
+      elsif s.b.b.kind == :ident && s.b.b.x != nil && s.b.b.x.binding != nil && @info.global_i32s[s.b.b.x.binding] != nil
+        c1_clb = @info.global_i32s[s.b.b.x.binding][0]
+      if li0 >= 0 && step_ok_clb && c1_clb > 0 && !stmt_writes_local?(s.d, li0)
+        c1 = c1_clb
+        c0 = -1
+        if s.a.kind == :var_decl && s.a.list.size == 1 && local_idx(s.a.list[0].a) == li0 && jit_int32_lit?(s.a.list[0].b)
+          c0 = s.a.list[0].b.a.to_i
+        elsif s.a.kind == :assign && s.a.str == "=" && local_idx(s.a.a) == li0 && jit_int32_lit?(s.a.b)
+          c0 = s.a.b.a.to_i
+        if c0 >= 0 && c1 > c0
+          clb_li = li0
+          clb_old = @const_loop_bounds[li0]
+          @const_loop_bounds[li0] = [c0, c1]
+    cs_st = !jit_has_loop_stmt?(s.d) ? begin_cs_loop_promo(s) : nil
     # Canonical counted loop inversion (`for (i = ...; i < LIMIT; i++)`):
     # Eliminates `b.vs` overflow branch, hoists constant limit into a free GPR,
     # reduces 3 branches/iter to 1 single back-edge `cmp + b.lt`, and enables
     # loop bounds-check elimination for `arr[i]` / `ta[i]`!
     if try_gen_step_or_le_for_loop(s, run_init)
+      end_cs_loop_promo(cs_st)
+      if clb_li >= 0
+        clb_old == nil ? @const_loop_bounds.delete(clb_li) : (@const_loop_bounds[clb_li] = clb_old)
       return nil
     if try_gen_counted_for_loop(s, run_init)
+      end_cs_loop_promo(cs_st)
+      if clb_li >= 0
+        clb_old == nil ? @const_loop_bounds.delete(clb_li) : (@const_loop_bounds[clb_li] = clb_old)
       return nil
     @known_shapes = {}
     l_head = @a.new_label
@@ -1673,11 +4436,29 @@ OSR_RETURN = 2
     @a.bind(l_brk)
     @in_loop_depth -= 1
     @loops.pop
+    end_cs_loop_promo(cs_st)
+    if clb_li >= 0
+      clb_old == nil ? @const_loop_bounds.delete(clb_li) : (@const_loop_bounds[clb_li] = clb_old)
     @known_shapes = {}
     nil
 
+  -> stmt_has_member_assign?(n)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if stmt_has_member_assign?(n[i])
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return true if (k == :assign || k == :update) && n.a.is_a?(JsNode) && n.a.kind == :member
+    return true if k == :unary && n.str == "delete"
+    return true if stmt_has_member_assign?(n.a) || stmt_has_member_assign?(n.b) || stmt_has_member_assign?(n.c) || stmt_has_member_assign?(n.d)
+    stmt_has_member_assign?(n.list)
+
   # `for (var k in obj) body` / `for (k in obj) body` with zero-lookup shape-unchanged fast path!
-  -> gen_for_in_loop(s)
+  -> gen_for_in_loop(s, next_missing_pair = nil, l_skip_next = nil)
     @known_shapes = {}
     gen_expr_any(s.b)
     obj_off = push_x(R_X0)
@@ -1694,36 +4475,328 @@ OSR_RETURN = 2
     @a.movz_x(R_X10, 0)
     @a.bind(l_shdone)
     sh_off = push_x(R_X10)
-    # Fetch enumerable keys array via RT_FOR_IN_KEYS (cached O(1) for plain objects!)
-    @a.ldr_x(R_X1, R_SP, obj_off)
-    call_rt(RT_FOR_IN_KEYS)
-    ks_off = push_x(R_X0)
-    @a.and_x_ptr47(R_X9, R_X0)
-    @a.ldrsw(R_X10, R_X9, 8)      # len
-    len_off = push_x(R_X10)
-    @a.movz_x(R_X11, 0)
-    idx_off = push_x(R_X11)
+    # Fetch enumerable keys array + direct-inline flag via inline 4-way (shape, epoch) -> [keys_arr, is_dir] IC!
+    fipic = i64[13]
+    fk = 0
+    while fk < 13
+      fipic[fk] = 0
+      fk += 1
+    fikeep = Array.new(8, nil)
+    jit_keep(fipic)
+    jit_keep(fikeep)
+    fipic_p = jit_i64_ptr(fipic)
+    l_fi_miss = @a.new_label
+    l_fi_got = @a.new_label
+    @a.cbz_x(R_X10, l_fi_miss)
+    @a.mov_imm64(R_X14, fipic_p)
+    @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+    @a.ldr_x(R_X11, R_X9, 0)
+    @a.ldr_x(R_X12, R_X14, 96)    # fipic[12] == cached JS_EPOCH[0]
+    @a.cmp_r(R_X11, R_X12)
+    @a.b_cond(CC_NE, l_fi_miss)
+    fi_i = 0
+    while fi_i < 4
+      l_fnxt = fi_i < 3 ? @a.new_label : l_fi_miss
+      @a.ldr_x(R_X11, R_X14, fi_i * 24)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_fnxt)
+      @a.ldr_x(R_X0, R_X14, fi_i * 24 + 8)
+      @a.ldr_x(R_X13, R_X14, fi_i * 24 + 16)   # is_direct_inl (0 or 1)
+      @a.b(l_fi_got)
+      @a.bind(l_fnxt) if fi_i < 3
+      fi_i += 1
+    @a.bind(l_fi_got)
+    cb_fi = ->()
+      @a.bind(l_fi_miss)
+      @a.ldr_x(R_X1, R_SP, obj_off)
+      @a.mov_imm64(R_X2, wvalue_bits(fipic) ## i64)
+      @a.mov_imm64(R_X3, wvalue_bits(fikeep) ## i64)
+      call_rt(RT_FOR_IN_PIC_MISS)
+      @a.movz_x(R_X13, 0)
+      @a.b(l_fi_got)
+    add_cold_stub(cb_fi)
+    # Reserve the 4 loop slots (dir_off, ks_off, len_off, idx_off) — written lazily only if general loop runs!
+    dir_off = @tmp_base + @tmp_depth * 8; @tmp_depth += 1
+    ks_off  = @tmp_base + @tmp_depth * 8; @tmp_depth += 1
+    len_off = @tmp_base + @tmp_depth * 8; @tmp_depth += 1
+    idx_off = @tmp_base + @tmp_depth * 8; @tmp_depth += 1
+    @max_tmp = @tmp_depth if @tmp_depth > @max_tmp
     l_head = @a.new_label
     l_cont = @a.new_label
     l_brk = @a.new_label
-    @loops.push(JS:JitLoopCtx.new(l_brk, l_cont, nil))
-    @in_loop_depth += 1
     lhs_node = s.a.kind == :var_decl ? s.a.list[0].a : s.a
     lhs_init = s.a.kind == :var_decl && s.a.str != "var"
+    k_bind = (lhs_node.kind == :ident && lhs_node.x != nil) ? lhs_node.x.binding : nil
+    body_one = (s.d != nil && s.d.kind == :block && s.d.list != nil && s.d.list.size == 1) ? s.d.list[0] : s.d
+    # Same-shape zero-iteration skip (BEFORE storing 4 loop stack slots or untagging `ks`!):
+    # `for (var k in b) { if (!(k in a)) { ... } }`
+    if k_bind != nil && body_one != nil && body_one.kind == :if && body_one.c == nil
+      cond_in = body_one.a
+      if cond_in != nil && cond_in.kind == :unary && cond_in.str == "!" && cond_in.a != nil && cond_in.a.kind == :binary && cond_in.a.str == "in"
+        in_e = cond_in.a
+        if in_e.a.kind == :ident && in_e.a.x != nil && in_e.a.x.binding == k_bind && in_e.b.kind == :ident && local_idx(in_e.b) >= 0 && local_idx(in_e.b) != local_idx(lhs_node)
+          other_li = local_idx(in_e.b)
+          l_run_fi = @a.new_label
+          @a.cbz_x(R_X13, l_run_fi)
+          load_slot_any(R_X9, other_li)
+          @a.sub_i(R_X9, R_X9, 4)
+          @a.tst_wobj_bad(R_X9)
+          @a.b_cond(CC_NE, l_run_fi)
+          @a.cbz_x(R_X9, l_run_fi)
+          @a.ldrb(R_X10, R_X9, 4)
+          @a.cmp_wi(R_X10, KIND_OBJECT)
+          @a.b_cond(CC_NE, l_run_fi)
+          @a.ldr_x(R_X10, R_X9, 8)
+          @a.ldr_x(R_X11, R_SP, sh_off)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_EQ, l_brk)
+          @a.bind(l_run_fi)
+    # Same-shape direct-inline slot-compare fast path (ZERO loop-slot stack writes when all props match!):
+    # `for (var k in a) { if (!(k in b)) s1; else if (a[k] !== b[k]) s2; }`
+    # When followed by `for (var k in b) { if (!(k in a)) ... }`, all-equal skips Loop 2 completely!
+    a_li_ss = local_idx(s.b)
+    if k_bind != nil && a_li_ss >= 0 && body_one != nil && body_one.kind == :if && body_one.c != nil
+      cond_in1 = body_one.a
+      else_one = (body_one.c.kind == :block && body_one.c.list != nil && body_one.c.list.size == 1) ? body_one.c.list[0] : body_one.c
+      if cond_in1 != nil && cond_in1.kind == :unary && cond_in1.str == "!" && cond_in1.a != nil && cond_in1.a.kind == :binary && cond_in1.a.str == "in" && else_one != nil && else_one.kind == :if && else_one.c == nil && else_one.a != nil && else_one.a.kind == :binary && else_one.a.str == "!=="
+        in1_e = cond_in1.a
+        if in1_e.a.kind == :ident && in1_e.a.x != nil && in1_e.a.x.binding == k_bind && in1_e.b.kind == :ident && local_idx(in1_e.b) >= 0 && local_idx(in1_e.b) != local_idx(lhs_node) && local_idx(in1_e.b) != a_li_ss
+          b_li_ss = local_idx(in1_e.b)
+          cmp_l = else_one.a.a
+          cmp_r = else_one.a.b
+          is_ak = ->(m, target_li)
+            m != nil && m.kind == :member && m.has?(F_COMPUTED) && m.a != nil && local_idx(m.a) == target_li && m.b != nil && m.b.kind == :ident && m.b.x != nil && m.b.x.binding == k_bind
+          if (is_ak.call(cmp_l, a_li_ss) && is_ak.call(cmp_r, b_li_ss)) || (is_ak.call(cmp_l, b_li_ss) && is_ak.call(cmp_r, a_li_ss))
+            can_skip_l2 = next_missing_pair != nil && l_skip_next != nil && next_missing_pair[0] == b_li_ss && next_missing_pair[1] == a_li_ss
+            l_ss_gen = @a.new_label
+            l_ss_lp = @a.new_label
+            l_ss_nxt = @a.new_label
+            l_ss_mis = @a.new_label
+            l_ss_eq = @a.new_label
+            # On entry here: R_X0 = ks, R_X13 = is_direct_inl!
+            @a.cbz_x(R_X13, l_ss_gen)
+            @a.ldr_x(R_X9, R_SP, obj_off)
+            @a.sub_i(R_X9, R_X9, 4)
+            @a.ldrb(R_X14, R_X9, 4)
+            @a.cmp_wi(R_X14, KIND_OBJECT)
+            @a.b_cond(CC_NE, l_ss_gen)
+            load_slot_any(R_X10, b_li_ss)
+            @a.sub_i(R_X10, R_X10, 4)
+            @a.tst_wobj_bad(R_X10)
+            @a.b_cond(CC_NE, l_ss_gen)
+            @a.cbz_x(R_X10, l_ss_gen)
+            @a.ldrb(R_X14, R_X10, 4)
+            @a.cmp_wi(R_X14, KIND_OBJECT)
+            @a.b_cond(CC_NE, l_ss_gen)
+            @a.ldr_x(R_X14, R_X10, 8)
+            @a.ldr_x(R_X15, R_SP, sh_off)
+            @a.cmp_r(R_X14, R_X15)
+            @a.b_cond(CC_NE, l_ss_gen)
+            # Load len directly from R_X0 (ks WArray) without spilling!
+            @a.and_x_ptr47(R_X14, R_X0)
+            @a.ldrsw(R_X11, R_X14, 8)
+            @a.movz_x(R_X12, 0)
+            @a.bind(l_ss_lp)
+            @a.cmp_r(R_X12, R_X11)
+            @a.b_cond(CC_GE, l_ss_eq)
+            @a.add_i(R_X14, R_X12, 3)
+            @a.ldr_x_idx(R_X15, R_X9, R_X14)
+            @a.ldr_x_idx(R_X14, R_X10, R_X14)
+            @a.cmp_r(R_X15, R_X14)
+            @a.b_cond(CC_NE, l_ss_mis)
+            @a.sub_r(R_X14, R_X15, R_X20)
+            @a.cmp_r(R_X14, R_X21)
+            @a.b_cond(CC_HS, l_ss_nxt)
+            @a.fmov_d_x(R_D0, R_X14)
+            @a.fcmp_d(R_D0, R_D0)
+            @a.b_cond(CC_VS, l_ss_mis)
+            @a.bind(l_ss_nxt)
+            @a.add_i(R_X12, R_X12, 1)
+            @a.b(l_ss_lp)
+            @a.bind(l_ss_eq)
+            l_eq_exit = can_skip_l2 ? l_skip_next : l_brk
+            if !lhs_init
+              @a.cbz_x(R_X11, l_eq_exit)
+              @a.sub_i(R_X11, R_X11, 1)
+              @a.and_x_ptr47(R_X9, R_X0)
+              @a.ldrsw(R_X12, R_X9, 4)
+              @a.add_r(R_X12, R_X12, R_X11)
+              @a.ldr_x(R_X13, R_X9, 16)
+              @a.ldr_x_idx(R_X0, R_X13, R_X12)
+              emit_write_binding(lhs_node.x.binding, R_X0, false, lhs_node.x)
+            @a.b(l_eq_exit)
+            @a.bind(l_ss_mis)
+            if !stmt_has_loop_ctrl?(else_one.b)
+              l_ss_run = @a.new_label
+              l_ss_after = @a.new_label
+              l_ss_exit_chk = @a.new_label
+              l_ss_fallback = @a.new_label
+              l_ss_chk_nn = @a.new_label
+              l_ss_x1_str = @a.new_label
+              l_ss_x2_str = @a.new_label
+              l_ss_seq_rt = @a.new_label
+              aval_off = push_x(R_X15)
+              bval_off = push_x(R_X14)
+              @a.str_x(R_X13, R_SP, dir_off)
+              @a.str_x(R_X0, R_SP, ks_off)
+              @a.str_x(R_X11, R_SP, len_off)
+              @a.str_x(R_X12, R_SP, idx_off)
+              # Load k = ks[idx] and bind it once, then test loaded `aval !== bval` directly in regs (ZERO @for_in_ctx re-lookups!)
+              @a.and_x_ptr47(R_X9, R_X0)
+              @a.ldrsw(R_X10, R_X9, 4)
+              @a.add_r(R_X10, R_X10, R_X12)
+              @a.ldr_x(R_X13, R_X9, 16)
+              @a.ldr_x_idx(R_X0, R_X13, R_X10)
+              emit_write_binding(lhs_node.x.binding, R_X0, lhs_init, lhs_node.x)
+              @a.ldr_x(R_X1, R_SP, aval_off)
+              @a.ldr_x(R_X2, R_SP, bval_off)
+              # If bits are equal here, we came from NaN branch -> NaN !== NaN is ALWAYS true!
+              @a.cmp_r(R_X1, R_X2)
+              @a.b_cond(CC_EQ, l_ss_run)
+              # Check if x1 is Number
+              @a.sub_r(R_X9, R_X1, R_X20)
+              @a.cmp_r(R_X9, R_X21)
+              @a.b_cond(CC_HS, l_ss_chk_nn)
+              @a.sub_r(R_X10, R_X2, R_X20)
+              @a.cmp_r(R_X10, R_X21)
+              @a.b_cond(CC_HS, l_ss_run)
+              @a.fmov_d_x(R_D0, R_X9)
+              @a.fmov_d_x(R_D1, R_X10)
+              @a.fcmp_d(R_D0, R_D1)
+              @a.b_cond(CC_EQ, l_ss_after)
+              @a.b(l_ss_run)
+              # x1 is NOT Number and x1 != x2: only equal if BOTH are heap/slab/rope strings with identical bytes!
+              @a.bind(l_ss_chk_nn)
+              @a.lsr_xi(R_X9, R_X1, 48)
+              @a.movz_x(R_X10, 0xFFF9)
+              @a.cmp_r(R_X9, R_X10)
+              @a.b_cond(CC_EQ, l_ss_x1_str)
+              @a.cbnz_x(R_X9, l_ss_run)
+              @a.tst_x_lowmask(R_X1, 4)
+              @a.b_cond(CC_NE, l_ss_run)
+              @a.cmp_i(R_X1, 16)
+              @a.b_cond(CC_HS, l_ss_seq_rt)
+              @a.b(l_ss_run)
+              @a.bind(l_ss_x1_str)
+              @a.tst_x_lowmask(R_X1, 1)
+              @a.b_cond(CC_NE, l_ss_run)
+              @a.lsr_xi(R_X9, R_X1, 1)
+              @a.and_x_lowmask(R_X9, R_X9, 3)
+              @a.cmp_i(R_X9, 5)
+              @a.b_cond(CC_LS, l_ss_run)
+              # x1 is mode 6/7 string -> check if x2 is also mode 6/7 or rope!
+              @a.lsr_xi(R_X11, R_X2, 48)
+              @a.cmp_r(R_X11, R_X10)
+              @a.b_cond(CC_NE, l_ss_x2_str)
+              @a.tst_x_lowmask(R_X2, 1)
+              @a.b_cond(CC_NE, l_ss_run)
+              @a.lsr_xi(R_X11, R_X2, 1)
+              @a.and_x_lowmask(R_X11, R_X11, 3)
+              @a.cmp_i(R_X11, 5)
+              @a.b_cond(CC_LS, l_ss_run)
+              @a.b(l_ss_seq_rt)
+              @a.bind(l_ss_x2_str)
+              @a.cbnz_x(R_X11, l_ss_run)
+              @a.tst_x_lowmask(R_X2, 4)
+              @a.b_cond(CC_NE, l_ss_run)
+              @a.cmp_i(R_X2, 16)
+              @a.b_cond(CC_HS, l_ss_seq_rt)
+              @a.bind(l_ss_run)
+              cb_ss_seq = ->()
+                @a.bind(l_ss_seq_rt)
+                @a.ldr_x(R_X1, R_SP, aval_off)
+                @a.ldr_x(R_X2, R_SP, bval_off)
+                call_rt(RT_SEQ)
+                @a.cmp_i(R_X0, 2)
+                @a.b_cond(CC_EQ, l_ss_after)
+                @a.b(l_ss_run)
+              add_cold_stub(cb_ss_seq)
+              old_fic_ss = @for_in_ctx
+              k_li_ss = local_idx(lhs_node)
+              pure_body_ss = osr_loop_pure_epoch?(else_one.b) && !stmt_has_member_assign?(else_one.b)
+              a_unmod = !stmt_writes_local?(else_one.b, a_li_ss)
+              b_unmod = !stmt_writes_local?(else_one.b, b_li_ss)
+              if k_li_ss < 0 || !stmt_writes_local?(else_one.b, k_li_ss)
+                if pure_body_ss && b_unmod
+                  @for_in_ctx = [k_bind, sh_off, idx_off, dir_off, b_li_ss, bval_off]
+                else
+                  @for_in_ctx = [k_bind, sh_off, idx_off, dir_off]
+              gen_stmt(else_one.b)
+              @for_in_ctx = old_fic_ss
+              @tmp_depth -= 2
+              @a.bind(l_ss_after)
+              # Re-verify a & b shapes still match orig_sh (and JS_EPOCH if !@hoisted_epoch) to stay in fast loop / skip Loop 2!
+              if !@hoisted_epoch
+                ep_ss = JS_EPOCH[0]
+                @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+                @a.ldr_x(R_X10, R_X9, 0)
+                @a.mov_imm64(R_X11, ep_ss)
+                @a.cmp_r(R_X10, R_X11)
+                @a.b_cond(CC_NE, l_ss_fallback)
+              @a.ldr_x(R_X9, R_SP, obj_off)
+              @a.sub_i(R_X9, R_X9, 4)
+              if !a_unmod
+                @a.ldrb(R_X14, R_X9, 4)
+                @a.cmp_wi(R_X14, KIND_OBJECT)
+                @a.b_cond(CC_NE, l_ss_fallback)
+              @a.ldr_x(R_X14, R_X9, 8)
+              @a.ldr_x(R_X15, R_SP, sh_off)
+              @a.cmp_r(R_X14, R_X15)
+              @a.b_cond(CC_NE, l_ss_fallback)
+              load_slot_any(R_X10, b_li_ss)
+              @a.sub_i(R_X10, R_X10, 4)
+              if !b_unmod
+                @a.tst_wobj_bad(R_X10)
+                @a.b_cond(CC_NE, l_ss_fallback)
+                @a.cbz_x(R_X10, l_ss_fallback)
+                @a.ldrb(R_X14, R_X10, 4)
+                @a.cmp_wi(R_X14, KIND_OBJECT)
+                @a.b_cond(CC_NE, l_ss_fallback)
+              @a.ldr_x(R_X14, R_X10, 8)
+              @a.cmp_r(R_X14, R_X15)
+              @a.b_cond(CC_NE, l_ss_fallback)
+              @a.ldr_x(R_X12, R_SP, idx_off)
+              @a.add_i(R_X12, R_X12, 1)
+              @a.ldr_x(R_X11, R_SP, len_off)
+              @a.cmp_r(R_X12, R_X11)
+              @a.b_cond(CC_GE, l_ss_exit_chk)
+              @a.ldr_x(R_X0, R_SP, ks_off)
+              @a.movz_x(R_X13, 1)
+              @a.b(l_ss_lp)
+              @a.bind(l_ss_exit_chk)
+              @a.b(can_skip_l2 ? l_skip_next : l_brk)
+              @a.bind(l_ss_fallback)
+              @a.ldr_x(R_X12, R_SP, idx_off)
+              @a.add_i(R_X12, R_X12, 1)
+              @a.str_x(R_X12, R_SP, idx_off)
+              @a.b(l_head)
+            else
+              @a.str_x(R_X13, R_SP, dir_off)
+              @a.str_x(R_X0, R_SP, ks_off)
+              @a.str_x(R_X11, R_SP, len_off)
+              @a.str_x(R_X12, R_SP, idx_off)
+              @a.b(l_head)
+            @a.bind(l_ss_gen)
+    @a.str_x(R_X13, R_SP, dir_off)
+    @a.str_x(R_X0, R_SP, ks_off)
+    @a.and_x_ptr47(R_X9, R_X0)
+    @a.ldrsw(R_X10, R_X9, 8)      # len
+    @a.str_x(R_X10, R_SP, len_off)
+    @a.str_x(R_XZR, R_SP, idx_off)
+    @loops.push(JS:JitLoopCtx.new(l_brk, l_cont, nil))
+    @in_loop_depth += 1
     @a.bind(l_head)
     @a.ldr_x(R_X11, R_SP, idx_off)
     @a.ldr_x(R_X10, R_SP, len_off)
     @a.cmp_r(R_X11, R_X10)
     @a.b_cond(CC_GE, l_brk)
-    # Load key ks[i], advance i
+    # Load key ks[i] (idx stays at current slot index i throughout the body; incremented at l_cont!)
     @a.ldr_x(R_X9, R_SP, ks_off)
     @a.and_x_ptr47(R_X9, R_X9)
     @a.ldrsw(R_X12, R_X9, 4)      # start
     @a.add_r(R_X12, R_X12, R_X11)
     @a.ldr_x(R_X13, R_X9, 16)     # slots
     @a.ldr_x_idx(R_X0, R_X13, R_X12)
-    @a.add_i(R_X11, R_X11, 1)
-    @a.str_x(R_X11, R_SP, idx_off)
     # Verify key still present (2-insn skip when obj.@shape == orig_shape!)
     l_present = @a.new_label
     @a.ldr_x(R_X10, R_SP, sh_off)
@@ -1743,13 +4816,21 @@ OSR_RETURN = 2
     @a.b_cond(CC_NE, l_cont)
     @a.bind(l_present)
     emit_write_binding(lhs_node.x.binding, R_X0, lhs_init, lhs_node.x)
+    old_fic = @for_in_ctx
+    k_li_fi = local_idx(lhs_node)
+    if k_bind != nil && (k_li_fi < 0 || !stmt_writes_local?(s.d, k_li_fi))
+      @for_in_ctx = [k_bind, sh_off, idx_off, dir_off]
     gen_loop_body_stmt(s.d)
+    @for_in_ctx = old_fic
     @a.bind(l_cont)
+    @a.ldr_x(R_X11, R_SP, idx_off)
+    @a.add_i(R_X11, R_X11, 1)
+    @a.str_x(R_X11, R_SP, idx_off)
     @a.b(l_head)
     @a.bind(l_brk)
     @in_loop_depth -= 1
     @loops.pop
-    @tmp_depth -= 5
+    @tmp_depth -= 6
     @known_shapes = {}
     nil
 
@@ -1802,6 +4883,36 @@ OSR_RETURN = 2
         return false if !node_pure_num_obj?(n.list[i])
         i += 1
     true
+
+  -> stmt_has_loop_ctrl?(n)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if stmt_has_loop_ctrl?(n[i])
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return false if k == :fn_decl || k == :fn_expr || k == :arrow
+    return true if k == :break || k == :continue
+    return true if stmt_has_loop_ctrl?(n.a) || stmt_has_loop_ctrl?(n.b) || stmt_has_loop_ctrl?(n.c) || stmt_has_loop_ctrl?(n.d)
+    stmt_has_loop_ctrl?(n.list)
+
+  -> stmts_has_reg_loop?(n)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if stmts_has_reg_loop?(n[i])
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return false if k == :fn_decl || k == :fn_expr || k == :arrow
+    return true if k == :for || k == :while || k == :do_while
+    return true if stmts_has_reg_loop?(n.a) || stmts_has_reg_loop?(n.b) || stmts_has_reg_loop?(n.c) || stmts_has_reg_loop?(n.d)
+    stmts_has_reg_loop?(n.list)
 
   -> stmts_have_return?(stmts)
     return false if stmts == nil
@@ -1889,6 +5000,51 @@ OSR_RETURN = 2
   # Counted `<=` or variable-step (`j += step`) `for` loops:
   #   - `for (var i = 1; i <= n; i++) { ... }` (float_math, sieve count!) -> 2x/4x unrolled, zero b.vs, BCE!
   #   - `for (var j = i * i; j <= n; j += i) buf[j] = 1;` (sieve inner!) -> promotes f64 `j` to i32 GPR, 2x unrolled, zero b.vs, BCE!
+  # Find a read-only unhoisted `JT_ANY` local `tli` indexed as `tli[li]` inside `n` (eligible for 1-time pre-loop Uint8Array hoist!).
+  -> find_loop_u8_ta_cand(n, li, body)
+    return -1 if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        r = find_loop_u8_ta_cand(n[i], li, body)
+        return r if r >= 0
+        i += 1
+      return -1
+    return -1 if !n.is_a?(JsNode)
+    k = n.kind
+    return -1 if k == :function || k == :arrow
+    if k == :member && n.has?(F_COMPUTED) && n.a != nil && n.a.kind == :ident && local_idx(n.b) == li
+      tli = local_idx(n.a)
+      if tli >= 0 && tli != li && @info.types[tli] == JT_ANY && @hoisted_tas[tli] == nil && @hoisted_arrs[tli] == nil && !@info.local_arrs[tli] && !stmt_writes_local?(body, tli) && !stmt_has_member_write_on_local?(body, tli)
+        return tli
+    r = find_loop_u8_ta_cand(n.a, li, body)
+    return r if r >= 0
+    r = find_loop_u8_ta_cand(n.b, li, body)
+    return r if r >= 0
+    r = find_loop_u8_ta_cand(n.c, li, body)
+    return r if r >= 0
+    r = find_loop_u8_ta_cand(n.d, li, body)
+    return r if r >= 0
+    find_loop_u8_ta_cand(n.list, li, body)
+
+  -> stmt_has_member_write_on_local?(n, tli)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if stmt_has_member_write_on_local?(n[i], tli)
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return false if k == :function || k == :arrow
+    if (k == :assign || k == :update) && n.a != nil && n.a.kind == :member && local_idx(n.a.a) == tli
+      return true
+    if k == :call && n.a != nil && n.a.kind == :member && local_idx(n.a.a) == tli
+      return true
+    return true if stmt_has_member_write_on_local?(n.a, tli) || stmt_has_member_write_on_local?(n.b, tli) || stmt_has_member_write_on_local?(n.c, tli) || stmt_has_member_write_on_local?(n.d, tli)
+    stmt_has_member_write_on_local?(n.list, tli)
+
   -> try_gen_step_or_le_for_loop(s, run_init)
     return false if s.b == nil || s.c == nil || s.b.kind != :binary
     op = s.b.str
@@ -1896,14 +5052,17 @@ OSR_RETURN = 2
     is_le = op == "<="
     li = local_idx(s.b.a)
     return false if li < 0 || stmt_writes_local?(s.d, li)
-    # Classify update: `i++` (step_reg == nil) or `j += step_local` (step_reg != nil)
+    # Classify update: `i++` (step_reg == nil && step_const == 0), `i += K` (step_const > 0), or `j += step_local` (step_reg != nil)
     step_reg = nil
+    step_const = 0
     if s.c.kind == :update && s.c.str == "++" && local_idx(s.c.a) == li
       return false if !is_le   # `<` with `i++` is handled by full try_gen_counted_for_loop!
     elsif s.c.kind == :assign && s.c.str == "+=" && local_idx(s.c.a) == li && s.c.b.kind == :ident
       sli = local_idx(s.c.b)
       return false if sli < 0 || sli == li || @info.types[sli] != JT_I32 || @info.reg_gpr[sli] == nil || stmt_writes_local?(s.d, sli)
       step_reg = @info.reg_gpr[sli]
+    elsif s.c.kind == :assign && s.c.str == "+=" && local_idx(s.c.a) == li && s.c.b.kind == :num && jit_int32_lit?(s.c.b) && s.c.b.a.to_i >= 1 && s.c.b.a.to_i <= 4095
+      step_const = s.c.b.a.to_i
     else
       return false
     # Allow JT_I32 induction var in GPR, OR promote a JT_F64/JT_ANY `j += step` induction var (e.g. `var j = i * i` inside `if`) into a free GPR!
@@ -1919,7 +5078,7 @@ OSR_RETURN = 2
       promo_any_j = true
     else
       return false
-    # Classify limit: i32 literal or JT_I32 register local
+    # Classify limit: i32 literal, hoisted global i32 constant, or JT_I32 register local
     lim_kind = 0
     lim_val = 0
     lim_reg = nil
@@ -1932,6 +5091,9 @@ OSR_RETURN = 2
       if lli >= 0 && lli != li && @info.types[lli] == JT_I32 && @info.reg_gpr[lli] != nil && !stmt_writes_local?(s.d, lli)
         lim_kind = 2
         lim_reg = @info.reg_gpr[lli]
+      elsif eb.x != nil && eb.x.binding != nil && @info.global_i32s[eb.x.binding] != nil && @info.global_i32s[eb.x.binding][0] >= 0 && @info.global_i32s[eb.x.binding][0] < 2147483647
+        lim_kind = 1
+        lim_val = @info.global_i32s[eb.x.binding][0]
     return false if lim_kind == 0
     promo_j_gpr = nil
     if promo_f64_j || promo_any_j
@@ -1983,11 +5145,55 @@ OSR_RETURN = 2
         @a.cmp_w(R_X10, R_X9)
       @a.b_cond(CC_GT, l_slow)
       need_slow = true
+    elsif step_const > 0
+      if lim_kind == 2
+        @a.mov_imm32(R_X9, 2147483646 - step_const)
+        @a.cmp_w(lim_reg, R_X9)
+        @a.b_cond(CC_GT, l_slow)
+        need_slow = true
+      elsif lim_val > 2147483646 - step_const
+        @a.b(l_slow)
+        need_slow = true
     elsif is_le && lim_kind == 2
       @a.mov_imm32(R_X9, 2147483645)
       @a.cmp_w(lim_reg, R_X9)
       @a.b_cond(CC_GT, l_slow)
       need_slow = true
+    # 1-time speculative Uint8Array hoist for an unhoisted read-only local `d[i]` (e.g. `var d = decompress(c, N); for (i = 0; i < N; i += 17) ... d[i] ...`)!
+    spec_ta_li = -1
+    r_st_ptr = nil
+    r_st_len = nil
+    if !@in_cold_stub && @in_loop_depth == 0 && @free_gprs.size >= 2 && lim_kind == 1 && !jit_has_loop_stmt?(s.d)
+      cand_st = find_loop_u8_ta_cand(s.d, li, s.d)
+      if cand_st >= 0
+        spec_ta_li = cand_st
+        r_st_ptr = @free_gprs.pop
+        r_st_len = @free_gprs.pop
+        ta_out_s = i64[4]
+        jit_keep(ta_out_s)
+        load_slot_any(R_X1, spec_ta_li)
+        @a.mov_imm64(R_X2, wvalue_bits(ta_out_s) ## i64)
+        call_rt(RT_TA_INFO)
+        @a.cmp_i(R_X0, 2)
+        @a.b_cond(CC_NE, l_slow)
+        @a.mov_imm64(R_X9, jit_i64_ptr(ta_out_s))
+        @a.ldr_x(R_X10, R_X9, 16)
+        @a.cmp_i(R_X10, 1)
+        @a.b_cond(CC_NE, l_slow)
+        @a.ldr_x(r_st_len, R_X9, 8)
+        @a.cmp_wi(ri, 0)
+        @a.b_cond(CC_LT, l_slow)
+        if lim_reg != nil
+          @a.cmp_r(lim_reg, r_st_len)
+        else
+          @a.mov_imm32(R_X10, lim_val)
+          @a.cmp_r(R_X10, r_st_len)
+        @a.b_cond(is_le ? CC_GE : CC_GT, l_slow)
+        @a.ldr_x(r_st_ptr, R_X9, 0)
+        @hoisted_tas[spec_ta_li] = [-1, -1, 1]
+        @hoisted_ta_regs[spec_ta_li] = [r_st_ptr, r_st_len]
+        @bounded_ta_set[li.to_s + ":" + spec_ta_li.to_s] = true
+        need_slow = true
     if bce_tas.size > 0
       @a.cmp_wi(ri, 0)
       @a.b_cond(CC_LT, l_slow)
@@ -2013,10 +5219,10 @@ OSR_RETURN = 2
       @info.types[li] = JT_I32
       @info.reg_gpr[li] = ri
     old_no_ovf = @no_ovf_p1_li
-    @no_ovf_p1_li = li if step_reg == nil && is_le && (lim_kind == 2 || lim_val <= 2147483645)
+    @no_ovf_p1_li = li if step_reg == nil && step_const == 0 && is_le && (lim_kind == 2 || lim_val <= 2147483645)
     body_sz = !stmt_has_cf_or_loop?(s.d) ? stmt_size_count(s.d) : 999
-    can_unroll4 = step_reg == nil && is_le && body_sz <= 22
-    can_unroll2 = step_reg == nil && is_le && !can_unroll4 && body_sz <= 26
+    can_unroll4 = step_reg == nil && step_const == 0 && is_le && body_sz <= 22
+    can_unroll2 = step_reg == nil && step_const == 0 && is_le && !can_unroll4 && body_sz <= 26
     can_step_unroll2 = step_reg != nil && is_le && lim_kind == 2 && body_sz <= 10
     @loops.push(JS:JitLoopCtx.new(l_fast_brk, l_cont, nil))
     @in_loop_depth += 1
@@ -2141,6 +5347,8 @@ OSR_RETURN = 2
       @a.bind(l_cont)
       if step_reg != nil
         @a.add_w(ri, ri, step_reg)
+      elsif step_const > 0
+        @a.add_wi(ri, ri, step_const)
       else
         @a.add_wi(ri, ri, 1)
       emit_counted_cmp_branch(ri, lim_kind, lim_val, lim_reg, -1, cc_back, l_head)
@@ -2162,6 +5370,12 @@ OSR_RETURN = 2
     @a.bind(l_brk)
     @in_loop_depth -= 1
     @loops.pop
+    if spec_ta_li >= 0
+      @hoisted_tas.delete(spec_ta_li)
+      @hoisted_ta_regs.delete(spec_ta_li)
+      @bounded_ta_set.delete(li.to_s + ":" + spec_ta_li.to_s)
+      @free_gprs.push(r_st_len)
+      @free_gprs.push(r_st_ptr)
     if bce_tas.size > 0
       lim_li = local_idx(eb)
       bce_tas.each ->(tli)
@@ -2513,6 +5727,109 @@ OSR_RETURN = 2
       n.list.each ->(x) collect_inv_indexof(x, out)
     nil
 
+  # Scan a call-free loop body (and its observed inlined polymorphic method arms) for:
+  #   - top hot shapes not already in @hoisted_shapes -> pin in R_X6 / R_X7
+  #   - read-only GlobalObj.num_prop (`Direction.FORWARD`) -> verify once & pin in R_X8!
+  -> scan_loop_pin_cands(n, sh_counts, gp_cands, gp_written, ok_ref, depth)
+    return nil if n == nil || !ok_ref[0]
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size && ok_ref[0]
+        scan_loop_pin_cands(n[i], sh_counts, gp_cands, gp_written, ok_ref, depth)
+        i += 1
+      return nil
+    return nil if !n.is_a?(JsNode)
+    k = n.kind
+    if k == :function || k == :arrow || k == :class || k == :for || k == :while || k == :do_while || k == :for_in || k == :for_of || k == :try || k == :throw || k == :new
+      ok_ref[0] = false
+      return nil
+    if (k == :assign || k == :update) && n.a != nil && n.a.kind == :member
+      if n.a.has?(F_COMPUTED)
+        ok_ref[0] = false
+        return nil
+      gp_written[n.a.b.str] = true
+    if k == :member && !n.has?(F_COMPUTED)
+      if jit_ic_valid?(n.x) && n.x[0] != 0 && n.x[2] == 0 && n.x[1] != 0
+        sh_b = n.x[0]
+        sh_counts[sh_b] = (sh_counts[sh_b] == nil ? 0 : sh_counts[sh_b]) + 1
+      if n.a != nil && n.a.kind == :ident && n.a.x != nil && n.a.x.binding != nil && n.a.x.binding.global? && n.a.x.binding.writes <= 1
+        gc = wk_cell(n.a.x.binding)
+        hgo = gc != nil ? @hoisted_gobj_shapes[wvalue_bits(gc) ## i64] : nil
+        if hgo != nil
+          gv = hgo[0]
+          gsh = hgo[1]
+          gsl = gsh.slot_of(n.b.str)
+          if gsl >= 0 && (gsh.attrs_of(n.b.str) & ATTR_ACCESSOR) == 0
+            obs = gv.get_own(n.b.str)
+            if js_number?(obs) && obs == obs
+              genc = gsl < gsh.inline ? (gsh.ibase + gsl) : (0 - (gsl - gsh.inline) - 1)
+              obs_b = wvalue_bits(obs) ## i64
+              gpk = (wvalue_bits(gc) ## i64).to_s + ":" + genc.to_s
+              cur_gp = gp_cands[gpk]
+              if cur_gp == nil
+                gp_cands[gpk] = [gc, gv, genc, obs_b, 1, n.b.str]
+              else
+                cur_gp[4] = cur_gp[4] + 1
+    if k == :call
+      if depth < 2 && n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.x.is_a?(Array) && n.x.size >= 2 && n.x.size <= 8
+        mn = n.a.b.str
+        prof_p = wk_sort_poly_prof(n, n.x)
+        np_p = prof_p.size / 2
+        pi_p = 0
+        while pi_p < np_p && ok_ref[0]
+          sh_p = prof_p[pi_p * 2]
+          fn_p = prof_p[pi_p * 2 + 1]
+          if sh_p.is_a?(JS:Shape) && !sh_p.dict && sh_p.slot_of(mn) < 0 && fn_p.is_a?(JS:Function) && fn_p.code != nil && fn_p.code.node.is_a?(JaFunc) && js_shape_proto_method_eq?(sh_p, mn, fn_p)
+            sh_pb = wvalue_bits(sh_p) ## i64
+            tjf_p = fn_p.code.node
+            p1_p = n.list.size <= 2 ? poly_classify_method(tjf_p, sh_p, n.list.size) : nil
+            if p1_p != nil
+              # Prefer pinning non-empty work arm shapes over no-op stubs!
+              w_arm = p1_p[0] == :empty ? 1 : 4
+              sh_counts[sh_pb] = (sh_counts[sh_pb] == nil ? 0 : sh_counts[sh_pb]) + w_arm
+              if p1_p[0] == :copy_cond_prop
+                sh_counts[p1_p[8]] = (sh_counts[p1_p[8]] == nil ? 0 : sh_counts[p1_p[8]]) + 8
+                ci_p = p1_p[3]
+                if ci_p[0] == :gprop && ci_p.size >= 7 && ci_p[5] != nil
+                  hgo_p = @hoisted_gobj_shapes[wvalue_bits(ci_p[1]) ## i64]
+                  if hgo_p != nil && hgo_p[0] == ci_p[2] && hgo_p[1] == ci_p[3]
+                    gpk_p = (wvalue_bits(ci_p[1]) ## i64).to_s + ":" + ci_p[4].to_s
+                    cur_gp = gp_cands[gpk_p]
+                    if cur_gp == nil
+                      gp_cands[gpk_p] = [ci_p[1], ci_p[2], ci_p[4], ci_p[5], 4, nil]
+                    else
+                      cur_gp[4] = cur_gp[4] + 4
+              elsif p1_p[0] == :ret_cmp || p1_p[0] == :ret_cond_prop
+                ci_p = p1_p[3]
+                if ci_p[0] == :gprop && ci_p.size >= 7 && ci_p[5] != nil
+                  hgo_p = @hoisted_gobj_shapes[wvalue_bits(ci_p[1]) ## i64]
+                  if hgo_p != nil && hgo_p[0] == ci_p[2] && hgo_p[1] == ci_p[3]
+                    gpk_p = (wvalue_bits(ci_p[1]) ## i64).to_s + ":" + ci_p[4].to_s
+                    cur_gp = gp_cands[gpk_p]
+                    if cur_gp == nil
+                      gp_cands[gpk_p] = [ci_p[1], ci_p[2], ci_p[4], ci_p[5], 4, nil]
+                    else
+                      cur_gp[4] = cur_gp[4] + 4
+            elsif tjf_p != @jf && tjf_p.free.size == 0 && tjf_p.node.b.is_a?(Array) && tjf_p.node.b.size > 0 && !ast_has_call?(tjf_p.node.b)
+              sh_counts[sh_pb] = (sh_counts[sh_pb] == nil ? 0 : sh_counts[sh_pb]) + 4
+              scan_loop_pin_cands(tjf_p.node.b, sh_counts, gp_cands, gp_written, ok_ref, depth + 1)
+            else
+              ok_ref[0] = false
+          else
+            ok_ref[0] = false
+          pi_p += 1
+      else
+        ok_ref[0] = false
+      scan_loop_pin_cands(n.a.a, sh_counts, gp_cands, gp_written, ok_ref, depth) if n.a != nil && n.a.kind == :member
+      scan_loop_pin_cands(n.list, sh_counts, gp_cands, gp_written, ok_ref, depth)
+      return nil
+    scan_loop_pin_cands(n.a, sh_counts, gp_cands, gp_written, ok_ref, depth)
+    scan_loop_pin_cands(n.b, sh_counts, gp_cands, gp_written, ok_ref, depth)
+    scan_loop_pin_cands(n.c, sh_counts, gp_cands, gp_written, ok_ref, depth)
+    scan_loop_pin_cands(n.d, sh_counts, gp_cands, gp_written, ok_ref, depth)
+    scan_loop_pin_cands(n.list, sh_counts, gp_cands, gp_written, ok_ref, depth)
+    nil
+
   -> try_gen_counted_for_loop(s, run_init)
     return false if s.b == nil || s.c == nil
     return false if s.b.kind != :binary || s.b.str != "<"
@@ -2532,6 +5849,9 @@ OSR_RETURN = 2
     lim_reg = nil
     lim_container = -1
     temp_hoist_arr = -1
+    temp_hoist_marr = nil   # [v_li, prop_s, sh_ma, sl_ma, push_targets]
+    temp_hoist_garr = nil
+    temp_hoist_garr_v = nil
     temp_arr_gprs = nil
     l_temp_arr_slow = nil
     eb = s.b.b
@@ -2551,11 +5871,25 @@ OSR_RETURN = 2
       elsif cli >= 0 && @hoisted_tas[cli] != nil
         lim_kind = 4
         lim_container = cli
-      elsif cli >= 0 && @info.types[cli] == JT_ANY && !stmt_mutates_arr?(s.d, cli) && @free_gprs.size >= 2
-        # Loop-local read-only dense Array hoisting (e.g. Loop 2 of arrays_warm: `for (i=0; i<a.length; i++) s += a[i]`)!
+      elsif cli >= 0 && @info.types[cli] == JT_ANY && !stmt_mutates_arr?(s.d, cli) && (@free_gprs.size >= 2 || @tmp_depth + 2 <= 56)
+        # Loop-local read-only dense Array hoisting (GPR-pinned when 2 GPRs free, else stack-spilled `[sl_off, ln_off]`)!
         temp_hoist_arr = cli
         lim_kind = 3
         lim_container = cli
+      elsif @hoisted_marr == nil && eb.a.kind == :member && !eb.a.has?(F_COMPUTED) && local_idx(eb.a.a) >= 0 && (@free_gprs.size >= 2 || @tmp_depth + 2 <= 56)
+        v_li_m = local_idx(eb.a.a)
+        ma_ic = eb.a.x
+        if @info.types[v_li_m] == JT_ANY && !stmt_writes_local?(s.d, v_li_m) && jit_ic_valid?(ma_ic) && ma_ic[0] != 0 && ma_ic[2] == 0 && ma_ic[1] != 0
+          push_tgts = []
+          if marr_loop_safe?(s.d, eb.a.b.str, push_tgts)
+            temp_hoist_marr = [v_li_m, eb.a.b.str, ma_ic[0], ma_ic[1], push_tgts]
+            lim_kind = 5
+      elsif @hoisted_epoch && eb.a.kind == :ident && eb.a.x != nil && eb.a.x.binding != nil && @info.global_objs[eb.a.x.binding] != nil && @free_gprs.size >= 2
+        gv_ga = @info.global_objs[eb.a.x.binding][1]
+        if js_array?(gv_ga) && !stmt_writes_global_arr?(s.d, eb.a.x.binding)
+          temp_hoist_garr = eb.a.x.binding
+          temp_hoist_garr_v = gv_ga
+          lim_kind = 2
     return false if lim_kind == 0
     # Hoist large constant limit (> 4095) into a free GPR if available!
     borrowed_gpr = nil
@@ -2564,17 +5898,25 @@ OSR_RETURN = 2
       @a.mov_imm32(borrowed_gpr, lim_val)
       lim_reg = borrowed_gpr
     # Fast hoisted monomorphic mutating method loop (`for (i=0; i<n; i++) s += p.step(1, -1)`)!
-    if temp_hoist_arr < 0 && try_gen_hoisted_method_loop(s, li, ri, lim_kind, lim_val, lim_reg, lim_container)
+    if temp_hoist_arr < 0 && temp_hoist_marr == nil && temp_hoist_garr == nil && try_gen_hoisted_method_loop(s, li, ri, lim_kind, lim_val, lim_reg, lim_container)
       @free_gprs.push(borrowed_gpr) if borrowed_gpr != nil
       return true
     # If loop-local read-only array hoisting is active, guard dense plain array ONCE before loop!
     l_temp_arr_done = nil
+    old_hoisted_ep_ta = @hoisted_epoch
+    old_hm_marr = @hoisted_marr
+    temp_arr_spilled = false
     if temp_hoist_arr >= 0
       l_temp_arr_slow = @a.new_label
       l_temp_arr_done = @a.new_label
-      r_sl = @free_gprs.pop
-      r_ln = @free_gprs.pop
-      temp_arr_gprs = [r_sl, r_ln]
+      if !@hoisted_epoch && osr_loop_pure_epoch?(s.d)
+        ep_ta = JS_EPOCH[0]
+        @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+        @a.ldr_x(R_X10, R_X9, 0)
+        @a.mov_imm64(R_X11, ep_ta)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_temp_arr_slow)
+        @hoisted_epoch = true
       load_slot_any(R_X9, temp_hoist_arr)
       @a.lsr_xi(R_X10, R_X9, 48)
       @a.movz_x(R_X11, 0xFFF4)
@@ -2587,10 +5929,95 @@ OSR_RETURN = 2
       @a.b_cond(CC_NE, l_temp_arr_slow)
       @a.ldr_w(R_X10, R_X9, 4)
       @a.cbnz_w(R_X10, l_temp_arr_slow)
+      if @free_gprs.size >= 2
+        r_sl = @free_gprs.pop
+        r_ln = @free_gprs.pop
+        temp_arr_gprs = [r_sl, r_ln]
+        @a.ldr_x(r_sl, R_X9, 16)
+        @a.ldrsw(r_ln, R_X9, 8)
+        @hoisted_arrs[temp_hoist_arr] = [0, 0]
+        @hoisted_arr_regs[temp_hoist_arr] = temp_arr_gprs
+      else
+        temp_arr_spilled = true
+        @a.ldr_x(R_X10, R_X9, 16)
+        @a.ldrsw(R_X11, R_X9, 8)
+        sl_off_ta = push_x(R_X10)
+        ln_off_ta = push_x(R_X11)
+        @hoisted_arrs[temp_hoist_arr] = [sl_off_ta, ln_off_ta]
+    elsif temp_hoist_marr != nil
+      l_temp_arr_slow = @a.new_label
+      l_temp_arr_done = @a.new_label
+      v_li_m = temp_hoist_marr[0]
+      sh_ma = temp_hoist_marr[2]
+      sl_ma = temp_hoist_marr[3]
+      push_tgts = temp_hoist_marr[4]
+      if !@hoisted_epoch && !@epoch_verified_now
+        ep_ma = JS_EPOCH[0]
+        @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+        @a.ldr_x(R_X10, R_X9, 0)
+        @a.mov_imm64(R_X11, ep_ma)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_temp_arr_slow)
+        @hoisted_epoch = true
+      load_slot_any(R_X13, v_li_m)
+      @a.sub_i(R_X9, R_X13, 4)
+      if @known_shapes[v_li_m] != sh_ma
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_temp_arr_slow)
+        @a.cbz_x(R_X9, l_temp_arr_slow)
+        @a.ldr_x(R_X10, R_X9, 8)
+        emit_cmp_shape(R_X10, sh_ma)
+        @a.b_cond(CC_NE, l_temp_arr_slow)
+      emit_slot_load(R_X13, R_X9, sl_ma)      # x13 = v.<prop>
+      pi_m = 0
+      while pi_m < push_tgts.size
+        load_slot_any(R_X10, push_tgts[pi_m])
+        @a.cmp_r(R_X10, R_X13)
+        @a.b_cond(CC_EQ, l_temp_arr_slow)     # reject if push target aliases v.<prop>!
+        pi_m += 1
+      @a.lsr_xi(R_X10, R_X13, 48)
+      @a.movz_x(R_X11, 0xFFF4)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_temp_arr_slow)
+      @a.and_x_ptr47(R_X9, R_X13)
+      @a.ldrb(R_X10, R_X9, 2)
+      @a.and_w_lowmask(R_X10, R_X10, 4)
+      @a.cmp_wi(R_X10, 1)
+      @a.b_cond(CC_NE, l_temp_arr_slow)
+      @a.ldr_w(R_X10, R_X9, 4)
+      @a.cbnz_w(R_X10, l_temp_arr_slow)
+      if @free_gprs.size >= 2
+        r_sl = @free_gprs.pop
+        r_ln = @free_gprs.pop
+        temp_arr_gprs = [r_sl, r_ln]
+        @a.ldr_x(r_sl, R_X9, 16)
+        @a.ldrsw(r_ln, R_X9, 8)
+        @hoisted_marr = [v_li_m, temp_hoist_marr[1], r_sl, r_ln, true, -1, sh_ma, sl_ma]
+      else
+        temp_arr_spilled = true
+        @a.ldr_x(R_X10, R_X9, 16)
+        @a.ldrsw(R_X11, R_X9, 8)
+        sl_off_ta = push_x(R_X10)
+        ln_off_ta = push_x(R_X11)
+        @hoisted_marr = [v_li_m, temp_hoist_marr[1], sl_off_ta, ln_off_ta, false, -1, sh_ma, sl_ma]
+    elsif temp_hoist_garr != nil
+      l_temp_arr_slow = @a.new_label
+      l_temp_arr_done = @a.new_label
+      r_sl = @free_gprs.pop
+      r_ln = @free_gprs.pop
+      temp_arr_gprs = [r_sl, r_ln]
+      lim_reg = r_ln
+      jit_keep(temp_hoist_garr_v)
+      ga_ptr = (wvalue_bits(temp_hoist_garr_v) ## i64) & 140737488355327
+      @a.mov_imm64(R_X9, ga_ptr)
+      @a.ldrb(R_X10, R_X9, 2)
+      @a.and_w_lowmask(R_X10, R_X10, 4)
+      @a.cmp_wi(R_X10, 1)
+      @a.b_cond(CC_NE, l_temp_arr_slow)
+      @a.ldr_w(R_X10, R_X9, 4)
+      @a.cbnz_w(R_X10, l_temp_arr_slow)
       @a.ldr_x(r_sl, R_X9, 16)
       @a.ldrsw(r_ln, R_X9, 8)
-      @hoisted_arrs[temp_hoist_arr] = [0, 0]
-      @hoisted_arr_regs[temp_hoist_arr] = temp_arr_gprs
     # Check if i is guaranteed >= 0 inside the loop (initialized to >= 0 literal OR `outer_nonneg + K`!)
     nonneg_known = false
     if run_init && s.a != nil
@@ -2615,6 +6042,11 @@ OSR_RETURN = 2
     old_bound = @bounded_idx[li]
     if nonneg_known && lim_container >= 0
       @bounded_idx[li] = lim_container
+    if temp_hoist_marr != nil
+      @hoisted_marr[5] = li if nonneg_known
+      @known_shapes[temp_hoist_marr[0]] = temp_hoist_marr[2]
+    if temp_hoist_garr != nil
+      @hoisted_garrs[temp_hoist_garr] = [temp_arr_gprs[0], temp_arr_gprs[1], nonneg_known ? li : -1]
     # TypedArray BCE for `for (k = 0; k < n; k++)` when n is a JT_I32 local (`lim_kind == 2`):
     # If body indexes hoisted TypedArrays by `k` or `(expr % n)`, verify `n <= ta.len` ONCE at loop entry!
     bce_tas = []
@@ -2645,7 +6077,7 @@ OSR_RETURN = 2
     # Promotes an outer-loop shape-guarded local's numeric fields into FP registers across the inner loop,
     # with an out-of-line unpromoted fallback loop for non-numbers, shape mismatches, or aliasing (`b === a`)!
     promo = nil
-    if @in_loop_depth >= 1 && @promoted_owner < 0 && bce_tas.size == 0 && temp_hoist_arr < 0 && s.d != nil && s.d.kind == :block && !stmt_has_cf_or_loop?(s.d) && osr_loop_pure_epoch?(s.d)
+    if @in_loop_depth >= 1 && @promoted_owner < 0 && bce_tas.size == 0 && temp_hoist_arr < 0 && temp_hoist_marr == nil && s.d != nil && s.d.kind == :block && !stmt_has_cf_or_loop?(s.d) && osr_loop_pure_epoch?(s.d)
       promo = find_promoted_outer_obj(s.d, li)
 
     if promo != nil
@@ -2816,14 +6248,14 @@ OSR_RETURN = 2
     # Counted-loop Call-Hoisting (`for (var s = 0; s < N; s++) fn(inv_args...)`):
     # When body is a single static-cell call to a pure-shape leaf function with jit_repeat_fp,
     # run fn's prologue + shape/numeric guards ONCE and loop N times inside fn with zero call overhead!
-    rep_call = (promo == nil && bce_tas.size == 0 && @promoted_owner < 0 && temp_hoist_arr < 0) ? stmt_single_call(s.d) : nil
+    rep_call = (promo == nil && bce_tas.size == 0 && @promoted_owner < 0 && temp_hoist_arr < 0 && temp_hoist_marr == nil) ? stmt_single_call(s.d) : nil
     if rep_call != nil && rep_call.a != nil && rep_call.a.kind == :ident && rep_call.list.size <= 3
       rc_b = rep_call.a.x == nil ? nil : rep_call.a.x.binding
       if rc_b != nil && rc_b.global?
         rc_cell = wk_cell(rc_b)
         rc_fv = rc_cell.value
         if rc_fv.is_a?(JS:Function) && rc_fv.code != nil && rc_fv.code.nparams == rep_call.list.size
-          jit_compile_and_install(rc_fv.code) if rc_fv.code.jit_state == 0 && rc_fv.code.node != @jf
+          jit_compile_and_install(rc_fv.code, rc_fv.code.warm_args) if rc_fv.code.jit_state == 0 && rc_fv.code.node != @jf && (rc_fv.code.nparams == 0 || rc_fv.code.warm_args != nil)
           if rc_fv.code.jit_repeat_fp != 0
             all_inv = true
             ai = 0
@@ -2876,7 +6308,7 @@ OSR_RETURN = 2
               @a.movz_x(R_X1, 0)
               @a.movz_x(R_X2, rep_call.list.size)
               @a.mov_imm64(R_X16, rc_fv.code.jit_repeat_fp)
-              @a.blr(R_X16)
+              emit_blr_x16()
               @a.cmp_i(R_X0, 6)    # JSR_SLOW -> zero mutations happened, run normal loop!
               @a.b_cond(CC_EQ, l_rep_slow)
               # Advance loop induction variable `ri = lim`!
@@ -2927,7 +6359,7 @@ OSR_RETURN = 2
     # When a counted loop only appends to a string local `s`, accumulate into ONE StringBuffer
     # (ZERO intermediate ropes/strings!) and materialize `s = sb.to_s` once on loop exit!
     sb_info = nil
-    if promo == nil && bce_tas.size == 0 && @promoted_owner < 0 && temp_hoist_arr < 0 && !stmt_has_cf_or_loop?(s.d) && osr_loop_pure_epoch?(s.d)
+    if promo == nil && bce_tas.size == 0 && @promoted_owner < 0 && temp_hoist_arr < 0 && temp_hoist_marr == nil && !stmt_has_cf_or_loop?(s.d) && osr_loop_pure_epoch?(s.d)
       sb_info = find_sb_loop_target(s.d, li)
     if sb_info != nil
       sli = sb_info[0]
@@ -3238,7 +6670,7 @@ OSR_RETURN = 2
     #   Case A: `for (i = 0; i < lim; i++) m.set(key_i32, val_num);`
     #   Case B: `for (i = 0; i < lim; i++) s += m.get(key_i32);`
     # Hoists epoch, Map shape, MapData meta_p, buckets/mask/keys/vals, and hash multiplier ONCE before the loop!
-    if !@is_osr && @promoted_owner < 0 && temp_hoist_arr < 0 && (lim_kind == 1 || lim_kind == 2) && fsum_st.is_a?(JsNode) && fsum_st.kind == :expr_stmt && fsum_st.a != nil
+    if !@is_osr && @promoted_owner < 0 && temp_hoist_arr < 0 && temp_hoist_marr == nil && (lim_kind == 1 || lim_kind == 2) && fsum_st.is_a?(JsNode) && fsum_st.kind == :expr_stmt && fsum_st.a != nil
       mp_off_hl = js_mapdata_metap_off()
       r_hl = mp_off_hl > 0 ? js_realm() : nil
       mp_hl = r_hl != nil ? r_hl.intrinsics["Map.prototype"] : nil
@@ -3629,16 +7061,90 @@ OSR_RETURN = 2
               @inv_str_ascii[csli] = [r_ptr, r_len, bmask]
               hoisted_cc_regs.push([csli, r_ptr, r_len])
 
+    # Tiny constant-trip-count full unrolling (`for (var d = 0; d < 4; d++)`, even with `continue`!)
+    # Substitutes constant induction values via `@const_i_vals[li] = k`, folding ternaries & eliminating loop overhead!
+    clb_u = @const_loop_bounds[li]
+    if run_init && lim_kind == 1 && clb_u != nil && clb_u[0] >= 0 && clb_u[1] == lim_val && (lim_val - clb_u[0]) >= 1 && (lim_val - clb_u[0]) <= 4 && i53_li < 0 && temp_hoist_arr < 0 && temp_hoist_marr == nil && bce_tas.size == 0 && promo == nil && !jit_has_loop_stmt?(s.d) && !stmt_has_break_or_label?(s.d)
+      @in_loop_depth += 1
+      uk = clb_u[0]
+      old_civ = @const_i_vals[li]
+      while uk < lim_val
+        l_ck = @a.new_label
+        @const_i_vals[li] = uk
+        @loops.push(JS:JitLoopCtx.new(l_brk, l_ck, nil))
+        gen_loop_body_stmt(s.d)
+        @a.bind(l_ck)
+        @loops.pop
+        uk += 1
+      old_civ == nil ? @const_i_vals.delete(li) : (@const_i_vals[li] = old_civ)
+      @a.mov_imm32(ri, lim_val)
+      @a.bind(l_brk)
+      @in_loop_depth -= 1
+      @free_gprs.push(borrowed_gpr) if borrowed_gpr != nil
+      @bounded_idx[li] = old_bound
+      @bounded_idx.delete(li) if old_bound == nil
+      @known_shapes = {}
+      return true
+
     # Check eligibility for 4x / 2x loop unrolling (small simple innermost loop, no break/continue/return/nested loops)!
     body_cnt = !stmt_has_cf_or_loop?(s.d) ? stmt_size_count(s.d) : 999
     r_lim4 = lim_reg
     if r_lim4 == nil && lim_kind == 3 && @hoisted_arr_regs[lim_container] != nil
       r_lim4 = @hoisted_arr_regs[lim_container][1]
     can_unroll4 = (lim_kind == 1 || lim_kind == 2 || (lim_kind == 3 && r_lim4 != nil)) && body_cnt <= 34
-    can_unroll2 = !can_unroll4 && body_cnt <= 36
+    can_unroll2 = !can_unroll4 && (body_cnt <= 36 || (@in_cs_promo && lim_kind == 1 && lim_val >= 16 && body_cnt <= 140))
     # When i53_li is active AND body cannot bail mid-4-iters, use 2 independent accumulator lanes (i53_gpr + R_X14)
     # and deferred `add ri, ri, #4` -> breaks BOTH `i` and `s` 1-cycle serial chains to sub-0.6 cycles/iter!
     can_2lane_4x = can_unroll4 && i53_li >= 0 && !stmt_can_i53_bail?(s.d)
+    # Pin top loop-invariant shapes (R_X6, R_X7) & read-only GlobalObj.num_prop (R_X8, e.g. Direction.FORWARD!) in call-free temp_hoist loops!
+    pin_saved_sh = nil
+    pin_saved_gp = nil
+    pin_saved_lcr = @loop_cs_reloads
+    if (temp_hoist_arr >= 0 || temp_hoist_marr != nil) && !@in_cs_promo && @loop_cs_reloads == nil && @while_dirty_off < 0 && !@in_cold_stub && i53_li < 0 && !stmt_has_cf_or_loop?(s.d)
+      sh_cnts_p = {}
+      gp_cands_p = {}
+      gp_wr_p = {}
+      ok_pin = [true]
+      scan_loop_pin_cands(s.d, sh_cnts_p, gp_cands_p, gp_wr_p, ok_pin, 0)
+      if ok_pin[0] && (sh_cnts_p.size > 0 || gp_cands_p.size > 0)
+        reloads_p = []
+        pin_saved_sh = @hoisted_shapes.dup
+        pin_saved_gp = @hoisted_gprops.dup
+        pin_sh_regs = [R_X6, R_X7]
+        ps_i = 0
+        while ps_i < 2
+          best_sh = 0
+          best_sc = 0
+          sh_cnts_p.each ->(sh_k, sc_v)
+            if @hoisted_shapes[sh_k] == nil && sc_v > best_sc
+              best_sh = sh_k
+              best_sc = sc_v
+          break if best_sh == 0
+          r_ps = pin_sh_regs[ps_i]
+          @a.mov_imm64(r_ps, best_sh)
+          @hoisted_shapes[best_sh] = r_ps
+          reloads_p.push([:imm, r_ps, best_sh])
+          ps_i += 1
+        best_gpk = nil
+        best_gp = nil
+        best_gc = 0
+        gp_cands_p.each ->(gpk_k, gp_v)
+          if (gp_v[5] == nil || !gp_wr_p[gp_v[5]]) && gp_v[4] > best_gc
+            best_gpk = gpk_k
+            best_gp = gp_v
+            best_gc = gp_v[4]
+        if best_gp != nil
+          jit_keep(best_gp[0])
+          jit_keep(best_gp[1])
+          gv_ptr_p = (wvalue_bits(best_gp[1]) ## i64) - 4
+          @a.mov_imm64(R_X9, gv_ptr_p)
+          emit_slot_load(R_X8, R_X9, best_gp[2])
+          @a.mov_imm64(R_X14, best_gp[3])
+          @a.cmp_r(R_X8, R_X14)
+          @a.b_cond(CC_NE, l_temp_arr_slow)
+          @hoisted_gprops[best_gpk] = [best_gp[3], R_X8]
+          reloads_p.push([:gprop, R_X8, gv_ptr_p, best_gp[2], best_gp[3]])
+        @loop_cs_reloads = reloads_p if reloads_p.size > 0
     @loops.push(JS:JitLoopCtx.new(l_brk, l_cont, nil))
     @in_loop_depth += 1
     if can_2lane_4x
@@ -3769,6 +7275,10 @@ OSR_RETURN = 2
       # Single back-edge branch: cmp + b.lt l_head!
       emit_counted_cmp_branch(ri, lim_kind, lim_val, lim_reg, lim_container, CC_LT, l_head)
     @a.bind(l_brk)
+    if pin_saved_sh != nil
+      @hoisted_shapes = pin_saved_sh
+      @hoisted_gprops = pin_saved_gp
+      @loop_cs_reloads = pin_saved_lcr
     hoisted_cc_regs.each ->(tri)
       @inv_str_ascii.delete(tri[0])
       @free_gprs.push(tri[1])
@@ -3781,11 +7291,12 @@ OSR_RETURN = 2
       @i53_acc_reg = nil
       @i53_acc_bail = nil
       saved_tha = temp_hoist_arr
+      saved_tha_pair = saved_tha >= 0 ? @hoisted_arrs[saved_tha] : nil
       saved_tha_gprs = temp_arr_gprs
       cb_i53 = ->()
         if saved_tha >= 0
-          @hoisted_arrs[saved_tha] = [0, 0]
-          @hoisted_arr_regs[saved_tha] = saved_tha_gprs
+          @hoisted_arrs[saved_tha] = saved_tha_pair
+          @hoisted_arr_regs[saved_tha] = saved_tha_gprs if saved_tha_gprs != nil
         @a.bind(l_i53_bail)
         @a.scvtf_d_x(@info.reg_fpr[i53_li], i53_gpr)
         @a.bind(l_i53_entry_slow)
@@ -3828,12 +7339,21 @@ OSR_RETURN = 2
       @bounded_idx.delete(li)
     else
       @bounded_idx[li] = old_bound
-    if temp_hoist_arr >= 0
+    if temp_hoist_arr >= 0 || temp_hoist_marr != nil || temp_hoist_garr != nil
+      @hoisted_epoch = old_hoisted_ep_ta
       @a.bind(l_temp_arr_done)
-      @hoisted_arrs.delete(temp_hoist_arr)
-      @hoisted_arr_regs.delete(temp_hoist_arr)
-      @free_gprs.push(temp_arr_gprs[0])
-      @free_gprs.push(temp_arr_gprs[1])
+      if temp_hoist_arr >= 0
+        @hoisted_arrs.delete(temp_hoist_arr)
+        @hoisted_arr_regs.delete(temp_hoist_arr)
+      elsif temp_hoist_marr != nil
+        @hoisted_marr = old_hm_marr
+      else
+        @hoisted_garrs.delete(temp_hoist_garr)
+      if temp_arr_gprs != nil
+        @free_gprs.push(temp_arr_gprs[0])
+        @free_gprs.push(temp_arr_gprs[1])
+      elsif temp_arr_spilled
+        @tmp_depth -= 2
       cb_ta = ->()
         @a.bind(l_temp_arr_slow)
         l_uhead = @a.new_label
@@ -4027,6 +7547,51 @@ OSR_RETURN = 2
         i += 1
     c
 
+  -> marr_loop_safe?(n, prop_s, push_tgts)
+    return true if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return false if !marr_loop_safe?(n[i], prop_s, push_tgts)
+        i += 1
+      return true
+    return true if !n.is_a?(JsNode)
+    k = n.kind
+    return false if k == :new || k == :throw || k == :try || k == :for_in || k == :for_of || k == :function || k == :arrow || k == :class
+    return false if k == :unary && n.str == "delete"
+    if k == :assign || k == :update
+      if n.a != nil && n.a.kind == :member
+        return false if n.a.has?(F_COMPUTED) || n.a.b.str == prop_s
+    if k == :call
+      if n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED)
+        mn = n.a.b.str
+        if mn == "push" && n.list.size == 1 && !(n.x.is_a?(Array) && n.x.size >= 2)
+          pli = local_idx(n.a.a)
+          return false if pli < 0 || @info.types[pli] != JT_ANY
+          push_tgts.push(pli) if !push_tgts.include?(pli)
+          return marr_loop_safe?(n.list[0], prop_s, push_tgts)
+        # Allow pure 0-arg read-only polymorphic predicates (`c.isSatisfied()`, `c.isInput()`)!
+        if n.list.size == 0 && n.x.is_a?(Array) && n.x.size >= 2 && n.x.size <= 8
+          np = n.x.size / 2
+          qi = 0
+          ok_p = true
+          while qi < np && ok_p
+            sh_q = n.x[qi * 2]
+            fn_q = n.x[qi * 2 + 1]
+            if sh_q.is_a?(JS:Shape) && !sh_q.dict && sh_q.slot_of(mn) < 0 && fn_q.is_a?(JS:Function) && fn_q.code != nil && fn_q.code.node.is_a?(JaFunc) && js_shape_proto_method_eq?(sh_q, mn, fn_q)
+              pl_q = poly_classify_method(fn_q.code.node, sh_q, 0)
+              ok_p = pl_q != nil && (pl_q[0] == :ret_held_or_susp || pl_q[0] == :ret_cmp || (pl_q[0] == :ret_expr && (pl_q[1].kind == :true || pl_q[1].kind == :false || (pl_q[1].kind == :member && !pl_q[1].has?(F_COMPUTED) && pl_q[1].a.kind == :this))))
+              if !ok_p && fn_q.code.node.free.size == 0 && fn_q.code.node.node.b.is_a?(Array) && fn_q.code.node.node.b.size == 1 && fn_q.code.node.node.b[0].kind == :return
+                re_q = fn_q.code.node.node.b[0].a
+                if re_q != nil && re_q.kind == :member && !re_q.has?(F_COMPUTED) && re_q.a != nil && re_q.a.kind == :this && sh_q.slot_of(re_q.b.str) >= 0 && (sh_q.attrs_of(re_q.b.str) & ATTR_ACCESSOR) == 0
+                  ok_p = true
+            else
+              ok_p = false
+            qi += 1
+          return marr_loop_safe?(n.a.a, prop_s, push_tgts) if ok_p
+      return false
+    marr_loop_safe?(n.a, prop_s, push_tgts) && marr_loop_safe?(n.b, prop_s, push_tgts) && marr_loop_safe?(n.c, prop_s, push_tgts) && marr_loop_safe?(n.d, prop_s, push_tgts) && marr_loop_safe?(n.list, prop_s, push_tgts)
+
   # Compare (ri + 1) against LIMIT for 2x unrolled loop guard!
   -> emit_counted_cmp_p1_branch(ri, lim_kind, lim_val, lim_reg, lim_container, cc, target)
     if lim_kind == 1
@@ -4048,6 +7613,13 @@ OSR_RETURN = 2
         @a.sub_wi(R_X9, ar[1], 1)
       else
         @a.ldr_x(R_X9, R_SP, @hoisted_arrs[lim_container][1])
+        @a.sub_wi(R_X9, R_X9, 1)
+      @a.cmp_w(ri, R_X9)
+    elsif lim_kind == 5
+      if @hoisted_marr[4]
+        @a.sub_wi(R_X9, @hoisted_marr[3], 1)
+      else
+        @a.ldr_x(R_X9, R_SP, @hoisted_marr[3])
         @a.sub_wi(R_X9, R_X9, 1)
       @a.cmp_w(ri, R_X9)
     else
@@ -4078,6 +7650,12 @@ OSR_RETURN = 2
         @a.cmp_w(ri, ar[1])
       else
         @a.ldr_x(R_X9, R_SP, @hoisted_arrs[lim_container][1])
+        @a.cmp_w(ri, R_X9)
+    elsif lim_kind == 5
+      if @hoisted_marr[4]
+        @a.cmp_w(ri, @hoisted_marr[3])
+      else
+        @a.ldr_x(R_X9, R_SP, @hoisted_marr[3])
         @a.cmp_w(ri, R_X9)
     else
       tr = @hoisted_ta_regs[lim_container]
@@ -4452,20 +8030,991 @@ OSR_RETURN = 2
       e.list.each ->(x) collect_expr_shapes(x, counts)
     nil
 
+  # Fast zero-BCE Uint8Array byte-match loop: `while (l < maxL && ta[a + l] === ta[b + l]) l++;` (hot in LZ77/string search!)
+  -> try_gen_u8_match_while(s)
+    c = s.a
+    return false if c == nil || c.kind != :logical || c.str != "&&"
+    return false if c.a == nil || c.a.kind != :binary || c.a.str != "<"
+    l_li = local_idx(c.a.a)
+    max_li = local_idx(c.a.b)
+    return false if l_li < 0 || max_li < 0 || @info.types[l_li] != JT_I32 || @info.types[max_li] != JT_I32
+    # Body must be `l++` or `{ l++; }`
+    b = s.b
+    b = b.list[0] if b.is_a?(JsNode) && b.kind == :block && b.list.size == 1
+    return false if b == nil || b.kind != :expr_stmt || b.a == nil || b.a.kind != :update || b.a.str != "++" || local_idx(b.a.a) != l_li
+    # RHS of `&&`: `ta[a + l] === ta[b + l]`
+    eq = c.b
+    return false if eq == nil || eq.kind != :binary || (eq.str != "===" && eq.str != "==")
+    return false if eq.a.kind != :member || !eq.a.has?(F_COMPUTED) || eq.b.kind != :member || !eq.b.has?(F_COMPUTED)
+    ta_li = local_idx(eq.a.a)
+    return false if ta_li < 0 || ta_li != local_idx(eq.b.a) || @hoisted_tas[ta_li] == nil || @hoisted_tas[ta_li][2] != 1
+    return false if eq.a.b.kind != :binary || eq.a.b.str != "+" || eq.b.b.kind != :binary || eq.b.b.str != "+"
+    a_li = local_idx(eq.a.b.a)
+    b_li = local_idx(eq.b.b.a)
+    return false if a_li < 0 || b_li < 0 || local_idx(eq.a.b.b) != l_li || local_idx(eq.b.b.b) != l_li
+    return false if @info.types[a_li] != JT_I32 || @info.types[b_li] != JT_I32
+    h = @hoisted_tas[ta_li]
+    tr = @hoisted_ta_regs[ta_li]
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    l_head = @a.new_label
+    # Load l -> w11, maxL -> w12, ta_len -> x10
+    load_slot_i32(R_X11, l_li)
+    load_slot_i32(R_X12, max_li)
+    @a.cmp_w(R_X11, R_X12)
+    @a.b_cond(CC_GE, l_done)
+    if tr != nil && tr[1] != nil
+      @a.mov_r(R_X10, tr[1])
+    else
+      @a.ldr_x(R_X10, R_SP, h[1])
+    # Combine `l < 0 || a < 0 || b < 0` into ONE sign-bit check + verify `a + maxL <= ta_len && b + maxL <= ta_len`!
+    load_slot_i32(R_X13, a_li)
+    load_slot_i32(R_X15, b_li)
+    @a.orr_w(R_X9, R_X11, R_X13)
+    @a.orr_w(R_X9, R_X9, R_X15)
+    @a.tbnz(R_X9, 31, l_slow)
+    @a.sxtw(R_X14, R_X12)
+    @a.add_r(R_X9, R_X13, R_X14)
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_GT, l_slow)
+    @a.add_r(R_X14, R_X15, R_X14)
+    @a.cmp_r(R_X14, R_X10)
+    @a.b_cond(CC_GT, l_slow)
+    # Compute base pointers: x13 = ta_ptr + a, x15 = ta_ptr + b!
+    if tr != nil && tr[0] != nil
+      @a.add_r(R_X13, tr[0], R_X13)
+      @a.add_r(R_X15, tr[0], R_X15)
+    else
+      @a.ldr_x(R_X9, R_SP, h[0])
+      @a.add_r(R_X13, R_X9, R_X13)
+      @a.add_r(R_X15, R_X9, R_X15)
+    # Tight 8-byte word-compare loop with fall-through mismatch (ZERO taken branches on 95% of hash hits!) + 4B/1B tail!
+    l_head4 = @a.new_label
+    l_byte = @a.new_label
+    l_xcont = @a.new_label
+    @a.bind(l_head)
+    @a.add_wi(R_X9, R_X11, 8)
+    @a.cmp_w(R_X9, R_X12)
+    @a.b_cond(CC_GT, l_head4)
+    @a.ldr_x_byte(R_X9, R_X13, R_X11)
+    @a.ldr_x_byte(R_X10, R_X15, R_X11)
+    @a.eor_r(R_X9, R_X9, R_X10)
+    @a.cbz_x(R_X9, l_xcont)
+    @a.rbit_x(R_X9, R_X9)
+    @a.clz_x(R_X9, R_X9)
+    @a.lsr_xi(R_X9, R_X9, 3)
+    @a.add_w(R_X11, R_X11, R_X9)
+    @a.bind(l_done)
+    store_slot_i32(l_li, R_X11)
+    l_exit = @a.new_label
+    @a.bind(l_exit)
+    cb_u8m = ->()
+      @a.bind(l_xcont)
+      @a.add_wi(R_X11, R_X11, 8)
+      @a.b(l_head)
+      @a.bind(l_head4)
+      @a.add_wi(R_X9, R_X11, 4)
+      @a.cmp_w(R_X9, R_X12)
+      @a.b_cond(CC_GT, l_byte)
+      @a.ldr_w_byte(R_X9, R_X13, R_X11)
+      @a.ldr_w_byte(R_X10, R_X15, R_X11)
+      @a.eor_w(R_X9, R_X9, R_X10)
+      l_wmiss = @a.new_label
+      @a.cbnz_w(R_X9, l_wmiss)
+      @a.add_wi(R_X11, R_X11, 4)
+      @a.b(l_head4)
+      @a.bind(l_wmiss)
+      @a.rbit_w(R_X9, R_X9)
+      @a.clz_w(R_X9, R_X9)
+      @a.lsr_wi(R_X9, R_X9, 3)
+      @a.add_w(R_X11, R_X11, R_X9)
+      @a.b(l_done)
+      @a.bind(l_byte)
+      @a.cmp_w(R_X11, R_X12)
+      @a.b_cond(CC_GE, l_done)
+      @a.ldrb_idx(R_X9, R_X13, R_X11)
+      @a.ldrb_idx(R_X10, R_X15, R_X11)
+      @a.cmp_w(R_X9, R_X10)
+      @a.b_cond(CC_NE, l_done)
+      @a.add_wi(R_X11, R_X11, 1)
+      @a.b(l_byte)
+      @a.bind(l_slow)
+      l_shead = @a.new_label
+      @a.bind(l_shead)
+      gen_cond_branch(s.a, l_exit, false)
+      gen_stmt(s.b)
+      @a.b(l_shead)
+    add_cold_stub(cb_u8m)
+    true
+
+  -> stmt_has_break_or_label?(n)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if stmt_has_break_or_label?(n[i])
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return true if k == :break || (k == :continue && n.str != nil)
+    return false if k == :for || k == :while || k == :do_while || k == :switch || k == :function || k == :arrow
+    stmt_has_break_or_label?(n.a) || stmt_has_break_or_label?(n.b) || stmt_has_break_or_label?(n.c) || stmt_has_break_or_label?(n.d) || stmt_has_break_or_label?(n.list)
+
+  # Collect minimum constant length of all hoisted TAs indexed in `n` (or -1 if none / variable-length).
+  -> collect_const_ta_min_len(n, min_box)
+    return nil if n == nil || min_box[0] == -2
+    if n.is_a?(Array)
+      n.each ->(x) collect_const_ta_min_len(x, min_box)
+      return nil
+    return nil if !n.is_a?(JsNode)
+    if n.kind == :member && n.has?(F_COMPUTED)
+      bli = local_idx(n.a)
+      if bli >= 0 && @hoisted_tas[bli] != nil
+        cl = @info.local_ta_lens[bli]
+        if cl != nil && cl > 0
+          min_box[0] = cl if min_box[0] < 0 || cl < min_box[0]
+        else
+          min_box[0] = -2
+    collect_const_ta_min_len(n.a, min_box)
+    collect_const_ta_min_len(n.b, min_box)
+    collect_const_ta_min_len(n.c, min_box)
+    collect_const_ta_min_len(n.d, min_box)
+    collect_const_ta_min_len(n.list, min_box) if n.list.is_a?(Array)
+    nil
+
+  # Guarded zero-BCE compilation for pure constant-length TA `while` loops (binary heap sift-up / sift-down!):
+  #   A) `while (i > 0) { var p = (i - 1) >> 1; ... i = p; }` -> guards `0 <= i < min_len` once!
+  #   B) `while (true) { var l = i*2+1, r = l+1, sm = i; if (l < hsz && ...) sm = l; if (r < hsz && ...) sm = r; if (sm === i) break; ... i = sm; }`
+  #      -> guards `0 <= i < min_len && 0 <= hsz <= min_len` once!
+  -> try_gen_guarded_ta_bce_while(s)
+    return false if @is_osr || s.b == nil || s.b.kind != :block || !s.b.list.is_a?(Array) || s.b.list.size < 3
+    return false if !expr_pure_cond_no_rt?(s.a) || !stmt_pure_no_rt_calls?(s.b)
+    min_box = [-1]
+    collect_const_ta_min_len(s.b, min_box)
+    mlen = min_box[0]
+    return false if mlen <= 0 || mlen > 1073741823
+    stmts = s.b.list
+    # Pattern A: `while (i > 0)` where stmt 0 is `var p = (i - 1) >> 1` and only write to `i` is `i = p`!
+    if s.a.kind == :binary && s.a.str == ">" && s.a.a.kind == :ident && jit_int32_lit?(s.a.b) && s.a.b.a.to_i == 0
+      i_li = local_idx(s.a.a)
+      if i_li >= 0 && @info.types[i_li] == JT_I32
+        st0 = stmts[0]
+        if st0.kind == :var_decl && st0.list.size == 1 && st0.list[0].b != nil
+          p_li = local_idx(st0.list[0].a)
+          pb = st0.list[0].b
+          if p_li >= 0 && p_li != i_li && @info.types[p_li] == JT_I32 && pb.kind == :binary && pb.str == ">>" && jit_int32_lit?(pb.b) && pb.b.a.to_i == 1 && pb.a.kind == :binary && pb.a.str == "-" && local_idx(pb.a.a) == i_li && jit_int32_lit?(pb.a.b) && pb.a.b.a.to_i == 1
+            # Verify `i` is ONLY written via `i = p` and `p` is never written after st0!
+            ok_a = true
+            qi = 1
+            while qi < stmts.size && ok_a
+              st = stmts[qi]
+              if stmt_writes_local?(st, p_li)
+                ok_a = false
+              elsif stmt_writes_local?(st, i_li)
+                if !(st.kind == :expr_stmt && st.a != nil && st.a.kind == :assign && st.a.str == "=" && local_idx(st.a.a) == i_li && local_idx(st.a.b) == p_li)
+                  ok_a = false
+              qi += 1
+            if ok_a
+              l_slow = @a.new_label
+              l_exit = @a.new_label
+              load_slot_i32(R_X9, i_li)
+              @a.cmp_wi(R_X9, 0)
+              @a.b_cond(CC_LE, l_exit)
+              if mlen <= 4095
+                @a.cmp_wi(R_X9, mlen)
+              elsif (mlen & 4095) == 0 && (mlen >> 12) <= 4095
+                @a.cmp_i(R_X9, mlen >> 12, 1)
+              else
+                @a.mov_imm32(R_X10, mlen)
+                @a.cmp_w(R_X9, R_X10)
+              @a.b_cond(CC_GE, l_slow)
+              old_i = @scoped_ta_ub[i_li]
+              old_p = @scoped_ta_ub[p_li]
+              @scoped_ta_ub[i_li] = [-1, 0, mlen]
+              @scoped_ta_ub[p_li] = [-1, 0, mlen]
+              l_head = @a.new_label
+              @loops.push(JS:JitLoopCtx.new(l_exit, l_head, nil))
+              @in_loop_depth += 1
+              @a.bind(l_head)
+              gen_cond_branch(s.a, l_exit, false)
+              gen_stmt(s.b)
+              @a.b(l_head)
+              @in_loop_depth -= 1
+              @loops.pop
+              old_i == nil ? @scoped_ta_ub.delete(i_li) : (@scoped_ta_ub[i_li] = old_i)
+              old_p == nil ? @scoped_ta_ub.delete(p_li) : (@scoped_ta_ub[p_li] = old_p)
+              @a.bind(l_slow)
+              l_sh = @a.new_label
+              @loops.push(JS:JitLoopCtx.new(l_exit, l_sh, nil))
+              @in_loop_depth += 1
+              @a.bind(l_sh)
+              gen_cond_branch(s.a, l_exit, false)
+              gen_stmt(s.b)
+              @a.b(l_sh)
+              @in_loop_depth -= 1
+              @loops.pop
+              @a.bind(l_exit)
+              return true
+    # Pattern B: `while (true)` sift-down (`var l = i*2+1, r = l+1, sm = i; if (l < hsz && ...) sm = l; if (r < hsz && ...) sm = r; ... i = sm;`)!
+    if s.a.kind == :true && stmts.size >= 5
+      st0 = stmts[0]
+      if st0.kind == :var_decl && st0.list.size == 3
+        l_li = local_idx(st0.list[0].a)
+        r_li = local_idx(st0.list[1].a)
+        sm_li = local_idx(st0.list[2].a)
+        lb = st0.list[0].b
+        rb = st0.list[1].b
+        smb = st0.list[2].b
+        i_li = local_idx(smb)
+        if i_li >= 0 && l_li >= 0 && r_li >= 0 && sm_li >= 0 && @info.types[i_li] == JT_I32 && @info.types[l_li] == JT_I32 && @info.types[r_li] == JT_I32 && @info.types[sm_li] == JT_I32
+          l_ok = lb != nil && lb.kind == :binary && lb.str == "+" && jit_int32_lit?(lb.b) && lb.b.a.to_i == 1 && lb.a.kind == :binary && lb.a.str == "*" && local_idx(lb.a.a) == i_li && jit_int32_lit?(lb.a.b) && lb.a.b.a.to_i == 2
+          r_ok = rb != nil && rb.kind == :binary && rb.str == "+" && local_idx(rb.a) == l_li && jit_int32_lit?(rb.b) && rb.b.a.to_i == 1
+          if l_ok && r_ok
+            # Check stmts[1] is `if (l < hsz && ...) sm = l;` and stmts[2] is `if (r < hsz && ...) sm = r;`
+            s1 = stmts[1]
+            s2 = stmts[2]
+            hsz_li = -1
+            if s1.kind == :if && s1.c == nil && s1.a.kind == :logical && s1.a.str == "&&" && s1.a.a.kind == :binary && s1.a.a.str == "<" && local_idx(s1.a.a.a) == l_li && s1.a.a.b.kind == :ident
+              hsz_li = local_idx(s1.a.a.b)
+            s1_ok = hsz_li >= 0 && @info.types[hsz_li] == JT_I32 && s1.b.kind == :expr_stmt && s1.b.a != nil && s1.b.a.kind == :assign && s1.b.a.str == "=" && local_idx(s1.b.a.a) == sm_li && local_idx(s1.b.a.b) == l_li
+            s2_ok = s1_ok && s2.kind == :if && s2.c == nil && s2.a.kind == :logical && s2.a.str == "&&" && s2.a.a.kind == :binary && s2.a.a.str == "<" && local_idx(s2.a.a.a) == r_li && local_idx(s2.a.a.b) == hsz_li && s2.b.kind == :expr_stmt && s2.b.a != nil && s2.b.a.kind == :assign && s2.b.a.str == "=" && local_idx(s2.b.a.a) == sm_li && local_idx(s2.b.a.b) == r_li
+            if s2_ok && !stmt_writes_local?(s.b, hsz_li)
+              ok_b = true
+              qi = 3
+              while qi < stmts.size && ok_b
+                st = stmts[qi]
+                if stmt_writes_local?(st, l_li) || stmt_writes_local?(st, r_li) || stmt_writes_local?(st, sm_li)
+                  ok_b = false
+                elsif stmt_writes_local?(st, i_li)
+                  if !(st.kind == :expr_stmt && st.a != nil && st.a.kind == :assign && st.a.str == "=" && local_idx(st.a.a) == i_li && local_idx(st.a.b) == sm_li)
+                    ok_b = false
+                qi += 1
+              if ok_b
+                l_slow = @a.new_label
+                l_exit = @a.new_label
+                # Guard: 0 <= i < mlen && 0 <= hsz <= mlen!
+                load_slot_i32(R_X9, i_li)
+                @a.cmp_wi(R_X9, 0)
+                @a.b_cond(CC_LT, l_slow)
+                if mlen <= 4095
+                  @a.cmp_wi(R_X9, mlen)
+                elsif (mlen & 4095) == 0 && (mlen >> 12) <= 4095
+                  @a.cmp_i(R_X9, mlen >> 12, 1)
+                else
+                  @a.mov_imm32(R_X10, mlen)
+                  @a.cmp_w(R_X9, R_X10)
+                @a.b_cond(CC_GE, l_slow)
+                load_slot_i32(R_X9, hsz_li)
+                @a.cmp_wi(R_X9, 0)
+                @a.b_cond(CC_LT, l_slow)
+                if mlen <= 4095
+                  @a.cmp_wi(R_X9, mlen)
+                elsif (mlen & 4095) == 0 && (mlen >> 12) <= 4095
+                  @a.cmp_i(R_X9, mlen >> 12, 1)
+                else
+                  @a.mov_imm32(R_X10, mlen)
+                  @a.cmp_w(R_X9, R_X10)
+                @a.b_cond(CC_GT, l_slow)
+                old_i = @scoped_ta_ub[i_li]
+                old_sm = @scoped_ta_ub[sm_li]
+                old_gu = @guarded_ub_locals[hsz_li]
+                @scoped_ta_ub[i_li] = [-1, 0, mlen]
+                @scoped_ta_ub[sm_li] = [-1, 0, mlen]
+                @guarded_ub_locals[hsz_li] = [mlen, l_li, r_li]
+                l_head = @a.new_label
+                @loops.push(JS:JitLoopCtx.new(l_exit, l_head, nil))
+                @in_loop_depth += 1
+                @a.bind(l_head)
+                gen_stmt(s.b)
+                @a.b(l_head)
+                @in_loop_depth -= 1
+                @loops.pop
+                old_i == nil ? @scoped_ta_ub.delete(i_li) : (@scoped_ta_ub[i_li] = old_i)
+                old_sm == nil ? @scoped_ta_ub.delete(sm_li) : (@scoped_ta_ub[sm_li] = old_sm)
+                old_gu == nil ? @guarded_ub_locals.delete(hsz_li) : (@guarded_ub_locals[hsz_li] = old_gu)
+                @a.bind(l_slow)
+                l_sh = @a.new_label
+                @loops.push(JS:JitLoopCtx.new(l_exit, l_sh, nil))
+                @in_loop_depth += 1
+                @a.bind(l_sh)
+                gen_stmt(s.b)
+                @a.b(l_sh)
+                @in_loop_depth -= 1
+                @loops.pop
+                @a.bind(l_exit)
+                return true
+    false
+
+  # Check if all calls inside a `vs_fn` body are pure (Math.*, self-vs, or resolved vstruct/vstruct-f64) so JS_EPOCH can stay hoisted!
+  -> vs_stmts_pure_epoch?(n)
+    return true if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return false if !vs_stmts_pure_epoch?(n[i])
+        i += 1
+      return true
+    return true if !n.is_a?(JsNode)
+    k = n.kind
+    return false if k == :function || k == :arrow || k == :eval
+    if k == :call
+      if n.a.kind == :ident && n.a.x != nil && n.a.x.binding == @jf.binding
+        return vs_stmts_pure_epoch?(n.list)
+      if n.a.kind == :member && !n.a.has?(F_COMPUTED)
+        if n.a.a.kind == :ident && n.a.a.str == "Math"
+          return vs_stmts_pure_epoch?(n.list)
+        if resolve_vstruct_method_call(n) != nil || resolve_vstruct_method_f64(n) != nil
+          return vs_stmts_pure_epoch?(n.a.a) && vs_stmts_pure_epoch?(n.list)
+      return false
+    if k == :new
+      if n.a.kind == :ident && n.a.x != nil && n.a.x.binding != nil && n.a.x.binding.global?
+        ci = jit_vstruct_ctor_info(wk_cell(n.a.x.binding).value)
+        return ci != nil && vs_stmts_pure_epoch?(n.list)
+      return false
+    vs_stmts_pure_epoch?(n.a) && vs_stmts_pure_epoch?(n.b) && vs_stmts_pure_epoch?(n.c) && vs_stmts_pure_epoch?(n.d) && vs_stmts_pure_epoch?(n.list)
+
+  # Check if `n` mutates global array binding `gb` (via index write or method call on `gb`).
+  -> stmt_writes_global_arr?(n, gb)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if stmt_writes_global_arr?(n[i], gb)
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    if (k == :assign || k == :update) && n.a != nil
+      if n.a.kind == :ident && n.a.x != nil && n.a.x.binding == gb
+        return true
+      if n.a.kind == :member && n.a.a != nil && n.a.a.kind == :ident && n.a.a.x != nil && n.a.a.x.binding == gb
+        return true
+    if k == :call && n.a != nil && n.a.kind == :member && n.a.a != nil && n.a.a.kind == :ident && n.a.a.x != nil && n.a.a.x.binding == gb
+      return true
+    return true if stmt_writes_global_arr?(n.a, gb) || stmt_writes_global_arr?(n.b, gb) || stmt_writes_global_arr?(n.c, gb) || stmt_writes_global_arr?(n.d, gb)
+    stmt_writes_global_arr?(n.list, gb)
+
+  # Infer monomorphic shapes of `this.<prop>` from warmed `this.<prop>.<m>(...)` call sites in `n`!
+  -> collect_this_prop_shapes(n, out)
+    return nil if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        collect_this_prop_shapes(n[i], out)
+        i += 1
+      return nil
+    return nil if !n.is_a?(JsNode)
+    return nil if n.kind == :function || n.kind == :arrow
+    if n.kind == :call && n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.a.a != nil && n.a.a.kind == :member && !n.a.a.has?(F_COMPUTED) && n.a.a.a != nil && n.a.a.a.kind == :this
+      if n.x.is_a?(Array) && n.x.size == 2 && n.x[0].is_a?(JS:Shape)
+        pn = n.a.a.b.str
+        cur = out[pn]
+        if cur == nil
+          out[pn] = n.x[0]
+        elsif cur != n.x[0]
+          out[pn] = :conflict
+    collect_this_prop_shapes(n.a, out)
+    collect_this_prop_shapes(n.b, out)
+    collect_this_prop_shapes(n.c, out)
+    collect_this_prop_shapes(n.d, out)
+    collect_this_prop_shapes(n.list, out) if n.list.is_a?(Array)
+    nil
+
+  -> while_uses_this_count(n)
+    return 0 if n == nil
+    if n.is_a?(Array)
+      c = 0
+      i = 0
+      while i < n.size
+        c += while_uses_this_count(n[i])
+        i += 1
+      return c
+    return 0 if !n.is_a?(JsNode)
+    return 1 if n.kind == :this
+    return 0 if n.kind == :function
+    while_uses_this_count(n.a) + while_uses_this_count(n.b) + while_uses_this_count(n.c) + while_uses_this_count(n.d) + while_uses_this_count(n.list)
+
+  -> collect_this_arr_reads_deep(n, out_reads, out_writes, visited, depth, out_inc = nil, out_other = nil, out_cur_wr = nil)
+    return nil if n == nil || depth > 3
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        collect_this_arr_reads_deep(n[i], out_reads, out_writes, visited, depth, out_inc, out_other, out_cur_wr)
+        i += 1
+      return nil
+    return nil if !n.is_a?(JsNode)
+    k = n.kind
+    return nil if k == :function || k == :arrow || k == :class
+    if out_inc != nil && k == :expr_stmt && n.a != nil && n.a.kind == :update && n.a.str == "++" && n.a.a != nil && n.a.a.kind == :member && !n.a.a.has?(F_COMPUTED) && n.a.a.a != nil && n.a.a.a.kind == :this
+      pn_i = n.a.a.b.str
+      out_inc[pn_i] = (out_inc[pn_i] == nil ? 0 : out_inc[pn_i]) + 1
+      out_writes[pn_i] = true
+      out_cur_wr[pn_i] = true if out_cur_wr != nil && depth >= 1
+      return nil
+    if out_other != nil && k == :member && !n.has?(F_COMPUTED) && n.b != nil
+      out_other[n.b.str] = true
+    if (k == :assign || k == :update) && n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.a.a != nil && n.a.a.kind == :this
+      out_writes[n.a.b.str] = true
+      out_cur_wr[n.a.b.str] = true if out_cur_wr != nil && depth >= 1
+    if k == :member && n.has?(F_COMPUTED) && n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.a.a != nil && n.a.a.kind == :this
+      out_reads[n.a.b.str] = (out_reads[n.a.b.str] == nil ? 0 : out_reads[n.a.b.str]) + 1
+    if k == :call && n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.x.is_a?(Array) && n.x.size >= 2 && n.x.size <= 8
+      q = 0
+      while q < n.x.size
+        fn = n.x[q + 1]
+        if fn.is_a?(JS:Function) && fn.code != nil && fn.code.node.is_a?(JaFunc)
+          tjf = fn.code.node
+          if tjf != @jf && visited[tjf] == nil && tjf.node.b.is_a?(Array)
+            visited[tjf] = true
+            collect_this_arr_reads_deep(tjf.node.b, out_reads, out_writes, visited, depth + 1, out_inc, out_other, out_cur_wr)
+        q += 2
+    collect_this_arr_reads_deep(n.a, out_reads, out_writes, visited, depth, out_inc, out_other, out_cur_wr)
+    collect_this_arr_reads_deep(n.b, out_reads, out_writes, visited, depth, out_inc, out_other, out_cur_wr)
+    collect_this_arr_reads_deep(n.c, out_reads, out_writes, visited, depth, out_inc, out_other, out_cur_wr)
+    collect_this_arr_reads_deep(n.d, out_reads, out_writes, visited, depth, out_inc, out_other, out_cur_wr)
+    collect_this_arr_reads_deep(n.list, out_reads, out_writes, visited, depth, out_inc, out_other, out_cur_wr)
+    nil
+
+  # Populate 13-entry stack direct-index cache `[sp, tbl_off]` for a verified small dense array (R_X10=slots, R_X11=len)
+  # when `len <= 8` and EVERY element `0..len-1` is a WObject of shape `r_sh_cmp` (else zeros all 13 slots cleanly!).
+  # Slot mapping `0..7 -> [12, 0, 4, 6, 8, 9, 10, 11]` matches `(u ror 50) - 4092` (0.0 -> 12). Preserves R_X13!
+  -> emit_fill_wta_tbl(tbl_off, r_sh_cmp)
+    qi_z = 0
+    while qi_z < 13
+      @a.str_x(R_XZR, R_SP, tbl_off + qi_z * 8)
+      qi_z += 1
+    l_wt_done = @a.new_label
+    l_wt_zero = @a.new_label
+    l_wt_lp = @a.new_label
+    @a.cmp_i(R_X11, 8)
+    @a.b_cond(CC_HI, l_wt_done)
+    @a.cbz_x(R_X11, l_wt_done)
+    @a.movz_x(R_X14, 0)
+    @a.add_i(R_X1, R_SP, tbl_off)
+    @a.bind(l_wt_lp)
+    @a.ldr_x_idx(R_X15, R_X10, R_X14)
+    @a.sub_i(R_X9, R_X15, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_wt_zero)
+    @a.cbz_x(R_X9, l_wt_zero)
+    @a.ldr_x(R_X9, R_X9, 8)
+    @a.cmp_r(R_X9, r_sh_cmp)
+    @a.b_cond(CC_NE, l_wt_zero)
+    # Map idx in 0..7 -> slot in [12, 0, 4, 6, 8, 9, 10, 11] via 0xBA98640C!
+    @a.mov_imm32(R_X9, 0xBA98640C)
+    @a.lsl_xi(R_X0, R_X14, 2)
+    @a.lsr_x(R_X9, R_X9, R_X0)
+    @a.and_x_lowmask(R_X9, R_X9, 4)
+    @a.str_x_idx(R_X15, R_X1, R_X9)
+    @a.add_i(R_X14, R_X14, 1)
+    @a.cmp_r(R_X14, R_X11)
+    @a.b_cond(CC_LO, l_wt_lp)
+    @a.b(l_wt_done)
+    @a.bind(l_wt_zero)
+    qi_z2 = 0
+    while qi_z2 < 13
+      @a.str_x(R_XZR, R_SP, tbl_off + qi_z2 * 8)
+      qi_z2 += 1
+    @a.bind(l_wt_done)
+    nil
+
   -> gen_while_loop(s)
     @known_shapes = {}
+    return nil if @inline_env == nil && try_gen_u8_match_while(s)
+    cs_st = (@inline_env == nil && (@in_loop_depth == 0 || jit_has_loop_stmt?(s.b))) ? begin_cs_loop_promo(s) : nil
+    if @inline_env == nil && try_gen_guarded_ta_bce_while(s)
+      end_cs_loop_promo(cs_st)
+      @known_shapes = {}
+      return nil
     l_head = @a.new_label
     l_brk = @a.new_label
     @loops.push(JS:JitLoopCtx.new(l_brk, l_head, nil))
     @in_loop_depth += 1
     @a.bind(l_head)
-    gen_cond_branch(s.a, l_brk, false)
-    gen_stmt(s.b)
-    @a.b(l_head)
+    pure_ep_wl = false
+    if !@in_cold_stub && @this_mono_sh != 0 && @inline_env == nil && !@is_osr && while_uses_this_count(s) >= 3
+      # Hoist `this.@shape == @this_mono_sh` AND `JS_EPOCH[0] == ep_now` ONCE per iteration (e.g. Scheduler.schedule!)
+      l_unspec_iter = @a.new_label
+      @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+      @a.sub_i(R_X9, R_X9, 4)
+      @a.ldr_x(R_X10, R_X9, 8)
+      emit_cmp_shape(R_X10, @this_mono_sh)
+      @a.b_cond(CC_NE, l_unspec_iter)
+      if !@hoisted_epoch
+        ep_w = JS_EPOCH[0]
+        @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+        @a.ldr_x(R_X10, R_X9, 0)
+        @a.mov_imm64(R_X11, ep_w)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_unspec_iter)
+      @known_shapes = { -2 => @this_mono_sh }
+      @epoch_verified_now = true
+      # General register-carried linked-list skip-loop fusion:
+      # `while (this.<cur> != null) { if (this.<cur>.<pred>()) this.<cur> = this.<cur>.<next>; else <else_body> }`
+      # Keeps `cur` in R_X12 across consecutive skips (zero stores, zero `this`/epoch reloads, single cache line!).
+      skip_done = false
+      if !@in_cs_promo && s.a != nil && s.a.kind == :binary && (s.a.str == "!=" || s.a.str == "!==")
+        sa_obj = nil
+        if s.a.b != nil && s.a.b.kind == :null
+          sa_obj = s.a.a
+        elsif s.a.a != nil && s.a.a.kind == :null
+          sa_obj = s.a.b
+        if sa_obj != nil && sa_obj.kind == :member && !sa_obj.has?(F_COMPUTED) && sa_obj.a != nil && sa_obj.a.kind == :this
+          cur_name = sa_obj.b.str
+          s_if = (s.b != nil && s.b.kind == :block && s.b.list != nil && s.b.list.size == 1) ? s.b.list[0] : s.b
+          if s_if != nil && s_if.kind == :if && s_if.c != nil && s_if.a != nil && s_if.a.kind == :call && s_if.a.list.size == 0 && s_if.a.a != nil && s_if.a.a.kind == :member && !s_if.a.a.has?(F_COMPUTED)
+            pm = s_if.a.a
+            if pm.a != nil && pm.a.kind == :member && !pm.a.has?(F_COMPUTED) && pm.a.a != nil && pm.a.a.kind == :this && pm.a.b.str == cur_name && s_if.a.x.is_a?(Array) && s_if.a.x.size == 2
+              sh_nd = s_if.a.x[0]
+              fn_pr = s_if.a.x[1]
+              then_s = (s_if.b != nil && s_if.b.kind == :block && s_if.b.list != nil && s_if.b.list.size == 1) ? s_if.b.list[0] : s_if.b
+              if sh_nd.is_a?(JS:Shape) && !sh_nd.dict && sh_nd.slot_of(pm.b.str) < 0 && fn_pr.is_a?(JS:Function) && fn_pr.code != nil && fn_pr.code.node.is_a?(JaFunc) && js_shape_proto_method_eq?(sh_nd, pm.b.str, fn_pr)
+                plan_pr = poly_classify_method(fn_pr.code.node, sh_nd, 0)
+                if plan_pr != nil && plan_pr[0] == :ret_held_or_susp && then_s != nil && then_s.kind == :expr_stmt && then_s.a != nil && then_s.a.kind == :assign && then_s.a.str == "="
+                  as_l = then_s.a.a
+                  as_r = then_s.a.b
+                  if as_l != nil && as_l.kind == :member && !as_l.has?(F_COMPUTED) && as_l.a != nil && as_l.a.kind == :this && as_l.b.str == cur_name && as_r != nil && as_r.kind == :member && !as_r.has?(F_COMPUTED) && as_r.a != nil && as_r.a.kind == :member && !as_r.a.has?(F_COMPUTED) && as_r.a.a != nil && as_r.a.a.kind == :this && as_r.a.b.str == cur_name
+                    th_sh_w = wvalue_from_bits(@this_mono_sh)
+                    sl_cur = th_sh_w.is_a?(JS:Shape) ? th_sh_w.slot_of(cur_name) : -1
+                    sl_nxt = sh_nd.slot_of(as_r.b.str)
+                    if sl_cur >= 0 && (th_sh_w.attrs_of(cur_name) & ATTR_ACCESSOR) == 0 && sl_nxt >= 0 && (sh_nd.attrs_of(as_r.b.str) & ATTR_ACCESSOR) == 0
+                      enc_cur = sl_cur < th_sh_w.inline ? (th_sh_w.ibase + sl_cur) : (0 - (sl_cur - th_sh_w.inline) - 1)
+                      enc_nxt = sl_nxt < sh_nd.inline ? (sh_nd.ibase + sl_nxt) : (0 - (sl_nxt - sh_nd.inline) - 1)
+                      jit_keep(sh_nd)
+                      sh_nd_b = wvalue_bits(sh_nd) ## i64
+                      is_strict_neq = s.a.str == "!=="
+                      emit_poly_const_load(R_X10, plan_pr[2], l_unspec_iter, false)
+                      emit_poly_const_load(R_X10, plan_pr[3], l_unspec_iter, false)
+                      iv1 = plan_pr[2][0] == :gnum ? plan_pr[2][3] : plan_pr[2][2]
+                      iv2 = plan_pr[3][0] == :gnum ? plan_pr[3][3] : plan_pr[3][2]
+                      vals_hs = [~1.0, ~1.25, ~1.5, ~1.75, ~2.0, ~2.5, ~3.0, ~3.5, ~4.0, ~5.0, ~6.0, ~7.0]
+                      tmask_hs = 0
+                      qi_hs = 0
+                      while qi_hs < 12
+                        vq_hs = vals_hs[qi_hs]
+                        if ((vq_hs.to_i & iv1) != 0) || (vq_hs == iv2.to_f)
+                          tmask_hs = tmask_hs | (1 << qi_hs)
+                        qi_hs += 1
+                      res0_hs = ((0 & iv1) != 0) || (0 == iv2)
+                      # Check if `else` is a block ending with `this.<cur> = <rhs>` and no control-flow (fuses backedge into l_skip_loop!)
+                      c_stmts = (s_if.c.kind == :block && s_if.c.list.is_a?(Array)) ? s_if.c.list : [s_if.c]
+                      last_cs = c_stmts.size > 0 ? c_stmts[c_stmts.size - 1] : nil
+                      ci1_hoist = plan_pr[2][0] == :lit || (plan_pr[2][0] == :gnum && @hoisted_cells[wvalue_bits(plan_pr[2][1]) ## i64] == plan_pr[2][2])
+                      ci2_hoist = plan_pr[3][0] == :lit || (plan_pr[3][0] == :gnum && @hoisted_cells[wvalue_bits(plan_pr[3][1]) ## i64] == plan_pr[3][2])
+                      fuse_tail = ci1_hoist && ci2_hoist && !stmt_has_cf_or_loop?(s_if.c) && last_cs != nil && last_cs.kind == :expr_stmt && last_cs.a != nil && last_cs.a.kind == :assign && last_cs.a.str == "=" && last_cs.a.a != nil && last_cs.a.a.kind == :member && !last_cs.a.a.has?(F_COMPUTED) && last_cs.a.a.a != nil && last_cs.a.a.a.kind == :this && last_cs.a.a.b.str == cur_name
+                      r_sh_nd = @hoisted_shapes[sh_nd_b]
+                      r_sh_cmp = r_sh_nd != nil ? r_sh_nd : R_X8
+                      l_skip_loop = @a.new_label
+                      l_skip_next = @a.new_label
+                      l_skip_run = @a.new_label
+                      l_skip_done = @a.new_label
+                      l_skip_bail = @a.new_label
+                      l_skip_fp = @a.new_label
+                      l_tail_bail = fuse_tail ? @a.new_label : nil
+                      dirty_off_w = fuse_tail ? push_x(R_XZR) : -1
+                      # Detect read-only `this.<arr_prop>` AND write-only `this.<cnt>++` counters inside inlined callees!
+                      wta_info = nil
+                      wta_tbl_off = -1
+                      cnt_list = []
+                      cnt_props = {}
+                      cur_wr_deep = {}
+                      if fuse_tail && @while_this_arr == nil && @tmp_depth + 20 <= 56
+                        ar_rd = {}
+                        ar_wr = {}
+                        ar_inc = {}
+                        ar_oth = {}
+                        collect_this_arr_reads_deep(s_if.c, ar_rd, ar_wr, {}, 0, ar_inc, ar_oth, cur_wr_deep)
+                        best_ap = nil
+                        best_ac = 0
+                        ar_rd.each ->(pn_a, cnt_a)
+                          if !ar_wr[pn_a] && cnt_a > best_ac
+                            sl_ap = th_sh_w.slot_of(pn_a)
+                            if sl_ap >= 0 && (th_sh_w.attrs_of(pn_a) & ATTR_ACCESSOR) == 0
+                              best_ap = pn_a
+                              best_ac = cnt_a
+                        if best_ap != nil
+                          sl_ap = th_sh_w.slot_of(best_ap)
+                          enc_ap = sl_ap < th_sh_w.inline ? (th_sh_w.ibase + sl_ap) : (0 - (sl_ap - th_sh_w.inline) - 1)
+                          wta_sl_off = push_x(R_XZR)
+                          wta_ln_off = push_x(R_XZR)
+                          wta_tbl_off = @tmp_base + @tmp_depth * 8
+                          @tmp_depth += 13
+                          @max_tmp = @tmp_depth if @tmp_depth > @max_tmp
+                          @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+                          @a.sub_i(R_X13, R_X13, 4)
+                          emit_slot_load(R_X9, R_X13, enc_ap)
+                          @a.lsr_xi(R_X10, R_X9, 48)
+                          @a.movz_x(R_X11, 0xFFF4)
+                          @a.cmp_r(R_X10, R_X11)
+                          @a.b_cond(CC_NE, l_unspec_iter)
+                          @a.and_x_ptr47(R_X9, R_X9)
+                          @a.ldrb(R_X10, R_X9, 2)
+                          @a.and_w_lowmask(R_X10, R_X10, 4)
+                          @a.tst_x_lowmask(R_X10, 1)
+                          @a.b_cond(CC_EQ, l_unspec_iter)
+                          @a.cmp_wi(R_X10, 4)
+                          @a.b_cond(CC_HS, l_unspec_iter)
+                          @a.ldr_w(R_X10, R_X9, 4)
+                          @a.cbnz_w(R_X10, l_unspec_iter)
+                          @a.ldr_x(R_X10, R_X9, 16)
+                          @a.ldrsw(R_X11, R_X9, 8)
+                          @a.str_x(R_X10, R_SP, wta_sl_off)
+                          @a.str_x(R_X11, R_SP, wta_ln_off)
+                          @a.mov_imm64(R_X8, sh_nd_b) if r_sh_nd == nil
+                          emit_fill_wta_tbl(wta_tbl_off, r_sh_cmp)
+                          wta_info = [best_ap, wta_sl_off, wta_ln_off, dirty_off_w, enc_ap, wta_tbl_off, sh_nd_b]
+                        # Promote up to 2 write-only `this.<cnt>++` counters to unboxed i64 stack slots (zero FP crossings!)
+                        if @while_cnt_list == nil
+                          ar_inc.each ->(pn_c, inc_n)
+                            if cnt_list.size < 2 && inc_n >= 1 && !ar_oth[pn_c] && pn_c != cur_name && pn_c != best_ap
+                              sl_cp = th_sh_w.slot_of(pn_c)
+                              if sl_cp >= 0 && th_sh_w.attrs_of(pn_c) == ATTR_DEFAULT
+                                enc_cp = sl_cp < th_sh_w.inline ? (th_sh_w.ibase + sl_cp) : (0 - (sl_cp - th_sh_w.inline) - 1)
+                                c_off = push_x(R_XZR)
+                                entry_cp = [pn_c, c_off, enc_cp]
+                                cnt_list.push(entry_cp)
+                                cnt_props[pn_c] = entry_cp
+                          if cnt_list.size > 0
+                            @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+                            @a.sub_i(R_X13, R_X13, 4)
+                            ci_init = 0
+                            while ci_init < cnt_list.size
+                              ec_i = cnt_list[ci_init]
+                              emit_slot_load(R_X10, R_X13, ec_i[2])
+                              emit_unbox_f64(R_D0, R_X10, l_unspec_iter)
+                              @a.fcvtzs_x_d(R_X11, R_D0)
+                              @a.scvtf_d_x(R_D1, R_X11)
+                              @a.fcmp_d(R_D0, R_D1)
+                              @a.b_cond(CC_NE, l_unspec_iter)
+                              @a.lsr_xi(R_X14, R_X11, 40)
+                              @a.cbnz_x(R_X14, l_unspec_iter)
+                              @a.str_x(R_X11, R_SP, ec_i[1])
+                              ci_init += 1
+                      @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+                      @a.sub_i(R_X13, R_X13, 4)
+                      emit_slot_load(R_X12, R_X13, enc_cur)
+                      # General single-branch CCMP skip-loop when `(x & 2^k) != 0 || x == C` with 0 <= C < 2^k and r_sh_nd in GPR!
+                      use_ccmp_skip = r_sh_nd != nil && iv1 > 0 && (iv1 & (iv1 - 1)) == 0 && iv2 >= 0 && iv2 < iv1
+                      sk_hi_bits = use_ccmp_skip ? jit_f64_bits(wvalue_bits((iv1 * 2).to_f) ## i64) : 0
+                      sk_m1_bits = use_ccmp_skip ? jit_f64_bits(wvalue_bits(iv1.to_f) ## i64) : 0
+                      sk_eq_bits = use_ccmp_skip ? jit_f64_bits(wvalue_bits(iv2.to_f) ## i64) : 0
+                      if use_ccmp_skip
+                        @a.mov_imm64(R_X6, sk_hi_bits)
+                        @a.mov_imm64(R_X7, sk_m1_bits)
+                        @a.mov_imm64(R_X8, sk_eq_bits)
+                      else
+                        @a.mov_imm64(R_X6, 4611686018427391996) # (wvalue_bits(1.0) ror 50) = 0x4000_0000_0000_0ffc
+                        @a.mov_imm32(R_X7, tmask_hs)
+                        @a.mov_imm64(R_X8, sh_nd_b) if r_sh_nd == nil
+                      l_skip_chk_null = @a.new_label
+                      l_loop_back = fuse_tail ? @a.new_label : nil
+                      l_tail_recheck = fuse_tail ? @a.new_label : nil
+                      if fuse_tail
+                        # Place `l_loop_back` right before 32-byte aligned `l_skip_loop` so every task return falls straight into `l_skip_loop`!
+                        @a.b(l_skip_loop)
+                        while ((@a.len + 3) & 7) != 0
+                          @a.nop
+                        @a.bind(l_loop_back)
+                        @a.mov_r(R_X12, R_X0)
+                        @a.ldr_x(R_X10, R_SP, dirty_off_w)
+                        @a.cbnz_x(R_X10, l_tail_recheck)
+                      @a.bind(l_skip_loop)
+                      # Null/undefined fail `tst_wobj_bad` -> handled out-of-line in `l_skip_chk_null` (-3 insns per linked-list hop!)
+                      # Use `ldur` directly off tagged `R_X12` for shape/link/state to break `sub x9, x12, #4` -> `ldr` critical-path chain!
+                      @a.sub_i(R_X9, R_X12, 4)
+                      @a.tst_wobj_bad(R_X9)
+                      @a.b_cond(CC_NE, l_skip_chk_null)
+                      @a.cbz_x(R_X9, l_skip_bail)
+                      @a.ldr_x(R_X10, R_X12, 4)
+                      @a.cmp_r(R_X10, r_sh_cmp)
+                      @a.b_cond(CC_NE, l_skip_bail)
+                      if enc_nxt > 0 && enc_nxt <= 31
+                        @a.ldr_x(R_X11, R_X12, (enc_nxt + 1) * 8 - 4)
+                      else
+                        emit_slot_load(R_X11, R_X9, enc_nxt)
+                      if plan_pr[1] > 0 && plan_pr[1] <= 31
+                        @a.ldr_x(R_X10, R_X12, (plan_pr[1] + 1) * 8 - 4)
+                      else
+                        emit_slot_load(R_X10, R_X9, plan_pr[1])
+                      if use_ccmp_skip
+                        # 6-insn single-branch exact skip check: u in [0, 2*iv1) -> skip iff u >= iv1 || u == iv2!
+                        @a.sub_r(R_X14, R_X10, R_X20)
+                        @a.cmp_r(R_X14, R_X6)
+                        @a.b_cond(CC_HS, l_skip_fp)
+                        @a.cmp_r(R_X14, R_X7)
+                        @a.ccmp_r(R_X14, R_X8, 4, CC_LO)
+                        @a.b_cond(CC_NE, l_skip_run)
+                      else
+                        @a.cmp_r(R_X10, R_X20)
+                        @a.b_cond(CC_EQ, res0_hs ? l_skip_next : l_skip_run)
+                        @a.ror_xi(R_X14, R_X10, 50)
+                        @a.sub_r(R_X14, R_X14, R_X6)
+                        @a.cmp_i(R_X14, 11)
+                        @a.b_cond(CC_HI, l_skip_fp)
+                        @a.lsr_w(R_X15, R_X7, R_X14)
+                        @a.tbz(R_X15, 0, l_skip_run)
+                      @a.bind(l_skip_next)
+                      @a.mov_r(R_X12, R_X11)
+                      @a.b(l_skip_loop)
+                      @a.bind(l_skip_run)
+                      @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+                      @a.sub_i(R_X13, R_X13, 4)
+                      emit_slot_store(R_X13, enc_cur, R_X12)
+                      @known_shapes = { -2 => @this_mono_sh, "this." + cur_name => sh_nd_b }
+                      @epoch_verified_now = true
+                      if fuse_tail
+                        ci_t = 0
+                        enc_d0_s = 0
+                        enc_s0_s = 0
+                        # Zero-stall fusion of leading `this.<dst> = this.<cur>.<src>;` while `R_X9` (cur-4), `R_X12` (cur), `R_X13` (this-4), and `R_X10` (cur.state) stay live!
+                        if c_stmts.size >= 2 && c_stmts[0].kind == :expr_stmt && c_stmts[0].a != nil && c_stmts[0].a.kind == :assign && c_stmts[0].a.str == "="
+                          a0_l = c_stmts[0].a.a
+                          a0_r = c_stmts[0].a.b
+                          if a0_l != nil && a0_l.kind == :member && !a0_l.has?(F_COMPUTED) && a0_l.a != nil && a0_l.a.kind == :this && a0_l.b.str != cur_name && a0_r != nil && a0_r.kind == :member && !a0_r.has?(F_COMPUTED) && a0_r.a != nil && a0_r.a.kind == :member && !a0_r.a.has?(F_COMPUTED) && a0_r.a.a != nil && a0_r.a.a.kind == :this && a0_r.a.b.str == cur_name
+                            sl_d0 = th_sh_w.slot_of(a0_l.b.str)
+                            sl_s0 = sh_nd.slot_of(a0_r.b.str)
+                            if sl_d0 >= 0 && th_sh_w.attrs_of(a0_l.b.str) == ATTR_DEFAULT && sl_s0 >= 0 && (sh_nd.attrs_of(a0_r.b.str) & ATTR_ACCESSOR) == 0
+                              enc_d0 = sl_d0 < th_sh_w.inline ? (th_sh_w.ibase + sl_d0) : (0 - (sl_d0 - th_sh_w.inline) - 1)
+                              enc_s0 = sl_s0 < sh_nd.inline ? (sh_nd.ibase + sl_s0) : (0 - (sl_s0 - sh_nd.inline) - 1)
+                              enc_d0_s = enc_d0
+                              enc_s0_s = enc_s0
+                              emit_slot_load(R_X14, R_X9, enc_s0)
+                              emit_slot_store(R_X13, enc_d0, R_X14)
+                              ci_t = 1
+                        can_split_run = use_ccmp_skip && ci_t == 1 && c_stmts.size == 2
+                        l_sr_s3 = can_split_run ? @a.new_label : nil
+                        l_sr_s01 = can_split_run ? @a.new_label : nil
+                        old_wdo = @while_dirty_off
+                        old_wfc = @while_fast_clean
+                        old_wta = @while_this_arr
+                        old_woc = @while_outer_cur
+                        old_wcp = @while_cnt_props
+                        old_wcl = @while_cnt_list
+                        old_wlb = @while_loop_back_lbl
+                        old_wsl = @while_skip_loop_lbl
+                        old_wsr = @while_skip_run_lbl
+                        old_ws3 = @while_skip_run_s3
+                        old_ws01 = @while_skip_run_s01
+                        old_wsrh = @while_sr_hdr
+                        old_ws3b = @while_s3_bound
+                        old_ws01b = @while_s01_bound
+                        old_ts3 = @while_tcb_s3_lbl
+                        old_ts01 = @while_tcb_s01_lbl
+                        old_tcb_cb = @while_tcb_cmp_bits
+                        old_tcb_tr = @while_tcb_this_reg
+                        old_wst = @while_skip_tail
+                        @while_dirty_off = dirty_off_w
+                        @while_fast_clean = true
+                        @while_this_arr = wta_info
+                        @while_outer_cur = !cur_wr_deep[cur_name] ? [cur_name, sh_nd_b] : nil
+                        @while_cnt_props = cnt_list.size > 0 ? cnt_props : nil
+                        @while_cnt_list = cnt_list.size > 0 ? cnt_list : nil
+                        @while_loop_back_lbl = l_loop_back
+                        @while_skip_loop_lbl = l_skip_loop
+                        @while_skip_run_lbl = use_ccmp_skip ? l_skip_run : nil
+                        @while_skip_run_s3 = l_sr_s3
+                        @while_skip_run_s01 = l_sr_s01
+                        @while_sr_hdr = can_split_run ? [enc_cur, enc_s0_s, enc_d0_s] : nil
+                        @while_s3_bound = false
+                        @while_s01_bound = false
+                        @while_tcb_s3_lbl = nil
+                        @while_tcb_s01_lbl = nil
+                        @while_tcb_cmp_bits = 0
+                        @while_tcb_this_reg = nil
+                        @while_skip_tail = use_ccmp_skip ? [sh_nd_b, plan_pr[1], enc_nxt, iv1, iv2] : nil
+                        while ci_t < c_stmts.size - 1
+                          gen_stmt(c_stmts[ci_t])
+                          ci_t += 1
+                        @live_cur_reg = (ci_t == 1 && c_stmts.size == 2) ? [cur_name, R_X12] : nil
+                        @live_cur_prop = (ci_t == 1 && c_stmts.size == 2) ? [plan_pr[1], R_X10] : nil
+                        old_ttl_r = @top_tail_loop_ret
+                        old_ttl_c = @top_tail_loop_call
+                        old_tre_w = @tail_ret_emitted
+                        @top_tail_loop_ret = l_loop_back
+                        @top_tail_loop_call = last_cs.a.b
+                        @tail_ret_emitted = false
+                        gen_expr_any(last_cs.a.b)
+                        did_tre_w = @tail_ret_emitted
+                        got_ts3 = @while_tcb_s3_lbl
+                        got_ts01 = @while_tcb_s01_lbl
+                        got_tcb_tr = @while_tcb_this_reg
+                        did_s3_b = @while_s3_bound
+                        did_s01_b = @while_s01_bound
+                        @top_tail_loop_ret = old_ttl_r
+                        @top_tail_loop_call = old_ttl_c
+                        @tail_ret_emitted = old_tre_w
+                        @live_cur_reg = nil
+                        @live_cur_prop = nil
+                        @while_dirty_off = old_wdo
+                        @while_fast_clean = old_wfc
+                        @while_this_arr = old_wta
+                        @while_outer_cur = old_woc
+                        @while_cnt_props = old_wcp
+                        @while_cnt_list = old_wcl
+                        @while_loop_back_lbl = old_wlb
+                        @while_skip_loop_lbl = old_wsl
+                        @while_skip_run_lbl = old_wsr
+                        @while_skip_run_s3 = old_ws3
+                        @while_skip_run_s01 = old_ws01
+                        @while_sr_hdr = old_wsrh
+                        @while_s3_bound = old_ws3b
+                        @while_s01_bound = old_ws01b
+                        @while_tcb_s3_lbl = old_ts3
+                        @while_tcb_s01_lbl = old_ts01
+                        @while_tcb_cmp_bits = old_tcb_cb
+                        @while_tcb_this_reg = old_tcb_tr
+                        @while_skip_tail = old_wst
+                        @a.b(l_loop_back) if !did_tre_w
+                        if l_sr_s3 != nil && got_ts3 != nil && got_ts01 != nil && got_tcb_tr != nil
+                          if !did_s3_b
+                            @a.bind(l_sr_s3)
+                            emit_sr_hdr_stub(enc_cur, enc_s0_s, enc_d0_s, got_tcb_tr)
+                            @a.b(got_ts3)
+                          if !did_s01_b
+                            @a.bind(l_sr_s01)
+                            emit_sr_hdr_stub(enc_cur, enc_s0_s, enc_d0_s, got_tcb_tr)
+                            @a.b(got_ts01)
+                        if l_tail_recheck != nil
+                          cnt_list_trc = cnt_list
+                          wta_tbl_trc = wta_tbl_off
+                          cb_trc = ->()
+                            @a.bind(l_tail_recheck)
+                            @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+                            @a.sub_i(R_X13, R_X13, 4)
+                            @a.ldr_x(R_X10, R_X13, 8)
+                            emit_cmp_shape(R_X10, @this_mono_sh)
+                            @a.b_cond(CC_NE, l_tail_bail)
+                            @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+                            @a.ldr_x(R_X10, R_X9, 0)
+                            @a.mov_imm64(R_X11, ep_w)
+                            @a.cmp_r(R_X10, R_X11)
+                            @a.b_cond(CC_NE, l_tail_bail)
+                            if wta_info != nil
+                              emit_slot_load(R_X9, R_X13, wta_info[4])
+                              @a.lsr_xi(R_X10, R_X9, 48)
+                              @a.movz_x(R_X11, 0xFFF4)
+                              @a.cmp_r(R_X10, R_X11)
+                              @a.b_cond(CC_NE, l_tail_bail)
+                              @a.and_x_ptr47(R_X9, R_X9)
+                              @a.ldrb(R_X10, R_X9, 2)
+                              @a.and_w_lowmask(R_X10, R_X10, 4)
+                              @a.tst_x_lowmask(R_X10, 1)
+                              @a.b_cond(CC_EQ, l_tail_bail)
+                              @a.cmp_wi(R_X10, 4)
+                              @a.b_cond(CC_HS, l_tail_bail)
+                              @a.ldr_w(R_X10, R_X9, 4)
+                              @a.cbnz_w(R_X10, l_tail_bail)
+                              @a.ldr_x(R_X10, R_X9, 16)
+                              @a.ldrsw(R_X11, R_X9, 8)
+                              @a.str_x(R_X10, R_SP, wta_info[1])
+                              @a.str_x(R_X11, R_SP, wta_info[2])
+                              if wta_tbl_trc >= 0
+                                @a.mov_imm64(R_X8, sh_nd_b) if r_sh_nd == nil
+                                emit_fill_wta_tbl(wta_tbl_trc, r_sh_cmp)
+                            ci_rc = 0
+                            while ci_rc < cnt_list_trc.size
+                              ec_r = cnt_list_trc[ci_rc]
+                              emit_slot_load(R_X10, R_X13, ec_r[2])
+                              emit_unbox_f64(R_D0, R_X10, l_tail_bail)
+                              @a.fcvtzs_x_d(R_X11, R_D0)
+                              @a.scvtf_d_x(R_D1, R_X11)
+                              @a.fcmp_d(R_D0, R_D1)
+                              @a.b_cond(CC_NE, l_tail_bail)
+                              @a.lsr_xi(R_X14, R_X11, 40)
+                              @a.cbnz_x(R_X14, l_tail_bail)
+                              @a.str_x(R_X11, R_SP, ec_r[1])
+                              ci_rc += 1
+                            @a.str_x(R_XZR, R_SP, dirty_off_w)
+                            if use_ccmp_skip
+                              @a.mov_imm64(R_X6, sk_hi_bits)
+                              @a.mov_imm64(R_X7, sk_m1_bits)
+                              @a.mov_imm64(R_X8, sk_eq_bits)
+                            else
+                              @a.mov_imm64(R_X6, 4611686018427391996)
+                              @a.mov_imm32(R_X7, tmask_hs)
+                              @a.mov_imm64(R_X8, sh_nd_b) if r_sh_nd == nil
+                            @a.b(l_skip_loop)
+                          add_cold_stub(cb_trc)
+                      else
+                        gen_stmt(s_if.c)
+                        @a.b(l_head)
+                      @tmp_depth -= cnt_list.size
+                      @tmp_depth -= 13 if wta_tbl_off >= 0
+                      @tmp_depth -= 2 if wta_info != nil
+                      @tmp_depth -= 1 if dirty_off_w >= 0
+                      @a.bind(l_skip_done)
+                      emit_flush_while_cnts(cnt_list)
+                      @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+                      @a.sub_i(R_X13, R_X13, 4)
+                      emit_slot_store(R_X13, enc_cur, R_X12)
+                      @a.b(l_brk)
+                      jit_keep(cur_name) if fuse_tail
+                      cnt_list_sk = cnt_list
+                      cb_sk = ->()
+                        @a.bind(l_skip_chk_null)
+                        @a.cbz_x(R_X12, is_strict_neq ? l_skip_bail : l_skip_done)
+                        @a.ldr_x(R_X10, R_X19, RT_K_NULL_BITS * 8)
+                        @a.cmp_r(R_X12, R_X10)
+                        @a.b_cond(CC_EQ, l_skip_done)
+                        @a.b(l_skip_bail)
+                        @a.bind(l_skip_fp)
+                        emit_unbox_f64(R_D0, R_X10, l_skip_bail)
+                        emit_f64_to_i32(R_X14, R_D0)
+                        @a.mov_imm32(R_X15, iv1)
+                        @a.and_w(R_X15, R_X14, R_X15)
+                        @a.cbnz_w(R_X15, l_skip_next)
+                        @a.mov_imm32(R_X15, iv2)
+                        @a.scvtf_d_w(R_D1, R_X15)
+                        @a.fcmp_d(R_D0, R_D1)
+                        @a.b_cond(CC_EQ, l_skip_next)
+                        @a.b(l_skip_run)
+                        @a.bind(l_skip_bail)
+                        emit_flush_while_cnts(cnt_list_sk)
+                        @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+                        @a.sub_i(R_X13, R_X13, 4)
+                        emit_slot_store(R_X13, enc_cur, R_X12)
+                        @a.b(l_unspec_iter)
+                        if fuse_tail
+                          @a.bind(l_tail_bail)
+                          @a.ldr_x(R_X1, R_SP, JF_SLOT_THIS)
+                          @a.mov_imm64(R_X2, wvalue_bits(cur_name) ## i64)
+                          @a.mov_r(R_X3, R_X12)
+                          @a.movz_x(R_X4, @jf.strict ? 2 : 1)
+                          call_rt(RT_SETV)
+                          @a.b(l_head)
+                      add_cold_stub(cb_sk)
+                      skip_done = true
+      if !skip_done
+        gen_cond_branch(s.a, l_brk, false)
+        gen_stmt(s.b)
+        @a.b(l_head)
+      cur_lp_w = @loops.last
+      cb_wu = ->()
+        @a.bind(l_unspec_iter)
+        @loops.push(cur_lp_w)
+        @in_loop_depth += 1
+        @known_shapes = {}
+        @epoch_verified_now = false
+        gen_cond_branch(s.a, l_brk, false)
+        gen_stmt(s.b)
+        @in_loop_depth -= 1
+        @loops.pop
+        @a.b(l_head)
+      add_cold_stub(cb_wu)
+    else
+      sv_ep_wl = @epoch_verified_now
+      pure_ep_wl = sv_ep_wl && osr_loop_pure_epoch?(s)
+      @epoch_verified_now = pure_ep_wl
+      gen_cond_branch(s.a, l_brk, false)
+      gen_stmt(s.b)
+      @a.b(l_head)
     @a.bind(l_brk)
     @in_loop_depth -= 1
     @loops.pop
+    end_cs_loop_promo(cs_st)
     @known_shapes = {}
+    @epoch_verified_now = pure_ep_wl ? true : false
     nil
 
   -> gen_do_while_loop(s)
@@ -4487,15 +9036,70 @@ OSR_RETURN = 2
 
   # ---- Binding Helpers ----
 
-  -> local_idx(e)
-    return -1 if e == nil || e.kind != :ident || e.x == nil
-    b = e.x.binding
-    return -1 if b == nil || b.global? || b.slot >= 0 || b.scope.func != @jf
+  -> binding_slot(b)
+    return -1 if b == nil
+    vs = @info.demoted_env[b]
+    return vs if vs != nil
+    return -1 if b.global? || b.slot >= 0 || b.scope.func != @jf
     b.lidx
 
+  -> local_idx(e)
+    return -1 if e == nil || e.kind != :ident || e.x == nil
+    binding_slot(e.x.binding)
+
+  -> shape_key(e)
+    return -1 if e == nil
+    return -2 if e.kind == :this
+    if e.kind == :ident && e.x != nil && e.x.binding != nil
+      b = e.x.binding
+      if @inline_env != nil && @inline_env[b] != nil
+        iv = @inline_env[b]
+        return (-1000 - iv[1]) if iv[0] == :spill_x
+        return (-2000 - iv[1]) if iv[0] == :reg_x
+        return iv[1] if iv[0] == :slot
+        return -1
+      li = binding_slot(b)
+      return li if li >= 0
+    if e.kind == :member && !e.has?(F_COMPUTED) && e.a != nil && e.a.kind == :this && @known_shapes[-2] != nil
+      return "this." + e.b.str
+    -1
+
+  -> emit_cmp_shape(reg, sh_bits)
+    r_hs = @hoisted_shapes[sh_bits]
+    if r_hs != nil
+      @a.cmp_r(reg, r_hs)
+    elsif @sh_spill_slots[sh_bits] != nil
+      r_tmp = reg == R_X11 ? R_X16 : R_X11
+      @a.ldr_x(r_tmp, R_SP, @sh_spill_slots[sh_bits])
+      @a.cmp_r(reg, r_tmp)
+    else
+      r_tmp = reg == R_X11 ? R_X16 : R_X11
+      @a.mov_imm64(r_tmp, sh_bits)
+      @a.cmp_r(reg, r_tmp)
+    nil
+
+  -> binding_shape_key(b)
+    return -1 if b == nil
+    if @inline_env != nil && @inline_env[b] != nil
+      iv = @inline_env[b]
+      return (-1000 - iv[1]) if iv[0] == :spill_x
+      return (-2000 - iv[1]) if iv[0] == :reg_x
+      return iv[1] if iv[0] == :slot
+      return -1
+    li = binding_slot(b)
+    return li if li >= 0
+    -1
+
+  -> rhs_pure_known_shape(rhs)
+    return nil if rhs == nil || !rhs.is_a?(JsNode)
+    if rhs.kind == :this || rhs.kind == :ident || (rhs.kind == :member && !rhs.has?(F_COMPUTED) && rhs.a != nil && rhs.a.kind == :this)
+      sk = shape_key(rhs)
+      return sk != -1 ? @known_shapes[sk] : nil
+    nil
+
   -> emit_assign_to_binding(b, rhs, init)
-    if !b.global? && b.slot < 0 && b.scope.func == @jf
-      li = b.lidx
+    li = binding_slot(b)
+    if li >= 0
       ty = @info.types[li]
       if ty == JT_SRA_OBJ
         # Scalar-replaced object literal: store each property expression directly into its vslot!
@@ -4539,9 +9143,87 @@ OSR_RETURN = 2
         return nil
       emit_store_expr_to_slot(li, rhs)
       return nil
+    rhs_ksh = rhs_pure_known_shape(rhs)
     gen_expr_any(rhs)
     emit_write_binding(b, R_X0, init)
+    if rhs_ksh != nil
+      dsk = binding_shape_key(b)
+      @known_shapes[dsk] = rhs_ksh if dsk != -1
     nil
+
+  # Direct-to-register targeting for raw 32-bit wrapping expressions (`JT_I32` & `JT_U32`)!
+  # Eliminates `mov w0, rx; mov r, w0` round-trips and fuses 3-way rotate-XOR, ch, maj, and wrapping `+` straight into `r`!
+  -> try_emit_raw32_direct(r, rhs)
+    return false if r == nil || rhs == nil
+    # Direct copy `x = y` (`h = g; g = f; ...` -> 1 single `mov_w`!)
+    pr = peek_raw32_reg(rhs)
+    if pr != nil
+      @a.mov_w(r, pr) if r != pr
+      return true
+    # `(a + b) | 0` or `(a + b) >>> 0` where both a, b are in raw32 regs -> 1 single `add_w(r, ra, rb)`!
+    if rhs.kind == :binary && (rhs.str == "|" || rhs.str == ">>>") && rhs.b.kind == :num && rhs.b.a == ~0.0
+      inn = rhs.a
+      if inn != nil && inn.kind == :binary && (inn.str == "+" || inn.str == "-")
+        ra = peek_raw32_reg(inn.a)
+        rb = peek_raw32_reg(inn.b)
+        if ra != nil && rb != nil
+          if inn.str == "+"
+            @a.add_w(r, ra, rb)
+          else
+            @a.sub_w(r, ra, rb)
+          return true
+    # `a ^ b` direct-to-reg:
+    if rhs.kind == :binary && rhs.str == "^"
+      # 1) 3-way rotate/LSR XOR (`S1`, `S0`, `s0`, `s1`): `(ROR(x,k1) ^ ROR(x,k2)) ^ (ROR(x,k3) | (x>>>k3))` -> 3 insns straight into `r`!
+      if rhs.a != nil && rhs.a.kind == :binary && rhs.a.str == "^"
+        rm1 = match_ror32(rhs.a.a)
+        rm2 = rm1 != nil ? match_ror32(rhs.a.b) : nil
+        if rm1 != nil && rm2 != nil
+          rx1 = peek_raw32_reg(rm1[0])
+          rx2 = peek_raw32_reg(rm2[0])
+          if rx1 != nil && rx2 != nil && rx1 != r && rx2 != r
+            rm3 = match_ror32(rhs.b)
+            if rm3 != nil
+              rx3 = peek_raw32_reg(rm3[0])
+              if rx3 != nil && rx3 != r
+                @a.ror_wi(r, rx1, rm1[1])
+                @a.eor_w_ror(r, r, rx2, rm2[1])
+                @a.eor_w_ror(r, r, rx3, rm3[1])
+                return true
+            elsif rhs.b.kind == :binary && rhs.b.str == ">>>" && jit_int32_lit?(rhs.b.b)
+              sh3 = rhs.b.b.a.to_i & 31
+              rx3 = sh3 > 0 ? peek_raw32_reg(rhs.b.a) : nil
+              if rx3 != nil && rx3 != r
+                @a.ror_wi(r, rx1, rm1[1])
+                @a.eor_w_ror(r, r, rx2, rm2[1])
+                @a.eor_w_lsr(r, r, rx3, sh3)
+                return true
+        # 2) Majority `(a & b) ^ (a & c) ^ (b & c)` -> 4-insn `(a & b) | ((a | b) & c)` straight into `r`!
+        ea1 = rhs.a.a
+        ea2 = rhs.a.b
+        eb3 = rhs.b
+        if ea1.kind == :binary && ea1.str == "&" && ea2.kind == :binary && ea2.str == "&" && eb3.kind == :binary && eb3.str == "&"
+          r1a = peek_raw32_reg(ea1.a); r1b = peek_raw32_reg(ea1.b)
+          r2a = peek_raw32_reg(ea2.a); r2b = peek_raw32_reg(ea2.b)
+          r3a = peek_raw32_reg(eb3.a); r3b = peek_raw32_reg(eb3.b)
+          if r1a != nil && r1b != nil && r2a == r1a && r2b != nil && r3a == r1b && r3b == r2b
+            @a.and_w(R_X9, r1a, r1b)
+            @a.orr_w(R_X10, r1a, r1b)
+            @a.and_w(R_X10, R_X10, r2b)
+            @a.orr_w(r, R_X9, R_X10)
+            return true
+      # 3) Choose `(e & f) ^ ((~e) & g)` -> 3 insns straight into `r`!
+      if rhs.a.kind == :binary && rhs.a.str == "&" && rhs.b.kind == :binary && rhs.b.str == "&" && rhs.b.a.kind == :unary && rhs.b.a.str == "~"
+        re = peek_raw32_reg(rhs.a.a)
+        rf = peek_raw32_reg(rhs.a.b)
+        re2 = peek_raw32_reg(rhs.b.a.a)
+        rg = peek_raw32_reg(rhs.b.b)
+        if re != nil && rf != nil && re2 == re && rg != nil
+          @a.and_w(R_X9, re, rf)
+          @a.bic_w(R_X10, rg, re)
+          @a.eor_w(r, R_X9, R_X10)
+          return true
+    false
 
   -> emit_store_expr_to_slot(slot, rhs)
     ty = @info.types[slot]
@@ -4555,20 +9237,26 @@ OSR_RETURN = 2
           if hr_io != nil
             @a.mov_w(r, hr_io) if r != hr_io && @unroll_i_off == 0
             return nil
-        # Direct-to-register targeting for `i`, `i + K`, `i & mask` (zero redundant movs!)
+        # Direct-to-register targeting for `i`, `i + const_eval`, `i & mask`, and raw32 fusions (zero redundant movs!)
         pr = peek_i32_reg(rhs)
         if pr != nil
           @a.mov_w(r, pr) if r != pr
           return nil
-        if rhs.kind == :binary && (rhs.str == "+" || rhs.str == "-") && jit_small_int_lit?(rhs.b, 4095) && rhs.b.a.to_i >= 0
+        if rhs.kind == :binary && (rhs.str == "+" || rhs.str == "-")
           ra = peek_i32_reg(rhs.a)
-          if ra != nil
-            if rhs.str == "+"
-              @a.adds_wi(r, ra, rhs.b.a.to_i)
+          cv_b = ra != nil ? const_eval_i32(rhs.b) : nil
+          if ra != nil && cv_b != nil && cv_b >= -4095 && cv_b <= 4095
+            sv = rhs.str == "+" ? cv_b : (0 - cv_b)
+            if sv == 0
+              @a.mov_w(r, ra) if r != ra
+            elsif sv > 0
+              @a.adds_wi(r, ra, sv)
+              @a.b_cond(CC_VS, @l_deopt)
             else
-              @a.subs_wi(r, ra, rhs.b.a.to_i)
-            @a.b_cond(CC_VS, @l_deopt)
+              @a.subs_wi(r, ra, 0 - sv)
+              @a.b_cond(CC_VS, @l_deopt)
             return nil
+        return nil if try_emit_raw32_direct(r, rhs)
         if rhs.kind == :binary && rhs.str == "&" && rhs.b.kind == :num && jit_int32_lit?(rhs.b)
           m = rhs.b.a.to_i
           if m == 1 || m == 3 || m == 7 || m == 15 || m == 31 || m == 63 || m == 127 || m == 255 || m == 511 || m == 1023 || m == 2047 || m == 4095 || m == 65535
@@ -4633,6 +9321,12 @@ OSR_RETURN = 2
       gen_expr_i32(rhs)
       store_slot_i32(slot, R_X0)
       return nil
+    if ty == JT_U32
+      r = @info.reg_gpr[slot]
+      return nil if r != nil && try_emit_raw32_direct(r, rhs)
+      gen_expr_to_i32(rhs)
+      store_slot_i32(slot, R_X0)
+      return nil
     if ty == JT_F64
       dr = @info.reg_fpr[slot]
       if dr != nil && rhs != nil && rhs.kind == :binary && (rhs.str == "+" || rhs.str == "-" || rhs.str == "*" || rhs.str == "/")
@@ -4652,8 +9346,11 @@ OSR_RETURN = 2
       gen_expr_f64(rhs)
       store_slot_f64(slot, R_D0)
       return nil
+    rhs_ksh_s = rhs_pure_known_shape(rhs)
     gen_expr_any(rhs)
+    @known_shapes.delete(slot)
     store_slot_any(slot, R_X0)
+    @known_shapes[slot] = rhs_ksh_s if rhs_ksh_s != nil
     # If slot is a local TypedArray (`var buf = new Uint8Array(...)`), populate hoisted (raw_ptr, len) immediately!
     if !@is_osr && @info.local_tas[slot] != nil && @hoisted_tas[slot] != nil
       h_ta = @hoisted_tas[slot]
@@ -4680,6 +9377,23 @@ OSR_RETURN = 2
     nil
 
   -> emit_write_binding(b, val_reg, init, ref = nil)
+    if @inline_env != nil && @inline_env[b] != nil
+      iv = @inline_env[b]
+      if iv[0] == :spill_x
+        @known_shapes.delete(-1000 - iv[1])
+        @a.str_x(val_reg, R_SP, iv[1])
+      elsif iv[0] == :reg_x
+        @known_shapes.delete(-2000 - iv[1])
+        @a.mov_r(iv[1], val_reg) if iv[1] != val_reg
+      elsif iv[0] == :slot
+        @known_shapes.delete(iv[1])
+        store_slot_any(iv[1], val_reg)
+      return nil
+    bsl = binding_slot(b)
+    if bsl >= 0
+      @known_shapes.delete(bsl)
+      store_slot_any(bsl, val_reg)
+      return nil
     if b.global?
       c = wk_cell(b)
       jit_keep(c)
@@ -4693,24 +9407,40 @@ OSR_RETURN = 2
         else
           call_rt(RT_LSET)
         return nil
-      # Fast path: plain writable global cell (cell.@fast != 3)
-      @a.mov_imm64(R_X9, cb - 4)
-      @a.ldr_x(R_X10, R_X9, 8)
-      @a.cmp_i(R_X10, 3)
+      # Fast path: plain writable global cell (cell.@fast != 3); slow path out-of-line in cold stub!
+      r_ptr = val_reg == R_X9 ? R_X11 : R_X9
+      r_chk = val_reg == R_X10 ? R_X12 : R_X10
+      @a.mov_imm64(r_ptr, cb - 4)
+      @a.ldr_x(r_chk, r_ptr, 8)
+      @a.cmp_i(r_chk, 3)
       l_slow = @a.new_label
       l_done = @a.new_label
       @a.b_cond(CC_EQ, l_slow)
-      @a.str_x(val_reg, R_X9, 8)
-      @a.b(l_done)
-      @a.bind(l_slow)
-      @a.mov_r(R_X2, val_reg)
-      @a.mov_imm64(R_X1, cb)
-      @a.movz_x(R_X3, @jf.strict ? 2 : 1)
-      call_rt(RT_GSET)
+      @a.str_x(val_reg, r_ptr, 8)
       @a.bind(l_done)
+      vr_gs = val_reg
+      cb_gs = ->()
+        @a.bind(l_slow)
+        @a.mov_r(R_X2, vr_gs)
+        @a.mov_imm64(R_X1, cb)
+        @a.movz_x(R_X3, @jf.strict ? 2 : 1)
+        call_rt(RT_GSET)
+        @a.b(l_done)
+      add_cold_stub(cb_gs)
       return nil
     if b.slot >= 0
-      # Write to JS:Env slot (walking hops if in outer env!)
+      # Write to JS:Env slot (inline 1-STR for slot < 7 when GC is off, else RT_ENV_SET!)
+      if !JS_GC_ON[0] && b.slot < 7 && !b.decl_const
+        r_ep = val_reg == R_X9 ? R_X11 : R_X9
+        @a.ldr_x(r_ep, R_SP, JF_SLOT_ENV)
+        h = ref != nil ? wk_hops(ref) : @jf.analysis.env_hops(@jf.scope, b.scope)
+        while h > 0
+          @a.sub_i(r_ep, r_ep, 4)
+          @a.ldr_x(r_ep, r_ep, 8)
+          h -= 1
+        @a.sub_i(r_ep, r_ep, 4)
+        @a.str_x(val_reg, r_ep, (b.slot + 1) * 8 + 8)
+        return nil
       @a.mov_r(R_X3, val_reg)
       @a.ldr_x(R_X1, R_SP, JF_SLOT_ENV)
       h = ref != nil ? wk_hops(ref) : @jf.analysis.env_hops(@jf.scope, b.scope)
@@ -4738,6 +9468,19 @@ OSR_RETURN = 2
       gen_cond_branch(e.a, target, !branch_if_true)
       return nil
     if k == :logical && e.str == "&&"
+      # Propagate `l < hsz` / `r < hsz` into RHS when `hsz` is guarded `<= mlen` (eliminates heapF[l]/heapF[r] BCs!)
+      sc_pushes = nil
+      if @guarded_ub_locals.size > 0 && e.a != nil && e.a.kind == :binary && e.a.str == "<" && e.a.a.kind == :ident && e.a.b.kind == :ident
+        xli = local_idx(e.a.a)
+        lli = local_idx(e.a.b)
+        gu = lli >= 0 ? @guarded_ub_locals[lli] : nil
+        if gu != nil && xli >= 0 && (xli == gu[1] || xli == gu[2])
+          sc_pushes = []
+          sc_pushes.push([xli, @scoped_ta_ub[xli]])
+          @scoped_ta_ub[xli] = [-1, 0, gu[0]]
+          if xli == gu[2]
+            sc_pushes.push([gu[1], @scoped_ta_ub[gu[1]]])
+            @scoped_ta_ub[gu[1]] = [-1, 0, gu[0]]
       if branch_if_true
         l_skip = @a.new_label
         gen_cond_branch(e.a, l_skip, false)
@@ -4746,8 +9489,51 @@ OSR_RETURN = 2
       else
         gen_cond_branch(e.a, target, false)
         gen_cond_branch(e.b, target, false)
+      if sc_pushes != nil
+        sp_i = sc_pushes.size - 1
+        while sp_i >= 0
+          pair = sc_pushes[sp_i]
+          pair[1] == nil ? @scoped_ta_ub.delete(pair[0]) : (@scoped_ta_ub[pair[0]] = pair[1])
+          sp_i -= 1
       return nil
     if k == :logical && e.str == "||"
+      # Unsigned range-check fusion: `x < 0 || x >= K` (K > 0) -> single `cmp wx, #K; b.hs/b.lo target`!
+      # Also handles left-associated chains `((a || x < 0) || x >= K)` (like `nx < 0 || nx >= W || ny < 0 || ny >= H`)!
+      if e.b != nil && e.b.kind == :binary && e.b.str == ">=" && can_i32?(e.b.a)
+        cv_k = const_eval_i32(e.b.b)
+        x_li_hi = local_idx(e.b.a)
+        if cv_k != nil && cv_k > 0 && cv_k <= 4095 && x_li_hi >= 0
+          if e.a != nil && e.a.kind == :binary && e.a.str == "<" && local_idx(e.a.a) == x_li_hi && const_eval_i32(e.a.b) == 0
+            rx = peek_i32_reg(e.b.a)
+            if rx != nil
+              @a.cmp_wi(rx, cv_k)
+            else
+              gen_expr_i32(e.b.a)
+              @a.cmp_wi(R_X0, cv_k)
+            @a.b_cond(branch_if_true ? CC_HS : CC_LO, target)
+            return nil
+          if e.a != nil && e.a.kind == :logical && e.a.str == "||" && e.a.b != nil && e.a.b.kind == :binary && e.a.b.str == "<" && local_idx(e.a.b.a) == x_li_hi && const_eval_i32(e.a.b.b) == 0
+            if branch_if_true
+              gen_cond_branch(e.a.a, target, true)
+              rx = peek_i32_reg(e.b.a)
+              if rx != nil
+                @a.cmp_wi(rx, cv_k)
+              else
+                gen_expr_i32(e.b.a)
+                @a.cmp_wi(R_X0, cv_k)
+              @a.b_cond(CC_HS, target)
+            else
+              l_sk = @a.new_label
+              gen_cond_branch(e.a.a, l_sk, true)
+              rx = peek_i32_reg(e.b.a)
+              if rx != nil
+                @a.cmp_wi(rx, cv_k)
+              else
+                gen_expr_i32(e.b.a)
+                @a.cmp_wi(R_X0, cv_k)
+              @a.b_cond(CC_LO, target)
+              @a.bind(l_sk)
+            return nil
       if branch_if_true
         gen_cond_branch(e.a, target, true)
         gen_cond_branch(e.b, target, true)
@@ -4757,9 +9543,339 @@ OSR_RETURN = 2
         gen_cond_branch(e.b, target, false)
         @a.bind(l_skip)
       return nil
+    # Direct branch for 0-arg boolean-returning inlined methods (`isHeldOrSuspended()`, `isSatisfied()`, `isInput()`)!
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.list.size == 0 && e.x.is_a?(Array) && e.x.size >= 2 && e.x.size <= 8
+      if try_gen_poly_bool_branch(e, e.a, e.x, target, branch_if_true)
+        return nil
     if k == :binary
       op = e.str
-      if op == "<" || op == "<=" || op == ">" || op == ">=" || op == "===" || op == "!=="
+      # Fast inline `typeof x === "string" / "object" / "number" / "boolean"` & `!==` (ZERO RT_TYPEOF / RT_SEQ!)
+      if (op == "===" || op == "!==" || op == "==" || op == "!=") && e.a.kind == :unary && e.a.str == "typeof" && e.b.kind == :string
+        ta = e.a.a
+        is_glob_ident = ta.kind == :ident && ta.x != nil && ta.x.binding != nil && ta.x.binding.global?
+        if !is_glob_ident
+          ts = e.b.str
+          eq_t = (op == "===" || op == "==") == branch_if_true
+          if ts == "string"
+            gen_expr_any(ta)
+            l_is = eq_t ? target : @a.new_label
+            l_no = eq_t ? @a.new_label : target
+            l_chk_rope = @a.new_label
+            @a.lsr_xi(R_X9, R_X0, 48)
+            @a.movz_x(R_X10, 0xFFF9)
+            @a.cmp_r(R_X9, R_X10)
+            @a.b_cond(CC_NE, l_chk_rope)
+            @a.tst_x_lowmask(R_X0, 1)
+            @a.b_cond(CC_EQ, l_is)
+            @a.b(l_no)
+            @a.bind(l_chk_rope)
+            @a.cbnz_x(R_X9, l_no)
+            @a.tst_x_lowmask(R_X0, 4)
+            @a.b_cond(CC_NE, l_no)
+            @a.cmp_i(R_X0, 16)
+            @a.b_cond(CC_LO, l_no)
+            @a.ldrb(R_X9, R_X0, 0)
+            @a.cmp_wi(R_X9, 9)
+            @a.b_cond(eq_t ? CC_EQ : CC_NE, target)
+            @a.bind(eq_t ? l_no : l_is)
+            return nil
+          elsif ts == "number"
+            gen_expr_any(ta)
+            @a.sub_r(R_X9, R_X0, R_X20)
+            @a.cmp_r(R_X9, R_X21)
+            @a.b_cond(eq_t ? CC_LO : CC_HS, target)
+            return nil
+          elsif ts == "boolean"
+            gen_expr_any(ta)
+            @a.sub_i(R_X9, R_X0, 1)
+            @a.cmp_i(R_X9, 2)
+            @a.b_cond(eq_t ? CC_LO : CC_HS, target)
+            return nil
+          elsif ts == "object"
+            gen_expr_any(ta)
+            l_is = eq_t ? target : @a.new_label
+            l_no = eq_t ? @a.new_label : target
+            l_slow = @a.new_label
+            l_done = @a.new_label
+            l_not_str_tag = @a.new_label
+            l_not_arr_tag = @a.new_label
+            @a.cmp_i(R_X0, 3)
+            @a.b_cond(CC_LO, l_no)                   # undefined(0), false(1), true(2)
+            @a.sub_r(R_X9, R_X0, R_X20)
+            @a.cmp_r(R_X9, R_X21)
+            @a.b_cond(CC_LO, l_no)                   # number
+            @a.lsr_xi(R_X9, R_X0, 48)
+            @a.movz_x(R_X10, 0xFFF9)
+            @a.cmp_r(R_X9, R_X10)
+            @a.b_cond(CC_NE, l_not_str_tag)
+            @a.tst_x_lowmask(R_X0, 1)
+            @a.b_cond(CC_EQ, l_no)                   # flat/inline string
+            @a.bind(l_not_str_tag)
+            @a.movz_x(R_X10, 0xFFF4)
+            @a.cmp_r(R_X9, R_X10)
+            @a.b_cond(CC_NE, l_not_arr_tag)
+            @a.and_x_ptr47(R_X10, R_X0)
+            @a.ldrb(R_X10, R_X10, 2)
+            @a.tst_x_lowmask(R_X10, 1)
+            @a.b_cond(CC_NE, l_is)                   # JS array -> "object"
+            @a.bind(l_not_arr_tag)
+            @a.ldr_x(R_X10, R_X19, RT_K_NULL_BITS * 8)
+            @a.cmp_r(R_X0, R_X10)
+            @a.b_cond(CC_EQ, l_is)                   # null -> "object"
+            @a.sub_i(R_X9, R_X0, 4)
+            @a.tst_wobj_bad(R_X9)
+            @a.b_cond(CC_NE, l_slow)
+            @a.cbz_x(R_X9, l_slow)
+            @a.ldr_w(R_X10, R_X9, 0)
+            @a.and_w_lowmask(R_X10, R_X10, 16)
+            @a.ldr_x(R_X11, R_X19, RT_K_OBJ_CLSID * 8)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_EQ, l_is)                   # plain JS:Object -> "object"
+            @a.ldr_x(R_X11, R_X19, RT_K_FN_CLSID * 8)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_EQ, l_no)                   # JS:Function -> "function"
+            @a.b(l_slow)
+            @a.bind(eq_t ? l_no : l_is)
+            @a.bind(l_done)
+            ts_keep = "object"
+            jit_keep(ts_keep)
+            cb_to = ->()
+              @a.bind(l_slow)
+              @a.mov_r(R_X1, R_X0)
+              call_rt(RT_TYPEOF)
+              @a.mov_r(R_X1, R_X0)
+              @a.mov_imm64(R_X2, wvalue_bits(ts_keep) ## i64)
+              call_rt(RT_SEQ)
+              @a.cmp_i(R_X0, 2)
+              @a.b_cond(eq_t ? CC_EQ : CC_NE, target)
+              @a.b(l_done)
+            add_cold_stub(cb_to)
+            return nil
+      # Fast inline 64-entry 2-way linear-probe `(shape, key_bits) -> bool` IC for `k in obj`!
+      if op == "in"
+        gen_expr_any(e.a)
+        k_off_in = push_x(R_X0)
+        gen_expr_any(e.b)
+        @a.mov_r(R_X13, R_X0)             # obj
+        @a.ldr_x(R_X12, R_SP, k_off_in)   # key
+        hpic = i64[193]
+        hk = 0
+        while hk < 193
+          hpic[hk] = 0
+          hk += 1
+        hkeep = Array.new(128, nil)
+        jit_keep(hpic)
+        jit_keep(hkeep)
+        hpic_p = jit_i64_ptr(hpic)
+        l_in_p1 = @a.new_label
+        l_in_hit = @a.new_label
+        l_in_miss = @a.new_label
+        l_in_done = @a.new_label
+        @a.sub_i(R_X9, R_X13, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_in_miss)
+        @a.cbz_x(R_X9, l_in_miss)
+        @a.ldr_x(R_X14, R_X9, 8)          # obj.@shape
+        if @for_in_ctx != nil && e.a.kind == :ident && e.a.x != nil && e.a.x.binding == @for_in_ctx[0]
+          l_in_hpic = @a.new_label
+          @a.ldr_x(R_X10, R_SP, @for_in_ctx[3])
+          @a.cbz_x(R_X10, l_in_hpic)
+          @a.ldrb(R_X10, R_X9, 4)
+          @a.cmp_wi(R_X10, KIND_OBJECT)
+          @a.b_cond(CC_NE, l_in_hpic)
+          @a.ldr_x(R_X10, R_SP, @for_in_ctx[1])
+          @a.cmp_r(R_X14, R_X10)
+          @a.b_cond(CC_NE, l_in_hpic)
+          # Guaranteed own key on same plain shape -> `k in obj` is ALWAYS true (ZERO hash, ZERO epoch load!)
+          @a.b(branch_if_true ? target : l_in_done)
+          @a.bind(l_in_hpic)
+        @a.mov_imm64(R_X15, hpic_p)
+        @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+        @a.ldr_x(R_X10, R_X9, 0)
+        @a.ldr_x(R_X11, R_X15, 1536)      # hpic[192] == JS_EPOCH[0]
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_in_miss)
+        @a.eor_r(R_X9, R_X14, R_X12)
+        @a.mov_imm64(R_X11, -7046029254386353131)
+        @a.mul_x(R_X9, R_X9, R_X11)
+        @a.lsr_xi(R_X9, R_X9, 58)         # h0 in 0..63
+        @a.add_r(R_X10, R_X9, R_X9, 1)    # h0 * 3
+        @a.add_r(R_X11, R_X15, R_X10, 3)  # hpic_p + h0 * 24
+        @a.ldr_x(R_X10, R_X11, 0)
+        @a.cmp_r(R_X10, R_X14)
+        @a.b_cond(CC_NE, l_in_p1)
+        @a.ldr_x(R_X10, R_X11, 8)
+        @a.cmp_r(R_X10, R_X12)
+        @a.b_cond(CC_NE, l_in_p1)
+        @a.bind(l_in_hit)
+        @a.ldr_x(R_X0, R_X11, 16)         # 1=false, 2=true
+        @a.cmp_i(R_X0, 2)
+        @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+        @a.bind(l_in_done)
+        cb_in = ->()
+          @a.bind(l_in_p1)
+          @a.add_i(R_X9, R_X9, 1)
+          @a.and_x_lowmask(R_X9, R_X9, 6)
+          @a.add_r(R_X10, R_X9, R_X9, 1)
+          @a.add_r(R_X11, R_X15, R_X10, 3)
+          @a.ldr_x(R_X10, R_X11, 0)
+          @a.cmp_r(R_X10, R_X14)
+          @a.b_cond(CC_NE, l_in_miss)
+          @a.ldr_x(R_X10, R_X11, 8)
+          @a.cmp_r(R_X10, R_X12)
+          @a.b_cond(CC_EQ, l_in_hit)
+          @a.bind(l_in_miss)
+          @a.mov_r(R_X1, R_X13)
+          @a.mov_r(R_X2, R_X12)
+          @a.mov_imm64(R_X3, wvalue_bits(hpic) ## i64)
+          @a.mov_imm64(R_X4, wvalue_bits(hkeep) ## i64)
+          call_rt(RT_HAS_KEY_PIC_MISS)
+          @a.cmp_i(R_X0, 2)
+          @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+          @a.b(l_in_done)
+        add_cold_stub(cb_in)
+        @tmp_depth -= 1
+        return nil
+      if op == "<" || op == "<=" || op == ">" || op == ">=" || op == "===" || op == "!==" || op == "==" || op == "!="
+        # Fast `x == null` / `x != null` / `x == undefined` / `x != undefined` (ZERO RT_EQ!)
+        if (op == "==" || op == "!=") && (e.b.kind == :null || is_undef_node?(e.b))
+          gen_expr_any(e.a)
+          eq_true = (op == "==") == branch_if_true
+          if !JS_HAS_HTMLDDA[0] && (@hoisted_epoch || @epoch_verified_now)
+            # Zero-HTMLDDA 4-insn fast path (JS_EPOCH bumped if js_new_htmldda is ever called!)
+            if eq_true
+              @a.cbz_x(R_X0, target)
+              @a.ldr_x(R_X9, R_X19, RT_K_NULL_BITS * 8)
+              @a.cmp_r(R_X0, R_X9)
+              @a.b_cond(CC_EQ, target)
+            else
+              l_null_fall = @a.new_label
+              @a.cbz_x(R_X0, l_null_fall)
+              @a.ldr_x(R_X9, R_X19, RT_K_NULL_BITS * 8)
+              @a.cmp_r(R_X0, R_X9)
+              @a.b_cond(CC_NE, target)
+              @a.bind(l_null_fall)
+            return nil
+          l_is_nullish = eq_true ? target : @a.new_label
+          l_not_nullish = eq_true ? @a.new_label : target
+          l_slow = @a.new_label
+          l_done = @a.new_label
+          @a.cbz_x(R_X0, l_is_nullish)                          # undefined -> nullish!
+          @a.ldr_x(R_X9, R_X19, RT_K_NULL_BITS * 8)
+          @a.cmp_r(R_X0, R_X9)
+          @a.b_cond(CC_EQ, l_is_nullish)                        # null -> nullish!
+          # Zero-pointer-chase IsHTMLDDA guard (L1-hot global flag == 0 until any document.all created!)
+          @a.ldr_x(R_X9, R_X19, RT_K_HTMLDDA_PTR * 8)
+          @a.ldr_x(R_X9, R_X9, 0)
+          @a.cbnz_x(R_X9, l_slow)
+          @a.b(l_not_nullish) if !eq_true
+          @a.bind(eq_true ? l_not_nullish : l_is_nullish)
+          @a.bind(l_done)
+          cb = ->()
+            @a.bind(l_slow)
+            @a.mov_r(R_X1, R_X0)
+            @a.ldr_x(R_X2, R_X19, RT_K_NULL_BITS * 8)
+            call_rt(RT_EQ)
+            @a.cmp_i(R_X0, 2)
+            @a.b_cond(eq_true ? CC_EQ : CC_NE, target)
+            @a.b(l_done)
+          add_cold_stub(cb)
+          return nil
+        # Fast `x == num_lit` / `x != num_lit` / `x == global_i32` / `x == GlobalObj.num_prop` when `x` is a Number (ZERO RT_EQ!)
+        if (op == "==" || op == "!=" || op == "===" || op == "!==") && !can_i32?(e.a) && !can_f64?(e.a)
+          rhs_num_bits = nil
+          rhs_is_zero = false
+          rhs_gprop = nil   # [gv, genc, obs_b, hgp_reg_or_nil]
+          if (op == "==" || op == "!=") && e.b.kind == :num && e.b.a == e.b.a
+            rhs_num_bits = wvalue_bits(e.b.a) ## i64
+            rhs_is_zero = e.b.a == ~0.0
+          elsif (op == "==" || op == "!=") && e.b.kind == :ident && e.b.x != nil && e.b.x.binding != nil && @info.global_i32s[e.b.x.binding] != nil
+            gv_eq = @info.global_i32s[e.b.x.binding][2]
+            rhs_num_bits = wvalue_bits(gv_eq) ## i64
+            rhs_is_zero = gv_eq == ~0.0
+          elsif e.b.kind == :member && !e.b.has?(F_COMPUTED) && e.b.a != nil && e.b.a.kind == :ident && e.b.a.x != nil && e.b.a.x.binding != nil && e.b.a.x.binding.global? && e.b.a.x.binding.writes <= 1
+            gc_eq = wk_cell(e.b.a.x.binding)
+            hgo_eq = gc_eq != nil ? @hoisted_gobj_shapes[wvalue_bits(gc_eq) ## i64] : nil
+            if hgo_eq != nil
+              gv_eq2 = hgo_eq[0]
+              gsh_eq2 = hgo_eq[1]
+              gsl_eq2 = gsh_eq2.slot_of(e.b.b.str)
+              if gsl_eq2 >= 0 && (gsh_eq2.attrs_of(e.b.b.str) & ATTR_ACCESSOR) == 0
+                obs_eq2 = gv_eq2.get_own(e.b.b.str)
+                if js_number?(obs_eq2) && obs_eq2 == obs_eq2 && obs_eq2 != ~0.0
+                  genc_eq2 = gsl_eq2 < gsh_eq2.inline ? (gsh_eq2.ibase + gsl_eq2) : (0 - (gsl_eq2 - gsh_eq2.inline) - 1)
+                  obs_b_eq2 = wvalue_bits(obs_eq2) ## i64
+                  gp_k_eq2 = (wvalue_bits(gc_eq) ## i64).to_s + ":" + genc_eq2.to_s
+                  hgp_eq2 = @hoisted_gprops[gp_k_eq2]
+                  rhs_gprop = [gv_eq2, genc_eq2, obs_b_eq2, (hgp_eq2 != nil && hgp_eq2[0] == obs_b_eq2) ? hgp_eq2[1] : nil]
+                  rhs_num_bits = obs_b_eq2
+                  rhs_is_zero = false
+          if rhs_num_bits != nil
+            was_lcp = @live_cur_prop != nil
+            gen_expr_any(e.a)
+            lhs_known_num = was_lcp && @live_cur_prop == nil
+            eq_true = (op == "==" || op == "===") == branch_if_true
+            is_strict_num = op == "===" || op == "!=="
+            l_slow = @a.new_label
+            l_done = @a.new_label
+            if rhs_is_zero
+              @a.sub_r(R_X9, R_X0, R_X20)
+              @a.cmp_r(R_X9, R_X21)
+              @a.b_cond(CC_HS, l_slow)
+              @a.lsl_xi(R_X10, R_X9, 1)                         # clear sign bit so +0.0 and -0.0 both == 0!
+              if eq_true
+                @a.cbz_x(R_X10, target)
+              else
+                @a.cbnz_x(R_X10, target)
+            else
+              r_rhs_cmp = R_X10
+              if rhs_gprop != nil
+                if rhs_gprop[3] != nil
+                  r_rhs_cmp = rhs_gprop[3]
+                  @a.cmp_i(r_rhs_cmp, 6)
+                  @a.b_cond(CC_EQ, l_slow)
+                else
+                  jit_keep(rhs_gprop[0])
+                  @a.mov_imm64(R_X9, (wvalue_bits(rhs_gprop[0]) ## i64) - 4)
+                  emit_slot_load(R_X10, R_X9, rhs_gprop[1])
+                  @a.mov_imm64(R_X11, rhs_num_bits)
+                  @a.cmp_r(R_X10, R_X11)
+                  @a.b_cond(CC_NE, l_slow)
+              else
+                @a.mov_imm64(R_X10, rhs_num_bits)
+              # Exact 64-bit match for finite non-zero number proves `x == rhs` IMMEDIATELY without number-tag check!
+              @a.cmp_r(R_X0, r_rhs_cmp)
+              if lhs_known_num || is_strict_num
+                @a.b_cond(eq_true ? CC_EQ : CC_NE, target)
+              elsif eq_true
+                @a.b_cond(CC_EQ, target)
+                @a.sub_r(R_X9, R_X0, R_X20)
+                @a.cmp_r(R_X9, R_X21)
+                @a.b_cond(CC_HS, l_slow)
+              else
+                @a.b_cond(CC_EQ, l_done)
+                @a.sub_r(R_X9, R_X0, R_X20)
+                @a.cmp_r(R_X9, R_X21)
+                @a.b_cond(CC_HS, l_slow)
+                @a.b(target)
+            @a.bind(l_done)
+            if !(lhs_known_num && rhs_gprop == nil && !rhs_is_zero) && !(is_strict_num && rhs_gprop == nil)
+              cb = ->()
+                @a.bind(l_slow)
+                @a.mov_r(R_X1, R_X0)
+                if rhs_gprop != nil
+                  jit_keep(rhs_gprop[0])
+                  @a.mov_imm64(R_X9, (wvalue_bits(rhs_gprop[0]) ## i64) - 4)
+                  emit_slot_load(R_X2, R_X9, rhs_gprop[1])
+                else
+                  @a.mov_imm64(R_X2, rhs_num_bits)
+                call_rt(is_strict_num ? RT_SEQ : RT_EQ)
+                @a.cmp_i(R_X0, 2)
+                @a.b_cond(eq_true ? CC_EQ : CC_NE, target)
+                @a.b(l_done)
+              add_cold_stub(cb)
+            return nil
+      if op == "<" || op == "<=" || op == ">" || op == ">=" || op == "===" || op == "!==" || op == "==" || op == "!="
         # Fast SRA RegExp exec condition: `(m = re.exec(text)) !== null` / `m !== null`!
         if (op == "!==" || op == "===") && e.b.kind == :null
           want_match = (op == "!==") == branch_if_true
@@ -4775,23 +9891,24 @@ OSR_RETURN = 2
             @a.cmp_wi(R_X0, 0)
             @a.b_cond(want_match ? CC_GE : CC_LT, target)
             return nil
-        # Fast i32 comparison (zero stack spills for literals & registers!)
+        # Fast i32 comparison (zero stack spills for literals, global_i32s, registers, TA loads, and simple conds!)
         if can_i32?(e.a) && can_i32?(e.b)
           ra = peek_i32_reg(e.a)
           rb = peek_i32_reg(e.b)
-          if e.b.kind == :num && jit_small_int_lit?(e.b, 4095) && e.b.a.to_i >= 0
+          cv_b = const_eval_i32(e.b)
+          if cv_b != nil && cv_b >= 0 && cv_b <= 4095
             if ra != nil
-              @a.cmp_wi(ra, e.b.a.to_i)
+              @a.cmp_wi(ra, cv_b)
             else
               gen_expr_i32(e.a)
-              @a.cmp_wi(R_X0, e.b.a.to_i)
-          elsif e.b.kind == :num && jit_int32_lit?(e.b)
+              @a.cmp_wi(R_X0, cv_b)
+          elsif cv_b != nil
             if ra != nil
-              @a.mov_imm32(R_X9, e.b.a.to_i)
+              @a.mov_imm32(R_X9, cv_b)
               @a.cmp_w(ra, R_X9)
             else
               gen_expr_i32(e.a)
-              @a.mov_imm32(R_X9, e.b.a.to_i)
+              @a.mov_imm32(R_X9, cv_b)
               @a.cmp_w(R_X0, R_X9)
           elsif rb != nil
             if ra != nil
@@ -4799,6 +9916,12 @@ OSR_RETURN = 2
             else
               gen_expr_i32(e.a)
               @a.cmp_w(R_X0, rb)
+          elsif (e.b.kind == :member && e.b.has?(F_COMPUTED) && (local_idx(e.b.a) >= 0 && @hoisted_tas[local_idx(e.b.a)] != nil && @hoisted_tas[local_idx(e.b.a)][2] <= 5)) || (e.b.kind == :cond && can_i32?(e.b.b) && can_i32?(e.b.c) && !expr_uses_x12?(e.b))
+            # Zero-spill compare against hoisted int TA load or simple cond (`heapF[r] < (sm === i ? lf : heapF[l])` -> R_X12!)
+            gen_expr_i32(e.a)
+            @a.mov_w(R_X12, R_X0)
+            gen_expr_i32(e.b)
+            @a.cmp_w(R_X12, R_X0)
           else
             gen_expr_i32(e.a)
             push_w(R_X0)
@@ -4808,6 +9931,22 @@ OSR_RETURN = 2
           cc = i32_cmp_cc(op, branch_if_true)
           @a.b_cond(cc, target)
           return nil
+        # Exact 64-bit `(i32_a - i32_b) cmp K` (zero float conversion for `i - pos < 4096`!)
+        if e.a.kind == :binary && e.a.str == "-" && can_i32?(e.a.a) && can_i32?(e.a.b) && e.b.kind == :num && jit_int32_lit?(e.b)
+          ra = try_i32_reg(e.a.a, R_X9)
+          rb = ra != nil ? try_i32_reg(e.a.b, R_X10) : nil
+          if ra != nil && rb != nil
+            @a.sxtw(R_X9, ra)
+            @a.sxtw(R_X10, rb)
+            @a.sub_r(R_X9, R_X9, R_X10)
+            kv = e.b.a.to_i
+            if kv >= 0 && kv <= 4095
+              @a.cmp_i(R_X9, kv)
+            else
+              @a.mov_imm64(R_X10, kv)
+              @a.cmp_r(R_X9, R_X10)
+            @a.b_cond(i32_cmp_cc(op, branch_if_true), target)
+            return nil
         # Fast `(x % K) === 0` / `(x % K) !== 0` (e.g. `filter(x => x % 3 === 0)` — ZERO RT_MOD calls!)
         if (op == "===" || op == "!==") && e.a.kind == :binary && e.a.str == "%" && e.a.b.kind == :num && jit_int32_lit?(e.a.b) && e.a.b.a.to_i > 0 && e.b.kind == :num && e.b.a == ~0.0
           kv = e.a.b.a.to_i
@@ -4864,6 +10003,119 @@ OSR_RETURN = 2
           else
             @a.cbnz_x(R_X0, target)
           return nil
+        # Fast `v === num_lit` / `v !== num_lit` (non-NaN literal: 2-3 ARM64 insns, ZERO RT_SEQ!)
+        if (op == "===" || op == "!==") && e.b.kind == :num && e.b.a == e.b.a
+          gen_expr_any(e.a)
+          eq_true = (op == "===") == branch_if_true
+          if e.b.a == ~0.0
+            # Matches BOTH +0.0 (2^48) and -0.0 (0x8001_0000_0000_0000)!
+            @a.mov_imm64(R_X9, -9223372036854775807 - 1)
+            @a.bic_r(R_X9, R_X0, R_X9)
+            @a.cmp_r(R_X9, R_X20)
+            @a.b_cond(eq_true ? CC_EQ : CC_NE, target)
+          else
+            @a.mov_imm64(R_X9, wvalue_bits(e.b.a) ## i64)
+            @a.cmp_r(R_X0, R_X9)
+            @a.b_cond(eq_true ? CC_EQ : CC_NE, target)
+          return nil
+        # Fast `v === null` / `v !== null` (2 ARM64 insns, ZERO RT_SEQ!)
+        if (op == "===" || op == "!==") && e.b.kind == :null
+          gen_expr_any(e.a)
+          eq_true = (op == "===") == branch_if_true
+          @a.ldr_x(R_X9, R_X19, RT_K_NULL_BITS * 8)
+          @a.cmp_r(R_X0, R_X9)
+          @a.b_cond(eq_true ? CC_EQ : CC_NE, target)
+          return nil
+        # Fast `v == null` / `v != null` / `v == undefined` / `v != undefined` (4 insns when !JS_HAS_HTMLDDA; 8 insns otherwise!)
+        if (op == "==" || op == "!=") && (e.b.kind == :null || is_undef_node?(e.b))
+          gen_expr_any(e.a)
+          eq_true = (op == "==") == branch_if_true
+          if !JS_HAS_HTMLDDA[0] && (@hoisted_epoch || @epoch_verified_now)
+            if eq_true
+              @a.cbz_x(R_X0, target)
+              @a.ldr_x(R_X11, R_X19, RT_K_NULL_BITS * 8)
+              @a.cmp_r(R_X0, R_X11)
+              @a.b_cond(CC_EQ, target)
+            else
+              l_is_n = @a.new_label
+              @a.cbz_x(R_X0, l_is_n)
+              @a.ldr_x(R_X11, R_X19, RT_K_NULL_BITS * 8)
+              @a.cmp_r(R_X0, R_X11)
+              @a.b_cond(CC_NE, target)
+              @a.bind(l_is_n)
+            return nil
+          l_eq_n = eq_true ? target : @a.new_label
+          l_ne_n = eq_true ? @a.new_label : target
+          l_slow_n = @a.new_label
+          l_done_n = @a.new_label
+          @a.cbz_x(R_X0, l_eq_n)
+          @a.ldr_x(R_X11, R_X19, RT_K_NULL_BITS * 8)
+          @a.cmp_r(R_X0, R_X11)
+          @a.b_cond(CC_EQ, l_eq_n)
+          # Zero-pointer-chase IsHTMLDDA guard (L1-hot global flag == 0 until any document.all created!)
+          @a.ldr_x(R_X9, R_X19, RT_K_HTMLDDA_PTR * 8)
+          @a.ldr_x(R_X9, R_X9, 0)
+          @a.cbnz_x(R_X9, l_slow_n)
+          @a.b(l_ne_n) if !eq_true
+          @a.bind(eq_true ? l_ne_n : l_eq_n)
+          @a.bind(l_done_n)
+          cb_nn = ->()
+            @a.bind(l_slow_n)
+            @a.mov_r(R_X1, R_X0)
+            @a.ldr_x(R_X2, R_X19, RT_K_NULL_BITS * 8)
+            call_rt(RT_EQ)
+            @a.cmp_i(R_X0, 2)
+            @a.b_cond(eq_true ? CC_EQ : CC_NE, target)
+            @a.b(l_done_n)
+          add_cold_stub(cb_nn)
+          return nil
+        # Fast `v == num_lit` / `v != num_lit` / `v == hoisted_global_i32` (ZERO spill, ZERO FP domain crossing!)
+        if (op == "==" || op == "!=")
+          kv_eq = nil
+          if e.b.kind == :num && e.b.a == e.b.a
+            kv_eq = e.b.a
+          elsif e.b.kind == :ident && e.b.x != nil && e.b.x.binding != nil && @info.global_i32s[e.b.x.binding] != nil
+            kv_eq = @info.global_i32s[e.b.x.binding][2]
+          if kv_eq != nil
+            gen_expr_any(e.a)
+            eq_true = (op == "==") == branch_if_true
+            l_slow_qn = @a.new_label
+            l_done_qn = @a.new_label
+            kv_eq_bits = wvalue_bits(kv_eq) ## i64
+            if kv_eq == ~0.0
+              @a.sub_r(R_X9, R_X0, R_X20)
+              @a.cmp_r(R_X9, R_X21)
+              @a.b_cond(CC_HS, l_slow_qn)
+              @a.mov_imm64(R_X9, -9223372036854775807 - 1)
+              @a.bic_r(R_X9, R_X0, R_X9)
+              @a.cmp_r(R_X9, R_X20)
+              @a.b_cond(eq_true ? CC_EQ : CC_NE, target)
+            else
+              # Exact 64-bit match for finite non-zero number proves `v == kv_eq` IMMEDIATELY without number-tag check!
+              @a.mov_imm64(R_X9, kv_eq_bits)
+              @a.cmp_r(R_X0, R_X9)
+              if eq_true
+                @a.b_cond(CC_EQ, target)
+                @a.sub_r(R_X9, R_X0, R_X20)
+                @a.cmp_r(R_X9, R_X21)
+                @a.b_cond(CC_HS, l_slow_qn)
+              else
+                @a.b_cond(CC_EQ, l_done_qn)
+                @a.sub_r(R_X9, R_X0, R_X20)
+                @a.cmp_r(R_X9, R_X21)
+                @a.b_cond(CC_HS, l_slow_qn)
+                @a.b(target)
+            @a.bind(l_done_qn)
+            cb_qn = ->()
+              @a.bind(l_slow_qn)
+              @a.mov_r(R_X1, R_X0)
+              @a.mov_imm64(R_X2, kv_eq_bits)
+              call_rt(RT_EQ)
+              @a.cmp_i(R_X0, 2)
+              @a.b_cond(eq_true ? CC_EQ : CC_NE, target)
+              @a.b(l_done_qn)
+            add_cold_stub(cb_qn)
+            return nil
         # Fast `i < arr.length` where i is i32 and arr is a hoisted dense array or TypedArray!
         if op == "<" && can_i32?(e.a) && e.b.kind == :member && !e.b.has?(F_COMPUTED) && e.b.b.str == "length"
           bli = local_idx(e.b.a)
@@ -4879,6 +10131,44 @@ OSR_RETURN = 2
             @a.cmp_w(R_X0, R_X9)
             @a.b_cond(branch_if_true ? CC_LT : CC_GE, target)
             return nil
+          # Guarded global dense/holey plain JS array (e.g. `i < spheres.length` in raytrace!)
+          if e.b.a.kind == :ident && e.b.a.x != nil && e.b.a.x.binding != nil && @info.global_objs[e.b.a.x.binding] != nil
+            gv_ga = @info.global_objs[e.b.a.x.binding][1]
+            if js_array?(gv_ga)
+              jit_keep(gv_ga)
+              ga_ptr = (wvalue_bits(gv_ga) ## i64) & 140737488355327
+              r_ia = peek_i32_reg(e.a)
+              if r_ia != nil
+                @a.mov_w(R_X12, r_ia)
+              else
+                gen_expr_i32(e.a)
+                @a.mov_w(R_X12, R_X0)
+              l_slow_gl = @a.new_label
+              l_done_gl = @a.new_label
+              @a.mov_imm64(R_X9, ga_ptr)
+              @a.ldrb(R_X10, R_X9, 2)
+              @a.and_w_lowmask(R_X10, R_X10, 3)
+              @a.tst_x_lowmask(R_X10, 1)
+              @a.b_cond(CC_EQ, l_slow_gl)
+              @a.cmp_wi(R_X10, 4)
+              @a.b_cond(CC_GE, l_slow_gl)
+              @a.ldrsw(R_X10, R_X9, 8)
+              @a.cmp_w(R_X12, R_X10)
+              @a.b_cond(branch_if_true ? CC_LT : CC_GE, target)
+              @a.bind(l_done_gl)
+              cb_gl = ->()
+                @a.bind(l_slow_gl)
+                emit_box_i32(R_X0, R_X12)
+                push_x(R_X0)
+                gen_expr_any(e.b)
+                @a.mov_r(R_X2, R_X0)
+                pop_x(R_X1)
+                call_rt(RT_LT)
+                @a.cmp_i(R_X0, 2)
+                @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+                @a.b(l_done_gl)
+              add_cold_stub(cb_gl)
+              return nil
           # Also non-hoisted array.length (e.g. bodies.length inside step(bodies, dt)!)
           if bli >= 0 && @info.types[bli] == JT_ANY
             gen_expr_i32(e.a)
@@ -4900,59 +10190,525 @@ OSR_RETURN = 2
             @a.ldrsw(R_X10, R_X9, 8)   # arr.size
             @a.cmp_w(R_X12, R_X10)
             @a.b_cond(branch_if_true ? CC_LT : CC_GE, target)
-            @a.b(l_cmp_done)
-            @a.bind(l_slow_len)
-            # Slow path: box i, read .length, call RT_LT
-            emit_box_i32(R_X0, R_X12)
-            push_x(R_X0)
-            gen_expr_any(e.b)
-            @a.mov_r(R_X2, R_X0)
-            pop_x(R_X1)
-            call_rt(RT_LT)
-            @a.cmp_i(R_X0, 2)
-            @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
             @a.bind(l_cmp_done)
+            cb_sl_len = ->()
+              @a.bind(l_slow_len)
+              emit_box_i32(R_X0, R_X12)
+              push_x(R_X0)
+              gen_expr_any(e.b)
+              @a.mov_r(R_X2, R_X0)
+              pop_x(R_X1)
+              call_rt(RT_LT)
+              @a.cmp_i(R_X0, 2)
+              @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+              @a.b(l_cmp_done)
+            add_cold_stub(cb_sl_len)
             return nil
+          # General zero-box `i32 < any_expr.length` (`for (var i = 0; i < v.constraints.length; i++)`!)
+          r_ia_g = peek_i32_reg(e.a)
+          if r_ia_g != nil
+            gen_expr_any(e.b.a)
+            @a.mov_r(R_X9, R_X0)
+            l_slow_ml = @a.new_label
+            l_done_ml = @a.new_label
+            @a.lsr_xi(R_X10, R_X9, 48)
+            @a.movz_x(R_X11, 0xFFF4)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_NE, l_slow_ml)
+            @a.and_x_ptr47(R_X9, R_X9)
+            @a.ldrb(R_X10, R_X9, 2)
+            @a.and_w_lowmask(R_X10, R_X10, 4)
+            @a.tst_x_lowmask(R_X10, 1)
+            @a.b_cond(CC_EQ, l_slow_ml)
+            @a.cmp_wi(R_X10, 4)
+            @a.b_cond(CC_HS, l_slow_ml)
+            @a.ldrsw(R_X10, R_X9, 8)
+            @a.cmp_w(r_ia_g, R_X10)
+            @a.b_cond(branch_if_true ? CC_LT : CC_GE, target)
+            @a.bind(l_done_ml)
+            jit_keep("length")
+            cb_ml = ->()
+              @a.bind(l_slow_ml)
+              @a.mov_r(R_X1, R_X0)
+              @a.mov_imm64(R_X2, wvalue_bits("length") ## i64)
+              call_rt(RT_GETV)
+              @a.mov_r(R_X2, R_X0)
+              emit_box_i32(R_X1, r_ia_g)
+              call_rt(RT_LT)
+              @a.cmp_i(R_X0, 2)
+              @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+              @a.b(l_done_ml)
+            add_cold_stub(cb_ml)
+            return nil
+      # Fast `arr_loc.length op K` / `arr1_loc.length op arr2_loc.length` (`<, <=, >, >=` — zero boxing/FP, supports both outer locals AND `@inline_env`!)
+      if (op == "<" || op == "<=" || op == ">" || op == ">=") && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "length"
+        ali = local_idx(e.a.a)
+        a_iv = (ali < 0 && e.a.a != nil && e.a.a.kind == :ident && e.a.a.x != nil && @inline_env != nil) ? @inline_env[e.a.a.x.binding] : nil
+        a_iv = nil if a_iv != nil && a_iv[0] != :reg_x && a_iv[0] != :spill_x
+        if (ali >= 0 && @info.types[ali] == JT_ANY) || a_iv != nil
+          if e.b.kind == :num && jit_int32_lit?(e.b) && e.b.a.to_i >= 0 && e.b.a.to_i <= 4095
+            kv_l = e.b.a.to_i
+            kv_val = e.b.a
+            l_slow_al = @a.new_label
+            l_done_al = @a.new_label
+            if a_iv != nil
+              a_iv[0] == :reg_x ? @a.mov_r(R_X9, a_iv[1]) : @a.ldr_x(R_X9, R_SP, a_iv[1])
+            else
+              load_slot_any(R_X9, ali)
+            @a.lsr_xi(R_X10, R_X9, 48)
+            @a.movz_x(R_X11, 0xFFF4)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_NE, l_slow_al)
+            @a.and_x_ptr47(R_X9, R_X9)
+            @a.ldrb(R_X10, R_X9, 2)
+            @a.and_w_lowmask(R_X10, R_X10, 4)
+            @a.tst_x_lowmask(R_X10, 1)
+            @a.b_cond(CC_EQ, l_slow_al)
+            @a.cmp_wi(R_X10, 8)
+            @a.b_cond(CC_HS, l_slow_al)
+            @a.ldrsw(R_X10, R_X9, 8)
+            @a.cmp_wi(R_X10, kv_l)
+            @a.b_cond(i32_cmp_cc(op, branch_if_true), target)
+            @a.bind(l_done_al)
+            rt_al = op == "<" ? RT_LT : (op == "<=" ? RT_LE : (op == ">" ? RT_GT : RT_GE))
+            jit_keep("length")
+            cb_al = ->()
+              @a.bind(l_slow_al)
+              if a_iv != nil
+                a_iv[0] == :reg_x ? @a.mov_r(R_X1, a_iv[1]) : @a.ldr_x(R_X1, R_SP, a_iv[1])
+              else
+                load_slot_any(R_X1, ali)
+              @a.mov_imm64(R_X2, wvalue_bits("length") ## i64)
+              call_rt(RT_GETV)
+              @a.mov_r(R_X1, R_X0)
+              @a.mov_imm64(R_X2, wvalue_bits(kv_val) ## i64)
+              call_rt(rt_al)
+              @a.cmp_i(R_X0, 2)
+              @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+              @a.b(l_done_al)
+            add_cold_stub(cb_al)
+            return nil
+          if ali >= 0 && e.b.kind == :member && !e.b.has?(F_COMPUTED) && e.b.b.str == "length"
+            bli_l = local_idx(e.b.a)
+            if bli_l >= 0 && @info.types[bli_l] == JT_ANY
+              l_slow_al2 = @a.new_label
+              l_done_al2 = @a.new_label
+              s0_off = @tmp_base + @tmp_depth * 8
+              @max_tmp = @tmp_depth + 1 if @tmp_depth + 1 > @max_tmp
+              load_slot_any(R_X9, ali)
+              @a.lsr_xi(R_X10, R_X9, 48)
+              @a.movz_x(R_X11, 0xFFF4)
+              @a.cmp_r(R_X10, R_X11)
+              @a.b_cond(CC_NE, l_slow_al2)
+              @a.and_x_ptr47(R_X9, R_X9)
+              @a.ldrb(R_X10, R_X9, 2)
+              @a.and_w_lowmask(R_X10, R_X10, 4)
+              @a.tst_x_lowmask(R_X10, 1)
+              @a.b_cond(CC_EQ, l_slow_al2)
+              @a.cmp_wi(R_X10, 8)
+              @a.b_cond(CC_HS, l_slow_al2)
+              @a.ldrsw(R_X12, R_X9, 8)
+              load_slot_any(R_X9, bli_l)
+              @a.lsr_xi(R_X10, R_X9, 48)
+              @a.cmp_r(R_X10, R_X11)
+              @a.b_cond(CC_NE, l_slow_al2)
+              @a.and_x_ptr47(R_X9, R_X9)
+              @a.ldrb(R_X10, R_X9, 2)
+              @a.and_w_lowmask(R_X10, R_X10, 4)
+              @a.tst_x_lowmask(R_X10, 1)
+              @a.b_cond(CC_EQ, l_slow_al2)
+              @a.cmp_wi(R_X10, 8)
+              @a.b_cond(CC_HS, l_slow_al2)
+              @a.ldrsw(R_X10, R_X9, 8)
+              @a.cmp_w(R_X12, R_X10)
+              @a.b_cond(i32_cmp_cc(op, branch_if_true), target)
+              @a.bind(l_done_al2)
+              rt_al2 = op == "<" ? RT_LT : (op == "<=" ? RT_LE : (op == ">" ? RT_GT : RT_GE))
+              jit_keep("length")
+              cb_al2 = ->()
+                @a.bind(l_slow_al2)
+                load_slot_any(R_X1, ali)
+                @a.mov_imm64(R_X2, wvalue_bits("length") ## i64)
+                call_rt(RT_GETV)
+                @a.str_x(R_X0, R_SP, s0_off)
+                load_slot_any(R_X1, bli_l)
+                @a.mov_imm64(R_X2, wvalue_bits("length") ## i64)
+                call_rt(RT_GETV)
+                @a.mov_r(R_X2, R_X0)
+                @a.ldr_x(R_X1, R_SP, s0_off)
+                call_rt(rt_al2)
+                @a.cmp_i(R_X0, 2)
+                @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+                @a.b(l_done_al2)
+              add_cold_stub(cb_al2)
+              return nil
+      # Fast `i32_ident op any_ident` (`for (var i = 0; i < m; i++)` where `m` is JT_ANY — zero boxing of `i`, zero spill!)
+      if (op == "<" || op == "<=" || op == ">" || op == ">=") && e.a.kind == :ident && can_i32?(e.a) && e.b.kind == :ident && !can_f64?(e.b) && local_idx(e.b) >= 0
+        bli_ia = local_idx(e.b)
+        l_slow_ia = @a.new_label
+        l_done_ia = @a.new_label
+        load_slot_any(R_X2, bli_ia)
+        @a.sub_r(R_X10, R_X2, R_X20)
+        @a.cmp_r(R_X10, R_X21)
+        @a.b_cond(CC_HS, l_slow_ia)
+        @a.fmov_d_x(R_D1, R_X10)
+        ra_ia = peek_i32_reg(e.a)
+        if ra_ia != nil
+          @a.scvtf_d_w(R_D0, ra_ia)
+        else
+          gen_expr_i32(e.a)
+          @a.scvtf_d_w(R_D0, R_X0)
+        @a.fcmp_d(R_D0, R_D1)
+        emit_f64_cmp_branch(op, branch_if_true, target)
+        @a.bind(l_done_ia)
+        rt_ia = op == "<" ? RT_LT : (op == "<=" ? RT_LE : (op == ">" ? RT_GT : RT_GE))
+        cb_ia = ->()
+          @a.bind(l_slow_ia)
+          gen_expr_i32(e.a)
+          emit_box_i32(R_X1, R_X0)
+          load_slot_any(R_X2, bli_ia)
+          call_rt(rt_ia)
+          @a.cmp_i(R_X0, 2)
+          @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+          @a.b(l_done_ia)
+        add_cold_stub(cb_ia)
+        return nil
       # Generic binary comparison fallback (NEVER recurse back into gen_expr_any(e)!)
       if op == "<" || op == "<=" || op == ">" || op == ">=" || op == "===" || op == "!==" || op == "==" || op == "!="
-        gen_expr_any(e.a)
-        push_x(R_X0)
-        gen_expr_any(e.b)
-        @a.mov_r(R_X2, R_X0)
-        pop_x(R_X1)
+        # Zero-spill, zero-FP fast path for `any_expr op nonneg_finite_num_lit` (e.g. `count < 4`, `this.v2 > 26`!)
+        if (op == "<" || op == "<=" || op == ">" || op == ">=") && e.b.kind == :num && e.b.a == e.b.a && e.b.a >= ~0.0 && e.b.a < ~1.0e308
+          k_wb = wvalue_bits(e.b.a) ## i64
+          k_raw = jit_f64_bits(k_wb)
+          gen_expr_any(e.a)
+          l_fp_s = @a.new_label
+          l_done_k = @a.new_label
+          @a.sub_r(R_X9, R_X0, R_X20)
+          @a.movz_x(R_X14, 0x7FF0, 3)
+          @a.cmp_r(R_X9, R_X14)
+          @a.b_cond(CC_HS, l_fp_s)
+          @a.mov_imm64(R_X10, k_raw)
+          @a.cmp_r(R_X9, R_X10)
+          cc_u = branch_if_true ? (op == "<" ? CC_LO : (op == "<=" ? CC_LS : (op == ">" ? CC_HI : CC_HS))) : (op == "<" ? CC_HS : (op == "<=" ? CC_HI : (op == ">" ? CC_LS : CC_LO)))
+          @a.b_cond(cc_u, target)
+          @a.bind(l_done_k)
+          rt_k = op == "<" ? RT_LT : (op == "<=" ? RT_LE : (op == ">" ? RT_GT : RT_GE))
+          cb_k = ->()
+            @a.bind(l_fp_s)
+            l_rt_k = @a.new_label
+            @a.cmp_r(R_X9, R_X21)
+            @a.b_cond(CC_HS, l_rt_k)
+            @a.fmov_d_x(R_D0, R_X9)
+            @a.mov_imm64(R_X10, k_raw)
+            @a.fmov_d_x(R_D1, R_X10)
+            @a.fcmp_d(R_D0, R_D1)
+            emit_f64_cmp_branch(op, branch_if_true, target)
+            @a.b(l_done_k)
+            @a.bind(l_rt_k)
+            @a.mov_r(R_X1, R_X0)
+            @a.mov_imm64(R_X2, k_wb)
+            call_rt(rt_k)
+            @a.cmp_i(R_X0, 2)
+            @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+            @a.b(l_done_k)
+          add_cold_stub(cb_k)
+          return nil
+        # Zero-spill pair evaluation when `e.b` is a pure leaf (local/inlined-param/num/null/bool/hoisted-global-prop)!
+        eb_simple_done = false
+        if e.b.kind == :num
+          gen_expr_any(e.a)
+          @a.mov_r(R_X1, R_X0)
+          @a.mov_imm64(R_X2, wvalue_bits(e.b.a) ## i64)
+          eb_simple_done = true
+        elsif e.b.kind == :null
+          gen_expr_any(e.a)
+          @a.mov_r(R_X1, R_X0)
+          @a.ldr_x(R_X2, R_X19, RT_K_NULL_BITS * 8)
+          eb_simple_done = true
+        elsif e.b.kind == :true || e.b.kind == :false
+          gen_expr_any(e.a)
+          @a.mov_r(R_X1, R_X0)
+          @a.movz_x(R_X2, e.b.kind == :true ? 2 : 1)
+          eb_simple_done = true
+        elsif e.b.kind == :ident && e.b.x != nil && e.b.x.binding != nil
+          b_rb = e.b.x.binding
+          if @inline_env != nil && @inline_env[b_rb] != nil
+            iv_rb = @inline_env[b_rb]
+            if iv_rb[0] == :reg_x
+              gen_expr_any(e.a)
+              @a.mov_r(R_X1, R_X0)
+              @a.mov_r(R_X2, iv_rb[1])
+              eb_simple_done = true
+            elsif iv_rb[0] == :spill_x
+              gen_expr_any(e.a)
+              @a.mov_r(R_X1, R_X0)
+              @a.ldr_x(R_X2, R_SP, iv_rb[1])
+              eb_simple_done = true
+          else
+            li_rb = local_idx(e.b)
+            if li_rb >= 0 && @info.types[li_rb] == JT_ANY
+              gen_expr_any(e.a)
+              @a.mov_r(R_X1, R_X0)
+              load_slot_any(R_X2, li_rb)
+              eb_simple_done = true
+            elsif b_rb.global? && @info.global_i32s[b_rb] != nil
+              gen_expr_any(e.a)
+              @a.mov_r(R_X1, R_X0)
+              @a.mov_imm64(R_X2, wvalue_bits(@info.global_i32s[b_rb][2]) ## i64)
+              eb_simple_done = true
+        elsif e.b.kind == :member && !e.b.has?(F_COMPUTED) && e.b.a != nil && e.b.a.kind == :ident && e.b.a.x != nil && e.b.a.x.binding != nil && e.b.a.x.binding.global?
+          gc_rb = wk_cell(e.b.a.x.binding)
+          hgo_rb = @hoisted_gobj_shapes[wvalue_bits(gc_rb) ## i64]
+          if hgo_rb != nil
+            gsl_rb = hgo_rb[1].slot_of(e.b.b.str)
+            if gsl_rb >= 0 && (hgo_rb[1].attrs_of(e.b.b.str) & ATTR_ACCESSOR) == 0
+              genc_rb = gsl_rb < hgo_rb[1].inline ? (hgo_rb[1].ibase + gsl_rb) : (0 - (gsl_rb - hgo_rb[1].inline) - 1)
+              gen_expr_any(e.a)
+              @a.mov_r(R_X1, R_X0)
+              @a.mov_imm64(R_X9, (wvalue_bits(hgo_rb[0]) ## i64) - 4)
+              emit_slot_load(R_X2, R_X9, genc_rb)
+              eb_simple_done = true
+        elsif pure_known_member_no_x1?(e.b)
+          gen_expr_any(e.a)
+          @a.mov_r(R_X1, R_X0)
+          gen_expr_any(e.b)
+          @a.mov_r(R_X2, R_X0)
+          eb_simple_done = true
+        if !eb_simple_done
+          gen_expr_any(e.a)
+          push_x(R_X0)
+          gen_expr_any(e.b)
+          @a.mov_r(R_X2, R_X0)
+          pop_x(R_X1)
         if op == "<" || op == "<=" || op == ">" || op == ">="
+          # Zero-FP non-negative finite double unsigned comparison (100% IEEE-754 exact; cold stub handles negatives/NaN/Inf/objects!)
+          l_fp_s = @a.new_label
+          l_done = @a.new_label
+          @a.sub_r(R_X9, R_X1, R_X20)
+          @a.sub_r(R_X10, R_X2, R_X20)
+          @a.movz_x(R_X14, 0x7FF0, 3)
+          @a.cmp_r(R_X9, R_X14)
+          @a.b_cond(CC_HS, l_fp_s)
+          @a.cmp_r(R_X10, R_X14)
+          @a.b_cond(CC_HS, l_fp_s)
+          @a.cmp_r(R_X9, R_X10)
+          cc_u = branch_if_true ? (op == "<" ? CC_LO : (op == "<=" ? CC_LS : (op == ">" ? CC_HI : CC_HS))) : (op == "<" ? CC_HS : (op == "<=" ? CC_HI : (op == ">" ? CC_LS : CC_LO)))
+          @a.b_cond(cc_u, target)
+          @a.bind(l_done)
+          rt = op == "<" ? RT_LT : (op == "<=" ? RT_LE : (op == ">" ? RT_GT : RT_GE))
+          cb_c = ->()
+            @a.bind(l_fp_s)
+            l_rt_c = @a.new_label
+            @a.cmp_r(R_X9, R_X21)
+            @a.b_cond(CC_HS, l_rt_c)
+            @a.cmp_r(R_X10, R_X21)
+            @a.b_cond(CC_HS, l_rt_c)
+            @a.fmov_d_x(R_D0, R_X9)
+            @a.fmov_d_x(R_D1, R_X10)
+            @a.fcmp_d(R_D0, R_D1)
+            emit_f64_cmp_branch(op, branch_if_true, target)
+            @a.b(l_done)
+            @a.bind(l_rt_c)
+            call_rt(rt)
+            @a.cmp_i(R_X0, 2)
+            @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+            @a.b(l_done)
+          add_cold_stub(cb_c)
+          return nil
+        if op == "===" || op == "!=="
+          # Fast zero-FP === / !== for non-negative finite doubles & WObjects; exact FP fallback for negatives/-0.0/NaN!
+          eq_t = (op == "===") == branch_if_true
+          l_eq = eq_t ? target : @a.new_label
+          l_ne = eq_t ? @a.new_label : target
+          l_chk_nonnum = @a.new_label
+          l_fp_eq = @a.new_label
           l_slow = @a.new_label
           l_done = @a.new_label
           @a.sub_r(R_X9, R_X1, R_X20)
           @a.cmp_r(R_X9, R_X21)
-          @a.b_cond(CC_HS, l_slow)
+          @a.b_cond(CC_HS, l_chk_nonnum)
+          @a.movz_x(R_X14, 0x7FF0, 3)
+          @a.cmp_r(R_X9, R_X14)
+          @a.b_cond(CC_HS, l_fp_eq)
+          @a.sub_r(R_X10, R_X2, R_X20)
+          @a.cmp_r(R_X10, R_X14)
+          @a.b_cond(CC_HS, l_fp_eq)
+          # Both are non-negative finite doubles (+0.0 <= d < +Inf): exact 64-bit equality (ZERO FP domain crossing!)
+          @a.cmp_r(R_X9, R_X10)
+          @a.b_cond(CC_EQ, l_eq)
+          @a.b(l_ne)
+          @a.bind(l_fp_eq)
           @a.sub_r(R_X10, R_X2, R_X20)
           @a.cmp_r(R_X10, R_X21)
-          @a.b_cond(CC_HS, l_slow)
+          @a.b_cond(CC_HS, l_ne)
           @a.fmov_d_x(R_D0, R_X9)
           @a.fmov_d_x(R_D1, R_X10)
           @a.fcmp_d(R_D0, R_D1)
-          emit_f64_cmp_branch(op, branch_if_true, target)
-          @a.b(l_done)
-          @a.bind(l_slow)
-          rt = op == "<" ? RT_LT : (op == "<=" ? RT_LE : (op == ">" ? RT_GT : RT_GE))
-          call_rt(rt)
-          @a.cmp_i(R_X0, 2)
-          @a.b_cond(branch_if_true ? CC_EQ : CC_NE, target)
+          @a.b_cond(CC_EQ, l_eq)
+          @a.b(l_ne)
+          # x1 is NOT a Number: identical bits -> ALWAYS true; distinct WObject -> ALWAYS false (3 insns!)
+          @a.bind(l_chk_nonnum)
+          @a.cmp_r(R_X1, R_X2)
+          @a.b_cond(CC_EQ, l_eq)
+          @a.sub_i(R_X9, R_X1, 4)
+          @a.tst_wobj_bad(R_X9)
+          @a.b_cond(CC_EQ, l_ne)
+          # Distinct bits: if x1 is a flat inline string (mode <= 5), it has a unique 64-bit encoding -> ALWAYS false!
+          # If x1 or x2 is a heap/slab/rope string (mode >= 6 or rope), check length mismatch / fallback RT_SEQ!
+          l_chk_x2_str = @a.new_label
+          l_x1_is_str = @a.new_label
+          @a.lsr_xi(R_X9, R_X1, 48)
+          @a.movz_x(R_X10, 0xFFF9)
+          @a.cmp_r(R_X9, R_X10)
+          @a.b_cond(CC_EQ, l_x1_is_str)
+          # Check x1 not a rope (top16==0 && low4==0 && x1>=16)
+          @a.cbnz_x(R_X9, l_ne)
+          @a.tst_x_lowmask(R_X1, 4)
+          @a.b_cond(CC_NE, l_ne)
+          @a.cmp_i(R_X1, 16)
+          @a.b_cond(CC_HS, l_slow)
+          @a.b(l_ne)
+          @a.bind(l_x1_is_str)
+          @a.tst_x_lowmask(R_X1, 1)
+          @a.b_cond(CC_NE, l_ne)
+          # x1 is a flat String; if mode <= 5 (inline 0..5B), distinct bits -> ALWAYS false!
+          @a.lsr_xi(R_X9, R_X1, 1)
+          @a.and_x_lowmask(R_X9, R_X9, 3)
+          @a.cmp_i(R_X9, 5)
+          @a.b_cond(CC_LS, l_ne)
+          # x1 is mode 6/7 string: check if x2 is also a string (otherwise ALWAYS false!)
+          @a.lsr_xi(R_X11, R_X2, 48)
+          @a.cmp_r(R_X11, R_X10)
+          @a.b_cond(CC_NE, l_chk_x2_str)
+          @a.tst_x_lowmask(R_X2, 1)
+          @a.b_cond(CC_NE, l_ne)
+          @a.lsr_xi(R_X11, R_X2, 1)
+          @a.and_x_lowmask(R_X11, R_X11, 3)
+          @a.cmp_i(R_X11, 5)
+          @a.b_cond(CC_LS, l_ne)
+          # Both are mode 7 heap strings -> quick 31-bit byte-length inequality check!
+          @a.cmp_i(R_X9, 7)
+          @a.b_cond(CC_NE, l_slow)
+          @a.cmp_i(R_X11, 7)
+          @a.b_cond(CC_NE, l_slow)
+          @a.and_x_ptr47(R_X9, R_X1)
+          @a.and_x_ptr47(R_X11, R_X2)
+          @a.ldr_w(R_X9, R_X9, 8)
+          @a.ldr_w(R_X11, R_X11, 8)
+          @a.and_w_lowmask(R_X9, R_X9, 31)
+          @a.and_w_lowmask(R_X11, R_X11, 31)
+          @a.cmp_w(R_X9, R_X11)
+          @a.b_cond(CC_NE, l_ne)
+          @a.b(l_slow)
+          @a.bind(l_chk_x2_str)
+          @a.cbnz_x(R_X11, l_ne)
+          @a.tst_x_lowmask(R_X2, 4)
+          @a.b_cond(CC_NE, l_ne)
+          @a.cmp_i(R_X2, 16)
+          @a.b_cond(CC_HS, l_slow)
+          @a.b(l_ne)
+          @a.bind(eq_t ? l_ne : l_eq)
           @a.bind(l_done)
+          cb = ->()
+            @a.bind(l_slow)
+            call_rt(RT_SEQ)
+            @a.cmp_i(R_X0, 2)
+            @a.b_cond(eq_t ? CC_EQ : CC_NE, target)
+            @a.b(l_done)
+          add_cold_stub(cb)
           return nil
-        if op == "===" || op == "!=="
-          call_rt(RT_SEQ)
-          eq_t = (op == "===") == branch_if_true
+        # == / != (inline fast path for Numbers, null/undefined, identical non-Numbers, and distinct plain JS:Objects!)
+        eq_t = (op == "==") == branch_if_true
+        l_eq = eq_t ? target : @a.new_label
+        l_ne = eq_t ? @a.new_label : target
+        l_chk_nonnum = @a.new_label
+        l_x1_null = @a.new_label
+        l_x2_null = @a.new_label
+        l_slow = @a.new_label
+        l_done = @a.new_label
+        @a.sub_r(R_X9, R_X1, R_X20)
+        @a.cmp_r(R_X9, R_X21)
+        @a.b_cond(CC_HS, l_chk_nonnum)
+        # x1 is a Number: if x2 is also a Number -> exact IEEE fcmp_d!
+        @a.sub_r(R_X10, R_X2, R_X20)
+        @a.cmp_r(R_X10, R_X21)
+        @a.b_cond(CC_HS, l_slow)
+        @a.fmov_d_x(R_D0, R_X9)
+        @a.fmov_d_x(R_D1, R_X10)
+        @a.fcmp_d(R_D0, R_D1)
+        @a.b_cond(CC_EQ, l_eq)
+        @a.b(l_ne)
+        # x1 is NOT a Number: check null/undefined, identical values, and distinct plain JS:Objects!
+        @a.bind(l_chk_nonnum)
+        @a.ldr_x(R_X11, R_X19, RT_K_NULL_BITS * 8)
+        @a.cbz_x(R_X1, l_x1_null)
+        @a.cmp_r(R_X1, R_X11)
+        @a.b_cond(CC_EQ, l_x1_null)
+        @a.cbz_x(R_X2, l_x2_null)
+        @a.cmp_r(R_X2, R_X11)
+        @a.b_cond(CC_EQ, l_x2_null)
+        # Neither x1 nor x2 is null/undefined, and x1 is NOT a Number: x1 == x2 -> ALWAYS true!
+        @a.cmp_r(R_X1, R_X2)
+        @a.b_cond(CC_EQ, l_eq)
+        # If both x1 and x2 are plain JS:Object (clsid == RT_K_OBJ_CLSID), distinct pointers -> ALWAYS false!
+        @a.sub_i(R_X9, R_X1, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_slow)
+        @a.ldr_w(R_X10, R_X9, 0)
+        @a.and_w_lowmask(R_X10, R_X10, 16)
+        @a.ldr_x(R_X12, R_X19, RT_K_OBJ_CLSID * 8)
+        @a.cmp_r(R_X10, R_X12)
+        @a.b_cond(CC_NE, l_slow)
+        @a.sub_i(R_X9, R_X2, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_slow)
+        @a.ldr_w(R_X10, R_X9, 0)
+        @a.and_w_lowmask(R_X10, R_X10, 16)
+        @a.cmp_r(R_X10, R_X12)
+        @a.b_cond(CC_EQ, l_ne)
+        @a.b(l_slow)
+        # x1 is null/undefined: equal iff x2 is null/undefined (or IsHTMLDDA -> slow)
+        @a.bind(l_x1_null)
+        @a.cbz_x(R_X2, l_eq)
+        @a.cmp_r(R_X2, R_X11)
+        @a.b_cond(CC_EQ, l_eq)
+        @a.sub_i(R_X9, R_X2, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_ne)
+        @a.ldr_w(R_X10, R_X9, 0)
+        @a.and_w_lowmask(R_X10, R_X10, 16)
+        @a.ldr_x(R_X12, R_X19, RT_K_OBJ_CLSID * 8)
+        @a.cmp_r(R_X10, R_X12)
+        @a.b_cond(CC_EQ, l_ne)
+        @a.b(l_slow)
+        # x2 is null/undefined, x1 is non-nullish: unequal for non-WObject or plain JS:Object
+        @a.bind(l_x2_null)
+        @a.sub_i(R_X9, R_X1, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_ne)
+        @a.ldr_w(R_X10, R_X9, 0)
+        @a.and_w_lowmask(R_X10, R_X10, 16)
+        @a.ldr_x(R_X12, R_X19, RT_K_OBJ_CLSID * 8)
+        @a.cmp_r(R_X10, R_X12)
+        @a.b_cond(CC_EQ, l_ne)
+        @a.b(l_slow)
+        @a.bind(eq_t ? l_ne : l_eq)
+        @a.bind(l_done)
+        cb = ->()
+          @a.bind(l_slow)
+          call_rt(RT_EQ)
           @a.cmp_i(R_X0, 2)
           @a.b_cond(eq_t ? CC_EQ : CC_NE, target)
-          return nil
-        # == / !=
-        call_rt(RT_EQ)
-        eq_t = (op == "==") == branch_if_true
-        @a.cmp_i(R_X0, 2)
-        @a.b_cond(eq_t ? CC_EQ : CC_NE, target)
+          @a.b(l_done)
+        add_cold_stub(cb)
         return nil
+    # Fast int32 truthiness (`if (closed[cur])`, `if (GRID[nb] || closed[nb])` -> 1-cycle cbz/cbnz!)
+    if can_i32?(e)
+      gen_expr_i32(e)
+      if branch_if_true
+        @a.cbnz_w(R_X0, target)
+      else
+        @a.cbz_w(R_X0, target)
+      return nil
     # General truthiness branch
     gen_expr_any(e)
     emit_truthy_branch(R_X0, target, branch_if_true)
@@ -4969,13 +10725,13 @@ OSR_RETURN = 2
       return CC_LE if op == "<="
       return CC_GT if op == ">"
       return CC_GE if op == ">="
-      return CC_EQ if op == "==="
+      return CC_EQ if op == "===" || op == "=="
       return CC_NE
     return CC_GE if op == "<"
     return CC_GT if op == "<="
     return CC_LE if op == ">"
     return CC_LT if op == ">="
-    return CC_NE if op == "==="
+    return CC_NE if op == "===" || op == "=="
     CC_EQ
 
   # ARM64 FP flags after FCMP:
@@ -4992,59 +10748,154 @@ OSR_RETURN = 2
       cc = CC_LS if op == "<="
       cc = CC_GT if op == ">"
       cc = CC_GE if op == ">="
-      cc = CC_EQ if op == "==="
-      cc = CC_NE if op == "!=="
+      cc = CC_EQ if op == "===" || op == "=="
+      cc = CC_NE if op == "!==" || op == "!="
     else
       cc = CC_PL if op == "<"
       cc = CC_HI if op == "<="
       cc = CC_LE if op == ">"
       cc = CC_LT if op == ">="
-      cc = CC_NE if op == "==="
-      cc = CC_EQ if op == "!=="
+      cc = CC_NE if op == "===" || op == "=="
+      cc = CC_EQ if op == "!==" || op == "!="
     @a.b_cond(cc, target)
     nil
 
   -> emit_truthy_branch(reg, target, br_true)
-    # Fast check: true (2) -> truthy; false (1) or nil (0) -> falsy; else call RT_TRUTHY
+    # Fast check: 0(undef)/1(false) -> falsy; 2(true) -> truthy; Number (+0/-0/NaN falsy, else truthy — ZERO FP crossings!);
+    # WArray & plain JS:Object -> ALWAYS truthy; null -> falsy!
+    if reg == R_X9 || reg == R_X10 || reg == R_X11
+      @a.mov_r(R_X0, reg)
+      reg = R_X0
     l_slow = @a.new_label
+    l_chk_num = @a.new_label
+    l_chk_arr = @a.new_label
     l_done = @a.new_label
+    l_tr = br_true ? target : l_done
+    l_fl = br_true ? l_done : target
     @a.cmp_i(reg, 2)
-    @a.b_cond(CC_HI, l_slow)
+    @a.b_cond(CC_HI, l_chk_num)
     # reg is 0 (nil), 1 (false), or 2 (true)
     @a.b_cond(br_true ? CC_EQ : CC_NE, target)
     @a.b(l_done)
-    @a.bind(l_slow)
-    @a.mov_r(R_X1, reg)
-    call_rt(RT_TRUTHY)
-    @a.cmp_i(R_X0, 2)
-    @a.b_cond(br_true ? CC_EQ : CC_NE, target)
+    @a.bind(l_chk_num)
+    # Pure-integer IEEE-754 Number check (100% exact: +0/-0/NaN -> falsy; +/-Inf & all finite non-zero -> truthy!)
+    @a.sub_r(R_X9, reg, R_X20)
+    @a.cmp_r(R_X9, R_X21)
+    @a.b_cond(CC_HS, l_chk_arr)
+    @a.lsl_xi(R_X10, R_X9, 1)
+    @a.cbz_x(R_X10, l_fl)
+    @a.lsr_xi(R_X11, R_X10, 53)
+    @a.cmp_i(R_X11, 2047)
+    @a.b_cond(CC_NE, l_tr)
+    @a.lsl_xi(R_X11, R_X10, 11)
+    @a.cbnz_x(R_X11, l_fl)
+    @a.b(l_tr)
+    @a.bind(l_chk_arr)
+    # WArray (0xFFF4) is ALWAYS truthy!
+    @a.lsr_xi(R_X9, reg, 48)
+    @a.movz_x(R_X10, 0xFFF4)
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_EQ, l_tr)
+    # JS_NULL is ALWAYS falsy!
+    @a.ldr_x(R_X9, R_X19, RT_K_NULL_BITS * 8)
+    @a.cmp_r(reg, R_X9)
+    @a.b_cond(CC_EQ, l_fl)
+    # Any non-exotic JS:Base (JS:Object, JS:Special Map/Set/WeakMap/Promise, JS:Function, JS:Native, JS:Bound) is ALWAYS truthy!
+    # Only non-JS:Base (kind==0: BigInt/Symbol) and KIND_EXOTIC==5 (HtmlDDA/Proxy/etc.) fall to l_slow!
+    @a.sub_i(R_X9, reg, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_slow)
+    @a.cbz_x(R_X9, l_slow)
+    @a.ldrb(R_X10, R_X9, 4)
+    @a.and_w_lowmask(R_X10, R_X10, 4)
+    @a.cbz_w(R_X10, l_slow)
+    @a.cmp_wi(R_X10, KIND_EXOTIC)
+    @a.b_cond(CC_NE, l_tr)
+    @a.b(l_slow)
     @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @a.mov_r(R_X1, reg)
+      call_rt(RT_TRUTHY)
+      @a.cmp_i(R_X0, 2)
+      @a.b_cond(br_true ? CC_EQ : CC_NE, target)
+      @a.b(l_done)
+    add_cold_stub(cb)
     nil
 
   # ---- Type Query Helpers for Codegen ----
 
+  -> inlined_fn_ret_type(fb)
+    ih = @info.inlined_fns[fb]
+    return JT_ANY if ih == nil
+    rets = ih[2]
+    return JT_ANY if rets.size == 0
+    all_i32 = true
+    all_f64 = true
+    i = 0
+    while i < rets.size
+      re = rets[i]
+      if re == nil
+        all_i32 = false
+        all_f64 = false
+      else
+        all_i32 = false if !can_i32?(re)
+        all_f64 = false if !can_f64?(re)
+      i += 1
+    return JT_I32 if all_i32
+    return JT_F64 if all_f64
+    JT_ANY
+
+  -> jit_known_nonneg_i32?(e)
+    return false if e == nil
+    k = e.kind
+    return jit_int32_lit?(e) && e.a.to_i >= 0 if k == :num
+    if k == :ident
+      li = local_idx(e)
+      return li >= 0 && @info.nonneg_locals[li] == true
+    if k == :binary && e.str == "*"
+      return (jit_known_nonneg_i32?(e.a) && e.b.kind == :num && jit_int32_lit?(e.b) && e.b.a.to_i >= 0) || (jit_known_nonneg_i32?(e.b) && e.a.kind == :num && jit_int32_lit?(e.a) && e.a.a.to_i >= 0)
+    if k == :binary && e.str == "+"
+      return jit_known_nonneg_i32?(e.a) && jit_known_nonneg_i32?(e.b)
+    if k == :binary && e.str == "%"
+      return jit_known_nonneg_i32?(e.a) && ((e.b.kind == :num && jit_int32_lit?(e.b) && e.b.a.to_i > 0) || (e.b.kind == :ident && local_idx(e.b) >= 0 && @info.param_nonneg_ints[local_idx(e.b)] == 2))
+    false
+
   -> can_i32?(e)
     return false if e == nil
     k = e.kind
+    return true if k == :jit_spill_w
     return jit_int32_lit?(e) if k == :num
+    return true if k == :unary && e.str == "-" && jit_signed_i32_val(e) != nil
     if k == :ident
       if @inline_env != nil && e.x != nil && @inline_env[e.x.binding] != nil
         iv = @inline_env[e.x.binding]
-        return iv[0] == :reg_w || iv[0] == :spill_w || (iv[0] == :slot && @info.types[iv[1]] == JT_I32)
+        return iv[0] == :const_i32 || iv[0] == :reg_w || iv[0] == :spill_w || (iv[0] == :slot && @info.types[iv[1]] == JT_I32)
       li = local_idx(e)
+      return li >= 0 && @info.types[li] == JT_I32 if li >= 0
+      return e.x != nil && e.x.binding != nil && @info.global_i32s[e.x.binding] != nil
+    if k == :update
+      li = local_idx(e.a)
       return li >= 0 && @info.types[li] == JT_I32
+    if k == :cond
+      return can_i32?(e.b) && can_i32?(e.c)
     if k == :binary
       op = e.str
       if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
         return true if e.a.kind == :num || e.b.kind == :num
         return can_f64?(e.a) && can_f64?(e.b)
-      return true if op == "%" && can_i32?(e.a) && e.b.kind == :num && jit_int32_lit?(e.b) && e.b.a.to_i > 0
+      return true if op == "%" && can_i32?(e.a) && ((e.b.kind == :num && jit_int32_lit?(e.b) && e.b.a.to_i > 0 && (@is_osr || jit_known_nonneg_i32?(e.a))) || (jit_known_nonneg_i32?(e.a) && e.b.kind == :ident && local_idx(e.b) >= 0 && @info.param_nonneg_ints[local_idx(e.b)] == 2))
       return true if op == "+" && e.b.kind == :num && e.b.a == ~1.0 && @no_ovf_p1_li >= 0 && local_idx(e.a) == @no_ovf_p1_li
+      return true if (op == "+" || op == "-") && can_i32?(e.a) && jit_small_int_lit?(e.b, 4095)
+      return true if op == "+" && can_i32?(e.a) && can_i32?(e.b) && (e.b.kind == :cond || (e.b.kind == :ident && local_idx(e.b) >= 0 && @info.param_nonneg_ints[local_idx(e.b)] != nil) || (e.b.kind == :binary && e.b.str == "*" && jit_small_int_lit?(e.b.b, 16)) || (e.a.kind == :binary && e.a.str == "*"))
+      return true if op == "*" && can_i32?(e.a) && can_i32?(e.b) && (jit_small_int_lit?(e.b, 1024) || jit_small_int_lit?(e.a, 1024) || (e.b.kind == :ident && e.b.x != nil && e.b.x.binding != nil && @info.global_i32s[e.b.x.binding] != nil && @info.global_i32s[e.b.x.binding][0] >= 0 && @info.global_i32s[e.b.x.binding][0] <= 1024))
       return false
     if k == :unary
       return e.str == "~" && can_f64?(e.a)
     if k == :member && !e.has?(F_COMPUTED)
       bli = local_idx(e.a)
+      if e.b.str == "length" && bli >= 0 && (@hoisted_tas[bli] != nil || @hoisted_arrs[bli] != nil || @info.local_arrs[bli] != nil || @info.ro_keys_locals[bli] != nil || (!@is_osr && @info.str_locals[bli]))
+        return true
       if bli >= 0 && @info.sra_objs[bli] != nil
         vs = @info.sra_objs[bli].field_slots[e.b.str]
         return vs != nil && @info.types[vs] == JT_I32
@@ -5058,13 +10909,35 @@ OSR_RETURN = 2
       if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil
         return @hoisted_global_tas[e.a.x.binding][2] <= 5
       return false
-    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "indexOf" && e.list.size == 1 && !@is_osr
+    if k == :call && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @info.inlined_fns[e.a.x.binding] != nil
+      return inlined_fn_ret_type(e.a.x.binding) == JT_I32
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "indexOf" && (e.list.size == 1 || e.list.size == 2) && !@is_osr
       sli = local_idx(e.a.a)
       return true if sli >= 0 && @info.str_locals[sli]
     false
 
+  -> can_u32?(e)
+    return false if e == nil
+    k = e.kind
+    return jit_u32_lit?(e) if k == :num
+    if k == :ident
+      li = local_idx(e)
+      return li >= 0 && @info.types[li] == JT_U32
+    if k == :binary && e.str == ">>>"
+      return e.a.kind == :num || e.b.kind == :num || (can_f64?(e.a) && can_f64?(e.b))
+    if k == :member && e.has?(F_COMPUTED)
+      bli = local_idx(e.a)
+      return true if bli >= 0 && @hoisted_tas[bli] != nil && @hoisted_tas[bli][2] == 6
+      if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil
+        return @hoisted_global_tas[e.a.x.binding][2] == 6
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.a.kind == :ident && e.a.a.str == "Math" && e.a.b.str == "abs" && e.list.size == 1
+      a0 = e.list[0]
+      return true if can_i32?(a0)
+      return true if a0.kind == :binary && a0.str == "-" && can_i32?(a0.a) && can_i32?(a0.b)
+    false
+
   -> can_f64?(e)
-    return true if can_i32?(e)
+    return true if can_i32?(e) || can_u32?(e)
     return false if e == nil
     k = e.kind
     return true if k == :num
@@ -5073,7 +10946,9 @@ OSR_RETURN = 2
         iv = @inline_env[e.x.binding]
         return iv[0] == :reg_d || (iv[0] == :slot && @info.types[iv[1]] == JT_F64)
       li = local_idx(e)
-      return li >= 0 && @info.types[li] == JT_F64
+      return li >= 0 && (@info.types[li] == JT_F64 || @info.types[li] == JT_U32)
+    if k == :cond
+      return can_f64?(e.b) && can_f64?(e.c)
     if k == :binary
       op = e.str
       if op == "-" || op == "*" || op == "/"
@@ -5110,10 +10985,14 @@ OSR_RETURN = 2
       return false
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && !@is_osr
       return true if resolve_vstruct_scalar(e) != nil
+      return true if resolve_vstruct_method_f64(e) != nil
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "charCodeAt" && e.list.size == 1 && !@is_osr
       sli = local_idx(e.a.a)
       return true if sli >= 0 && @info.str_locals[sli]
     if k == :call && e.a.kind == :ident
+      if e.a.x != nil && e.a.x.binding != nil && @info.inlined_fns[e.a.x.binding] != nil
+        rt = inlined_fn_ret_type(e.a.x.binding)
+        return rt == JT_I32 || rt == JT_F64
       li = local_idx(e.a)
       if li >= 0 && @info.sra_clos[li] != nil
         sc = @info.sra_clos[li]
@@ -5130,6 +11009,13 @@ OSR_RETURN = 2
   -> gen_expr_void(e)
     return nil if e == nil
     k = e.kind
+    if k == :update && e.str == "++" && @inline_this_is_outer && @while_cnt_props != nil && e.a != nil && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.a != nil && e.a.a.kind == :this
+      wc_u = @while_cnt_props[e.a.b.str]
+      if wc_u != nil
+        @a.ldr_x(R_X10, R_SP, wc_u[1])
+        @a.add_i(R_X10, R_X10, 1)
+        @a.str_x(R_X10, R_SP, wc_u[1])
+        return nil
     if k == :update && e.a.kind == :ident
       li = local_idx(e.a)
       if li >= 0 && @info.types[li] == JT_I32
@@ -5266,11 +11152,33 @@ OSR_RETURN = 2
         else
           @a.sub_r(@i53_acc_reg, @i53_acc_reg, R_X0)
         return nil
+      if li >= 0 && @info.types[li] == JT_I32 && e.str == "+=" && can_i32?(e.b)
+        r_dst = @info.reg_gpr[li]
+        if e.b.kind == :num && jit_small_int_lit?(e.b, 4095) && e.b.a.to_i >= 0
+          if r_dst != nil
+            @a.add_wi(r_dst, r_dst, e.b.a.to_i)
+          else
+            load_slot_i32(R_X0, li)
+            @a.add_wi(R_X0, R_X0, e.b.a.to_i)
+            store_slot_i32(li, R_X0)
+          return nil
+        rb = peek_i32_reg(e.b)
+        if rb != nil && r_dst != nil
+          @a.add_w(r_dst, r_dst, rb)
+          return nil
+        gen_expr_i32(e.b)
+        if r_dst != nil
+          @a.add_w(r_dst, r_dst, R_X0)
+        else
+          load_slot_i32(R_X9, li)
+          @a.add_w(R_X0, R_X9, R_X0)
+          store_slot_i32(li, R_X0)
+        return nil
       if li >= 0 && @info.types[li] == JT_F64
         # Fused `s += x * y` -> zero-spill FMUL + FADD directly into D_s!
         if e.str == "+=" && e.b.kind == :binary && e.b.str == "*" && can_f64?(e.b.a) && can_f64?(e.b.b)
           dr = @info.reg_fpr[li]
-          if @info.reg_fpr.size < 8 && @d_bias_reg != R_D15 && dr != nil && !expr_uses_d15?(e.b.b)
+          if @slim_f_hi >= R_D15 && @info.reg_fpr.size < 8 && @d_bias_reg != R_D15 && dr != nil && !expr_uses_d15?(e.b.b)
             # R_D15 is an unused callee-saved FP register (survives any slow call!)
             gen_expr_f64(e.b.a)
             @a.fmov_d(R_D15, R_D0)
@@ -5351,6 +11259,19 @@ OSR_RETURN = 2
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "push" && e.list.size == 1
       gen_array_push_inline(e.a.a, e.list[0], false)
       return nil
+    # Void `arr.splice(idx, 1)` (pure inline ARM64 shift — ZERO RT call, ZERO removed-array allocation!)
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "splice" && e.list.size == 2 && e.list[1].kind == :num && e.list[1].a == ~1.0 && !(e.x.is_a?(Array) && e.x.size >= 2)
+      gen_array_splice1_void_inline(e.a.a, e.list[0], e.list[1])
+      return nil
+    # Void `ta.fill(val)` on hoisted integer TypedArray!
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "fill" && e.list.size == 1
+      bli_f = local_idx(e.a.a)
+      if bli_f >= 0 && @hoisted_tas[bli_f] != nil && gen_ta_fill_inline(bli_f, e.list[0], false)
+        return nil
+    # Void inlined local helper call (`push(nb, f)`)!
+    if k == :call && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @info.inlined_fns[e.a.x.binding] != nil
+      emit_inlined_fn_call(@info.inlined_fns[e.a.x.binding], e.list, :void)
+      return nil
     if k == :seq
       i = 0
       while i < e.list.size
@@ -5395,19 +11316,24 @@ OSR_RETURN = 2
 
   # ---- Lane 1: Unboxed int32 Expression Codegen -> result in w0 ----
 
-  # If `e` is a register-resident i32 leaf (or simple spill/imm), return the register holding it
+  # If `e` is a register-resident i32/u32 leaf (or simple spill/imm), return the register holding it
   # (loading into `scratch` if needed), without touching the temp stack! Else nil.
   -> try_i32_reg(e, scratch)
     return nil if e == nil
     k = e.kind
-    if k == :num && jit_int32_lit?(e)
+    if k == :num && (jit_int32_lit?(e) || jit_u32_lit?(e))
       @a.mov_imm32(scratch, e.a.to_i)
       return scratch
+    if k == :unary && e.str == "-"
+      sv = jit_signed_i32_val(e)
+      if sv != nil
+        @a.mov_imm32(scratch, sv)
+        return scratch
     if k == :ident
       if @inline_env != nil && e.x != nil && @inline_env[e.x.binding] != nil
         iv = @inline_env[e.x.binding]
         return iv[1] if iv[0] == :reg_w
-        if iv[0] == :slot && @info.types[iv[1]] == JT_I32
+        if iv[0] == :slot && (@info.types[iv[1]] == JT_I32 || @info.types[iv[1]] == JT_U32)
           r = @info.reg_gpr[iv[1]]
           return r if r != nil
           @a.ldr_w(scratch, R_SP, @info.spill_off[iv[1]])
@@ -5416,10 +11342,16 @@ OSR_RETURN = 2
           @a.ldr_w(scratch, R_SP, iv[1])
           return scratch
       li = local_idx(e)
-      if li >= 0 && @info.types[li] == JT_I32
+      if li >= 0 && (@info.types[li] == JT_I32 || @info.types[li] == JT_U32)
+        if li == @unroll_i_li && @unroll_i_off > 0 && @info.reg_gpr[li] != nil
+          @a.add_wi(scratch, @info.reg_gpr[li], @unroll_i_off)
+          return scratch
         r = @info.reg_gpr[li]
         return r if r != nil
         @a.ldr_w(scratch, R_SP, @info.spill_off[li])
+        return scratch
+      if e.x != nil && e.x.binding != nil && @info.global_i32s[e.x.binding] != nil
+        @a.mov_imm32(scratch, @info.global_i32s[e.x.binding][0])
         return scratch
     if k == :member && !e.has?(F_COMPUTED)
       bli = local_idx(e.a)
@@ -5451,14 +11383,246 @@ OSR_RETURN = 2
         return @info.reg_gpr[vs] if vs != nil && @info.types[vs] == JT_I32
     nil
 
+  # Same as peek_i32_reg, also accepting JT_U32 (for 32-bit bitwise / wrapping contexts!)
+  -> peek_raw32_reg(e)
+    r = peek_i32_reg(e)
+    return r if r != nil
+    if e != nil && e.kind == :ident
+      li = local_idx(e)
+      return @info.reg_gpr[li] if li >= 0 && @info.types[li] == JT_U32
+    nil
+
+  # Check if `e` is a 32-bit right-rotate pattern `(x >>> k) | (x << (32 - k))` or `(x << (32 - k)) | (x >>> k)`
+  # where `x` is the same side-effect-free local ident. Returns `[x_node, ror_k]` or nil.
+  -> match_ror32(e)
+    return nil if e == nil || e.kind != :binary || e.str != "|"
+    a = e.a
+    b = e.b
+    return nil if a == nil || b == nil || a.kind != :binary || b.kind != :binary
+    if a.str == ">>>" && b.str == "<<" && jit_int32_lit?(a.b) && jit_int32_lit?(b.b)
+      k1 = a.b.a.to_i & 31
+      k2 = b.b.a.to_i & 31
+      if k1 > 0 && k1 + k2 == 32 && a.a.kind == :ident && b.a.kind == :ident && local_idx(a.a) >= 0 && local_idx(a.a) == local_idx(b.a)
+        return [a.a, k1]
+    elsif a.str == "<<" && b.str == ">>>" && jit_int32_lit?(a.b) && jit_int32_lit?(b.b)
+      k2 = a.b.a.to_i & 31
+      k1 = b.b.a.to_i & 31
+      if k1 > 0 && k1 + k2 == 32 && a.a.kind == :ident && b.a.kind == :ident && local_idx(a.a) >= 0 && local_idx(a.a) == local_idx(b.a)
+        return [a.a, k1]
+    nil
+
+  # Zero-spill BCE'd 32-bit or Uint8 TypedArray element load directly into `dst` (using `tmp_ptr`, `tmp_idx`)!
+  # Matches `W[i]`, `K[i]`, `W[i - k]`, `inp[i + k]` without touching R_X0 or stack!
+  -> try_raw32_ta_load(e, dst, tmp_ptr, tmp_idx)
+    return nil if e == nil || e.kind != :member || !e.has?(F_COMPUTED)
+    h = nil
+    tr = nil
+    bli = local_idx(e.a)
+    gb = nil
+    if bli >= 0 && @hoisted_tas[bli] != nil && (@hoisted_tas[bli][2] == 5 || @hoisted_tas[bli][2] == 6 || @hoisted_tas[bli][2] == 1)
+      h = @hoisted_tas[bli]
+      tr = @hoisted_ta_regs[bli]
+    elsif e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil
+      gb = e.a.x.binding
+      gh = @hoisted_global_tas[gb]
+      if gh[2] == 5 || gh[2] == 6 || gh[2] == 1
+        h = gh
+        tr = @hoisted_gta_regs[gb]
+    return nil if h == nil || !ta_idx_bounded?(bli, e.b, gb)
+    tk_r = h[2]
+    idx_e = e.b
+    ri = peek_i32_reg(idx_e)
+    if ri != nil
+      ili = local_idx(idx_e)
+      if ili >= 0 && @const_loop_bounds[ili] != nil && @const_loop_bounds[ili][0] >= 0
+        # Non-negative counted loop var already zero-extended in X register (ZERO sxtw!)
+        r_ptr = (tr != nil && tr[0] != nil) ? tr[0] : tmp_ptr
+        @a.ldr_x(tmp_ptr, R_SP, h[0]) if r_ptr == tmp_ptr
+        tk_r == 1 ? @a.ldrb_idx(dst, r_ptr, ri) : @a.ldr_w_idx(dst, r_ptr, ri)
+        return dst
+      @a.sxtw(tmp_idx, ri)
+    elsif idx_e.kind == :binary && idx_e.str == "-" && jit_small_int_lit?(idx_e.b, 4095) && idx_e.b.a.to_i >= 0 && peek_i32_reg(idx_e.a) != nil
+      @a.sub_wi(tmp_idx, peek_i32_reg(idx_e.a), idx_e.b.a.to_i)
+    elsif idx_e.kind == :binary && idx_e.str == "+" && jit_small_int_lit?(idx_e.b, 4095) && idx_e.b.a.to_i >= 0 && peek_i32_reg(idx_e.a) != nil
+      @a.add_wi(tmp_idx, peek_i32_reg(idx_e.a), idx_e.b.a.to_i)
+    else
+      return nil
+    r_ptr = (tr != nil && tr[0] != nil) ? tr[0] : tmp_ptr
+    @a.ldr_x(tmp_ptr, R_SP, h[0]) if r_ptr == tmp_ptr
+    tk_r == 1 ? @a.ldrb_idx(dst, r_ptr, tmp_idx) : @a.ldr_w_idx(dst, r_ptr, tmp_idx)
+    dst
+
+  # Try evaluating simple 32-bit RHS leaf directly into `dst` (using `tmp` scratch, ZERO stack spills!).
+  # Returns register holding result (`dst` or an existing GPR), or nil if complex.
+  -> try_eval_raw32_leaf(e, dst, tmp)
+    r = try_i32_reg(e, dst)
+    return r if r != nil
+    r_ta = try_raw32_ta_load(e, dst, tmp, R_X11)
+    return r_ta if r_ta != nil
+    return nil if e == nil
+    # Rotate leaf `((x >>> k) | (x << (32 - k)))` -> 1-insn ROR!
+    rm = match_ror32(e)
+    if rm != nil
+      rx = try_i32_reg(rm[0], dst)
+      if rx != nil
+        @a.ror_wi(dst, rx, rm[1])
+        return dst
+    if e.kind == :unary && e.str == "~"
+      ra = try_i32_reg(e.a, dst)
+      if ra != nil
+        @a.mvn_w(dst, ra)
+        return dst
+    if e.kind == :binary
+      op = e.str
+      if (op == ">>>" || op == "<<" || op == ">>") && jit_int32_lit?(e.b)
+        ra = try_i32_reg(e.a, dst)
+        ra = try_raw32_ta_load(e.a, dst, tmp, R_X11) if ra == nil
+        if ra != nil
+          sh = e.b.a.to_i & 31
+          if sh == 0
+            @a.mov_w(dst, ra) if dst != ra
+          elsif op == ">>>"
+            @a.lsr_wi(dst, ra, sh)
+          elsif op == "<<"
+            @a.lsl_wi(dst, ra, sh)
+          else
+            @a.asr_wi(dst, ra, sh)
+          return dst
+      if op == "&"
+        # `(~a) & b` or `b & (~a)` -> 1-insn BIC!
+        if e.a.kind == :unary && e.a.str == "~"
+          ra = try_i32_reg(e.a.a, dst)
+          rb = ra != nil ? try_i32_reg(e.b, tmp) : nil
+          if ra != nil && rb != nil
+            @a.bic_w(dst, rb, ra)
+            return dst
+        if e.b.kind == :unary && e.b.str == "~"
+          ra = try_i32_reg(e.a, dst)
+          rb = ra != nil ? try_i32_reg(e.b.a, tmp) : nil
+          if ra != nil && rb != nil
+            @a.bic_w(dst, ra, rb)
+            return dst
+        ra = try_i32_reg(e.a, dst)
+        rb = ra != nil ? try_i32_reg(e.b, tmp) : nil
+        if ra != nil && rb != nil
+          @a.and_w(dst, ra, rb)
+          return dst
+      if op == "|" || op == "^"
+        ra = try_i32_reg(e.a, dst)
+        rb = ra != nil ? try_i32_reg(e.b, tmp) : nil
+        if ra != nil && rb != nil
+          if op == "|"
+            @a.orr_w(dst, ra, rb)
+          else
+            @a.eor_w(dst, ra, rb)
+          return dst
+    nil
+
+  # Collect flat terms of an exact 32-bit wrapping addition chain `(a + b + c + d + ...) | 0`!
+  # Because addition in Z/2^32Z is strictly associative & commutative (and <= 8 i32/u32 terms sum < 2^35 << 2^53),
+  # tree-reducing the chain with memory loads first slashes critical-path latency from O(N) to O(log N)!
+  -> collect_wrap32_add_terms(e, out)
+    if e != nil && e.kind == :binary && e.str == "+" && exact_i32_sum_term?(e.a) && exact_i32_sum_term?(e.b)
+      return false if !collect_wrap32_add_terms(e.a, out)
+      return collect_wrap32_add_terms(e.b, out)
+    return false if out.size >= 8
+    out.push(e)
+    true
+
+  -> wrap32_leaf_kind(e)
+    return 0 if e == nil
+    return 1 if e.kind == :num && (jit_int32_lit?(e) || jit_u32_lit?(e))
+    if e.kind == :ident
+      li = local_idx(e)
+      return 1 if li >= 0 && (@info.types[li] == JT_I32 || @info.types[li] == JT_U32)
+      return 1 if e.x != nil && e.x.binding != nil && @info.global_i32s[e.x.binding] != nil
+    if e.kind == :member && e.has?(F_COMPUTED)
+      bli = local_idx(e.a)
+      gb = nil
+      h = nil
+      if bli >= 0 && @hoisted_tas[bli] != nil && (@hoisted_tas[bli][2] == 5 || @hoisted_tas[bli][2] == 6)
+        h = @hoisted_tas[bli]
+      elsif e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil
+        gb = e.a.x.binding
+        h = @hoisted_global_tas[gb] if @hoisted_global_tas[gb][2] == 5 || @hoisted_global_tas[gb][2] == 6
+      if h != nil && ta_idx_bounded?(bli, e.b, gb)
+        idx_e = e.b
+        return 2 if peek_i32_reg(idx_e) != nil
+        return 2 if idx_e.kind == :binary && idx_e.str == "-" && jit_small_int_lit?(idx_e.b, 4095) && idx_e.b.a.to_i >= 0 && peek_i32_reg(idx_e.a) != nil
+    0
+
+  -> emit_wrap32_leaf_into(e, dst)
+    r = try_i32_reg(e, dst)
+    if r != nil
+      @a.mov_w(dst, r) if dst != r
+      return dst
+    try_raw32_ta_load(e, dst, R_X10, R_X11)
+
+  -> emit_wrap32_leaf_add(acc, e)
+    r = try_i32_reg(e, R_X9)
+    r = try_raw32_ta_load(e, R_X9, R_X10, R_X11) if r == nil
+    @a.add_w(acc, acc, r)
+    nil
+
+  -> try_gen_wrap32_add_tree(e)
+    terms = []
+    return false if !collect_wrap32_add_terms(e, terms) || terms.size < 4
+    loads = []
+    regs = []
+    i = 0
+    while i < terms.size
+      lk = wrap32_leaf_kind(terms[i])
+      return false if lk == 0
+      if lk == 2
+        loads.push(terms[i])
+      else
+        regs.push(terms[i])
+      i += 1
+    # Reorder: memory loads + earliest variable (e.g. `h` in SHA-256!) in Group A (R_X0),
+    # remaining freshly-computed temps (`S1`, `ch`, `s0`, `s1`) in Group B (R_X12), then `add R_X0, R_X0, R_X12`!
+    ordered = []
+    loads.each ->(x) ordered.push(x)
+    regs.each ->(x) ordered.push(x)
+    mid = ordered.size / 2
+    mid = loads.size + 1 if loads.size >= 2 && loads.size + 1 < ordered.size
+    emit_wrap32_leaf_into(ordered[0], R_X0)
+    i = 1
+    while i < mid
+      emit_wrap32_leaf_add(R_X0, ordered[i])
+      i += 1
+    emit_wrap32_leaf_into(ordered[mid], R_X12)
+    i = mid + 1
+    while i < ordered.size
+      emit_wrap32_leaf_add(R_X12, ordered[i])
+      i += 1
+    @a.add_w(R_X0, R_X0, R_X12)
+    true
+
   # Evaluate `e` whose result is guaranteed to be truncated via ToInt32 (`expr | 0`)!
   # Because sums of int32s and products with |K| <= 2^20 never exceed 2^53 in IEEE double,
   # 32-bit wrapping arithmetic is 100% bit-for-bit identical to IEEE double + ToInt32!
   -> gen_expr_to_i32(e)
     k = e.kind
-    if k == :num && jit_int32_lit?(e)
+    if k == :num && (jit_int32_lit?(e) || jit_u32_lit?(e))
       @a.mov_imm32(R_X0, e.a.to_i)
       return nil
+    if k == :unary && e.str == "-"
+      sv = jit_signed_i32_val(e)
+      if sv != nil
+        @a.mov_imm32(R_X0, sv)
+        return nil
+    if k == :binary && e.str == "+" && try_gen_wrap32_add_tree(e)
+      return nil
+    if k == :binary && e.str == "|" && try_gen_be32_u8_load(e)
+      return nil
+    if k == :ident
+      li = local_idx(e)
+      if li >= 0 && (@info.types[li] == JT_I32 || @info.types[li] == JT_U32)
+        load_slot_i32(R_X0, li)
+        return nil
+      if e.x != nil && e.x.binding != nil && @info.global_i32s[e.x.binding] != nil
+        @a.mov_imm32(R_X0, @info.global_i32s[e.x.binding][0])
+        return nil
     if k == :binary
       op = e.str
       # Fused `a + (x * K)` -> shifted ADD (K=2,4,8), 2-op shift-add (K=3,5,9 -> 1-cycle!), or MADD!
@@ -5500,24 +11664,8 @@ OSR_RETURN = 2
         @a.mov_imm32(R_X10, e.a.b.a.to_i)
         @a.madd_w(R_X0, R_X9, R_X10, R_X0)
         return nil
-      # Exact int32 `+` / `-` inside `| 0` with zero-spill register targeting!
+      # Exact int32/uint32 `+` / `-` inside `| 0` / `>>> 0` with zero-spill register targeting!
       if (op == "+" || op == "-") && exact_i32_sum_term?(e.a)
-        rb = peek_i32_reg(e.b)
-        if rb != nil
-          gen_expr_to_i32(e.a)
-          if op == "+"
-            @a.add_w(R_X0, R_X0, rb)
-          else
-            @a.sub_w(R_X0, R_X0, rb)
-          return nil
-        ra = peek_i32_reg(e.a)
-        if ra != nil && (exact_i32_sum_term?(e.b) || e.b.kind == :call)
-          gen_expr_to_i32(e.b)
-          if op == "+"
-            @a.add_w(R_X0, ra, R_X0)
-          else
-            @a.sub_w(R_X0, ra, R_X0)
-          return nil
         if e.b.kind == :num && jit_small_int_lit?(e.b, 4095) && e.b.a.to_i >= 0
           gen_expr_to_i32(e.a)
           if op == "+"
@@ -5526,6 +11674,14 @@ OSR_RETURN = 2
             @a.sub_wi(R_X0, R_X0, e.b.a.to_i)
           return nil
         gen_expr_to_i32(e.a)
+        rb = try_i32_reg(e.b, R_X9)
+        rb = try_raw32_ta_load(e.b, R_X9, R_X10, R_X11) if rb == nil
+        if rb != nil
+          if op == "+"
+            @a.add_w(R_X0, R_X0, rb)
+          else
+            @a.sub_w(R_X0, R_X0, rb)
+          return nil
         push_w(R_X0)
         gen_expr_to_i32(e.b)
         pop_w(R_X9)
@@ -5574,10 +11730,39 @@ OSR_RETURN = 2
         return nil
       if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil && @hoisted_global_tas[e.a.x.binding][2] == 6
         gb_u = e.a.x.binding
-        gen_ta_load_raw32(@hoisted_global_tas[gb_u], @hoisted_gta_regs[gb_u], -1, e.b)
+        gen_ta_load_raw32(@hoisted_global_tas[gb_u], @hoisted_gta_regs[gb_u], -1, e.b, gb_u)
+        return nil
+    # Direct Math.abs(i32) or Math.abs(i32_a - i32_b) -> exact unsigned 32-bit (ZERO float conversion!)
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.a.kind == :ident && e.a.a.str == "Math" && e.a.b.str == "abs" && e.list.size == 1
+      a0 = e.list[0]
+      if can_i32?(a0)
+        gen_expr_i32(a0)
+        @a.cmp_wi(R_X0, 0)
+        @a.cneg_w(R_X0, R_X0, CC_LT)
+        return nil
+      if a0.kind == :binary && a0.str == "-" && can_i32?(a0.a) && can_i32?(a0.b)
+        ra = try_i32_reg(a0.a, R_X9)
+        rb = ra != nil ? try_i32_reg(a0.b, R_X10) : nil
+        if ra != nil && rb != nil
+          @a.sxtw(R_X9, ra)
+          @a.sxtw(R_X10, rb)
+          @a.sub_r(R_X0, R_X9, R_X10)
+        else
+          gen_expr_i32(a0.a)
+          push_w(R_X0)
+          gen_expr_i32(a0.b)
+          pop_w(R_X9)
+          @a.sxtw(R_X9, R_X9)
+          @a.sxtw(R_X10, R_X0)
+          @a.sub_r(R_X0, R_X9, R_X10)
+        @a.cmp_i(R_X0, 0)
+        @a.cneg_x(R_X0, R_X0, CC_LT)
         return nil
     # Direct scalar-replaced closure call returning exact i32 sum!
     if k == :call && e.a.kind == :ident
+      if e.a.x != nil && e.a.x.binding != nil && @info.inlined_fns[e.a.x.binding] != nil && inlined_fn_ret_type(e.a.x.binding) == JT_I32
+        emit_inlined_fn_call(@info.inlined_fns[e.a.x.binding], e.list, :i32)
+        return nil
       li = local_idx(e.a)
       if li >= 0 && @info.sra_clos[li] != nil
         sc = @info.sra_clos[li]
@@ -5597,7 +11782,7 @@ OSR_RETURN = 2
       gen_expr_f64(e)
       emit_f64_to_i32(R_X0, R_D0)
       return nil
-    # Fallback: evaluate boxed, convert to int32
+    # Fallback: evaluate boxed, convert to int32 (cold stub for non-Number!)
     gen_expr_any(e)
     @a.sub_r(R_X15, R_X0, R_X20)
     @a.cmp_r(R_X15, R_X21)
@@ -5606,14 +11791,16 @@ OSR_RETURN = 2
     @a.b_cond(CC_HS, l_slow)
     @a.fmov_d_x(R_D0, R_X15)
     emit_f64_to_i32(R_X0, R_D0)
-    @a.b(l_done)
-    @a.bind(l_slow)
-    @a.mov_r(R_X1, R_X0)
-    call_rt(RT_TO_INT32)
-    @a.sub_r(R_X15, R_X0, R_X20)
-    @a.fmov_d_x(R_D0, R_X15)
-    @a.fcvtzs_w_d(R_X0, R_D0)
     @a.bind(l_done)
+    cb_ti = ->()
+      @a.bind(l_slow)
+      @a.mov_r(R_X1, R_X0)
+      call_rt(RT_TO_INT32)
+      @a.sub_r(R_X15, R_X0, R_X20)
+      @a.fmov_d_x(R_D0, R_X15)
+      @a.fcvtzs_w_d(R_X0, R_D0)
+      @a.b(l_done)
+    add_cold_stub(cb_ti)
     nil
 
   -> exact_i32_small_term?(e)
@@ -5623,7 +11810,7 @@ OSR_RETURN = 2
     false
 
   -> exact_i32_sum_term?(e)
-    return true if can_i32?(e)
+    return true if can_i32?(e) || can_u32?(e)
     if e.kind == :binary
       op = e.str
       return exact_i32_sum_term?(e.a) && exact_i32_sum_term?(e.b) if op == "+" || op == "-"
@@ -5713,14 +11900,259 @@ OSR_RETURN = 2
     @tmp_depth -= pushed
     nil
 
-  # Inline 1-entry IC for `str_local.indexOf(sub)` -> i32 result in w0 (ZERO runtime calls on hit!)
-  -> gen_str_indexof_i32(call_e, str_e, sub_e)
+  # Inline ARM64 1-byte ASCII `str.indexOf(ch, [from])` scanner!
+  # Inputs:
+  #   str_reg: flat String WValue (caller verified tag 0xFFF9 if needed; we verify flat + mode 7 / inline ASCII!)
+  #   ch: ASCII byte 0..127, OR -1 to compare against register R_X15!
+  #   has_from: true -> R_X12 holds signed 64-bit starting index (clamped < 0 -> 0); false -> starts at 0.
+  # Outputs:
+  #   branches to l_hit with found index in R_X12;
+  #   branches to l_miss if not found;
+  #   branches to l_rt if non-flat / mode 6 slab / non-ASCII / inline with from > 0.
+  # Preserves R_X1, R_X2, R_X3, R_X13, R_X15!
+  -> emit_inline_ascii_indexof1(str_reg, ch, has_from, l_rt, l_hit, l_miss)
+    l_chk_slab = @a.new_label
+    l_chk_inl = @a.new_label
+    l_scan_buf = @a.new_label
+    l_hlp = @a.new_label
+    l_ilp = @a.new_label
+    @a.tst_x_lowmask(str_reg, 1)
+    @a.b_cond(CC_NE, l_rt)
+    @a.lsr_xi(R_X9, str_reg, 1)
+    @a.and_x_lowmask(R_X9, R_X9, 3)
+    @a.cmp_i(R_X9, 7)
+    @a.b_cond(CC_NE, l_chk_slab)
+    # Mode 7 heap ASCII
+    @a.and_x_ptr47(R_X10, str_reg)
+    @a.ldr_w(R_X11, R_X10, 8)
+    @a.cmp_wi(R_X11, 0)
+    @a.b_cond(CC_GE, l_rt)
+    @a.and_w_lowmask(R_X11, R_X11, 31)
+    @a.add_i(R_X10, R_X10, 16)
+    @a.bind(l_scan_buf)
+    if has_from
+      @a.cmp_i(R_X12, 0)
+      @a.csel_x(R_X12, R_XZR, R_X12, CC_LT)
+    else
+      @a.movz_x(R_X12, 0)
+    @a.bind(l_hlp)
+    @a.cmp_r(R_X12, R_X11)
+    @a.b_cond(CC_GE, l_miss)
+    @a.ldrb_idx(R_X14, R_X10, R_X12)
+    if ch >= 0
+      @a.cmp_wi(R_X14, ch)
+    else
+      @a.cmp_w(R_X14, R_X15)
+    @a.b_cond(CC_EQ, l_hit)
+    @a.add_i(R_X12, R_X12, 1)
+    @a.b(l_hlp)
+    # Mode 6 interned slab inline ASCII (6..61 bytes!)
+    @a.bind(l_chk_slab)
+    @a.cmp_i(R_X9, 6)
+    @a.b_cond(CC_NE, l_chk_inl)
+    @a.ldr_x(R_X10, R_X19, RT_K_SLAB_BASE * 8)
+    @a.cbz_x(R_X10, l_rt)
+    @a.lsr_xi(R_X14, str_reg, 4)
+    @a.and_x_lowmask(R_X14, R_X14, 24)
+    @a.add_r(R_X10, R_X10, R_X14, 5)
+    @a.ldrb(R_X11, R_X10, 0)
+    @a.movz_x(R_X14, 9)
+    @a.and_w(R_X11, R_X11, R_X14)
+    @a.cmp_wi(R_X11, 9)
+    @a.b_cond(CC_NE, l_rt)
+    @a.ldrb(R_X11, R_X10, 1)
+    @a.add_i(R_X10, R_X10, 2)
+    @a.b(l_scan_buf)
+    # Mode 0..5 inline ASCII (supports ANY from!)
+    @a.bind(l_chk_inl)
+    @a.cmp_i(R_X9, 5)
+    @a.b_cond(CC_HI, l_rt)
+    @a.mov_imm64(R_X10, 8830587504640)
+    @a.tst_r(str_reg, R_X10)
+    @a.b_cond(CC_NE, l_rt)
+    @a.lsr_xi(R_X10, str_reg, 4)
+    if has_from
+      @a.cmp_i(R_X12, 0)
+      @a.csel_x(R_X12, R_XZR, R_X12, CC_LT)
+      @a.cmp_r(R_X12, R_X9)
+      @a.b_cond(CC_GE, l_miss)
+      @a.lsl_xi(R_X14, R_X12, 3)
+      @a.lsr_x(R_X10, R_X10, R_X14)
+    else
+      @a.movz_x(R_X12, 0)
+    @a.bind(l_ilp)
+    @a.cmp_r(R_X12, R_X9)
+    @a.b_cond(CC_GE, l_miss)
+    @a.and_w_lowmask(R_X14, R_X10, 8)
+    if ch >= 0
+      @a.cmp_wi(R_X14, ch)
+    else
+      @a.cmp_w(R_X14, R_X15)
+    @a.b_cond(CC_EQ, l_hit)
+    @a.lsr_xi(R_X10, R_X10, 8)
+    @a.add_i(R_X12, R_X12, 1)
+    @a.b(l_ilp)
+    nil
+
+  # Inline ARM64 `str_local.indexOf(sub, [from])` -> i32 result in w0 (ZERO runtime calls on ASCII hit!)
+  -> gen_str_indexof_i32(call_e, str_e, sub_e, from_e = nil)
     sli = local_idx(str_e)
-    if sli >= 0 && sub_e.kind == :string
+    if from_e == nil && sli >= 0 && sub_e.kind == :string
       hr = @inv_indexof[sli.to_s + ":" + sub_e.str]
       if hr != nil
         @a.mov_w(R_X0, hr)
         return nil
+    # Fast inline ARM64 1-byte ASCII scan for constant 1-char needle OR conditional 1-char needle (`q===34 ? '"' : "'"`)!
+    is_lit1 = sub_e.kind == :string && sub_e.str.size == 1 && sub_e.str.byte_at(0) < 128
+    is_cond1 = !is_lit1 && sub_e.kind == :cond && sub_e.b.kind == :string && sub_e.b.str.size == 1 && sub_e.b.str.byte_at(0) < 128 && sub_e.c.kind == :string && sub_e.c.str.size == 1 && sub_e.c.str.byte_at(0) < 128
+    if is_lit1 || is_cond1
+      jit_keep("indexOf")
+      ch = -1
+      sub_off = -1
+      if is_lit1
+        ch = sub_e.str.byte_at(0)
+        jit_keep(sub_e.str)
+      else
+        jit_keep(sub_e.b.str)
+        jit_keep(sub_e.c.str)
+        l_cf = @a.new_label
+        l_cd = @a.new_label
+        gen_cond_branch(sub_e.a, l_cf, false)
+        @a.movz_x(R_X15, sub_e.b.str.byte_at(0))
+        @a.mov_imm64(R_X2, wvalue_bits(sub_e.b.str) ## i64)
+        @a.b(l_cd)
+        @a.bind(l_cf)
+        @a.movz_x(R_X15, sub_e.c.str.byte_at(0))
+        @a.mov_imm64(R_X2, wvalue_bits(sub_e.c.str) ## i64)
+        @a.bind(l_cd)
+        sub_off = push_x(R_X2) if from_e != nil
+      from_is_i32 = from_e != nil && can_i32?(from_e)
+      from_off = -1
+      if from_e != nil
+        if from_is_i32
+          gen_expr_i32(from_e)
+          @a.sxtw(R_X12, R_X0)
+        else
+          gen_expr_any(from_e)
+          from_off = push_x(R_X0)
+        if is_cond1
+          @a.ldr_x(R_X2, R_SP, sub_off)
+          @a.lsr_xi(R_X15, R_X2, 4)
+          @a.and_w_lowmask(R_X15, R_X15, 8)
+      l_rt = @a.new_label
+      l_slow = @a.new_label
+      l_hit = @a.new_label
+      l_miss = @a.new_label
+      l_done = @a.new_label
+      if !@hoisted_epoch
+        ep_now = JS_EPOCH[0]
+        @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+        @a.ldr_x(R_X10, R_X9, 0)
+        @a.mov_imm64(R_X11, ep_now)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_slow)
+      r_s = (sli >= 0 && @info.types[sli] == JT_ANY) ? @info.reg_gpr[sli] : nil
+      if r_s != nil
+        @a.mov_r(R_X13, r_s)
+      else
+        load_slot_any(R_X13, sli)
+      @a.lsr_xi(R_X9, R_X13, 48)
+      @a.movz_x(R_X10, 0xFFF9)
+      @a.cmp_r(R_X9, R_X10)
+      @a.b_cond(CC_NE, l_slow)
+      if from_e != nil && !from_is_i32
+        @a.ldr_x(R_X9, R_SP, from_off)
+        @a.sub_r(R_X9, R_X9, R_X20)
+        @a.cmp_r(R_X9, R_X21)
+        @a.b_cond(CC_HS, l_rt)
+        @a.fmov_d_x(R_D0, R_X9)
+        @a.fcvtzs_w_d(R_X12, R_D0)
+        @a.scvtf_d_w(R_D1, R_X12)
+        @a.fcmp_d(R_D0, R_D1)
+        @a.b_cond(CC_NE, l_rt)
+        @a.sxtw(R_X12, R_X12)
+      emit_inline_ascii_indexof1(R_X13, ch, from_e != nil, l_rt, l_hit, l_miss)
+      @a.bind(l_hit)
+      @a.mov_w(R_X0, R_X12)
+      @a.b(l_done)
+      @a.bind(l_miss)
+      @a.movn_x(R_X0, 0)
+      @a.bind(l_done)
+      cb = ->()
+        @a.bind(l_rt)
+        @a.mov_r(R_X1, R_X13)
+        if is_lit1
+          @a.mov_imm64(R_X2, wvalue_bits(sub_e.str) ## i64)
+        elsif sub_off >= 0
+          @a.ldr_x(R_X2, R_SP, sub_off)
+        if from_e != nil
+          if from_is_i32
+            emit_box_i32(R_X3, R_X12)
+          else
+            @a.ldr_x(R_X3, R_SP, from_off)
+          call_rt(RT_STR_INDEXOF2)
+        else
+          call_rt(RT_STR_INDEXOF)
+        @a.sub_r(R_X15, R_X0, R_X20)
+        @a.fmov_d_x(R_D16, R_X15)
+        @a.fcvtzs_w_d(R_X0, R_D16)
+        @a.b(l_done)
+        @a.bind(l_slow)
+        sub_sv2 = (is_cond1 && sub_off < 0) ? push_x(R_X2) : sub_off
+        if from_e != nil && from_is_i32
+          emit_box_i32(R_X9, R_X12)
+          from_sv = push_x(R_X9)
+        r_s2 = (sli >= 0 && @info.types[sli] == JT_ANY) ? @info.reg_gpr[sli] : nil
+        if r_s2 != nil
+          @a.mov_r(R_X1, r_s2)
+        else
+          load_slot_any(R_X1, sli)
+        @a.mov_imm64(R_X2, wvalue_bits("indexOf") ## i64)
+        call_rt(RT_GETV)
+        @a.mov_r(R_X1, R_X0)
+        if r_s2 != nil
+          @a.mov_r(R_X2, r_s2)
+        else
+          load_slot_any(R_X2, sli)
+        if is_lit1
+          @a.mov_imm64(R_X3, wvalue_bits(sub_e.str) ## i64)
+        else
+          @a.ldr_x(R_X3, R_SP, sub_sv2)
+        if from_e != nil
+          @a.ldr_x(R_X4, R_SP, from_is_i32 ? from_sv : from_off)
+          call_rt(RT_CALL_2)
+          @tmp_depth -= 1 if from_is_i32
+        else
+          call_rt(RT_CALL_1)
+        @tmp_depth -= 1 if is_cond1 && sub_off < 0
+        @a.sub_r(R_X15, R_X0, R_X20)
+        @a.fmov_d_x(R_D16, R_X15)
+        @a.fcvtzs_w_d(R_X0, R_D16)
+        @a.b(l_done)
+      add_cold_stub(cb)
+      @tmp_depth -= 1 if from_off >= 0
+      @tmp_depth -= 1 if sub_off >= 0
+      return nil
+    if from_e != nil
+      # General 2-arg indexOf -> call RT_STR_INDEXOF2 (or RT_CALL_2 on epoch change) and unbox i32
+      r_s = (sli >= 0 && @info.types[sli] == JT_ANY) ? @info.reg_gpr[sli] : nil
+      if r_s != nil
+        @a.mov_r(R_X0, r_s)
+      else
+        load_slot_any(R_X0, sli)
+      rec_off = push_x(R_X0)
+      gen_expr_any(sub_e)
+      sub_off = push_x(R_X0)
+      gen_expr_any(from_e)
+      @a.mov_r(R_X3, R_X0)
+      @a.ldr_x(R_X1, R_SP, rec_off)
+      @a.ldr_x(R_X2, R_SP, sub_off)
+      call_rt(RT_STR_INDEXOF2)
+      @a.sub_r(R_X15, R_X0, R_X20)
+      @a.fmov_d_x(R_D16, R_X15)
+      @a.fcvtzs_w_d(R_X0, R_D16)
+      @tmp_depth -= 2
+      return nil
     ic = @str_io_ics[call_e]
     if ic == nil
       ic = i64[3]
@@ -5729,14 +12161,8 @@ OSR_RETURN = 2
       @str_io_ics[call_e] = ic
     ic_p = jit_arr_slots_ptr(wvalue_bits(ic) ## i64)
     l_miss = @a.new_label
+    l_ep_slow = @a.new_label
     l_done = @a.new_label
-    if !@hoisted_epoch
-      ep_now = JS_EPOCH[0]
-      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
-      @a.ldr_x(R_X10, R_X9, 0)
-      @a.mov_imm64(R_X11, ep_now)
-      @a.cmp_r(R_X10, R_X11)
-      @a.b_cond(CC_NE, l_miss)
     r_s = (sli >= 0 && @info.types[sli] == JT_ANY) ? @info.reg_gpr[sli] : nil
     if r_s != nil
       @a.mov_r(R_X13, r_s)
@@ -5750,6 +12176,13 @@ OSR_RETURN = 2
       gen_expr_any(sub_e)
       @a.mov_r(R_X14, R_X0)
       pop_x(R_X13)
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_ep_slow)
     @a.mov_imm64(R_X9, ic_p)
     @a.ldr_x(R_X10, R_X9, 0)
     @a.cmp_r(R_X13, R_X10)
@@ -5769,10 +12202,26 @@ OSR_RETURN = 2
       @a.fmov_d_x(R_D16, R_X15)
       @a.fcvtzs_w_d(R_X0, R_D16)
       @a.b(l_done)
+      if !@hoisted_epoch
+        @a.bind(l_ep_slow)
+        s_ep = push_x(R_X13)
+        sub_ep = push_x(R_X14)
+        @a.mov_r(R_X1, R_X13)
+        @a.mov_imm64(R_X2, wvalue_bits("indexOf") ## i64)
+        call_rt(RT_GETV)
+        @a.mov_r(R_X1, R_X0)
+        @a.ldr_x(R_X2, R_SP, s_ep)
+        @a.ldr_x(R_X3, R_SP, sub_ep)
+        call_rt(RT_CALL_1)
+        @tmp_depth -= 2
+        @a.sub_r(R_X15, R_X0, R_X20)
+        @a.fmov_d_x(R_D16, R_X15)
+        @a.fcvtzs_w_d(R_X0, R_D16)
+        @a.b(l_done)
     add_cold_stub(cb)
     nil
 
-  # Inline 1-entry ASCII IC for `str_local.charCodeAt(idx)` -> u16 code unit in w0 (or branches to l_oob if OOB/slow!)
+  # Pure inline ARM64 flat ASCII `str_local.charCodeAt(idx)` -> u16 code unit in w0 (ZERO RT calls on both heap & inline ASCII!)
   -> gen_str_charcode_i32_fast(call_e, str_e, idx_e, l_slow_out)
     sli = local_idx(str_e)
     # Ultra-fast hoisted loop-invariant ASCII string `(ptr, [len], [bmask])` path (2-3 instructions total!)
@@ -5790,20 +12239,18 @@ OSR_RETURN = 2
           @a.cmp_r(R_X12, hp[1])
           @a.b_cond(CC_HS, l_slow_out)
         @a.ldrb_idx(R_X0, hp[0], R_X12)
-        return @str_cc_ics[call_e]
-    ic = @str_cc_ics[call_e]
-    if ic == nil
-      ic = i64[3]
-      ic[0] = 0; ic[1] = 0; ic[2] = 0
-      jit_keep(ic)
-      @str_cc_ics[call_e] = ic
-    ic_p = jit_arr_slots_ptr(wvalue_bits(ic) ## i64)
+        return nil
     r_idx = peek_i32_reg(idx_e)
     if r_idx != nil
       @a.sxtw(R_X12, r_idx)
     else
       gen_expr_to_i32(idx_e)
       @a.sxtw(R_X12, R_X0)
+    r_s = (sli >= 0 && @info.types[sli] == JT_ANY) ? @info.reg_gpr[sli] : nil
+    if r_s != nil
+      @a.mov_r(R_X13, r_s)
+    else
+      load_slot_any(R_X13, sli)
     if !@hoisted_epoch
       ep_now = JS_EPOCH[0]
       @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
@@ -5811,34 +12258,74 @@ OSR_RETURN = 2
       @a.mov_imm64(R_X11, ep_now)
       @a.cmp_r(R_X10, R_X11)
       @a.b_cond(CC_NE, l_slow_out)
-    r_s = (sli >= 0 && @info.types[sli] == JT_ANY) ? @info.reg_gpr[sli] : nil
-    if r_s != nil
-      @a.mov_r(R_X13, r_s)
-    else
-      load_slot_any(R_X13, sli)
-    @a.mov_imm64(R_X9, ic_p)
-    @a.ldr_x(R_X10, R_X9, 0)
-    @a.cmp_r(R_X13, R_X10)
+    l_cc_slab = @a.new_label
+    l_cc_inl = @a.new_label
+    l_cc_ok = @a.new_label
+    @a.lsr_xi(R_X9, R_X13, 48)
+    @a.movz_x(R_X10, 0xFFF9)
+    @a.cmp_r(R_X9, R_X10)
     @a.b_cond(CC_NE, l_slow_out)
-    @a.ldr_x(R_X11, R_X9, 16)         # byte_len
+    @a.tst_x_lowmask(R_X13, 1)
+    @a.b_cond(CC_NE, l_slow_out)
+    @a.lsr_xi(R_X9, R_X13, 1)
+    @a.and_x_lowmask(R_X9, R_X9, 3)
+    @a.cmp_i(R_X9, 7)
+    @a.b_cond(CC_NE, l_cc_slab)
+    @a.and_x_ptr47(R_X10, R_X13)
+    @a.ldr_w(R_X11, R_X10, 8)
+    @a.cmp_wi(R_X11, 0)
+    @a.b_cond(CC_GE, l_slow_out)
+    @a.and_w_lowmask(R_X11, R_X11, 31)
     @a.cmp_r(R_X12, R_X11)
     @a.b_cond(CC_HS, l_slow_out)
-    @a.ldr_x(R_X10, R_X9, 8)          # ascii_ptr
-    @a.ldrb_idx(R_X0, R_X10, R_X12)   # 1-cycle ASCII byte load!
-    ic
+    @a.add_i(R_X10, R_X10, 16)
+    @a.ldrb_idx(R_X0, R_X10, R_X12)
+    @a.b(l_cc_ok)
+    @a.bind(l_cc_slab)
+    @a.cmp_i(R_X9, 6)
+    @a.b_cond(CC_NE, l_cc_inl)
+    @a.ldr_x(R_X10, R_X19, RT_K_SLAB_BASE * 8)
+    @a.cbz_x(R_X10, l_slow_out)
+    @a.lsr_xi(R_X14, R_X13, 4)
+    @a.and_x_lowmask(R_X14, R_X14, 24)
+    @a.add_r(R_X10, R_X10, R_X14, 5)
+    @a.ldrb(R_X11, R_X10, 0)
+    @a.movz_x(R_X14, 9)
+    @a.and_w(R_X11, R_X11, R_X14)
+    @a.cmp_wi(R_X11, 9)
+    @a.b_cond(CC_NE, l_slow_out)
+    @a.ldrb(R_X11, R_X10, 1)
+    @a.cmp_r(R_X12, R_X11)
+    @a.b_cond(CC_HS, l_slow_out)
+    @a.add_i(R_X10, R_X10, 2)
+    @a.ldrb_idx(R_X0, R_X10, R_X12)
+    @a.b(l_cc_ok)
+    @a.bind(l_cc_inl)
+    @a.cmp_i(R_X9, 5)
+    @a.b_cond(CC_HI, l_slow_out)
+    @a.mov_imm64(R_X10, 8830587504640)
+    @a.tst_r(R_X13, R_X10)
+    @a.b_cond(CC_NE, l_slow_out)
+    @a.cmp_r(R_X12, R_X9)
+    @a.b_cond(CC_HS, l_slow_out)
+    @a.lsr_xi(R_X10, R_X13, 4)
+    @a.lsl_xi(R_X11, R_X12, 3)
+    @a.lsr_x(R_X0, R_X10, R_X11)
+    @a.and_w_lowmask(R_X0, R_X0, 8)
+    @a.bind(l_cc_ok)
+    nil
 
   -> gen_str_charcode_f64(call_e, str_e, idx_e)
     l_miss = @a.new_label
     l_done = @a.new_label
-    ic = gen_str_charcode_i32_fast(call_e, str_e, idx_e, l_miss)
+    gen_str_charcode_i32_fast(call_e, str_e, idx_e, l_miss)
     @a.scvtf_d_w(R_D0, R_X0)
     @a.bind(l_done)
     cb = ->()
       @a.bind(l_miss)
       @a.mov_r(R_X1, R_X13)
       emit_box_i32(R_X2, R_X12)
-      @a.mov_imm64(R_X3, wvalue_bits(ic) ## i64)
-      call_rt(RT_STR_CHARCODE_IC)
+      call_rt(RT_STR_CHARCODE)
       @a.sub_r(R_X15, R_X0, R_X20)
       @a.fmov_d_x(R_D0, R_X15)
       @a.b(l_done)
@@ -6011,15 +12498,178 @@ OSR_RETURN = 2
     terms.push(e)
     nil
 
+  # Compile-time constant i32/bool folding (resolves `@const_i_vals`, `global_i32s`, and constant ternaries!)
+  -> const_eval_bool(e)
+    return nil if e == nil
+    return true if e.kind == :true
+    return false if e.kind == :false
+    if e.kind == :binary
+      a = const_eval_i32(e.a)
+      b = a != nil ? const_eval_i32(e.b) : nil
+      if a != nil && b != nil
+        op = e.str
+        return a == b if op == "===" || op == "=="
+        return a != b if op == "!==" || op == "!="
+        return a < b if op == "<"
+        return a <= b if op == "<="
+        return a > b if op == ">"
+        return a >= b if op == ">="
+    nil
+
+  -> const_eval_i32(e)
+    return nil if e == nil
+    k = e.kind
+    return e.a.to_i if k == :num && jit_int32_lit?(e)
+    return jit_signed_i32_val(e) if k == :unary && e.str == "-"
+    if k == :ident
+      if @inline_env != nil && e.x != nil && e.x.binding != nil && @inline_env[e.x.binding] != nil && @inline_env[e.x.binding][0] == :const_i32
+        return @inline_env[e.x.binding][1]
+      li = local_idx(e)
+      return @const_i_vals[li] if li >= 0 && @const_i_vals[li] != nil
+      return @info.global_i32s[e.x.binding][0] if e.x != nil && e.x.binding != nil && @info.global_i32s[e.x.binding] != nil
+      return nil
+    if k == :cond
+      cb = const_eval_bool(e.a)
+      return const_eval_i32(e.b) if cb == true
+      return const_eval_i32(e.c) if cb == false
+    nil
+
+  -> expr_uses_x12?(e)
+    return false if e == nil
+    k = e.kind
+    return false if k == :num || k == :ident || k == :true || k == :false
+    if k == :member && e.has?(F_COMPUTED)
+      bli = local_idx(e.a)
+      return false if bli >= 0 && @hoisted_tas[bli] != nil && @hoisted_tas[bli][2] <= 5 && peek_i32_reg(e.b) != nil
+      return true
+    if k == :cond
+      return expr_uses_x12?(e.a) || expr_uses_x12?(e.b) || expr_uses_x12?(e.c)
+    if k == :binary && (e.str == "===" || e.str == "!==" || e.str == "<" || e.str == "<=" || e.str == ">" || e.str == ">=")
+      return peek_i32_reg(e.a) == nil || (peek_i32_reg(e.b) == nil && const_eval_i32(e.b) == nil)
+    true
+
+  # Branchless `csel_w` for simple i32 conditional chains (`d === 0 ? -1 : d === 1 ? 1 : 0`, `sm === i ? lf : x`)!
+  -> try_gen_branchless_cond_i32(e)
+    return false if e == nil || e.kind != :cond
+    # Pattern 1: nested 2-way `x === k1 ? v1 : (x === k2 ? v2 : v3)` with i32 reg/local x & signed i32 lits!
+    v1 = jit_signed_i32_val(e.b)
+    if v1 != nil && e.a.kind == :binary && (e.a.str == "===" || e.a.str == "!==") && jit_small_int_lit?(e.a.b, 4095) && e.a.b.a.to_i >= 0
+      rx = try_i32_reg(e.a.a, R_X10)
+      if rx != nil
+        v2_s = jit_signed_i32_val(e.c)
+        if v2_s != nil
+          @a.mov_imm32(R_X0, v2_s)
+          @a.mov_imm32(R_X9, v1)
+          @a.cmp_wi(rx, e.a.b.a.to_i)
+          @a.csel_w(R_X0, R_X9, R_X0, e.a.str == "===" ? CC_EQ : CC_NE)
+          return true
+        if e.c.kind == :cond && e.c.a.kind == :binary && e.c.a.str == "===" && jit_small_int_lit?(e.c.a.b, 4095) && e.c.a.b.a.to_i >= 0 && e.a.a.kind == :ident && e.c.a.a.kind == :ident && local_idx(e.a.a) >= 0 && local_idx(e.a.a) == local_idx(e.c.a.a)
+          v2 = jit_signed_i32_val(e.c.b)
+          v3 = jit_signed_i32_val(e.c.c)
+          if v2 != nil && v3 != nil
+            @a.mov_imm32(R_X0, v3)
+            @a.mov_imm32(R_X9, v2)
+            @a.cmp_wi(rx, e.c.a.b.a.to_i)
+            @a.csel_w(R_X0, R_X9, R_X0, CC_EQ)
+            @a.mov_imm32(R_X9, v1)
+            @a.cmp_wi(rx, e.a.b.a.to_i)
+            @a.csel_w(R_X0, R_X9, R_X0, e.a.str == "===" ? CC_EQ : CC_NE)
+            return true
+    false
+
   # Evaluate expression whose type is known JT_I32 -> result in w0.
+  # Match big-endian 4-byte Uint8Array word load: `(buf[p] << 24) | (buf[p+1] << 16) | (buf[p+2] << 8) | buf[p+3]`!
+  # Returns `[ta_li, p_li]` or nil.
+  -> match_be32_u8_term(e, out)
+    if e.kind == :binary && e.str == "|"
+      return match_be32_u8_term(e.a, out) && match_be32_u8_term(e.b, out)
+    sh = 0
+    mem = e
+    if e.kind == :binary && e.str == "<<" && e.b.kind == :num && jit_int32_lit?(e.b)
+      sh = e.b.a.to_i
+      mem = e.a
+    return false if mem == nil || mem.kind != :member || !mem.has?(F_COMPUTED)
+    ta_li = local_idx(mem.a)
+    return false if ta_li < 0 || @hoisted_tas[ta_li] == nil || @hoisted_tas[ta_li][2] != 1
+    off = 0
+    p_li = local_idx(mem.b)
+    if p_li < 0
+      return false if mem.b.kind != :binary || mem.b.str != "+" || !jit_int32_lit?(mem.b.b)
+      p_li = local_idx(mem.b.a)
+      off = mem.b.b.a.to_i
+    return false if p_li < 0 || @info.types[p_li] != JT_I32
+    want_sh = off == 0 ? 24 : (off == 1 ? 16 : (off == 2 ? 8 : (off == 3 ? 0 : -1)))
+    return false if sh != want_sh
+    return false if out[0] >= 0 && (out[0] != ta_li || out[1] != p_li)
+    out[0] = ta_li
+    out[1] = p_li
+    out[2] = out[2] | (1 << off)
+    true
+
+  -> try_gen_be32_u8_load(e)
+    return false if e.kind != :binary || e.str != "|"
+    out = [-1, -1, 0]
+    return false if !match_be32_u8_term(e, out) || out[2] != 15
+    ta_li = out[0]
+    p_li = out[1]
+    h = @hoisted_tas[ta_li]
+    tr = @hoisted_ta_regs[ta_li]
+    r_ptr = (tr != nil && tr[0] != nil) ? tr[0] : R_X9
+    r_p = @info.reg_gpr[p_li]
+    if r_p != nil
+      @a.sxtw(R_X11, r_p)
+    else
+      load_slot_i32(R_X11, p_li)
+      @a.sxtw(R_X11, R_X11)
+    if tr != nil && tr[1] != nil
+      @a.subs_i(R_X10, tr[1], 3)
+    else
+      @a.ldr_x(R_X10, R_SP, h[1])
+      @a.subs_i(R_X10, R_X10, 3)
+    l_oob = @a.new_label
+    l_done = @a.new_label
+    @a.b_cond(CC_LE, l_oob)              # len <= 3 -> slow
+    @a.cmp_r(R_X11, R_X10)               # unsigned p < len - 3 => 0 <= p && p + 3 < len!
+    @a.b_cond(CC_HS, l_oob)
+    @a.ldr_x(R_X9, R_SP, h[0]) if r_ptr == R_X9
+    @a.ldr_w_byte(R_X0, r_ptr, R_X11)
+    @a.rev_w(R_X0, R_X0)                 # big-endian 32-bit word in 2 instructions!
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_oob)
+      gen_expr_to_i32(e.a)
+      push_w(R_X0)
+      gen_expr_to_i32(e.b)
+      pop_w(R_X9)
+      @a.orr_w(R_X0, R_X9, R_X0)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    true
+
   -> gen_expr_i32(e)
     k = e.kind
+    if k == :jit_spill_w
+      @a.ldr_w(R_X0, R_SP, e.a)
+      return nil
     if k == :num
       @a.mov_imm32(R_X0, e.a.to_i)
       return nil
+    if @const_i_vals.size > 0
+      cv0 = const_eval_i32(e)
+      if cv0 != nil
+        @a.mov_imm32(R_X0, cv0)
+        return nil
+    if k == :unary && e.str == "-"
+      sv = jit_signed_i32_val(e)
+      if sv != nil
+        @a.mov_imm32(R_X0, sv)
+        return nil
     if k == :ident
       if @inline_env != nil && e.x != nil && @inline_env[e.x.binding] != nil
         iv = @inline_env[e.x.binding]
+        if iv[0] == :const_i32
+          @a.mov_imm32(R_X0, iv[1])
+          return nil
         if iv[0] == :slot
           load_slot_i32(R_X0, iv[1])
           return nil
@@ -6030,11 +12680,131 @@ OSR_RETURN = 2
           @a.mov_w(R_X0, iv[1])
           return nil
       li = local_idx(e)
-      if li >= 0 && @info.types[li] == JT_I32
+      if li >= 0 && (@info.types[li] == JT_I32 || @info.types[li] == JT_U32)
         load_slot_i32(R_X0, li)
         return nil
+      if e.x != nil && e.x.binding != nil && @info.global_i32s[e.x.binding] != nil
+        @a.mov_imm32(R_X0, @info.global_i32s[e.x.binding][0])
+        return nil
+    if k == :update
+      li = local_idx(e.a)
+      if li >= 0 && @info.types[li] == JT_I32
+        inc = e.str == "++"
+        pre = e.has?(F_PREFIX)
+        r = @info.reg_gpr[li]
+        if r != nil
+          @a.mov_w(R_X9, r) if !pre
+          if inc
+            @a.adds_wi(r, r, 1)
+          else
+            @a.subs_wi(r, r, 1)
+          @a.b_cond(CC_VS, @l_deopt)
+          @a.mov_w(R_X0, pre ? r : R_X9)
+        else
+          load_slot_i32(R_X9, li)
+          if inc
+            @a.adds_wi(R_X10, R_X9, 1)
+          else
+            @a.subs_wi(R_X10, R_X9, 1)
+          @a.b_cond(CC_VS, @l_deopt)
+          store_slot_i32(li, R_X10)
+          @a.mov_w(R_X0, pre ? R_X10 : R_X9)
+        return nil
+    if k == :cond
+      # Branchless `csel_w` for simple i32 literal/reg conditional chains (`d === 0 ? -1 : d === 1 ? 1 : 0`)!
+      if try_gen_branchless_cond_i32(e)
+        return nil
+      l_else = @a.new_label
+      l_end = @a.new_label
+      gen_cond_branch(e.a, l_else, false)
+      gen_expr_i32(e.b)
+      @a.b(l_end)
+      @a.bind(l_else)
+      gen_expr_i32(e.c)
+      @a.bind(l_end)
+      return nil
     if k == :member && !e.has?(F_COMPUTED)
       bli = local_idx(e.a)
+      if e.b.str == "length" && bli >= 0
+        if @hoisted_tas[bli] != nil
+          tr = @hoisted_ta_regs[bli]
+          if tr != nil && tr[1] != nil
+            @a.mov_w(R_X0, tr[1])
+          else
+            @a.ldr_x(R_X0, R_SP, @hoisted_tas[bli][1])
+          return nil
+        if @hoisted_arrs[bli] != nil
+          ar = @hoisted_arr_regs[bli]
+          if ar != nil && ar[1] != nil
+            @a.mov_w(R_X0, ar[1])
+          else
+            @a.ldr_x(R_X0, R_SP, @hoisted_arrs[bli][1])
+          return nil
+        if @info.local_arrs[bli] != nil || @info.ro_keys_locals[bli] != nil
+          load_slot_any(R_X9, bli)
+          @a.and_x_ptr47(R_X9, R_X9)
+          @a.ldrsw(R_X0, R_X9, 8)
+          return nil
+        if !@is_osr && @info.str_locals[bli]
+          r_s = @info.reg_gpr[bli]
+          if r_s != nil
+            @a.mov_r(R_X13, r_s)
+          else
+            load_slot_any(R_X13, bli)
+          l_hl = @a.new_label
+          l_sl = @a.new_label
+          l_rt = @a.new_label
+          l_dn = @a.new_label
+          @a.lsr_xi(R_X9, R_X13, 48)
+          @a.movz_x(R_X10, 0xFFF9)
+          @a.cmp_r(R_X9, R_X10)
+          @a.b_cond(CC_NE, l_rt)
+          @a.tst_x_lowmask(R_X13, 1)
+          @a.b_cond(CC_NE, l_rt)
+          @a.lsr_xi(R_X9, R_X13, 1)
+          @a.and_x_lowmask(R_X9, R_X9, 3)
+          @a.cmp_i(R_X9, 7)
+          @a.b_cond(CC_EQ, l_hl)
+          @a.cmp_i(R_X9, 6)
+          @a.b_cond(CC_EQ, l_sl)
+          @a.cmp_i(R_X9, 5)
+          @a.b_cond(CC_HI, l_rt)
+          @a.mov_imm64(R_X10, 8830587504640)
+          @a.tst_r(R_X13, R_X10)
+          @a.b_cond(CC_NE, l_rt)
+          @a.mov_w(R_X0, R_X9)
+          @a.b(l_dn)
+          @a.bind(l_sl)
+          @a.ldr_x(R_X10, R_X19, RT_K_SLAB_BASE * 8)
+          @a.cbz_x(R_X10, l_rt)
+          @a.lsr_xi(R_X11, R_X13, 4)
+          @a.and_x_lowmask(R_X11, R_X11, 24)
+          @a.add_r(R_X10, R_X10, R_X11, 5)
+          @a.ldrb(R_X11, R_X10, 0)
+          @a.movz_x(R_X12, 9)
+          @a.and_w(R_X11, R_X11, R_X12)
+          @a.cmp_wi(R_X11, 9)
+          @a.b_cond(CC_NE, l_rt)
+          @a.ldrb(R_X0, R_X10, 1)
+          @a.b(l_dn)
+          @a.bind(l_hl)
+          @a.and_x_ptr47(R_X10, R_X13)
+          @a.ldr_w(R_X0, R_X10, 8)
+          @a.cmp_wi(R_X0, 0)
+          @a.b_cond(CC_GE, l_rt)
+          @a.and_w_lowmask(R_X0, R_X0, 31)
+          @a.bind(l_dn)
+          cb = ->()
+            @a.bind(l_rt)
+            @a.mov_r(R_X1, R_X13)
+            @a.mov_imm64(R_X2, wvalue_bits("length") ## i64)
+            call_rt(RT_GETV)
+            @a.sub_r(R_X15, R_X0, R_X20)
+            @a.fmov_d_x(R_D16, R_X15)
+            @a.fcvtzs_w_d(R_X0, R_D16)
+            @a.b(l_dn)
+          add_cold_stub(cb)
+          return nil
       if bli >= 0 && @info.sra_objs[bli] != nil
         cval = @info.sra_objs[bli].const_i32[e.b.str]
         if cval != nil
@@ -6070,12 +12840,15 @@ OSR_RETURN = 2
         return nil
       if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @hoisted_global_tas[e.a.x.binding] != nil && @hoisted_global_tas[e.a.x.binding][2] <= 5
         gb = e.a.x.binding
-        gen_ta_load_i32_h(@hoisted_global_tas[gb], @hoisted_gta_regs[gb], -1, e.b)
+        gen_ta_load_i32_h(@hoisted_global_tas[gb], @hoisted_gta_regs[gb], -1, e.b, gb)
         return nil
-    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "indexOf" && e.list.size == 1 && !@is_osr
+    if k == :call && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @info.inlined_fns[e.a.x.binding] != nil
+      emit_inlined_fn_call(@info.inlined_fns[e.a.x.binding], e.list, :i32)
+      return nil
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "indexOf" && (e.list.size == 1 || e.list.size == 2) && !@is_osr
       sli = local_idx(e.a.a)
       if sli >= 0 && @info.str_locals[sli]
-        gen_str_indexof_i32(e, e.a.a, e.list[0])
+        gen_str_indexof_i32(e, e.a.a, e.list[0], e.list.size == 2 ? e.list[1] : nil)
         return nil
     if k == :binary
       op = e.str
@@ -6083,6 +12856,30 @@ OSR_RETURN = 2
       if op == "|" && e.b.kind == :num && e.b.a == ~0.0
         gen_expr_to_i32(e.a)
         return nil
+      # Fused big-endian 4-byte Uint8Array word load (`(buf[p]<<24)|(buf[p+1]<<16)|(buf[p+2]<<8)|buf[p+3]` -> LDR + REV!)
+      if op == "|" && try_gen_be32_u8_load(e)
+        return nil
+      # Fused 32-bit rotate `(x >>> k) | (x << (32 - k))` -> 1-insn ARM64 `ROR Wd, Wn, #k`!
+      rm = match_ror32(e)
+      if rm != nil
+        rx = try_i32_reg(rm[0], R_X0)
+        if rx != nil
+          @a.ror_wi(R_X0, rx, rm[1])
+          return nil
+      # Fused `(~a) & b` or `b & (~a)` -> 1-insn ARM64 `BIC Wd, Wb, Wa`!
+      if op == "&"
+        if e.a.kind == :unary && e.a.str == "~"
+          ra = try_i32_reg(e.a.a, R_X9)
+          rb = ra != nil ? try_i32_reg(e.b, R_X10) : nil
+          if ra != nil && rb != nil
+            @a.bic_w(R_X0, rb, ra)
+            return nil
+        if e.b.kind == :unary && e.b.str == "~"
+          ra = try_i32_reg(e.a, R_X9)
+          rb = ra != nil ? try_i32_reg(e.b.a, R_X10) : nil
+          if ra != nil && rb != nil
+            @a.bic_w(R_X0, ra, rb)
+            return nil
       # `x & 255` (power-of-two mask!) -> single AND W0, W0, #mask
       if op == "&" && e.b.kind == :num && jit_int32_lit?(e.b)
         m = e.b.a.to_i
@@ -6104,8 +12901,37 @@ OSR_RETURN = 2
           else
             @a.asr_wi(R_X0, R_X0, sh)
         return nil
+      if op == "^"
+        # Fused `x ^ ROR(y, k)` -> `eor_w_ror` and `x ^ (y >>> k)` -> `eor_w_lsr` (1 insn instead of 2!)
+        rm_x = match_ror32(e.b)
+        if rm_x != nil
+          ry = peek_raw32_reg(rm_x[0])
+          if ry != nil
+            gen_expr_to_i32(e.a)
+            @a.eor_w_ror(R_X0, R_X0, ry, rm_x[1])
+            return nil
+        if e.b.kind == :binary && e.b.str == ">>>" && jit_int32_lit?(e.b.b)
+          sh_x = e.b.b.a.to_i & 31
+          ry = sh_x > 0 ? peek_raw32_reg(e.b.a) : nil
+          if ry != nil
+            gen_expr_to_i32(e.a)
+            @a.eor_w_lsr(R_X0, R_X0, ry, sh_x)
+            return nil
       if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
         gen_expr_to_i32(e.a)
+        rb = try_eval_raw32_leaf(e.b, R_X9, R_X10)
+        if rb != nil
+          if op == "|"
+            @a.orr_w(R_X0, R_X0, rb)
+          elsif op == "&"
+            @a.and_w(R_X0, R_X0, rb)
+          elsif op == "^"
+            @a.eor_w(R_X0, R_X0, rb)
+          elsif op == "<<"
+            @a.lsl_w(R_X0, R_X0, rb)
+          else
+            @a.asr_w(R_X0, R_X0, rb)
+          return nil
         push_w(R_X0)
         gen_expr_to_i32(e.b)
         pop_w(R_X9)
@@ -6120,36 +12946,112 @@ OSR_RETURN = 2
         else
           @a.asr_w(R_X0, R_X9, R_X0)
         return nil
-      # Exact non-negative `a % K` (positive int32 literal K): magic multiply, deopt if a < 0 (preserves -0.0!)
+      # Exact non-negative `a % K` (positive int32 literal K): magic multiply, skip `< 0` check when proven non-negative!
       if op == "%" && can_i32?(e.a) && e.b.kind == :num && jit_int32_lit?(e.b) && e.b.a.to_i > 0
         kv = e.b.a.to_i
+        nn_a = jit_known_nonneg_i32?(e.a)
         ra = peek_i32_reg(e.a)
         if ra != nil
-          @a.cmp_wi(ra, 0)
-          @a.b_cond(CC_LT, @l_deopt)
+          if !nn_a
+            @a.cmp_wi(ra, 0)
+            @a.b_cond(CC_LT, @l_deopt)
           @a.mov_w(R_X9, ra)
         else
           gen_expr_i32(e.a)
-          @a.cmp_wi(R_X0, 0)
-          @a.b_cond(CC_LT, @l_deopt)
+          if !nn_a
+            @a.cmp_wi(R_X0, 0)
+            @a.b_cond(CC_LT, @l_deopt)
           @a.mov_w(R_X9, R_X0)
         if kv == 1
           @a.movz_x(R_X0, 0)
         else
           emit_mod_const_u31(R_X0, R_X9, kv)
         return nil
-      # Small offset like `i + 1` into an i32 slot (skip overflow check if loop guard proved i <= 2147483645!)
-      if (op == "+" || op == "-") && can_i32?(e.a) && jit_small_int_lit?(e.b, 4095) && e.b.a.to_i >= 0
-        if op == "+" && e.b.a.to_i == 1 && @no_ovf_p1_li >= 0 && local_idx(e.a) == @no_ovf_p1_li && @info.reg_gpr[@no_ovf_p1_li] != nil
+      # Exact non-negative `a % b` where `b` is a prologue-guarded positive int32 param (`1..1048576`): 2-insn udiv + msub!
+      if op == "%" && jit_known_nonneg_i32?(e.a) && e.b.kind == :ident && local_idx(e.b) >= 0 && @info.param_nonneg_ints[local_idx(e.b)] == 2
+        gen_expr_i32(e.a)
+        @a.mov_w(R_X9, R_X0)
+        rb = try_i32_reg(e.b, R_X10)
+        if rb == nil
+          push_w(R_X9)
+          gen_expr_i32(e.b)
+          @a.mov_w(R_X10, R_X0)
+          pop_w(R_X9)
+          rb = R_X10
+        @a.udiv_w(R_X11, R_X9, rb)
+        @a.msub_w(R_X0, R_X11, rb, R_X9)
+        return nil
+      # Small offset like `i + 1`, `i - 1`, or `cx + const_eval(ternary)` into an i32 slot
+      cv_add = (op == "+" || op == "-") && can_i32?(e.a) ? const_eval_i32(e.b) : nil
+      if cv_add != nil && cv_add >= -4095 && cv_add <= 4095
+        kv = cv_add
+        if op == "+" && kv == 1 && @no_ovf_p1_li >= 0 && local_idx(e.a) == @no_ovf_p1_li && @info.reg_gpr[@no_ovf_p1_li] != nil
           off_p1 = (@unroll_i_li == @no_ovf_p1_li ? @unroll_i_off : 0)
           @a.add_wi(R_X0, @info.reg_gpr[@no_ovf_p1_li], 1 + off_p1)
           return nil
         gen_expr_i32(e.a)
+        if kv > 0
+          if op == "+"
+            @a.add_wi(R_X0, R_X0, kv)
+          else
+            @a.sub_wi(R_X0, R_X0, kv)
+        elsif kv < 0
+          if op == "+"
+            @a.sub_wi(R_X0, R_X0, 0 - kv)
+          else
+            @a.add_wi(R_X0, R_X0, 0 - kv)
+        return nil
+      # Provably-safe `i32 * small_const` (power-of-2 shift or `mul_w`)
+      if op == "*" && can_i32?(e.a) && can_i32?(e.b)
+        kv = nil
+        lhs_m = e.a
+        if jit_small_int_lit?(e.b, 1024)
+          kv = e.b.a.to_i
+          lhs_m = e.a
+        elsif jit_small_int_lit?(e.a, 1024)
+          kv = e.a.a.to_i
+          lhs_m = e.b
+        elsif e.b.kind == :ident && e.b.x != nil && e.b.x.binding != nil && @info.global_i32s[e.b.x.binding] != nil
+          kv = @info.global_i32s[e.b.x.binding][0]
+          lhs_m = e.a
+        if kv != nil
+          gen_expr_i32(lhs_m)
+          if kv == 2
+            @a.lsl_wi(R_X0, R_X0, 1)
+          elsif kv == 4
+            @a.lsl_wi(R_X0, R_X0, 2)
+          elsif kv == 8
+            @a.lsl_wi(R_X0, R_X0, 3)
+          elsif kv == 16
+            @a.lsl_wi(R_X0, R_X0, 4)
+          elsif kv == 32
+            @a.lsl_wi(R_X0, R_X0, 5)
+          elsif kv == 64
+            @a.lsl_wi(R_X0, R_X0, 6)
+          elsif kv == 128
+            @a.lsl_wi(R_X0, R_X0, 7)
+          elsif kv == 256
+            @a.lsl_wi(R_X0, R_X0, 8)
+          else
+            @a.mov_imm32(R_X9, kv)
+            @a.mul_w(R_X0, R_X0, R_X9)
+          return nil
+      if (op == "+" || op == "-") && can_i32?(e.a) && can_i32?(e.b)
+        gen_expr_i32(e.a)
+        rb = try_i32_reg(e.b, R_X9)
+        if rb != nil
+          if op == "+"
+            @a.add_w(R_X0, R_X0, rb)
+          else
+            @a.sub_w(R_X0, R_X0, rb)
+          return nil
+        push_w(R_X0)
+        gen_expr_i32(e.b)
+        pop_w(R_X9)
         if op == "+"
-          @a.adds_wi(R_X0, R_X0, e.b.a.to_i)
+          @a.add_w(R_X0, R_X9, R_X0)
         else
-          @a.subs_wi(R_X0, R_X0, e.b.a.to_i)
-        @a.b_cond(CC_VS, @l_deopt)
+          @a.sub_w(R_X0, R_X9, R_X0)
         return nil
     if k == :unary && e.str == "~"
       gen_expr_to_i32(e.a)
@@ -6217,9 +13119,27 @@ OSR_RETURN = 2
       gen_expr_i32(e)
       @a.scvtf_d_w(R_D0, R_X0)
       return nil
+    if can_u32?(e)
+      gen_expr_to_i32(e)
+      @a.ucvtf_d_w(R_D0, R_X0)
+      return nil
+    if k == :cond
+      l_else = @a.new_label
+      l_end = @a.new_label
+      gen_cond_branch(e.a, l_else, false)
+      gen_expr_f64(e.b)
+      @a.b(l_end)
+      @a.bind(l_else)
+      gen_expr_f64(e.c)
+      @a.bind(l_end)
+      return nil
     if k == :ident
       if @inline_env != nil && e.x != nil && @inline_env[e.x.binding] != nil
         iv = @inline_env[e.x.binding]
+        if iv[0] == :const_i32
+          @a.mov_imm64(R_X9, jit_f64_bits(wvalue_bits(iv[1].to_f) ## i64))
+          @a.fmov_d_x(R_D0, R_X9)
+          return nil
         if iv[0] == :slot
           load_slot_f64(R_D0, iv[1])
           return nil
@@ -6391,7 +13311,7 @@ OSR_RETURN = 2
             emit_f64_op(e.b.str, R_D1, rba, rbb)
             emit_f64_op(op, R_D0, R_D0, R_D1)
             return nil
-        if @info.reg_fpr.size < 8 && @d_bias_reg != R_D15 && !expr_uses_d15?(e.b)
+        if @slim_f_hi >= R_D15 && @info.reg_fpr.size < 8 && @d_bias_reg != R_D15 && !expr_uses_d15?(e.b)
           # Zero-spill FP binary op using unused callee-saved R_D15 (`a.x - b.x`, `dx * dx + dy * dy`)!
           gen_expr_f64(e.a)
           @a.fmov_d(R_D15, R_D0)
@@ -6443,12 +13363,17 @@ OSR_RETURN = 2
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && !@is_osr
       if gen_vstruct_scalar_f64(e)
         return nil
+      if gen_vstruct_method_f64_inline(e)
+        return nil
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.b.str == "charCodeAt" && e.list.size == 1 && !@is_osr
       sli = local_idx(e.a.a)
       if sli >= 0 && @info.str_locals[sli]
         gen_str_charcode_f64(e, e.a.a, e.list[0])
         return nil
     if k == :call && e.a.kind == :ident
+      if e.a.x != nil && e.a.x.binding != nil && @info.inlined_fns[e.a.x.binding] != nil
+        emit_inlined_fn_call(@info.inlined_fns[e.a.x.binding], e.list, :f64)
+        return nil
       li = local_idx(e.a)
       if li >= 0 && @info.sra_clos[li] != nil
         sc = @info.sra_clos[li]
@@ -6602,12 +13527,54 @@ OSR_RETURN = 2
     gen_expr_to_i32(idx_e)
     nil
 
-  -> ta_idx_bounded?(bli, idx_e)
+  -> ta_idx_bounded?(bli, idx_e, gb = nil)
     idx_li = local_idx(idx_e)
-    return true if idx_li >= 0 && (@bounded_idx[idx_li] == bli || @bounded_ta_set[idx_li.to_s + ":" + bli.to_s] == true)
-    if idx_e.is_a?(JsNode) && idx_e.kind == :binary && idx_e.str == "%" && exact_i32_sum_term?(idx_e.a) && can_i32?(idx_e.b)
+    return true if bli >= 0 && idx_li >= 0 && (@bounded_idx[idx_li] == bli || @bounded_ta_set[idx_li.to_s + ":" + bli.to_s] == true)
+    # Scoped branch/while TA BCE (`if (i + K < n)` where `n == ta.length`, or heap `while` guarded `<= mlen`!)
+    if @scoped_ta_ub.size > 0 && idx_e.is_a?(JsNode)
+      if idx_li >= 0 && @scoped_ta_ub[idx_li] != nil
+        su = @scoped_ta_ub[idx_li]
+        return true if su[0] >= 0 && su[0] == bli
+        if su[0] < 0 && su[2] > 0
+          tl0 = bli >= 0 ? @info.local_ta_lens[bli] : (gb != nil && @hoisted_global_tas[gb] != nil ? js_ta_length(@hoisted_global_tas[gb][4]) : nil)
+          return true if tl0 != nil && su[2] <= tl0
+      elsif idx_e.kind == :binary && idx_e.str == "+" && idx_e.a.kind == :ident && jit_small_int_lit?(idx_e.b, 64)
+        base_li = local_idx(idx_e.a)
+        off_k = idx_e.b.a.to_i
+        if base_li >= 0 && off_k >= 0 && @scoped_ta_ub[base_li] != nil
+          su = @scoped_ta_ub[base_li]
+          return true if su[0] >= 0 && su[0] == bli && off_k <= su[1]
+    if bli >= 0 && idx_e.is_a?(JsNode) && idx_e.kind == :binary && idx_e.str == "%" && exact_i32_sum_term?(idx_e.a) && can_i32?(idx_e.b)
       div_li = local_idx(idx_e.b)
       return true if div_li >= 0 && @bounded_mod_ta[div_li.to_s + ":" + bli.to_s] == true
+    # Constant-length TypedArray BCE (local `new Uint32Array(64)` or guarded global `K`!)
+    ta_len = -1
+    if bli >= 0 && @info.local_ta_lens[bli] != nil
+      ta_len = @info.local_ta_lens[bli]
+    elsif gb != nil && @hoisted_global_tas[gb] != nil
+      ta_len = js_ta_length(@hoisted_global_tas[gb][4])
+    if ta_len > 0 && idx_e.is_a?(JsNode)
+      # Constant non-negative literal `ta[0]` where `0 <= lit < ta_len`!
+      if idx_e.kind == :num && jit_int32_lit?(idx_e) && idx_e.a.to_i >= 0 && idx_e.a.to_i < ta_len
+        return true
+      # Dominating range-guarded local (`0 <= idx < ub <= ta_len`, e.g. `nb = ny * W + nx` or `h = (...) & 4095`!)
+      if idx_li >= 0 && @info.proven_bounded_i32[idx_li] != nil && @info.proven_bounded_i32[idx_li] <= ta_len
+        return true
+      # `ta[i]` where `i` has constant loop range `[c0, c1)` with `0 <= c0` and `c1 <= ta_len`!
+      if idx_li >= 0 && @const_loop_bounds[idx_li] != nil
+        cb = @const_loop_bounds[idx_li]
+        return true if cb[0] >= 0 && cb[1] <= ta_len
+      # `ta[i - k]` where `0 <= k <= c0` and `c1 - k <= ta_len` (`W[i-15]`, `W[i-2]`, `W[i-16]`, `W[i-7]`!)
+      if idx_e.kind == :binary && idx_e.str == "-" && jit_int32_lit?(idx_e.b)
+        kv = idx_e.b.a.to_i
+        ili = local_idx(idx_e.a)
+        if ili >= 0 && @const_loop_bounds[ili] != nil
+          cb = @const_loop_bounds[ili]
+          return true if kv >= 0 && kv <= cb[0] && (cb[1] - kv) <= ta_len
+      # `ta[x & mask]` where `0 <= mask < ta_len`!
+      if idx_e.kind == :binary && idx_e.str == "&" && jit_int32_lit?(idx_e.b)
+        mv = idx_e.b.a.to_i
+        return true if mv >= 0 && mv < ta_len
     false
 
   -> emit_ta_load_i32_op(kind, r_ptr, r_idx)
@@ -6626,7 +13593,30 @@ OSR_RETURN = 2
   -> gen_ta_load_i32(bli, idx_e)
     gen_ta_load_i32_h(@hoisted_tas[bli], @hoisted_ta_regs[bli], bli, idx_e)
 
-  -> gen_ta_load_raw32(h, tr, bli, idx_e)
+  # Compare `r_idx` (in R_X11) against TA length using immediate constant when known (ZERO stack load!)
+  -> emit_ta_len_cmp(bli, tr, h, gb = nil)
+    if tr != nil && tr[1] != nil
+      @a.cmp_r(R_X11, tr[1])
+      return nil
+    clen = nil
+    if bli >= 0 && @info.local_ta_lens[bli] != nil
+      clen = @info.local_ta_lens[bli]
+    elsif gb != nil && @hoisted_global_tas[gb] != nil
+      clen = js_ta_length(@hoisted_global_tas[gb][4])
+    if clen != nil && clen >= 0
+      if clen <= 4095
+        @a.cmp_i(R_X11, clen)
+      elsif (clen & 4095) == 0 && (clen >> 12) <= 4095
+        @a.cmp_i(R_X11, clen >> 12, 1)
+      else
+        @a.mov_imm32(R_X10, clen)
+        @a.cmp_r(R_X11, R_X10)
+      return nil
+    @a.ldr_x(R_X10, R_SP, h[1])
+    @a.cmp_r(R_X11, R_X10)
+    nil
+
+  -> gen_ta_load_raw32(h, tr, bli, idx_e, gb = nil)
     r_idx = peek_i32_reg(idx_e)
     if r_idx != nil
       @a.sxtw(R_X11, r_idx)
@@ -6635,14 +13625,10 @@ OSR_RETURN = 2
       @a.sxtw(R_X11, R_X0)
     r_ptr = (tr != nil && tr[0] != nil) ? tr[0] : R_X9
     @a.ldr_x(R_X9, R_SP, h[0]) if r_ptr == R_X9
-    if bli >= 0 && ta_idx_bounded?(bli, idx_e)
+    if ta_idx_bounded?(bli, idx_e, gb)
       @a.ldr_w_idx(R_X0, r_ptr, R_X11)
       return nil
-    if tr != nil && tr[1] != nil
-      @a.cmp_r(R_X11, tr[1])
-    else
-      @a.ldr_x(R_X10, R_SP, h[1])
-      @a.cmp_r(R_X11, R_X10)
+    emit_ta_len_cmp(bli, tr, h, gb)
     l_oob = @a.new_label
     l_done = @a.new_label
     @a.b_cond(CC_HS, l_oob)
@@ -6655,7 +13641,7 @@ OSR_RETURN = 2
     add_cold_stub(cb)
     nil
 
-  -> gen_ta_load_i32_h(h, tr, bli, idx_e)
+  -> gen_ta_load_i32_h(h, tr, bli, idx_e, gb = nil)
     kind = h[2]
     r_idx = peek_i32_reg(idx_e)
     if r_idx != nil
@@ -6665,14 +13651,10 @@ OSR_RETURN = 2
       @a.sxtw(R_X11, R_X0)
     r_ptr = (tr != nil && tr[0] != nil) ? tr[0] : R_X9
     @a.ldr_x(R_X9, R_SP, h[0]) if r_ptr == R_X9
-    if bli >= 0 && ta_idx_bounded?(bli, idx_e)
+    if ta_idx_bounded?(bli, idx_e, gb)
       emit_ta_load_i32_op(kind, r_ptr, R_X11)
       return nil
-    if tr != nil && tr[1] != nil
-      @a.cmp_r(R_X11, tr[1])
-    else
-      @a.ldr_x(R_X10, R_SP, h[1])     # len
-      @a.cmp_r(R_X11, R_X10)
+    emit_ta_len_cmp(bli, tr, h, gb)
     l_oob = @a.new_label
     l_done = @a.new_label
     @a.b_cond(CC_HS, l_oob)         # unsigned out-of-bounds (< 0 or >= len)
@@ -6688,7 +13670,7 @@ OSR_RETURN = 2
   -> gen_ta_load_f64(bli, idx_e)
     gen_ta_load_f64_h(@hoisted_tas[bli], @hoisted_ta_regs[bli], bli, idx_e)
 
-  -> gen_ta_load_f64_h(h, tr, bli, idx_e)
+  -> gen_ta_load_f64_h(h, tr, bli, idx_e, gb = nil)
     kind = h[2]
     r_idx = peek_i32_reg(idx_e)
     if r_idx != nil
@@ -6698,15 +13680,11 @@ OSR_RETURN = 2
       @a.sxtw(R_X11, R_X0)
     r_ptr = (tr != nil && tr[0] != nil) ? tr[0] : R_X9
     @a.ldr_x(R_X9, R_SP, h[0]) if r_ptr == R_X9
-    skip_bc = bli >= 0 && ta_idx_bounded?(bli, idx_e)
+    skip_bc = ta_idx_bounded?(bli, idx_e, gb)
     l_oob = nil
     l_done = nil
     if !skip_bc
-      if tr != nil && tr[1] != nil
-        @a.cmp_r(R_X11, tr[1])
-      else
-        @a.ldr_x(R_X10, R_SP, h[1])     # len
-        @a.cmp_r(R_X11, R_X10)
+      emit_ta_len_cmp(bli, tr, h, gb)
       l_oob = @a.new_label
       l_done = @a.new_label
       @a.b_cond(CC_HS, l_oob)
@@ -6747,6 +13725,242 @@ OSR_RETURN = 2
     nil
 
   # ---- Lane 3: Boxed WValue Expression Codegen -> result in x0 ----
+
+  # Classify a pure, side-effect-free, non-throwing ternary arm for branchless `csel_x`:
+  # Returns [:bits, i64] | [:reg, r] | [:spill, off] | [:local, li] | [:this_prop, enc] | nil
+  -> pure_cond_arm_info(arm)
+    return nil if arm == nil || !arm.is_a?(JsNode)
+    k = arm.kind
+    return [:bits, wvalue_bits(arm.a) ## i64] if k == :num
+    return [:bits, 2 ## i64] if k == :true
+    return [:bits, 1 ## i64] if k == :false
+    return [:bits, 0 ## i64] if k == :undef
+    return [:bits, wvalue_bits(JS_NULL) ## i64] if k == :null
+    if k == :this
+      if @inline_env != nil && @inline_env[:this] != nil
+        iv = @inline_env[:this]
+        return [:reg, iv[1]] if iv[0] == :reg_x
+        return [:spill, iv[1]] if iv[0] == :spill_x
+      return [:spill, JF_SLOT_THIS]
+    if k == :ident && arm.x != nil && arm.x.binding != nil
+      b = arm.x.binding
+      if @inline_env != nil && @inline_env[b] != nil
+        iv = @inline_env[b]
+        return [:reg, iv[1]] if iv[0] == :reg_x
+        return [:spill, iv[1]] if iv[0] == :spill_x
+        return [:bits, wvalue_bits(iv[1].to_f) ## i64] if iv[0] == :const_i32
+        return nil
+      li = binding_slot(b)
+      return [:local, li] if li >= 0 && @info.types[li] == JT_ANY && b.kind != :lexical
+      return [:bits, wvalue_bits(@info.global_i32s[b][2]) ## i64] if b.global? && @info.global_i32s[b] != nil
+      return [:bits, wvalue_bits(@info.global_objs[b][1]) ## i64] if b.global? && @info.global_objs[b] != nil
+      return nil
+    if k == :member && !arm.has?(F_COMPUTED) && arm.a != nil && arm.a.kind == :this && @known_shapes[-2] != nil
+      th_c = (@inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64)) ? @inline_this_sh : wvalue_from_bits(@known_shapes[-2])
+      if th_c.is_a?(JS:Shape) && !th_c.dict
+        sl_c = th_c.slot_of(arm.b.str)
+        if sl_c >= 0 && (th_c.attrs_of(arm.b.str) & ATTR_ACCESSOR) == 0
+          enc_c = sl_c < th_c.inline ? (th_c.ibase + sl_c) : (0 - (sl_c - th_c.inline) - 1)
+          return [:this_prop, enc_c]
+    nil
+
+  -> emit_pure_cond_arm(dst, info, scratch)
+    ik = info[0]
+    if ik == :bits
+      @a.mov_imm64(dst, info[1])
+    elsif ik == :reg
+      @a.mov_r(dst, info[1]) if dst != info[1]
+    elsif ik == :spill
+      @a.ldr_x(dst, R_SP, info[1])
+    elsif ik == :local
+      load_slot_any(dst, info[1])
+    elsif ik == :this_prop
+      if @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+        @a.sub_i(scratch, @inline_env[:this][1], 4)
+      elsif @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :spill_x
+        @a.ldr_x(scratch, R_SP, @inline_env[:this][1])
+        @a.sub_i(scratch, scratch, 4)
+      else
+        @a.ldr_x(scratch, R_SP, JF_SLOT_THIS)
+        @a.sub_i(scratch, scratch, 4)
+      if info[1] > 0
+        @a.ldr_x(dst, scratch, (info[1] + 1) * 8)
+      else
+        ext_i = (0 - info[1]) - 1
+        @a.ldr_x(scratch, scratch, 16)
+        @a.and_x_ptr47(scratch, scratch)
+        @a.ldr_x(scratch, scratch, 16)
+        @a.ldr_x(dst, scratch, ext_i * 8)
+    nil
+
+  # General branchless `csel_x` lowering for `cond ? pure_a : pure_b` (eliminates 50/50 branch mispredictions!).
+  # True iff `gen_expr_any(e)` is guaranteed to be a pure known-shape own-slot read chain touching ONLY R_X0/R_X9/R_X14 (never R_X1, never calls/cold stubs).
+  -> pure_known_member_no_x1?(e)
+    return false if e == nil || e.kind != :member || e.has?(F_COMPUTED) || e.a == nil || e.b == nil
+    pn = e.b.str
+    return false if pn == "length" || pn == "size" || pn == "value"
+    bli_p = local_idx(e.a)
+    return false if bli_p >= 0 && (@info.sra_objs[bli_p] != nil || @info.sra_vs[bli_p] != nil || @info.reg_gpr[bli_p] != nil)
+    sk_p = shape_key(e.a)
+    return false if sk_p == -1 || @known_shapes[sk_p] == nil
+    ksh_p = (sk_p == -2 && @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64)) ? @inline_this_sh : wvalue_from_bits(@known_shapes[sk_p])
+    return false if !ksh_p.is_a?(JS:Shape) || ksh_p.dict
+    sl_p = ksh_p.slot_of(pn)
+    return false if sl_p < 0 || (ksh_p.attrs_of(pn) & ATTR_ACCESSOR) != 0
+    if e.a.kind == :this
+      return true if @inline_env != nil && @inline_env[:this] != nil && (@inline_env[:this][0] == :reg_x || @inline_env[:this][0] == :spill_x)
+      return !@jf.arrow
+    if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil
+      if @inline_env != nil && @inline_env[e.a.x.binding] != nil
+        iv_p = @inline_env[e.a.x.binding]
+        return iv_p[0] == :reg_x || iv_p[0] == :spill_x
+      return bli_p >= 0 && @info.types[bli_p] == JT_ANY
+    if e.a.kind == :member && !e.a.has?(F_COMPUTED)
+      return pure_known_member_no_x1?(e.a)
+    false
+
+  -> try_gen_branchless_cond_any(e)
+    return false if e == nil || e.a == nil || e.a.kind != :binary || @in_cold_stub
+    ca = e.a
+    op = ca.str
+    ia = pure_cond_arm_info(e.b)
+    return false if ia == nil
+    ib = pure_cond_arm_info(e.c)
+    return false if ib == nil
+    # Case 1: `x == null` / `x != null` / `x === null` / `x !== null` (e.g. `this.queue == null ? 0 : 1`)
+    if (op == "==" || op == "!=" || op == "===" || op == "!==") && ca.b != nil && ca.b.kind == :null
+      is_eq = op == "==" || op == "==="
+      is_strict = op == "===" || op == "!=="
+      gen_expr_any(ca.a)
+      l_slow = nil
+      l_done = nil
+      if !is_strict && !(!JS_HAS_HTMLDDA[0] && (@hoisted_epoch || @epoch_verified_now))
+        l_slow = @a.new_label
+        l_done = @a.new_label
+        @a.ldr_x(R_X9, R_X19, RT_K_HTMLDDA_PTR * 8)
+        @a.ldr_x(R_X9, R_X9, 0)
+        @a.cbnz_x(R_X9, l_slow)
+      emit_pure_cond_arm(R_X14, is_eq ? ia : ib, R_X12)
+      emit_pure_cond_arm(R_X15, is_eq ? ib : ia, R_X12)
+      @a.ldr_x(R_X9, R_X19, RT_K_NULL_BITS * 8)
+      @a.cmp_r(R_X0, R_X9)
+      if is_strict
+        @a.csel_x(R_X0, R_X14, R_X15, CC_EQ)
+      else
+        @a.csel_x(R_X12, R_X14, R_X15, CC_EQ)
+        @a.cmp_i(R_X0, 0)
+        @a.csel_x(R_X0, R_X14, R_X12, CC_EQ)
+      if l_slow != nil
+        @a.bind(l_done)
+        cb_cn = ->()
+          @a.bind(l_slow)
+          sv_sh_cn = @known_shapes; sv_ep_cn = @epoch_verified_now
+          @known_shapes = {}; @epoch_verified_now = false
+          @a.mov_r(R_X1, R_X0)
+          @a.ldr_x(R_X2, R_X19, RT_K_NULL_BITS * 8)
+          call_rt(RT_EQ)
+          l_cn_el = @a.new_label
+          @a.cmp_i(R_X0, 2)
+          @a.b_cond(is_eq ? CC_NE : CC_EQ, l_cn_el)
+          gen_expr_any(e.b)
+          @a.b(l_done)
+          @a.bind(l_cn_el)
+          gen_expr_any(e.c)
+          @known_shapes = sv_sh_cn; @epoch_verified_now = sv_ep_cn
+          @a.b(l_done)
+        add_cold_stub(cb_cn)
+      return true
+    # Case 2: `x == K` / `x != K` / `x === K` / `x !== K` for non-zero finite number literal or hoisted global_i32
+    if (op == "==" || op == "!=" || op == "===" || op == "!==") && ca.b != nil
+      kv_b = nil
+      if ca.b.kind == :num && ca.b.a == ca.b.a && ca.b.a != ~0.0
+        kv_b = wvalue_bits(ca.b.a) ## i64
+      elsif ca.b.kind == :ident && ca.b.x != nil && ca.b.x.binding != nil && @info.global_i32s[ca.b.x.binding] != nil && @info.global_i32s[ca.b.x.binding][2] != ~0.0
+        kv_b = wvalue_bits(@info.global_i32s[ca.b.x.binding][2]) ## i64
+      if kv_b != nil
+        is_eq = op == "==" || op == "==="
+        is_strict = op == "===" || op == "!=="
+        gen_expr_any(ca.a)
+        l_slow = nil
+        l_done = nil
+        if !is_strict
+          l_slow = @a.new_label
+          l_done = @a.new_label
+          @a.sub_r(R_X9, R_X0, R_X20)
+          @a.cmp_r(R_X9, R_X21)
+          @a.b_cond(CC_HS, l_slow)
+        emit_pure_cond_arm(R_X14, is_eq ? ia : ib, R_X12)
+        emit_pure_cond_arm(R_X15, is_eq ? ib : ia, R_X12)
+        @a.mov_imm64(R_X9, kv_b)
+        @a.cmp_r(R_X0, R_X9)
+        @a.csel_x(R_X0, R_X14, R_X15, CC_EQ)
+        if l_slow != nil
+          @a.bind(l_done)
+          cb_ck = ->()
+            @a.bind(l_slow)
+            sv_sh_ck = @known_shapes; sv_ep_ck = @epoch_verified_now
+            @known_shapes = {}; @epoch_verified_now = false
+            @a.mov_r(R_X1, R_X0)
+            @a.mov_imm64(R_X2, kv_b)
+            call_rt(RT_EQ)
+            l_ck_el = @a.new_label
+            @a.cmp_i(R_X0, 2)
+            @a.b_cond(is_eq ? CC_NE : CC_EQ, l_ck_el)
+            gen_expr_any(e.b)
+            @a.b(l_done)
+            @a.bind(l_ck_el)
+            gen_expr_any(e.c)
+            @known_shapes = sv_sh_ck; @epoch_verified_now = sv_ep_ck
+            @a.b(l_done)
+          add_cold_stub(cb_ck)
+        return true
+    # Case 3: `A > B` / `A < B` / `A >= B` / `A <= B` (zero-FP unsigned compare + branchless `csel_x` — e.g. `tcb.priority > cur.priority ? tcb : cur`!)
+    if (op == "<" || op == "<=" || op == ">" || op == ">=") && !ast_has_call?(ca)
+      if pure_known_member_no_x1?(ca.b)
+        gen_expr_any(ca.a)
+        @a.mov_r(R_X1, R_X0)
+        gen_expr_any(ca.b)
+        @a.mov_r(R_X2, R_X0)
+      else
+        gen_expr_any(ca.a)
+        a_off_c = push_x(R_X0)
+        gen_expr_any(ca.b)
+        @a.mov_r(R_X2, R_X0)
+        @a.ldr_x(R_X1, R_SP, a_off_c)
+        @tmp_depth -= 1
+      l_slow = @a.new_label
+      l_done = @a.new_label
+      @a.sub_r(R_X9, R_X1, R_X20)
+      @a.sub_r(R_X10, R_X2, R_X20)
+      @a.movz_x(R_X14, 0x7FF0, 3)
+      @a.cmp_r(R_X9, R_X14)
+      @a.b_cond(CC_HS, l_slow)
+      @a.cmp_r(R_X10, R_X14)
+      @a.b_cond(CC_HS, l_slow)
+      emit_pure_cond_arm(R_X14, ia, R_X12)
+      emit_pure_cond_arm(R_X15, ib, R_X12)
+      @a.cmp_r(R_X9, R_X10)
+      cc_u = op == "<" ? CC_LO : (op == "<=" ? CC_LS : (op == ">" ? CC_HI : CC_HS))
+      @a.csel_x(R_X0, R_X14, R_X15, cc_u)
+      @a.bind(l_done)
+      rt_c = op == "<" ? RT_LT : (op == "<=" ? RT_LE : (op == ">" ? RT_GT : RT_GE))
+      cb_cc = ->()
+        @a.bind(l_slow)
+        sv_sh_cc = @known_shapes; sv_ep_cc = @epoch_verified_now
+        @known_shapes = {}; @epoch_verified_now = false
+        call_rt(rt_c)
+        l_cc_el = @a.new_label
+        @a.cmp_i(R_X0, 2)
+        @a.b_cond(CC_NE, l_cc_el)
+        gen_expr_any(e.b)
+        @a.b(l_done)
+        @a.bind(l_cc_el)
+        gen_expr_any(e.c)
+        @known_shapes = sv_sh_cc; @epoch_verified_now = sv_ep_cc
+        @a.b(l_done)
+      add_cold_stub(cb_cc)
+      return true
+    false
 
   -> gen_expr_any(e)
     if e == nil
@@ -6789,7 +14003,7 @@ OSR_RETURN = 2
         @a.mov_r(R_X0, iv[1]) if iv[0] == :reg_x
         @a.ldr_x(R_X0, R_SP, iv[1]) if iv[0] == :spill_x
         return nil
-      if @jf.arrow
+      if @jf.arrow && @is_osr
         g = @jf
         while g.arrow
           g = g.parent
@@ -6800,6 +14014,13 @@ OSR_RETURN = 2
       return nil
     if k == :ident
       gen_ident_any(e)
+      return nil
+    if k == :jit_spill
+      @a.ldr_x(R_X0, R_SP, e.a)
+      return nil
+    if k == :jit_spill_w
+      @a.ldr_w(R_X9, R_SP, e.a)
+      emit_box_i32(R_X0, R_X9)
       return nil
     if k == :binary
       gen_binary_any(e)
@@ -6817,6 +14038,7 @@ OSR_RETURN = 2
       gen_logical_any(e)
       return nil
     if k == :cond
+      return nil if try_gen_branchless_cond_any(e)
       l_else = @a.new_label
       l_end = @a.new_label
       gen_cond_branch(e.a, l_else, false)
@@ -6880,7 +14102,9 @@ OSR_RETURN = 2
     b = e.x.binding
     if @inline_env != nil && @inline_env[b] != nil
       iv = @inline_env[b]
-      if iv[0] == :slot
+      if iv[0] == :const_i32
+        @a.mov_imm64(R_X0, wvalue_bits(iv[1].to_f) ## i64)
+      elsif iv[0] == :slot
         load_slot_any(R_X0, iv[1])
       elsif iv[0] == :spill_w
         @a.ldr_w(R_X9, R_SP, iv[1])
@@ -6895,13 +14119,19 @@ OSR_RETURN = 2
     if b.kind == :global && b.writes == 0 && e.str == "undefined"
       @a.movz_x(R_X0, 0)
       return nil
+    li_vs = local_idx(e)
+    if li_vs >= 0 && @info.sra_vs[li_vs] != nil
+      emit_materialize_sra_vs(@info.sra_vs[li_vs])
+      return nil
     emit_read_binding_any(b, R_X0, e.x)
     nil
 
   -> emit_read_binding_any(b, dst, ref = nil)
     if @inline_env != nil && @inline_env[b] != nil
       iv = @inline_env[b]
-      if iv[0] == :slot
+      if iv[0] == :const_i32
+        @a.mov_imm64(dst, wvalue_bits(iv[1].to_f) ## i64)
+      elsif iv[0] == :slot
         load_slot_any(dst, iv[1])
       elsif iv[0] == :spill_w
         @a.ldr_w(R_X9, R_SP, iv[1])
@@ -6914,25 +14144,41 @@ OSR_RETURN = 2
         emit_box_i32(dst, iv[1])
       return nil
     if b.global?
+      if @info.global_i32s[b] != nil
+        @a.mov_imm64(dst, wvalue_bits(@info.global_i32s[b][2]) ## i64)
+        return nil
+      if @info.global_objs[b] != nil
+        @a.mov_imm64(dst, wvalue_bits(@info.global_objs[b][1]) ## i64)
+        return nil
       c = wk_cell(b)
       jit_keep(c)
       cb = wvalue_bits(c) ## i64
       @a.mov_imm64(R_X9, cb - 4)
       @a.ldr_x(dst, R_X9, 8)     # cell.@fast
       @a.cmp_i(dst, 3)           # JS_NOTPLAIN == 3
+      l_slow = @a.new_label
       l_done = @a.new_label
-      @a.b_cond(CC_NE, l_done)
-      @a.mov_imm64(R_X1, cb)
-      call_rt(RT_GGET)
-      @a.mov_r(dst, R_X0) if dst != R_X0
+      @a.b_cond(CC_EQ, l_slow)
       @a.bind(l_done)
+      dst_gg = dst
+      cb_gg = ->()
+        @a.bind(l_slow)
+        @a.mov_imm64(R_X1, cb)
+        call_rt(RT_GGET)
+        @a.mov_r(dst_gg, R_X0) if dst_gg != R_X0
+        @a.b(l_done)
+      add_cold_stub(cb_gg)
+      return nil
+    bsl = binding_slot(b)
+    if bsl >= 0
+      load_slot_any(dst, bsl)
       return nil
     if b.scope.func != @jf
       if @jf.single == b
-        if @is_osr
-          # In OSR, JF_SLOT_ENV holds `act.env` (which may be a child JS:Env of this function),
-          # whereas the single captured value `act.fe` lives in `act.fobj.@env` (JF_SLOT_EXTRA + 32).
-          @a.ldr_x(R_X9, R_SP, JF_SLOT_EXTRA)
+        if @is_osr || (@jf.scope.has_env? && !@info.demote_env)
+          # In OSR (or when this function allocated its own JS:Env in JF_SLOT_ENV),
+          # the single captured value `act.fe` lives in `f.@env` (JF_SLOT_EXTRA / JF_SLOT_ARG0 + 32).
+          @a.ldr_x(R_X9, R_SP, @is_osr ? JF_SLOT_EXTRA : JF_SLOT_ARG0)
           @a.sub_i(R_X9, R_X9, 4)
           @a.ldr_x(dst, R_X9, 32)
         else
@@ -6978,7 +14224,7 @@ OSR_RETURN = 2
 
   -> gen_binary_any(e)
     op = e.str
-    if op == "<" || op == "<=" || op == ">" || op == ">=" || op == "===" || op == "!=="
+    if op == "<" || op == "<=" || op == ">" || op == ">=" || op == "===" || op == "!==" || op == "==" || op == "!="
       l_t = @a.new_label
       l_end = @a.new_label
       gen_cond_branch(e, l_t, true)
@@ -6994,6 +14240,25 @@ OSR_RETURN = 2
       return nil
     # Polymorphic bitwise / shift (`a ^ b`, `a & b`, `a | b`, `a << b`, `a >> b`):
     # Inline fast path when both operands are Numbers; cold stub handles BigInt & objects!
+    if op == "|" && e.b.kind == :num && e.b.a == ~0.0
+      gen_expr_any(e.a)
+      l_slow_o0 = @a.new_label
+      l_done_o0 = @a.new_label
+      @a.sub_r(R_X9, R_X0, R_X20)
+      @a.cmp_r(R_X9, R_X21)
+      @a.b_cond(CC_HS, l_slow_o0)
+      @a.fmov_d_x(R_D0, R_X9)
+      emit_f64_to_i32(R_X9, R_D0)
+      emit_box_i32(R_X0, R_X9)
+      @a.bind(l_done_o0)
+      cb_o0 = ->()
+        @a.bind(l_slow_o0)
+        @a.mov_r(R_X1, R_X0)
+        @a.mov_r(R_X2, R_X20)
+        call_rt(RT_BITOR)
+        @a.b(l_done_o0)
+      add_cold_stub(cb_o0)
+      return nil
     if op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
       gen_expr_any(e.a)
       push_x(R_X0)
@@ -7216,18 +14481,242 @@ OSR_RETURN = 2
           @a.b(l_cat_done)
         add_cold_stub(cb_cat)
         return nil
-      # Fast short ASCII string literal + exact i32 (`"ab" + i` -> zero-alloc inline WString via RT!)
-      if op == "+" && e.a.kind == :string && e.a.str.ascii? && e.a.str.size <= 4 && can_i32?(e.b)
+      # Fast inline ARM64 2- or 3-char ASCII string literal + small non-neg i32 (`"src" + i`, `"dst" + i`, `"id" + i` -> ZERO alloc, ZERO memory load!)
+      if op == "+" && e.a.kind == :string && e.a.str.ascii? && (e.a.str.size == 2 || e.a.str.size == 3) && can_i32?(e.b)
         pre_s = e.a.str
+        psz = pre_s.size
         jit_keep(pre_s)
         gen_expr_i32(e.b)
-        @a.sxtw(R_X2, R_X0)
+        l_cat_slow = @a.new_label
+        l_cat_done = @a.new_label
+        l_d2 = @a.new_label
+        l_d3 = psz == 2 ? @a.new_label : nil
+        max_lim = psz == 2 ? 1000 : 100
+        @a.mov_imm32(R_X9, max_lim)
+        @a.cmp_w(R_X0, R_X9)
+        @a.b_cond(CC_HS, l_cat_slow)
+        base_bits = (0xFFF9 << 48) | (pre_s.byte_at(0) << 4) | (pre_s.byte_at(1) << 12)
+        base_bits = base_bits | (pre_s.byte_at(2) << 20) if psz == 3
+        sh0 = 4 + psz * 8
+        @a.mov_imm64(R_X9, base_bits)
+        @a.cmp_wi(R_X0, 10)
+        @a.b_cond(CC_GE, l_d2)
+        # 1 digit (0..9)
+        @a.add_wi(R_X10, R_X0, 48)
+        @a.lsl_xi(R_X10, R_X10, sh0)
+        @a.movz_x(R_X11, (psz + 1) * 2)
+        @a.orr_r(R_X0, R_X9, R_X11)
+        @a.orr_r(R_X0, R_X0, R_X10)
+        @a.b(l_cat_done)
+        # 2 digits (10..99)
+        @a.bind(l_d2)
+        if psz == 2
+          @a.cmp_wi(R_X0, 100)
+          @a.b_cond(CC_GE, l_d3)
+        @a.movz_x(R_X11, 52429)
+        @a.mul_w(R_X10, R_X0, R_X11)
+        @a.lsr_xi(R_X10, R_X10, 19)
+        @a.movz_x(R_X11, 10)
+        @a.mul_w(R_X11, R_X10, R_X11)
+        @a.sub_w(R_X11, R_X0, R_X11)
+        @a.add_wi(R_X10, R_X10, 48)
+        @a.add_wi(R_X11, R_X11, 48)
+        @a.lsl_xi(R_X10, R_X10, sh0)
+        @a.lsl_xi(R_X11, R_X11, sh0 + 8)
+        @a.orr_r(R_X10, R_X10, R_X11)
+        @a.movz_x(R_X11, (psz + 2) * 2)
+        @a.orr_r(R_X0, R_X9, R_X11)
+        @a.orr_r(R_X0, R_X0, R_X10)
+        if psz == 2
+          @a.b(l_cat_done)
+          # 3 digits (100..999)
+          @a.bind(l_d3)
+          @a.movz_x(R_X11, 41944)
+          @a.mul_w(R_X12, R_X0, R_X11)
+          @a.lsr_xi(R_X12, R_X12, 22)
+          @a.movz_x(R_X11, 100)
+          @a.mul_w(R_X11, R_X12, R_X11)
+          @a.sub_w(R_X13, R_X0, R_X11)
+          @a.movz_x(R_X11, 52429)
+          @a.mul_w(R_X10, R_X13, R_X11)
+          @a.lsr_xi(R_X10, R_X10, 19)
+          @a.movz_x(R_X11, 10)
+          @a.mul_w(R_X11, R_X10, R_X11)
+          @a.sub_w(R_X11, R_X13, R_X11)
+          @a.add_wi(R_X12, R_X12, 48)
+          @a.add_wi(R_X10, R_X10, 48)
+          @a.add_wi(R_X11, R_X11, 48)
+          @a.lsl_xi(R_X12, R_X12, 20)
+          @a.lsl_xi(R_X10, R_X10, 28)
+          @a.lsl_xi(R_X11, R_X11, 36)
+          @a.orr_r(R_X10, R_X10, R_X12)
+          @a.orr_r(R_X10, R_X10, R_X11)
+          @a.movz_x(R_X11, 10)
+          @a.orr_r(R_X0, R_X9, R_X11)
+          @a.orr_r(R_X0, R_X0, R_X10)
+        @a.bind(l_cat_done)
+        cb_cat23 = ->()
+          @a.bind(l_cat_slow)
+          @a.sxtw(R_X2, R_X0)
+          @a.movk_x(R_X2, 0xFFFA, 3)
+          @a.mov_imm64(R_X1, wvalue_bits(pre_s) ## i64)
+          call_rt(RT_STR_CAT_INT)
+          @a.b(l_cat_done)
+        add_cold_stub(cb_cat23)
+        return nil
+      # Fast short ASCII string literal + exact i32 (`"Item " + id`, `"v" + i` -> 7-insn direct L1 cache for 0..1023!)
+      if op == "+" && e.a.kind == :string && e.a.str.ascii? && e.a.str.size >= 2 && e.a.str.size <= 12
+        pre_s = e.a.str
+        jit_keep(pre_s)
+        if can_i32?(e.b)
+          gen_expr_i32(e.b)
+          cat_cache = Array.new(1024, nil)
+          jit_keep(cat_cache)
+          cc_p = jit_arr_slots_ptr(wvalue_bits(cat_cache) ## i64)
+          l_cc_miss = @a.new_label
+          l_cc_done = @a.new_label
+          @a.cmp_wi(R_X0, 1024)
+          @a.b_cond(CC_HS, l_cc_miss)
+          @a.mov_imm64(R_X9, cc_p)
+          @a.uxtw(R_X10, R_X0)
+          @a.ldr_x_idx(R_X11, R_X9, R_X10)
+          @a.cbz_x(R_X11, l_cc_miss)
+          @a.mov_r(R_X0, R_X11)
+          @a.bind(l_cc_done)
+          cb_cc = ->()
+            @a.bind(l_cc_miss)
+            @a.sxtw(R_X2, R_X0)
+            @a.movk_x(R_X2, 0xFFFA, 3)
+            @a.mov_imm64(R_X1, wvalue_bits(pre_s) ## i64)
+            @a.mov_imm64(R_X3, wvalue_bits(cat_cache) ## i64)
+            call_rt(RT_STR_CAT_INT_CACHED)
+            @a.b(l_cc_done)
+          add_cold_stub(cb_cc)
+          return nil
+        gen_expr_any(e.b)
+        l_sc_slow = @a.new_label
+        l_sc_done = @a.new_label
+        @a.sub_r(R_X9, R_X0, R_X20)
+        @a.cmp_r(R_X9, R_X21)
+        @a.b_cond(CC_HS, l_sc_slow)
+        @a.fmov_d_x(R_D0, R_X9)
+        @a.fcvtzs_w_d(R_X10, R_D0)
+        @a.scvtf_d_w(R_D1, R_X10)
+        @a.fcmp_d(R_D0, R_D1)
+        @a.b_cond(CC_NE, l_sc_slow)
+        @a.sxtw(R_X2, R_X10)
         @a.movk_x(R_X2, 0xFFFA, 3)
         @a.mov_imm64(R_X1, wvalue_bits(pre_s) ## i64)
         call_rt(RT_STR_CAT_INT)
+        @a.bind(l_sc_done)
+        cb_sc = ->()
+          @a.bind(l_sc_slow)
+          @a.mov_r(R_X2, R_X0)
+          @a.mov_imm64(R_X1, wvalue_bits(pre_s) ## i64)
+          call_rt(RT_ADD)
+          @a.b(l_sc_done)
+        add_cold_stub(cb_sc)
+        return nil
+      # Fused unboxed FP chain `(A * B) +/- C` or `(A - B) / C` (zero intermediate box/spill/unbox — hot in ScaleConstraint.execute!)
+      if (op == "+" || op == "-" || op == "/") && e.a.kind == :binary && (e.a.str == "*" || e.a.str == "-") && e.b.kind == :member && !e.b.has?(F_COMPUTED)
+        op1_f = e.a.str
+        # Zero-spill `e.a.a` in R_X1 when `e.a.b` is a pure known-shape member read (clobbers only R_X0, R_X9)!
+        eab_no_spill = false
+        if e.a.b.kind == :member && !e.a.b.has?(F_COMPUTED) && !ast_has_call?(e.a.b) && e.a.b.a != nil && e.a.b.b.str != "length" && e.a.b.b.str != "size"
+          sk_ab = shape_key(e.a.b.a)
+          if sk_ab != -1 && @known_shapes[sk_ab] != nil
+            if e.a.b.a.kind == :this || e.a.b.a.kind == :ident || (e.a.b.a.kind == :member && !e.a.b.a.has?(F_COMPUTED) && e.a.b.a.a != nil && e.a.b.a.a.kind == :this && @known_shapes[-2] != nil)
+              ksh_ab = (sk_ab == -2 && @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64)) ? @inline_this_sh : wvalue_from_bits(@known_shapes[sk_ab])
+              if ksh_ab.is_a?(JS:Shape) && !ksh_ab.dict && ksh_ab.slot_of(e.a.b.b.str) >= 0 && (ksh_ab.attrs_of(e.a.b.b.str) & ATTR_ACCESSOR) == 0
+                if e.a.b.a.kind != :member
+                  eab_no_spill = true
+                else
+                  th_ab = @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64) ? @inline_this_sh : wvalue_from_bits(@known_shapes[-2])
+                  eab_no_spill = th_ab.is_a?(JS:Shape) && !th_ab.dict && th_ab.slot_of(e.a.b.a.b.str) >= 0 && (th_ab.attrs_of(e.a.b.a.b.str) & ATTR_ACCESSOR) == 0
+        if eab_no_spill
+          gen_expr_any(e.a.a)
+          @a.mov_r(R_X1, R_X0)
+          gen_expr_any(e.a.b)
+          @a.mov_r(R_X2, R_X0)
+        else
+          gen_expr_any(e.a.a)
+          a1_off_f = push_x(R_X0)
+          gen_expr_any(e.a.b)
+          @a.mov_r(R_X2, R_X0)
+          @a.ldr_x(R_X1, R_SP, a1_off_f)
+          @tmp_depth -= 1
+        l_fslow1 = @a.new_label
+        l_fslow2 = @a.new_label
+        l_fdone = @a.new_label
+        @a.sub_r(R_X9, R_X1, R_X20)
+        @a.cmp_r(R_X9, R_X21)
+        @a.b_cond(CC_HS, l_fslow1)
+        @a.sub_r(R_X10, R_X2, R_X20)
+        @a.cmp_r(R_X10, R_X21)
+        @a.b_cond(CC_HS, l_fslow1)
+        @a.fmov_d_x(R_D0, R_X9)
+        @a.fmov_d_x(R_D1, R_X10)
+        if op1_f == "*"
+          @a.fmul_d(R_D0, R_D0, R_D1)
+        else
+          @a.fsub_d(R_D0, R_D0, R_D1)
+        # Preserve intermediate d0 across e.b evaluation: keep in R_D2 (zero spill!) when e.b is a known-shape pure member read!
+        eb_d2_safe = false
+        if !ast_has_call?(e.b) && e.b.a != nil
+          sk_eb = shape_key(e.b.a)
+          if sk_eb != -1 && @known_shapes[sk_eb] != nil
+            if e.b.a.kind == :this || e.b.a.kind == :ident || (e.b.a.kind == :member && !e.b.a.has?(F_COMPUTED) && e.b.a.a != nil && e.b.a.a.kind == :this && @known_shapes[-2] != nil)
+              ksh_eb = (sk_eb == -2 && @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64)) ? @inline_this_sh : wvalue_from_bits(@known_shapes[sk_eb])
+              if ksh_eb.is_a?(JS:Shape) && !ksh_eb.dict && ksh_eb.slot_of(e.b.b.str) >= 0 && (ksh_eb.attrs_of(e.b.b.str) & ATTR_ACCESSOR) == 0
+                if e.b.a.kind != :member
+                  eb_d2_safe = true
+                else
+                  th_eb = @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64) ? @inline_this_sh : wvalue_from_bits(@known_shapes[-2])
+                  eb_d2_safe = th_eb.is_a?(JS:Shape) && !th_eb.dict && th_eb.slot_of(e.b.a.b.str) >= 0 && (th_eb.attrs_of(e.b.a.b.str) & ATTR_ACCESSOR) == 0
+        if eb_d2_safe
+          @a.fmov_d(R_D2, R_D0)
+          gen_expr_any(e.b)
+          @a.mov_r(R_X2, R_X0)
+          @a.fmov_d(R_D0, R_D2)
+        else
+          d0_off_f = push_d(R_D0)
+          gen_expr_any(e.b)
+          @a.mov_r(R_X2, R_X0)
+          @a.ldr_d(R_D0, R_SP, d0_off_f)
+          @tmp_depth -= 1
+        @a.sub_r(R_X10, R_X2, R_X20)
+        @a.cmp_r(R_X10, R_X21)
+        @a.b_cond(CC_HS, l_fslow2)
+        @a.fmov_d_x(R_D1, R_X10)
+        if op == "+"
+          @a.fadd_d(R_D0, R_D0, R_D1)
+        elsif op == "-"
+          @a.fsub_d(R_D0, R_D0, R_D1)
+        else
+          @a.fdiv_d(R_D0, R_D0, R_D1)
+        emit_box_f64_nonan(R_X0, R_D0)
+        @a.bind(l_fdone)
+        rt1_f = op1_f == "*" ? RT_MUL : RT_SUB
+        rt2_f = op == "+" ? RT_ADD : (op == "-" ? RT_SUB : RT_DIV)
+        cb_ff = ->()
+          @a.bind(l_fslow1)
+          call_rt(rt1_f)
+          s1_off = push_x(R_X0)
+          gen_expr_any(e.b)
+          @a.mov_r(R_X2, R_X0)
+          @a.ldr_x(R_X1, R_SP, s1_off)
+          @tmp_depth -= 1
+          call_rt(rt2_f)
+          @a.b(l_fdone)
+          @a.bind(l_fslow2)
+          emit_box_f64_nonan(R_X1, R_D0)
+          call_rt(rt2_f)
+          @a.b(l_fdone)
+        add_cold_stub(cb_ff)
         return nil
       # Zero-spill when right operand is a register-resident inline param or num literal!
       rb_x = (e.b.kind == :ident && @inline_env != nil && e.b.x != nil && @inline_env[e.b.x.binding] != nil && @inline_env[e.b.x.binding][0] == :reg_x) ? @inline_env[e.b.x.binding][1] : nil
+      rhs_num_wb = nil
       if rb_x != nil
         gen_expr_any(e.a)
         @a.mov_r(R_X1, R_X0)
@@ -7235,7 +14724,7 @@ OSR_RETURN = 2
       elsif e.b.kind == :num
         gen_expr_any(e.a)
         @a.mov_r(R_X1, R_X0)
-        @a.mov_imm64(R_X2, wvalue_bits(e.b.a) ## i64)
+        rhs_num_wb = wvalue_bits(e.b.a) ## i64
       else
         gen_expr_any(e.a)
         push_x(R_X0)
@@ -7247,11 +14736,19 @@ OSR_RETURN = 2
       @a.sub_r(R_X9, R_X1, R_X20)
       @a.cmp_r(R_X9, R_X21)
       @a.b_cond(CC_HS, l_slow)
-      @a.sub_r(R_X10, R_X2, R_X20)
-      @a.cmp_r(R_X10, R_X21)
-      @a.b_cond(CC_HS, l_slow)
-      @a.fmov_d_x(R_D0, R_X9)
-      @a.fmov_d_x(R_D1, R_X10)
+      if rhs_num_wb != nil && e.b.a == ~1.0
+        @a.fmov_d_x(R_D0, R_X9)
+        @a.fmov_d_one(R_D1)
+      elsif rhs_num_wb != nil
+        @a.mov_imm64(R_X10, jit_f64_bits(wvalue_bits(e.b.a) ## i64))
+        @a.fmov_d_x(R_D0, R_X9)
+        @a.fmov_d_x(R_D1, R_X10)
+      else
+        @a.sub_r(R_X10, R_X2, R_X20)
+        @a.cmp_r(R_X10, R_X21)
+        @a.b_cond(CC_HS, l_slow)
+        @a.fmov_d_x(R_D0, R_X9)
+        @a.fmov_d_x(R_D1, R_X10)
       if op == "+"
         @a.fadd_d(R_D0, R_D0, R_D1)
       elsif op == "-"
@@ -7265,9 +14762,53 @@ OSR_RETURN = 2
       rt = op == "+" ? RT_ADD : (op == "-" ? RT_SUB : (op == "*" ? RT_MUL : RT_DIV))
       cb = ->()
         @a.bind(l_slow)
+        @a.mov_imm64(R_X2, rhs_num_wb) if rhs_num_wb != nil
         call_rt(rt)
         @a.b(l_done)
       add_cold_stub(cb)
+      return nil
+    if op == "%"
+      if e.b.kind == :num
+        gen_expr_any(e.a)
+        @a.mov_r(R_X1, R_X0)
+        @a.mov_imm64(R_X2, wvalue_bits(e.b.a) ## i64)
+      else
+        gen_expr_any(e.a)
+        push_x(R_X0)
+        gen_expr_any(e.b)
+        @a.mov_r(R_X2, R_X0)
+        pop_x(R_X1)
+      l_mslow = @a.new_label
+      l_mdone = @a.new_label
+      @a.sub_r(R_X9, R_X1, R_X20)
+      @a.cmp_r(R_X9, R_X21)
+      @a.b_cond(CC_HS, l_mslow)
+      @a.sub_r(R_X10, R_X2, R_X20)
+      @a.cmp_r(R_X10, R_X21)
+      @a.b_cond(CC_HS, l_mslow)
+      @a.fmov_d_x(R_D0, R_X9)
+      @a.fcvtzs_w_d(R_X9, R_D0)
+      @a.scvtf_d_w(R_D2, R_X9)
+      @a.fcmp_d(R_D0, R_D2)
+      @a.b_cond(CC_NE, l_mslow)
+      @a.cmp_wi(R_X9, 0)
+      @a.b_cond(CC_LT, l_mslow)
+      @a.fmov_d_x(R_D1, R_X10)
+      @a.fcvtzs_w_d(R_X10, R_D1)
+      @a.scvtf_d_w(R_D2, R_X10)
+      @a.fcmp_d(R_D1, R_D2)
+      @a.b_cond(CC_NE, l_mslow)
+      @a.cmp_wi(R_X10, 0)
+      @a.b_cond(CC_LE, l_mslow)
+      @a.udiv_w(R_X11, R_X9, R_X10)
+      @a.msub_w(R_X9, R_X11, R_X10, R_X9)
+      emit_box_i32(R_X0, R_X9)
+      @a.bind(l_mdone)
+      cb_m = ->()
+        @a.bind(l_mslow)
+        call_rt(RT_MOD)
+        @a.b(l_mdone)
+      add_cold_stub(cb_m)
       return nil
     gen_expr_any(e.a)
     push_x(R_X0)
@@ -7373,14 +14914,44 @@ OSR_RETURN = 2
         emit_box_i32(R_X0, pre ? R_X10 : R_X9)
         return nil
       emit_read_binding_any(t.x.binding, R_X1, t.x)
-      call_rt(RT_TONUMERIC)
-      push_x(R_X0)
-      @a.mov_r(R_X1, R_X0)
-      @a.movz_x(R_X2, inc ? 2 : 1)
-      call_rt(RT_INC)
+      l_u_slow = @a.new_label
+      l_u_done = @a.new_label
+      @a.sub_r(R_X9, R_X1, R_X20)
+      @a.cmp_r(R_X9, R_X21)
+      @a.b_cond(CC_HS, l_u_slow)
+      @a.fmov_d_x(R_D0, R_X9)
+      @a.fmov_d_one(R_D1)
+      if inc
+        @a.fadd_d(R_D1, R_D0, R_D1)
+      else
+        @a.fsub_d(R_D1, R_D0, R_D1)
+      emit_box_f64(R_X0, R_D1)
+      u_off = @tmp_base + @tmp_depth * 8
+      @max_tmp = @tmp_depth + 1 if @tmp_depth + 1 > @max_tmp
+      is_local_wb = binding_slot(t.x.binding) >= 0 || (@inline_env != nil && @inline_env[t.x.binding] != nil)
+      if !pre
+        if is_local_wb
+          @a.mov_r(R_X12, R_X1)
+        else
+          @a.str_x(R_X1, R_SP, u_off)
       emit_write_binding(t.x.binding, R_X0, false, t.x)
-      pop_x(R_X9)
-      @a.mov_r(R_X0, R_X9) if !pre
+      if !pre
+        if is_local_wb
+          @a.mov_r(R_X0, R_X12)
+        else
+          @a.ldr_x(R_X0, R_SP, u_off)
+      @a.bind(l_u_done)
+      cb_u = ->()
+        @a.bind(l_u_slow)
+        call_rt(RT_TONUMERIC)
+        @a.str_x(R_X0, R_SP, u_off)
+        @a.mov_r(R_X1, R_X0)
+        @a.movz_x(R_X2, inc ? 2 : 1)
+        call_rt(RT_INC)
+        emit_write_binding(t.x.binding, R_X0, false, t.x)
+        @a.ldr_x(R_X0, R_SP, u_off) if !pre
+        @a.b(l_u_done)
+      add_cold_stub(cb_u)
       return nil
     # Member updates (`this.count--`, `this.holdCount++`, `++this.currentMark`, `a[i]++`):
     # Evaluates receiver (and key) ONCE; fast inline numeric IC path for warm own properties!
@@ -7393,22 +14964,31 @@ OSR_RETURN = 2
       sh_warm = node_ic[0]
       sl_warm = node_ic[1]
       ns_warm = node_ic[2]
-      obj_off = push_x(R_X0)
+      u_bli = shape_key(t.a)
+      @known_shapes.delete("this." + key)
+      # Direct known-shape fast path (e.g. `this.count--`, `this.holdCount++`, `this.queueCount++`, `this.v2++`!)
+      if u_bli != -1 && @known_shapes[u_bli] != nil
+        ksh_u = (u_bli == -2 && @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64)) ? @inline_this_sh : wvalue_from_bits(@known_shapes[u_bli])
+        if ksh_u.is_a?(JS:Shape) && !ksh_u.dict
+          sl_in = ksh_u.slot_of(key)
+          if sl_in >= 0 && ksh_u.attrs_of(key) == ATTR_DEFAULT
+            sh_warm = wvalue_bits(ksh_u) ## i64
+            sl_warm = sl_in < ksh_u.inline ? (ksh_u.ibase + sl_in) : (0 - (sl_in - ksh_u.inline) - 1)
+            ns_warm = 0
       if sh_warm != 0 && ns_warm == 0 && sl_warm != 0
         l_slow = @a.new_label
         l_done = @a.new_label
         @a.sub_i(R_X9, R_X0, 4)
-        @a.tst_wobj_bad(R_X9)
-        @a.b_cond(CC_NE, l_slow)
-        @a.cbz_x(R_X9, l_slow)
-        @a.ldr_x(R_X10, R_X9, 8)
-        @a.mov_imm64(R_X11, sh_warm)
-        @a.cmp_r(R_X10, R_X11)
-        @a.b_cond(CC_NE, l_slow)
+        if !(u_bli != -1 && @known_shapes[u_bli] == sh_warm)
+          @a.tst_wobj_bad(R_X9)
+          @a.b_cond(CC_NE, l_slow)
+          @a.cbz_x(R_X9, l_slow)
+          @a.ldr_x(R_X10, R_X9, 8)
+          emit_cmp_shape(R_X10, sh_warm)
+          @a.b_cond(CC_NE, l_slow)
         emit_slot_load(R_X12, R_X9, sl_warm)
         emit_unbox_f64(R_D0, R_X12, l_slow)
-        @a.mov_imm64(R_X10, jit_f64_bits(wvalue_bits(~1.0) ## i64))
-        @a.fmov_d_x(R_D1, R_X10)
+        @a.fmov_d_one(R_D1)
         if inc
           @a.fadd_d(R_D2, R_D0, R_D1)
         else
@@ -7419,7 +14999,8 @@ OSR_RETURN = 2
         @a.bind(l_done)
         cb = ->()
           @a.bind(l_slow)
-          @a.ldr_x(R_X1, R_SP, obj_off)
+          obj_off_u = push_x(R_X0)
+          @a.mov_r(R_X1, R_X0)
           @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
           call_rt(RT_GETV)
           @a.mov_r(R_X1, R_X0)
@@ -7429,34 +15010,71 @@ OSR_RETURN = 2
           @a.movz_x(R_X2, inc ? 2 : 1)
           call_rt(RT_INC)
           nv_off = push_x(R_X0)
-          @a.ldr_x(R_X1, R_SP, obj_off)
+          @a.ldr_x(R_X1, R_SP, obj_off_u)
           @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
           @a.mov_r(R_X3, R_X0)
           @a.movz_x(R_X4, @jf.strict ? 2 : 1)
           call_rt(RT_SETV)
           @a.ldr_x(R_X0, R_SP, pre ? nv_off : old_off)
-          @tmp_depth -= 2
+          @tmp_depth -= 3
           @a.b(l_done)
         add_cold_stub(cb)
-        @tmp_depth -= 1
         return nil
-      # Cold named member update (single receiver eval + IC populate on get/set)
-      @a.mov_r(R_X13, R_X0)
-      emit_ic_get(R_X13, key, node_ic, -1)
-      @a.mov_r(R_X1, R_X0)
-      call_rt(RT_TONUMERIC)
-      old_off = push_x(R_X0)
-      @a.mov_r(R_X1, R_X0)
-      @a.movz_x(R_X2, inc ? 2 : 1)
-      call_rt(RT_INC)
-      nv_off = push_x(R_X0)
-      @a.ldr_x(R_X1, R_SP, obj_off)
-      @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
-      @a.mov_r(R_X3, R_X0)
-      @a.movz_x(R_X4, @jf.strict ? 2 : 1)
-      call_rt(RT_SETV)
-      @a.ldr_x(R_X0, R_SP, pre ? nv_off : old_off)
-      @tmp_depth -= 3
+      obj_off = push_x(R_X0)
+      # Cold named member update: dynamic inline numeric IC (populated on first run via RT_SETP_MISS!)
+      ic_ptr_u = jit_i64_ptr(node_ic)
+      l_slow = @a.new_label
+      l_done = @a.new_label
+      @a.sub_i(R_X9, R_X0, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.mov_imm64(R_X11, ic_ptr_u)
+      @a.ldr_x(R_X14, R_X11, 0)         # ic[0] = shape
+      @a.cmp_r(R_X10, R_X14)
+      @a.b_cond(CC_NE, l_slow)
+      @a.ldr_x(R_X14, R_X11, 16)        # ic[2] == 0 (existing own slot)
+      @a.cbnz_x(R_X14, l_slow)
+      @a.ldr_x(R_X14, R_X11, 8)         # ic[1] = slot_enc (> 0 inline ivar)
+      @a.cmp_i(R_X14, 0)
+      @a.b_cond(CC_LE, l_slow)
+      @a.add_i(R_X14, R_X14, 1)
+      @a.ldr_x_idx(R_X12, R_X9, R_X14)
+      emit_unbox_f64(R_D0, R_X12, l_slow)
+      @a.fmov_d_one(R_D1)
+      if inc
+        @a.fadd_d(R_D2, R_D0, R_D1)
+      else
+        @a.fsub_d(R_D2, R_D0, R_D1)
+      emit_box_f64_nonan(R_X13, R_D2)
+      @a.str_x_idx(R_X13, R_X9, R_X14)
+      @a.mov_r(R_X0, pre ? R_X13 : R_X12)
+      @a.bind(l_done)
+      cb = ->()
+        @a.bind(l_slow)
+        @a.ldr_x(R_X1, R_SP, obj_off)
+        @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
+        call_rt(RT_GETV)
+        @a.mov_r(R_X1, R_X0)
+        call_rt(RT_TONUMERIC)
+        old_off = push_x(R_X0)
+        @a.mov_r(R_X1, R_X0)
+        @a.movz_x(R_X2, inc ? 2 : 1)
+        call_rt(RT_INC)
+        nv_off = push_x(R_X0)
+        @a.ldr_x(R_X1, R_SP, obj_off)
+        @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
+        @a.mov_r(R_X3, R_X0)
+        @a.mov_imm64(R_X4, wvalue_bits(node_ic) ## i64)
+        @a.mov_imm64(R_X5, wvalue_bits(0) ## i64)
+        @a.movz_x(R_X6, @jf.strict ? 2 : 1)
+        call_rt(RT_SETP_MISS)
+        @a.ldr_x(R_X0, R_SP, pre ? nv_off : old_off)
+        @tmp_depth -= 2
+        @a.b(l_done)
+      add_cold_stub(cb)
+      @tmp_depth -= 1
       return nil
     # Computed member update `o[k]++` (evaluates o and k ONCE!)
     obj_off = push_x(R_X0)
@@ -7543,6 +15161,18 @@ OSR_RETURN = 2
         return nil
       # Compound ident assign
       li = local_idx(t)
+      if li >= 0 && @info.types[li] == JT_I32 && op == "+=" && can_i32?(e.b)
+        r_dst = @info.reg_gpr[li]
+        gen_expr_i32(e.b)
+        if r_dst != nil
+          @a.add_w(r_dst, r_dst, R_X0)
+          emit_box_i32(R_X0, r_dst)
+        else
+          load_slot_i32(R_X9, li)
+          @a.add_w(R_X0, R_X9, R_X0)
+          store_slot_i32(li, R_X0)
+          emit_box_i32(R_X0, R_X0)
+        return nil
       if li >= 0 && @info.types[li] == JT_F64 && (op == "+=" || op == "-=" || op == "*=" || op == "/=")
         gen_expr_f64(e.b)
         load_slot_f64(R_D1, li)
@@ -7564,7 +15194,29 @@ OSR_RETURN = 2
       pop_x(R_X1)
       bop = op.slice(0, op.size - 1)
       rt = bop == "+" ? RT_ADD : (bop == "-" ? RT_SUB : (bop == "*" ? RT_MUL : (bop == "/" ? RT_DIV : (bop == "%" ? RT_MOD : (bop == "**" ? RT_POW : (bop == "|" ? RT_BITOR : (bop == "&" ? RT_BITAND : (bop == "^" ? RT_BITXOR : (bop == "<<" ? RT_SHL : (bop == ">>" ? RT_SAR : RT_SHR))))))))))
-      call_rt(rt)
+      if bop == "+" || bop == "-" || bop == "*" || bop == "/"
+        # Fast inline f64 compound assign for JT_ANY locals (e.g. `c += queryCount(...)`!)
+        l_slow_ca = @a.new_label
+        l_done_ca = @a.new_label
+        emit_unbox_f64(R_D0, R_X1, l_slow_ca)
+        emit_unbox_f64(R_D1, R_X2, l_slow_ca)
+        if bop == "+"
+          @a.fadd_d(R_D0, R_D0, R_D1)
+        elsif bop == "-"
+          @a.fsub_d(R_D0, R_D0, R_D1)
+        elsif bop == "*"
+          @a.fmul_d(R_D0, R_D0, R_D1)
+        else
+          @a.fdiv_d(R_D0, R_D0, R_D1)
+        emit_box_f64(R_X0, R_D0)
+        @a.bind(l_done_ca)
+        cb_ca = ->()
+          @a.bind(l_slow_ca)
+          call_rt(rt)
+          @a.b(l_done_ca)
+        add_cold_stub(cb_ca)
+      else
+        call_rt(rt)
       emit_write_binding(b, R_X0, false, t.x)
       return nil
     if t.kind == :member
@@ -7628,24 +15280,278 @@ OSR_RETURN = 2
         if bli >= 0 && @hoisted_tas[bli] != nil
           gen_ta_store(bli, t.b, e.b)
           return nil
+        # Inline plain JS Array element write `arr[i] = val` (dense OR holey `new Array(N)`, NO JS_AF_EXT!)
+        if can_i32?(t.b)
+          cv_idx = const_eval_i32(t.b)
+          # Zero-spill fast path when index is a constant i32 and RHS is a pure known-shape own-slot read (e.g. `p.a2[0] = this.v2`)!
+          eb_pure_slot = false
+          eb_sk_w = -1
+          eb_enc_w = 0
+          if cv_idx != nil && e.b.kind == :member && !e.b.has?(F_COMPUTED) && e.b.a != nil && (e.b.a.kind == :this || e.b.a.kind == :ident)
+            eb_sk_w = shape_key(e.b.a)
+            if eb_sk_w != -1 && @known_shapes[eb_sk_w] != nil
+              eb_ksh = (eb_sk_w == -2 && @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64)) ? @inline_this_sh : wvalue_from_bits(@known_shapes[eb_sk_w])
+              if eb_ksh.is_a?(JS:Shape) && !eb_ksh.dict
+                eb_sl = eb_ksh.slot_of(e.b.b.str)
+                if eb_sl >= 0 && (eb_ksh.attrs_of(e.b.b.str) & ATTR_ACCESSOR) == 0 && eb_sl < eb_ksh.inline
+                  eb_enc_w = eb_ksh.ibase + eb_sl
+                  eb_pure_slot = true
+          obj_off = -1
+          idx_off = -1
+          if cv_idx != nil && eb_pure_slot
+            gen_expr_any(t.a)
+            @a.mov_r(R_X13, R_X0)        # arr (preserved across pure slot load!)
+            if e.b.a.kind == :this && @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+              @a.sub_i(R_X9, @inline_env[:this][1], 4)
+            elsif e.b.a.kind == :this && @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :spill_x
+              @a.ldr_x(R_X9, R_SP, @inline_env[:this][1])
+              @a.sub_i(R_X9, R_X9, 4)
+            elsif e.b.a.kind == :this
+              @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+              @a.sub_i(R_X9, R_X9, 4)
+            elsif @inline_env != nil && e.b.a.x != nil && @inline_env[e.b.a.x.binding] != nil && @inline_env[e.b.a.x.binding][0] == :reg_x
+              @a.sub_i(R_X9, @inline_env[e.b.a.x.binding][1], 4)
+            elsif @inline_env != nil && e.b.a.x != nil && @inline_env[e.b.a.x.binding] != nil && @inline_env[e.b.a.x.binding][0] == :spill_x
+              @a.ldr_x(R_X9, R_SP, @inline_env[e.b.a.x.binding][1])
+              @a.sub_i(R_X9, R_X9, 4)
+            else
+              load_slot_any(R_X9, local_idx(e.b.a))
+              @a.sub_i(R_X9, R_X9, 4)
+            emit_slot_load(R_X12, R_X9, eb_enc_w)
+            @a.mov_imm32(R_X11, cv_idx)
+            @a.sxtw(R_X11, R_X11)
+          elsif cv_idx != nil
+            gen_expr_any(t.a)
+            obj_off = push_x(R_X0)
+            gen_expr_any(e.b)
+            @a.mov_r(R_X12, R_X0)
+            @a.ldr_x(R_X13, R_SP, obj_off)
+            @a.mov_imm32(R_X11, cv_idx)
+            @a.sxtw(R_X11, R_X11)
+          else
+            gen_expr_any(t.a)
+            obj_off = push_x(R_X0)
+            gen_expr_i32(t.b)
+            idx_off = push_w(R_X0)
+            gen_expr_any(e.b)
+            @a.mov_r(R_X12, R_X0)          # val
+            @a.ldr_x(R_X13, R_SP, obj_off) # arr
+            @a.ldrsw(R_X11, R_SP, idx_off) # idx (signed 64-bit)
+          l_slow = @a.new_label
+          l_done = @a.new_label
+          if !@hoisted_epoch && !@epoch_verified_now
+            ep_now = JS_EPOCH[0]
+            @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+            @a.ldr_x(R_X10, R_X9, 0)
+            @a.mov_imm64(R_X14, ep_now)
+            @a.cmp_r(R_X10, R_X14)
+            @a.b_cond(CC_NE, l_slow)
+          @a.lsr_xi(R_X9, R_X13, 48)
+          @a.movz_x(R_X10, 0xFFF4)
+          @a.cmp_r(R_X9, R_X10)
+          @a.b_cond(CC_NE, l_slow)
+          @a.and_x_ptr47(R_X9, R_X13)
+          @a.ldrb(R_X10, R_X9, 2)        # aflags
+          @a.and_w_lowmask(R_X10, R_X10, 4)
+          @a.cmp_wi(R_X10, 1)            # dense JS_AF_ARRAY
+          l_chk_holey = @a.new_label
+          l_store_ok = @a.new_label
+          @a.b_cond(CC_EQ, l_store_ok)
+          @a.bind(l_chk_holey)
+          @a.cmp_wi(R_X10, 3)            # holey JS_AF_ARRAY | JS_AF_HOLES (NO JS_AF_EXT!)
+          @a.b_cond(CC_NE, l_slow)
+          @a.bind(l_store_ok)
+          @a.ldrsw(R_X10, R_X9, 8)       # size
+          @a.cmp_r(R_X11, R_X10)
+          @a.b_cond(CC_HS, l_slow)
+          @a.ldrsw(R_X10, R_X9, 4)       # start
+          @a.add_r(R_X11, R_X11, R_X10)
+          @a.ldr_x(R_X9, R_X9, 16)       # slots
+          @a.str_x_idx(R_X12, R_X9, R_X11)
+          @a.mov_r(R_X0, R_X12)
+          @a.bind(l_done)
+          cb = ->()
+            @a.bind(l_slow)
+            @a.mov_r(R_X1, R_X13)
+            emit_box_i32(R_X2, R_X11)
+            @a.mov_r(R_X3, R_X12)
+            @a.movz_x(R_X4, @jf.strict ? 2 : 1)
+            call_rt(RT_SETV)
+            @a.b(l_done)
+          add_cold_stub(cb)
+          @tmp_depth -= ((obj_off >= 0 ? 1 : 0) + (idx_off >= 0 ? 1 : 0))
+          return nil
       # Named property write `o.prop = v` or `o.prop += v` / `-= v` (CRITICAL for float_math!)
       if !t.has?(F_COMPUTED)
         gen_member_set_named(t, op, e.b)
         return nil
-      # General computed member write `o[k] = v`
+      # General computed member write `o[k] = v` (with inline dense/holey WArray fast path for numeric index!)
       gen_expr_any(t.a)
-      push_x(R_X0)
+      obj_off_c = push_x(R_X0)
       gen_expr_any(t.b)
-      push_x(R_X0)
+      key_off_c = push_x(R_X0)
       if op == "="
         gen_expr_any(e.b)
-        @a.mov_r(R_X3, R_X0)
-        pop_x(R_X2)
-        pop_x(R_X1)
+        @a.mov_r(R_X12, R_X0)           # val
+        @a.ldr_x(R_X14, R_SP, key_off_c) # key
+        @a.ldr_x(R_X13, R_SP, obj_off_c) # obj
+        skpic = i64[257]
+        ski = 0
+        while ski < 257
+          skpic[ski] = 0
+          ski += 1
+        skeep = Array.new(192, nil)
+        jit_keep(skpic)
+        jit_keep(skeep)
+        skpic_p = jit_i64_ptr(skpic)
+        l_chk_kpic = @a.new_label
+        l_slow = @a.new_label
+        l_done = @a.new_label
+        l_ok_s = @a.new_label
+        @a.lsr_xi(R_X9, R_X13, 48)
+        @a.movz_x(R_X10, 0xFFF4)
+        @a.cmp_r(R_X9, R_X10)
+        @a.b_cond(CC_NE, l_chk_kpic)
+        if !@hoisted_epoch && !@epoch_verified_now
+          ep_now = JS_EPOCH[0]
+          @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+          @a.ldr_x(R_X10, R_X9, 0)
+          @a.mov_imm64(R_X11, ep_now)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_slow)
+        # Zero-FP small-int 0..7 index decode (cold FP fallback handles >= 8 & -0.0!)
+        l_idx0_s = @a.new_label
+        l_idx_fp_s = @a.new_label
+        l_idx_ok_s = @a.new_label
+        @a.sub_r(R_X9, R_X14, R_X20)
+        @a.cbz_x(R_X9, l_idx0_s)
+        @a.ror_xi(R_X10, R_X9, 50)
+        @a.sub_i(R_X10, R_X10, 4092)
+        @a.cmp_i(R_X10, 11)
+        @a.b_cond(CC_HI, l_idx_fp_s)
+        @a.lsl_xi(R_X10, R_X10, 2)
+        @a.mov_imm64(R_X11, 0x7654F3F2FFF1)   # 12-nibble LUT for 1.0..7.0 -> 1..7 (0xF = non-int)
+        @a.lsr_x(R_X11, R_X11, R_X10)
+        @a.and_x_lowmask(R_X11, R_X11, 4)
+        @a.cmp_i(R_X11, 7)
+        @a.b_cond(CC_HI, l_idx_fp_s)
+        @a.b(l_idx_ok_s)
+        @a.bind(l_idx0_s)
+        @a.movz_x(R_X11, 0)
+        @a.bind(l_idx_ok_s)
+        cb_ifs = ->()
+          @a.bind(l_idx_fp_s)
+          @a.cmp_r(R_X9, R_X21)
+          @a.b_cond(CC_HS, l_slow)
+          @a.fmov_d_x(R_D0, R_X9)
+          @a.fcvtzs_w_d(R_X11, R_D0)
+          @a.scvtf_d_w(R_D1, R_X11)
+          @a.fcmp_d(R_D0, R_D1)
+          @a.b_cond(CC_NE, l_slow)
+          @a.sxtw(R_X11, R_X11)
+          @a.b(l_idx_ok_s)
+        add_cold_stub(cb_ifs)
+        @a.and_x_ptr47(R_X9, R_X13)
+        @a.ldrb(R_X10, R_X9, 2)
+        @a.and_w_lowmask(R_X10, R_X10, 4)
+        @a.cmp_wi(R_X10, 1)
+        @a.b_cond(CC_EQ, l_ok_s)
+        @a.cmp_wi(R_X10, 3)
+        @a.b_cond(CC_NE, l_slow)
+        @a.bind(l_ok_s)
+        @a.ldrsw(R_X10, R_X9, 8)        # size
+        @a.cmp_r(R_X11, R_X10)
+        @a.b_cond(CC_HS, l_slow)
+        @a.ldrsw(R_X10, R_X9, 4)        # start
+        @a.add_r(R_X11, R_X11, R_X10)
+        @a.ldr_x(R_X9, R_X9, 16)        # slots
+        @a.str_x_idx(R_X12, R_X9, R_X11)
+        @a.mov_r(R_X0, R_X12)
+        @a.bind(l_done)
+        cb = ->()
+          # Out-of-line 64-entry 2-way linear-probe `(shape, key_bits) -> [slot_enc, new_shape]` IC for dynamic `obj[k] = v`!
+          @a.bind(l_chk_kpic)
+          l_skp_p1 = @a.new_label
+          l_skp_hit = @a.new_label
+          l_kp_trans = @a.new_label
+          l_kp_ext = @a.new_label
+          @a.sub_i(R_X9, R_X13, 4)
+          @a.tst_wobj_bad(R_X9)
+          @a.b_cond(CC_NE, l_slow)
+          @a.cbz_x(R_X9, l_slow)
+          @a.ldr_x(R_X15, R_X9, 8)        # obj.@shape
+          @a.eor_r(R_X10, R_X15, R_X14)
+          @a.mov_imm64(R_X11, -7046029254386353131)
+          @a.mul_x(R_X10, R_X10, R_X11)
+          @a.lsr_xi(R_X10, R_X10, 58)     # h0 in 0..63
+          @a.mov_imm64(R_X11, skpic_p)
+          @a.add_r(R_X11, R_X11, R_X10, 5) # skpic_p + h0 * 32
+          @a.ldr_x(R_X0, R_X11, 0)
+          @a.cmp_r(R_X0, R_X15)
+          @a.b_cond(CC_NE, l_skp_p1)
+          @a.ldr_x(R_X0, R_X11, 8)
+          @a.cmp_r(R_X0, R_X14)
+          @a.b_cond(CC_NE, l_skp_p1)
+          @a.bind(l_skp_hit)
+          @a.ldr_x(R_X10, R_X11, 16)      # slot_enc
+          @a.ldr_x(R_X15, R_X11, 24)      # new_shape (0 = existing slot)
+          @a.cbnz_x(R_X15, l_kp_trans)
+          @a.cmp_i(R_X10, 0)
+          @a.b_cond(CC_LE, l_kp_ext)
+          @a.add_i(R_X10, R_X10, 1)
+          @a.str_x_idx(R_X12, R_X9, R_X10)
+          @a.mov_r(R_X0, R_X12)
+          @a.b(l_done)
+          @a.bind(l_kp_trans)
+          mark_while_dirty()
+          @a.mov_imm64(R_X11, skpic_p + 2048)
+          @a.ldr_x(R_X11, R_X11, 0)       # skpic[256] == cached JS_EPOCH[0]
+          @a.ldr_x(R_X0, R_X19, RT_K_EPOCH_PTR * 8)
+          @a.ldr_x(R_X0, R_X0, 0)
+          @a.cmp_r(R_X0, R_X11)
+          @a.b_cond(CC_NE, l_slow)
+          @a.add_i(R_X10, R_X10, 1)
+          @a.str_x_idx(R_X12, R_X9, R_X10)
+          @a.str_x(R_X15, R_X9, 8)        # update obj.@shape = new_shape!
+          @a.mov_r(R_X0, R_X12)
+          @a.b(l_done)
+          @a.bind(l_kp_ext)
+          @a.cbz_x(R_X10, l_slow)
+          @a.sub_r(R_X10, R_XZR, R_X10)
+          @a.sub_i(R_X10, R_X10, 1)
+          @a.ldr_x(R_X11, R_X9, 16)       # @ext WArray
+          @a.and_x_ptr47(R_X11, R_X11)
+          @a.ldr_x(R_X11, R_X11, 16)      # slots
+          @a.str_x_idx(R_X12, R_X11, R_X10)
+          @a.mov_r(R_X0, R_X12)
+          @a.b(l_done)
+          @a.bind(l_skp_p1)
+          @a.add_i(R_X10, R_X10, 1)
+          @a.and_x_lowmask(R_X10, R_X10, 6)
+          @a.mov_imm64(R_X11, skpic_p)
+          @a.add_r(R_X11, R_X11, R_X10, 5)
+          @a.ldr_x(R_X0, R_X11, 0)
+          @a.cmp_r(R_X0, R_X15)
+          @a.b_cond(CC_NE, l_slow)
+          @a.ldr_x(R_X0, R_X11, 8)
+          @a.cmp_r(R_X0, R_X14)
+          @a.b_cond(CC_EQ, l_skp_hit)
+          @a.bind(l_slow)
+          @a.mov_r(R_X1, R_X13)
+          @a.mov_r(R_X2, R_X14)
+          @a.mov_r(R_X3, R_X12)
+          @a.mov_imm64(R_X4, wvalue_bits(skpic) ## i64)
+          @a.mov_imm64(R_X5, wvalue_bits(skeep) ## i64)
+          @a.movz_x(R_X6, @jf.strict ? 2 : 1)
+          call_rt(RT_SET_KEY_PIC_MISS)
+          @a.b(l_done)
+        add_cold_stub(cb)
+        @tmp_depth -= 2
+        return nil
       else
         # Reload obj & key from top of tmp stack
-        @a.ldr_x(R_X2, R_SP, @tmp_base + (@tmp_depth - 1) * 8)
-        @a.ldr_x(R_X1, R_SP, @tmp_base + (@tmp_depth - 2) * 8)
+        @a.ldr_x(R_X2, R_SP, key_off_c)
+        @a.ldr_x(R_X1, R_SP, obj_off_c)
         call_rt(RT_GETV)
         push_x(R_X0)
         gen_expr_any(e.b)
@@ -7668,7 +15574,14 @@ OSR_RETURN = 2
     tr = @hoisted_ta_regs[bli]
     r_idx = peek_i32_reg(idx_e)
     skip_bc = ta_idx_bounded?(bli, idx_e)
-    if r_idx == nil
+    r_postinc_idx = nil
+    if r_idx == nil && idx_e.kind == :update && idx_e.str == "++" && !idx_e.has?(F_PREFIX) && (kind == 5 || kind == 6 || kind == 0 || kind == 1 || kind == 3 || kind == 4)
+      oli_ts = local_idx(idx_e.a)
+      if oli_ts >= 0 && @info.types[oli_ts] == JT_I32 && @info.reg_gpr[oli_ts] != nil && !stmt_writes_local?(val_e, oli_ts)
+        r_postinc_idx = @info.reg_gpr[oli_ts]
+        @a.adds_wi(r_postinc_idx, r_postinc_idx, 1)
+        @a.b_cond(CC_VS, @l_deopt)
+    if r_idx == nil && r_postinc_idx == nil
       gen_ta_index(idx_e)
       push_w(R_X0)
     if kind == 8 || kind == 7 || kind == 11
@@ -7682,11 +15595,7 @@ OSR_RETURN = 2
       @a.ldr_x(R_X9, R_SP, h[0]) if r_ptr == R_X9
       l_oob = nil
       if !skip_bc
-        if tr != nil && tr[1] != nil
-          @a.cmp_r(R_X11, tr[1])
-        else
-          @a.ldr_x(R_X10, R_SP, h[1])
-          @a.cmp_r(R_X11, R_X10)
+        emit_ta_len_cmp(bli, tr, h, nil)
         l_oob = @a.new_label
         @a.b_cond(CC_HS, l_oob)
       if kind == 8
@@ -7710,6 +15619,9 @@ OSR_RETURN = 2
         rv = R_X0
       if r_idx != nil
         @a.sxtw(R_X11, r_idx)
+      elsif r_postinc_idx != nil
+        @a.sub_wi(R_X11, r_postinc_idx, 1)
+        @a.sxtw(R_X11, R_X11)
       else
         pop_w(R_X11)
         @a.sxtw(R_X11, R_X11)
@@ -7717,11 +15629,7 @@ OSR_RETURN = 2
       @a.ldr_x(R_X9, R_SP, h[0]) if r_ptr == R_X9
       l_oob = nil
       if !skip_bc
-        if tr != nil && tr[1] != nil
-          @a.cmp_r(R_X11, tr[1])
-        else
-          @a.ldr_x(R_X10, R_SP, h[1])
-          @a.cmp_r(R_X11, R_X10)
+        emit_ta_len_cmp(bli, tr, h, nil)
         l_oob = @a.new_label
         @a.b_cond(CC_HS, l_oob)
       if kind == 5 || kind == 6
@@ -7752,46 +15660,102 @@ OSR_RETURN = 2
   # Uses `node_ic` (pre-warmed by tier 0 if OSR, or fresh `i64[4]`).
   # If `bli >= 0` and `@known_shapes[bli]` already verified the exact shape of `obj_reg`
   # in this basic block, skips BOTH the instance check AND the shape check!
-  -> emit_ic_get(obj_reg, key, node_ic, bli)
+  # Emit 8-way dynamic own-slot property read PIC probe (handles inline `sl > 0`, `@ext` `sl < 0`, & negative lookups on up to 8 shapes!).
+  -> emit_ic_get_4way_probe(obj_reg, key, pic, l_done, check_wobj = true)
+    pic_ptr = jit_i64_ptr(pic)
+    l_rt = @a.new_label
+    if check_wobj
+      @a.sub_i(R_X9, obj_reg, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_rt)
+      @a.cbz_x(R_X9, l_rt)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.mov_imm64(R_X11, pic_ptr)
+    l_load_sl = @a.new_label
+    l_ext_sl = @a.new_label
+    l_neg_chk = @a.new_label
+    ei = 0
+    while ei < 8
+      l_nxt = ei < 7 ? @a.new_label : l_rt
+      l_own = @a.new_label
+      @a.ldr_x(R_X12, R_X11, ei * 32)          # shape
+      @a.cmp_r(R_X10, R_X12)
+      @a.b_cond(CC_NE, l_nxt)
+      @a.ldr_x(R_X14, R_X11, ei * 32 + 16)     # holder (0 => own slot, -1 => cached missing!)
+      @a.cbz_x(R_X14, l_own)
+      @a.add_i(R_X15, R_X14, 1)
+      @a.cbnz_x(R_X15, l_rt)
+      @a.ldr_x(R_X12, R_X11, ei * 32 + 24)     # cached JS_EPOCH
+      @a.b(l_neg_chk)
+      @a.bind(l_own)
+      @a.ldr_x(R_X12, R_X11, ei * 32 + 8)      # slot_enc
+      @a.b(l_load_sl)
+      @a.bind(l_nxt) if ei < 7
+      ei += 1
+    @a.bind(l_neg_chk)
+    @a.ldr_x(R_X14, R_X19, RT_K_EPOCH_PTR * 8)
+    @a.ldr_x(R_X14, R_X14, 0)
+    @a.cmp_r(R_X12, R_X14)
+    @a.b_cond(CC_NE, l_rt)
+    @a.movz_x(R_X0, 0)
+    @a.b(l_done)
+    @a.bind(l_load_sl)
+    @a.cbz_x(R_X12, l_rt)
+    @a.cmp_i(R_X12, 0)
+    @a.b_cond(CC_LT, l_ext_sl)
+    @a.add_i(R_X12, R_X12, 1)
+    @a.ldr_x_idx(R_X0, R_X9, R_X12)
+    @a.b(l_done)
+    @a.bind(l_ext_sl)
+    @a.sub_r(R_X12, R_XZR, R_X12)
+    @a.sub_i(R_X12, R_X12, 1)
+    @a.ldr_x(R_X14, R_X9, 16)                  # @ext WArray
+    @a.and_x_ptr47(R_X14, R_X14)
+    @a.ldr_x(R_X14, R_X14, 16)                 # slots
+    @a.ldr_x_idx(R_X0, R_X14, R_X12)
+    @a.b(l_done)
+    @a.bind(l_rt)
+    @a.mov_r(R_X1, obj_reg)
+    @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
+    @a.mov_imm64(R_X3, wvalue_bits(pic) ## i64)
+    call_rt(RT_GET_PIC_MISS)
+    @a.b(l_done)
+    nil
+
+  -> emit_ic_get(obj_reg, key, node_ic, bli, ast_e = nil)
     jit_keep(key)
     jit_keep(node_ic)
-    # Fast specialization: if node_ic is already warm with an own property (ic[0] != 0 && ic[2] == 0)!
+    # Direct slot load when receiver shape is ALREADY verified in `@known_shapes[bli]` (even if node_ic is cold!)
+    if bli != -1 && @known_shapes[bli] != nil
+      ksh_g = (bli == -2 && @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64)) ? @inline_this_sh : wvalue_from_bits(@known_shapes[bli])
+      if ksh_g.is_a?(JS:Shape) && !ksh_g.dict
+        sl_in = ksh_g.slot_of(key)
+        if sl_in >= 0 && (ksh_g.attrs_of(key) & ATTR_ACCESSOR) == 0
+          enc_in = sl_in < ksh_g.inline ? (ksh_g.ibase + sl_in) : (0 - (sl_in - ksh_g.inline) - 1)
+          @a.sub_i(R_X9, obj_reg, 4)
+          emit_slot_load(R_X0, R_X9, enc_in)
+          return nil
+    # Fast specialization for 2-shape polymorphic own-property hit (either persistent `i64[32]` PIC or `ic[2] = old_shape | 1`)!
     sh_warm = node_ic[0]
     sl_warm = node_ic[1]
     h_warm  = node_ic[2]
-    if sh_warm != 0 && h_warm == 0 && sl_warm != 0
-      # Check if we ALREADY verified this exact shape for local `bli`!
-      if bli >= 0 && @known_shapes[bli] == sh_warm
-        @a.sub_i(R_X9, obj_reg, 4)
-        emit_slot_load(R_X0, R_X9, sl_warm)
-        return nil
-      # Guard instance + shape == sh_warm (5 instructions), then direct slot load!
-      l_slow = @a.new_label
-      l_done = @a.new_label
-      @a.sub_i(R_X9, obj_reg, 4)
-      @a.tst_x_lowmask(R_X9, 4)
-      @a.b_cond(CC_NE, l_slow)
-      @a.lsr_xi(R_X10, R_X9, 48)
-      @a.cbnz_x(R_X10, l_slow)
-      @a.cbz_x(R_X9, l_slow)
-      @a.ldr_x(R_X10, R_X9, 8)         # @shape
-      @a.mov_imm64(R_X11, sh_warm)
-      @a.cmp_r(R_X10, R_X11)
-      @a.b_cond(CC_NE, l_slow)
-      emit_slot_load(R_X0, R_X9, sl_warm)
-      @a.b(l_done)
-      @a.bind(l_slow)
-      @a.mov_r(R_X1, obj_reg)
-      @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
-      @a.mov_imm64(R_X3, wvalue_bits(node_ic) ## i64)
-      @a.mov_imm64(R_X4, wvalue_bits(0) ## i64)
-      call_rt(RT_GETP_MISS)
-      @a.bind(l_done)
-      return nil
-    # Fast specialization for 2-shape polymorphic own-property hit (`ic[2] = old_shape | 1`, `ic[3] = old_slot`)!
-    if sh_warm != 0 && (h_warm & 1) != 0 && sl_warm != 0 && node_ic[3] != 0
-      sh2 = h_warm ^ 1
-      sl2 = node_ic[3]
+    is_pic32_2way = node_ic.size == 32 && sh_warm != 0 && h_warm == 0 && sl_warm != 0 && node_ic[4] != 0 && node_ic[6] == 0 && node_ic[5] != 0
+    is_ic4_2way = sh_warm != 0 && (h_warm & 1) != 0 && sl_warm != 0 && node_ic[3] != 0
+    if is_pic32_2way || is_ic4_2way
+      sh2 = is_pic32_2way ? node_ic[4] : (h_warm ^ 1)
+      sl2 = is_pic32_2way ? node_ic[5] : node_ic[3]
+      if node_ic.size == 32
+        pic_2 = node_ic
+      else
+        pic_2 = i64[32]
+        pk = 0
+        while pk < 32
+          pic_2[pk] = 0
+          pk += 1
+        pic_2[0] = sh_warm; pic_2[1] = sl_warm
+        pic_2[4] = sh2; pic_2[5] = sl2
+        ast_e.x = pic_2 if ast_e != nil && !@in_cold_stub && @inline_env == nil
+      jit_keep(pic_2)
       l_chk2 = @a.new_label
       l_slow = @a.new_label
       l_done = @a.new_label
@@ -7800,25 +15764,62 @@ OSR_RETURN = 2
       @a.b_cond(CC_NE, l_slow)
       @a.cbz_x(R_X9, l_slow)
       @a.ldr_x(R_X10, R_X9, 8)
-      @a.mov_imm64(R_X11, sh_warm)
-      @a.cmp_r(R_X10, R_X11)
+      emit_cmp_shape(R_X10, sh_warm)
       @a.b_cond(CC_NE, l_chk2)
       emit_slot_load(R_X0, R_X9, sl_warm)
       @a.b(l_done)
       @a.bind(l_chk2)
-      @a.mov_imm64(R_X11, sh2)
-      @a.cmp_r(R_X10, R_X11)
+      emit_cmp_shape(R_X10, sh2)
       @a.b_cond(CC_NE, l_slow)
       emit_slot_load(R_X0, R_X9, sl2)
       @a.bind(l_done)
       cb = ->()
         @a.bind(l_slow)
-        @a.mov_r(R_X1, obj_reg)
-        @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
-        @a.mov_imm64(R_X3, wvalue_bits(node_ic) ## i64)
-        @a.mov_imm64(R_X4, wvalue_bits(0) ## i64)
-        call_rt(RT_GETP_MISS)
-        @a.b(l_done)
+        emit_ic_get_4way_probe(obj_reg, key, pic_2, l_done, true)
+      add_cold_stub(cb)
+      return nil
+    # Fast specialization: if node_ic is already warm with an own property (ic[0] != 0 && ic[2] == 0)!
+    if sh_warm != 0 && h_warm == 0 && sl_warm != 0
+      # Check if we ALREADY verified this exact shape for local `bli` (or `this` via bli == -2)!
+      if bli != -1 && @known_shapes[bli] == sh_warm
+        @a.sub_i(R_X9, obj_reg, 4)
+        emit_slot_load(R_X0, R_X9, sl_warm)
+        return nil
+      # Guard instance + shape == sh_warm (5 instructions), then direct slot load!
+      # On polymorphic shape miss, cold stub probes a persistent 8-way dynamic PIC (so recompile upgrades to 2-way inline!)
+      if node_ic.size == 32
+        pic_m = node_ic
+      else
+        pic_m = i64[32]
+        pk = 0
+        while pk < 32
+          pic_m[pk] = 0
+          pk += 1
+        pic_m[0] = sh_warm; pic_m[1] = sl_warm
+        ast_e.x = pic_m if ast_e != nil && !@in_cold_stub && @inline_env == nil
+      jit_keep(pic_m)
+      l_slow = @a.new_label
+      l_done = @a.new_label
+      @a.sub_i(R_X9, obj_reg, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X10, R_X9, 8)         # @shape
+      r_hs = @hoisted_shapes[sh_warm]
+      if r_hs != nil
+        @a.cmp_r(R_X10, r_hs)
+      elsif @sh_spill_slots[sh_warm] != nil
+        @a.ldr_x(R_X11, R_SP, @sh_spill_slots[sh_warm])
+        @a.cmp_r(R_X10, R_X11)
+      else
+        @a.mov_imm64(R_X11, sh_warm)
+        @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+      emit_slot_load(R_X0, R_X9, sl_warm)
+      @a.bind(l_done)
+      cb = ->()
+        @a.bind(l_slow)
+        emit_ic_get_4way_probe(obj_reg, key, pic_m, l_done, true)
       add_cold_stub(cb)
       return nil
     # Fast specialization for warm prototype-chain hit (`ic[0] != 0 && ic[2] != 0 && (ic[2] & 1) == 0 && ic[1] != 0`)!
@@ -7853,36 +15854,167 @@ OSR_RETURN = 2
         @a.b(l_done)
       add_cold_stub(cb)
       return nil
-    # Generic dynamic IC lookup (reads node_ic[0..3] at runtime)
-    ic_ptr = jit_i64_ptr(node_ic)
+    # Fast specialization when `this` has a known monomorphic shape even if node_ic is cold!
+    if bli == -2
+      cand_sh_g = @inline_this_sh != nil ? (wvalue_bits(@inline_this_sh) ## i64) : @this_mono_sh
+      if cand_sh_g != 0
+        csh_o = @inline_this_sh != nil ? @inline_this_sh : wvalue_from_bits(cand_sh_g)
+        if csh_o.is_a?(JS:Shape) && !csh_o.dict
+          sl_cg = csh_o.slot_of(key)
+          if sl_cg >= 0 && (csh_o.attrs_of(key) & ATTR_ACCESSOR) == 0
+            enc_cg = sl_cg < csh_o.inline ? (csh_o.ibase + sl_cg) : (0 - (sl_cg - csh_o.inline) - 1)
+            jit_keep(csh_o)
+            pic_cg = i64[32]
+            pk_cg = 0
+            while pk_cg < 32
+              pic_cg[pk_cg] = 0
+              pk_cg += 1
+            jit_keep(pic_cg)
+            l_slow = @a.new_label
+            l_done = @a.new_label
+            @a.sub_i(R_X9, obj_reg, 4)
+            @a.tst_wobj_bad(R_X9)
+            @a.b_cond(CC_NE, l_slow)
+            @a.cbz_x(R_X9, l_slow)
+            @a.ldr_x(R_X10, R_X9, 8)
+            emit_cmp_shape(R_X10, cand_sh_g)
+            @a.b_cond(CC_NE, l_slow)
+            emit_slot_load(R_X0, R_X9, enc_cg)
+            @a.bind(l_done)
+            cb_cg = ->()
+              @a.bind(l_slow)
+              emit_ic_get_4way_probe(obj_reg, key, pic_cg, l_done, true)
+            add_cold_stub(cb_cg)
+            return nil
+    # Generic 8-way dynamic PIC lookup (entry 0 inline, entries 1..7 + @ext + miss in cold stub!)
+    # Attach `pic_g` to `ast_e.x` when cold so standalone JIT runs warm AST ICs for later callers/inliners!
+    if ast_e != nil && !@in_cold_stub && ast_e.x.is_a?(Array) && ast_e.x.size == 32 && ast_e.x[0].is_a?(Int)
+      pic_g = ast_e.x
+    else
+      pic_g = i64[32]
+      pk = 0
+      while pk < 32
+        pic_g[pk] = 0
+        pk += 1
+      if ast_e != nil && !@in_cold_stub && (ast_e.x == nil || (jit_ic_valid?(ast_e.x) && ast_e.x[0] == 0))
+        ast_e.x = pic_g
+    jit_keep(pic_g)
+    pic_ptr = jit_i64_ptr(pic_g)
     l_slow = @a.new_label
     l_done = @a.new_label
     @a.sub_i(R_X9, obj_reg, 4)
-    @a.tst_x_lowmask(R_X9, 4)
+    @a.tst_wobj_bad(R_X9)
     @a.b_cond(CC_NE, l_slow)
-    @a.lsr_xi(R_X10, R_X9, 48)
-    @a.cbnz_x(R_X10, l_slow)
     @a.cbz_x(R_X9, l_slow)
     @a.ldr_x(R_X10, R_X9, 8)           # obj.@shape
-    @a.mov_imm64(R_X11, ic_ptr)
-    @a.ldr_x(R_X12, R_X11, 0)          # ic[0]
+    @a.mov_imm64(R_X11, pic_ptr)
+    @a.ldr_x(R_X12, R_X11, 0)          # pic[0]
     @a.cmp_r(R_X10, R_X12)
     @a.b_cond(CC_NE, l_slow)
-    @a.ldr_x(R_X12, R_X11, 16)         # ic[2] = holder
-    @a.cbnz_x(R_X12, l_slow)           # proto hit -> slow (or handled below)
-    @a.ldr_x(R_X12, R_X11, 8)          # ic[1] = slot_enc
+    @a.ldr_x(R_X12, R_X11, 16)         # pic[2] = holder
+    @a.cbnz_x(R_X12, l_slow)
+    @a.ldr_x(R_X12, R_X11, 8)          # pic[1] = slot_enc
     @a.cmp_i(R_X12, 0)
-    @a.b_cond(CC_LE, l_slow)           # <= 0 -> overflow/miss -> slow
-    @a.add_i(R_X12, R_X12, 1)          # offset in 8-byte words = ivar + 1
-    @a.ldr_x_idx(R_X0, R_X9, R_X12)    # [obj_ptr + (ivar+1)*8]
-    @a.b(l_done)
-    @a.bind(l_slow)
-    @a.mov_r(R_X1, obj_reg)
-    @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
-    @a.mov_imm64(R_X3, wvalue_bits(node_ic) ## i64)
-    @a.mov_imm64(R_X4, wvalue_bits(0) ## i64)
-    call_rt(RT_GETP_MISS)
+    @a.b_cond(CC_LE, l_slow)
+    @a.add_i(R_X12, R_X12, 1)
+    @a.ldr_x_idx(R_X0, R_X9, R_X12)
     @a.bind(l_done)
+    saved_td_pg = @tmp_depth
+    px_ic_g = i64[4]
+    px_ic_g[0] = 0; px_ic_g[1] = 0; px_ic_g[2] = 0; px_ic_g[3] = 0
+    px_keep_g = Array.new(2, nil)
+    jit_keep(px_ic_g)
+    jit_keep(px_keep_g)
+    px_ic_gp = jit_i64_ptr(px_ic_g)
+    px_offs = js_proxy_ivar_offs()
+    cb = ->()
+      @a.bind(l_slow)
+      # Inline ARM64 JS:Proxy `get` trap dispatch (direct `blr trap_fn.code.jit_fast_fp` + post-call invariant check!)
+      l_not_px = @a.new_label
+      l_px_miss = @a.new_label
+      l_px_miss_gp = @a.new_label
+      l_px_inv = @a.new_label
+      @a.sub_i(R_X9, obj_reg, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_not_px)
+      @a.cbz_x(R_X9, l_not_px)
+      @a.ldr_w(R_X10, R_X9, 0)
+      @a.and_w_lowmask(R_X10, R_X10, 16)
+      @a.ldr_x(R_X11, R_X19, RT_K_PROXY_CLSID * 8)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_not_px)
+      @a.mov_imm64(R_X14, px_ic_gp)
+      @a.ldr_x(R_X10, R_X14, 0)          # hsh
+      @a.cbz_x(R_X10, l_px_miss)
+      @a.ldr_x(R_X1, R_X9, px_offs[1])   # h = proxy.@handler
+      @a.sub_i(R_X11, R_X1, 4)
+      @a.tst_wobj_bad(R_X11)
+      @a.b_cond(CC_NE, l_px_miss)
+      @a.cbz_x(R_X11, l_px_miss)
+      @a.ldr_x(R_X12, R_X11, 8)          # h.@shape
+      @a.cmp_r(R_X12, R_X10)
+      @a.b_cond(CC_NE, l_px_miss)
+      @a.ldr_x(R_X12, R_X14, 8)          # trap_sl_enc (> 0)
+      @a.add_i(R_X12, R_X12, 1)
+      @a.ldr_x_idx(R_X0, R_X11, R_X12)   # trap_fn
+      @a.sub_i(R_X11, R_X0, 4)
+      @a.tst_wobj_bad(R_X11)
+      @a.b_cond(CC_NE, l_px_miss)
+      @a.cbz_x(R_X11, l_px_miss)
+      @a.ldrb(R_X12, R_X11, 4)
+      @a.and_w_lowmask(R_X12, R_X12, 4)
+      @a.cmp_wi(R_X12, 2)                # KIND_FUNCTION
+      @a.b_cond(CC_NE, l_px_miss)
+      @a.ldr_x(R_X12, R_X11, 24)         # trap_fn.@code
+      @a.sub_i(R_X12, R_X12, 4)
+      @a.ldr_x(R_X16, R_X12, 96)         # jit_fast_fp
+      @a.and_x_lowmask(R_X16, R_X16, 48)
+      @a.cbz_x(R_X16, l_px_miss)
+      @a.ldr_x(R_X3, R_X9, px_offs[0])   # tgt = proxy.@target
+      old_td_pg = @tmp_depth
+      @tmp_depth = saved_td_pg
+      px_sv_o = push_x(obj_reg)
+      px_sv_t = push_x(R_X3)
+      @a.mov_r(R_X5, obj_reg)            # receiver = proxy
+      @a.mov_imm64(R_X4, wvalue_bits(key) ## i64)
+      @a.movz_x(R_X2, 3)                 # argc = 3 (target, key, receiver)
+      @a.movz_x(R_X6, 0)
+      @a.movz_x(R_X7, 0)
+      emit_blr_x16()
+      @a.cmp_i(R_X0, 6)                  # JSR_SLOW -> re-run safely via RT_PROXY_GET_MISS
+      @a.b_cond(CC_EQ, l_px_miss_gp)
+      # Post-call invariant check: if tgt.@shape == px_ic[2] (absent or configurable), ZERO invariant check can throw!
+      @a.ldr_x(R_X1, R_SP, px_sv_t)
+      @a.sub_i(R_X9, R_X1, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_px_inv)
+      @a.cbz_x(R_X9, l_px_inv)
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.mov_imm64(R_X14, px_ic_gp)
+      @a.ldr_x(R_X11, R_X14, 16)         # cached configurable tgt_shape
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_px_inv)
+      @a.b(l_done)
+      @a.bind(l_px_inv)
+      @a.mov_r(R_X3, R_X0)
+      @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
+      call_rt(RT_PROXY_GET_INV)
+      @a.b(l_done)
+      @a.bind(l_px_miss_gp)
+      @a.ldr_x(R_X1, R_SP, px_sv_o)
+      @a.b(l_px_miss_go = @a.new_label)
+      @a.bind(l_px_miss)
+      @a.mov_r(R_X1, obj_reg)
+      @a.bind(l_px_miss_go)
+      @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
+      @a.mov_imm64(R_X3, wvalue_bits(px_ic_g) ## i64)
+      @a.mov_imm64(R_X4, wvalue_bits(px_keep_g) ## i64)
+      call_rt(RT_PROXY_GET_MISS)
+      @a.b(l_done)
+      @tmp_depth = old_td_pg
+      @a.bind(l_not_px)
+      emit_ic_get_4way_probe(obj_reg, key, pic_g, l_done, true)
+    add_cold_stub(cb)
     nil
 
   # Load slot `sl_enc` from unmasked `WObject*` in `ptr_reg` -> `dst`.
@@ -7893,10 +16025,11 @@ OSR_RETURN = 2
       @a.ldr_x(dst, ptr_reg, (sl_enc + 1) * 8)
     else
       ext_idx = (0 - sl_enc) - 1
-      @a.ldr_x(R_X14, ptr_reg, 16)          # @ext WArray WValue
-      @a.and_x_ptr47(R_X14, R_X14)    # WArray*
-      @a.ldr_x(R_X14, R_X14, 16)            # slots ptr
-      @a.ldr_x(dst, R_X14, ext_idx * 8)
+      tmp = ptr_reg == R_X14 ? R_X16 : R_X14
+      @a.ldr_x(tmp, ptr_reg, 16)          # @ext WArray WValue
+      @a.and_x_ptr47(tmp, tmp)            # WArray*
+      @a.ldr_x(tmp, tmp, 16)              # slots ptr
+      @a.ldr_x(dst, tmp, ext_idx * 8)
     nil
 
   # Store `val_reg` into slot `sl_enc` of unmasked `WObject*` in `ptr_reg`.
@@ -7905,10 +16038,11 @@ OSR_RETURN = 2
       @a.str_x(val_reg, ptr_reg, (sl_enc + 1) * 8)
     else
       ext_idx = (0 - sl_enc) - 1
-      @a.ldr_x(R_X14, ptr_reg, 16)
-      @a.and_x_ptr47(R_X14, R_X14)
-      @a.ldr_x(R_X14, R_X14, 16)
-      @a.str_x(val_reg, R_X14, ext_idx * 8)
+      tmp = (ptr_reg != R_X14 && val_reg != R_X14) ? R_X14 : ((ptr_reg != R_X16 && val_reg != R_X16) ? R_X16 : R_X17)
+      @a.ldr_x(tmp, ptr_reg, 16)
+      @a.and_x_ptr47(tmp, tmp)
+      @a.ldr_x(tmp, tmp, 16)
+      @a.str_x(val_reg, tmp, ext_idx * 8)
     nil
 
   -> gen_member_get_any(e)
@@ -7935,37 +16069,159 @@ OSR_RETURN = 2
           @a.ldr_x(R_X9, R_SP, @hoisted_tas[bli][1])
           emit_box_i32(R_X0, R_X9)
           return nil
-        # Fast flat-String `.length` (avoids RT_GETP_MISS overhead!)
+        # Fast inline JS Array `.length` (dense OR holey plain array!) & flat-String `.length` (ZERO RT_GETP_MISS!)
         gen_expr_any(e.a)
         @a.mov_r(R_X13, R_X0)
+        l_chk_str = @a.new_label
         l_not_str = @a.new_label
         l_len_done = @a.new_label
         @a.lsr_xi(R_X9, R_X13, 48)
-        @a.movz_x(R_X10, 0xFFF9)
+        @a.movz_x(R_X10, 0xFFF4)          # WArray tag
         @a.cmp_r(R_X9, R_X10)
-        @a.b_cond(CC_NE, l_not_str)
-        @a.tst_x_lowmask(R_X13, 1)
-        @a.b_cond(CC_NE, l_not_str)
-        @a.mov_r(R_X1, R_X13)
-        call_rt(RT_STR_LEN)
+        @a.b_cond(CC_NE, l_chk_str)
+        @a.and_x_ptr47(R_X9, R_X13)
+        @a.ldrb(R_X10, R_X9, 2)           # aflags
+        @a.and_w_lowmask(R_X10, R_X10, 3) # bits 0..2: JS_AF_ARRAY(1) | JS_AF_HOLES(2) | JS_AF_EXT(4)
+        @a.tst_x_lowmask(R_X10, 1)
+        @a.b_cond(CC_EQ, l_not_str)       # not a JS array
+        @a.cmp_wi(R_X10, 4)
+        @a.b_cond(CC_GE, l_not_str)       # JS_AF_EXT -> slow
+        @a.ldrsw(R_X9, R_X9, 8)           # array.size
+        emit_box_i32(R_X0, R_X9)
         @a.bind(l_len_done)
         node_ic = wk_ic(e)
         cb = ->()
+          @a.bind(l_chk_str)
+          l_str_rt_len = @a.new_label
+          l_str_slab_len = @a.new_label
+          l_str_heap_len = @a.new_label
+          @a.movz_x(R_X10, 0xFFF9)
+          @a.cmp_r(R_X9, R_X10)
+          @a.b_cond(CC_NE, l_not_str)
+          @a.tst_x_lowmask(R_X13, 1)
+          @a.b_cond(CC_NE, l_not_str)
+          # Fast inline ARM64 ASCII `.length` for mode 0..5 inline, mode 6 slab, & mode 7 heap strings (ZERO RT_STR_LEN!)
+          @a.lsr_xi(R_X9, R_X13, 1)
+          @a.and_x_lowmask(R_X9, R_X9, 3)
+          @a.cmp_i(R_X9, 7)
+          @a.b_cond(CC_EQ, l_str_heap_len)
+          @a.cmp_i(R_X9, 6)
+          @a.b_cond(CC_EQ, l_str_slab_len)
+          @a.cmp_i(R_X9, 5)
+          @a.b_cond(CC_HI, l_str_rt_len)
+          @a.mov_imm64(R_X10, 8830587504640)
+          @a.tst_r(R_X13, R_X10)
+          @a.b_cond(CC_NE, l_str_rt_len)
+          emit_box_i32(R_X0, R_X9)
+          @a.b(l_len_done)
+          @a.bind(l_str_slab_len)
+          @a.ldr_x(R_X10, R_X19, RT_K_SLAB_BASE * 8)
+          @a.cbz_x(R_X10, l_str_rt_len)
+          @a.lsr_xi(R_X11, R_X13, 4)
+          @a.and_x_lowmask(R_X11, R_X11, 24)
+          @a.add_r(R_X10, R_X10, R_X11, 5)
+          @a.ldrb(R_X11, R_X10, 0)
+          @a.movz_x(R_X12, 9)
+          @a.and_w(R_X11, R_X11, R_X12)
+          @a.cmp_wi(R_X11, 9)
+          @a.b_cond(CC_NE, l_str_rt_len)
+          @a.ldrb(R_X9, R_X10, 1)
+          emit_box_i32(R_X0, R_X9)
+          @a.b(l_len_done)
+          @a.bind(l_str_heap_len)
+          @a.and_x_ptr47(R_X10, R_X13)
+          @a.ldr_w(R_X9, R_X10, 8)
+          @a.cmp_wi(R_X9, 0)
+          @a.b_cond(CC_GE, l_str_rt_len)
+          @a.and_w_lowmask(R_X9, R_X9, 31)
+          emit_box_i32(R_X0, R_X9)
+          @a.b(l_len_done)
+          @a.bind(l_str_rt_len)
+          @a.mov_r(R_X1, R_X13)
+          call_rt(RT_STR_LEN)
+          @a.b(l_len_done)
           @a.bind(l_not_str)
           emit_ic_get(R_X13, "length", node_ic, -1)
           @a.b(l_len_done)
         add_cold_stub(cb)
         return nil
-      # 3. Inline-cached named property read!
+      # 2b. Inline ARM64 `map.size` / `set.size` getter (ZERO RT_GETP_MISS!)
+      if e.b.str == "size" && gen_coll_size_inline(e)
+        return nil
+      # 2c. Inline ARM64 `map.keys().next().value` / `map.values().next().value` / `set.values().next().value`!
+      if e.b.str == "value" && e.a.kind == :call && e.a.list.size == 0 && e.a.a.kind == :member && !e.a.a.has?(F_COMPUTED) && e.a.a.b.str == "next"
+        it_call = e.a.a.a
+        if it_call.kind == :call && it_call.list.size == 0 && it_call.a.kind == :member && !it_call.a.has?(F_COMPUTED) && (it_call.a.b.str == "keys" || it_call.a.b.str == "values")
+          if gen_coll_first_entry_inline(it_call.a.a, it_call.a.b.str == "values", e)
+            return nil
+      # 3. Inline-cached named property read (2-insn fast path for prologue-guarded global objects like `Direction.FORWARD`, `Strength.REQUIRED`!)
+      if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && e.a.x.binding.global?
+        gc_ho = wk_cell(e.a.x.binding)
+        hgo = @hoisted_gobj_shapes[wvalue_bits(gc_ho) ## i64]
+        if hgo != nil
+          gv_ho = hgo[0]
+          gsh_ho = hgo[1]
+          gsl_ho = gsh_ho.slot_of(e.b.str)
+          if gsl_ho >= 0 && (gsh_ho.attrs_of(e.b.str) & ATTR_ACCESSOR) == 0
+            genc_ho = gsl_ho < gsh_ho.inline ? (gsh_ho.ibase + gsl_ho) : (0 - (gsl_ho - gsh_ho.inline) - 1)
+            @a.mov_imm64(R_X9, (wvalue_bits(gv_ho) ## i64) - 4)
+            emit_slot_load(R_X0, R_X9, genc_ho)
+            return nil
       node_ic = wk_ic(e)
       if bli >= 0 && @info.types[bli] == JT_ANY && @info.reg_gpr[bli] != nil
         emit_ic_get(@info.reg_gpr[bli], e.b.str, node_ic, bli)
         return nil
+      sk_mg = shape_key(e.a)
+      if sk_mg != -1 && @known_shapes[sk_mg] != nil
+        ksh_mg = (sk_mg == -2 && @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64)) ? @inline_this_sh : wvalue_from_bits(@known_shapes[sk_mg])
+        if ksh_mg.is_a?(JS:Shape) && !ksh_mg.dict
+          sl_mg = ksh_mg.slot_of(e.b.str)
+          if sl_mg >= 0 && (ksh_mg.attrs_of(e.b.str) & ATTR_ACCESSOR) == 0
+            enc_mg = sl_mg < ksh_mg.inline ? (ksh_mg.ibase + sl_mg) : (0 - (sl_mg - ksh_mg.inline) - 1)
+            if e.a.kind == :this && @live_cur_prop != nil && @live_cur_prop[0] == enc_mg
+              @a.mov_r(R_X0, @live_cur_prop[1])
+              @live_cur_prop = nil
+              return nil
+            r_dir_mg = nil
+            if e.a.kind == :this && @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+              r_dir_mg = @inline_env[:this][1]
+            elsif e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @inline_env != nil && @inline_env[e.a.x.binding] != nil && @inline_env[e.a.x.binding][0] == :reg_x
+              r_dir_mg = @inline_env[e.a.x.binding][1]
+            if r_dir_mg != nil && enc_mg > 0 && enc_mg <= 31
+              @a.ldr_x(R_X0, r_dir_mg, (enc_mg + 1) * 8 - 4)
+            elsif r_dir_mg != nil
+              @a.sub_i(R_X9, r_dir_mg, 4)
+              emit_slot_load(R_X0, R_X9, enc_mg)
+            else
+              gen_expr_any(e.a)
+              if enc_mg > 0 && enc_mg <= 31
+                @a.ldr_x(R_X0, R_X0, (enc_mg + 1) * 8 - 4)
+              else
+                @a.sub_i(R_X9, R_X0, 4)
+                emit_slot_load(R_X0, R_X9, enc_mg)
+            return nil
+      if e.a.kind == :this && @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+        emit_ic_get(@inline_env[:this][1], e.b.str, node_ic, sk_mg, e)
+        return nil
+      if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @inline_env != nil && @inline_env[e.a.x.binding] != nil && @inline_env[e.a.x.binding][0] == :reg_x
+        emit_ic_get(@inline_env[e.a.x.binding][1], e.b.str, node_ic, sk_mg, e)
+        return nil
       gen_expr_any(e.a)
       @a.mov_r(R_X13, R_X0)
-      emit_ic_get(R_X13, e.b.str, node_ic, -1)
+      emit_ic_get(R_X13, e.b.str, node_ic, sk_mg, e)
       return nil
     # Computed element access `o[idx]`
+    # 3b. Constant non-index string key `obj["class"]` -> monomorphic property IC (ZERO RT_GETV!)
+    if e.b.kind == :string && !js_array_index?(e.b.str)
+      node_ic = wk_ic(e)
+      bli_cs = local_idx(e.a)
+      if bli_cs >= 0 && @info.types[bli_cs] == JT_ANY && @info.reg_gpr[bli_cs] != nil
+        emit_ic_get(@info.reg_gpr[bli_cs], e.b.str, node_ic, bli_cs)
+        return nil
+      gen_expr_any(e.a)
+      @a.mov_r(R_X13, R_X0)
+      emit_ic_get(R_X13, e.b.str, node_ic, shape_key(e.a))
+      return nil
     bli = local_idx(e.a)
     # 4. Hoisted TypedArray element load (local OR read-only global)!
     if bli >= 0 && @hoisted_tas[bli] != nil
@@ -8002,31 +16258,209 @@ OSR_RETURN = 2
       l_done = @a.new_label
       @a.b_cond(CC_HS, l_slow)
       @a.ldr_x_idx(R_X0, r_sl, R_X11)
-      @a.b(l_done)
-      @a.bind(l_slow)
-      emit_box_i32(R_X2, R_X11)
-      load_slot_any(R_X1, bli)
-      call_rt(RT_GETV)
       @a.bind(l_done)
+      bli_ha = bli
+      cb_ha = ->()
+        @a.bind(l_slow)
+        emit_box_i32(R_X2, R_X11)
+        load_slot_any(R_X1, bli_ha)
+        call_rt(RT_GETV)
+        @a.b(l_done)
+      add_cold_stub(cb_ha)
       return nil
-    # 6. Dynamic dense JS array fast path (e.g. `bodies[i]` inside `step(bodies, dt)`!)
+    # 5a. Hoisted member dense Array element load (`v.constraints[i]` -> 1 single LDR!)
+    if @hoisted_marr != nil && e.a.kind == :member && !e.a.has?(F_COMPUTED) && local_idx(e.a.a) == @hoisted_marr[0] && e.a.b.str == @hoisted_marr[1] && can_i32?(e.b)
+      hm = @hoisted_marr
+      r_sl = hm[4] ? hm[2] : R_X9
+      r_idx = peek_i32_reg(e.b)
+      if r_idx != nil
+        @a.sxtw(R_X11, r_idx)
+      else
+        gen_expr_i32(e.b)
+        @a.sxtw(R_X11, R_X0)
+      @a.ldr_x(R_X9, R_SP, hm[2]) if !hm[4]
+      if local_idx(e.b) >= 0 && local_idx(e.b) == hm[5]
+        @a.ldr_x_idx(R_X0, r_sl, R_X11)
+        return nil
+      if hm[4]
+        @a.cmp_r(R_X11, hm[3])
+      else
+        @a.ldr_x(R_X10, R_SP, hm[3])
+        @a.cmp_r(R_X11, R_X10)
+      l_slow_hm = @a.new_label
+      l_done_hm = @a.new_label
+      @a.b_cond(CC_HS, l_slow_hm)
+      @a.ldr_x_idx(R_X0, r_sl, R_X11)
+      @a.bind(l_done_hm)
+      cb_hm = ->()
+        @a.bind(l_slow_hm)
+        load_slot_any(R_X9, hm[0])
+        @a.sub_i(R_X9, R_X9, 4)
+        emit_slot_load(R_X1, R_X9, hm[7])
+        emit_box_i32(R_X2, R_X11)
+        call_rt(RT_GETV)
+        @a.b(l_done_hm)
+      add_cold_stub(cb_hm)
+      return nil
+    # 5b. Guarded global dense JS Array element load (`spheres[i]` — 1 single LDR when loop-hoisted!)
+    if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && @info.global_objs[e.a.x.binding] != nil && can_i32?(e.b)
+      gb_ga = e.a.x.binding
+      hg_ga = @hoisted_garrs[gb_ga]
+      if hg_ga != nil
+        r_idx = peek_i32_reg(e.b)
+        if r_idx != nil
+          @a.sxtw(R_X11, r_idx)
+        else
+          gen_expr_i32(e.b)
+          @a.sxtw(R_X11, R_X0)
+        if local_idx(e.b) >= 0 && local_idx(e.b) == hg_ga[2]
+          @a.ldr_x_idx(R_X0, hg_ga[0], R_X11)
+          return nil
+        l_slow_hg = @a.new_label
+        l_done_hg = @a.new_label
+        @a.cmp_r(R_X11, hg_ga[1])
+        @a.b_cond(CC_HS, l_slow_hg)
+        @a.ldr_x_idx(R_X0, hg_ga[0], R_X11)
+        @a.bind(l_done_hg)
+        gv_hg = @info.global_objs[gb_ga][1]
+        jit_keep(gv_hg)
+        cb_hg = ->()
+          @a.bind(l_slow_hg)
+          @a.mov_imm64(R_X1, wvalue_bits(gv_hg) ## i64)
+          emit_box_i32(R_X2, R_X11)
+          call_rt(RT_GETV)
+          @a.b(l_done_hg)
+        add_cold_stub(cb_hg)
+        return nil
+      gv_ga = @info.global_objs[gb_ga][1]
+      if js_array?(gv_ga)
+        jit_keep(gv_ga)
+        ga_ptr = (wvalue_bits(gv_ga) ## i64) & 140737488355327
+        r_idx = peek_i32_reg(e.b)
+        if r_idx != nil
+          @a.sxtw(R_X11, r_idx)
+        else
+          gen_expr_i32(e.b)
+          @a.sxtw(R_X11, R_X0)
+        l_slow_ga = @a.new_label
+        l_done_ga = @a.new_label
+        @a.mov_imm64(R_X9, ga_ptr)
+        @a.ldrb(R_X10, R_X9, 2)
+        @a.and_w_lowmask(R_X10, R_X10, 4)
+        @a.cmp_wi(R_X10, 1)
+        @a.b_cond(CC_NE, l_slow_ga)
+        @a.ldrsw(R_X10, R_X9, 8)
+        @a.cmp_r(R_X11, R_X10)
+        @a.b_cond(CC_HS, l_slow_ga)
+        @a.ldrsw(R_X10, R_X9, 4)
+        @a.add_r(R_X11, R_X11, R_X10)
+        @a.ldr_x(R_X9, R_X9, 16)
+        @a.ldr_x_idx(R_X0, R_X9, R_X11)
+        @a.bind(l_done_ga)
+        cb_ga = ->()
+          @a.bind(l_slow_ga)
+          @a.mov_imm64(R_X1, wvalue_bits(gv_ga) ## i64)
+          emit_box_i32(R_X2, R_X11)
+          call_rt(RT_GETV)
+          @a.b(l_done_ga)
+        add_cold_stub(cb_ga)
+        return nil
+    # 6. Dynamic JS array (dense OR holey plain array!) + out-of-line TypedArray IC fast path (`bodies[i]`, `d[i]`, `blocks[id]`, `plan[j]`!)
     if can_i32?(e.b)
-      gen_expr_any(e.a)
-      push_x(R_X0)
-      gen_expr_i32(e.b)                # w0 = idx
-      @a.sxtw(R_X11, R_X0)
-      pop_x(R_X13)                     # x13 = arr WValue
+      cv_bi_d = const_eval_i32(e.b)
+      # Ultra-fast hoisted read-only `this.<arr>[i32_expr]` inside `gen_while_loop` (`this.blocks[4/5]` & `this.blocks[id_w]` -> ZERO tag/aflags/start/slots/LUT!)
+      if @while_this_arr != nil && !ast_has_call?(e.b) && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.a != nil && e.a.a.kind == :this && e.a.b.str == @while_this_arr[0]
+        wta_c = @while_this_arr
+        l_wta_slow = @a.new_label
+        l_wta_done = @a.new_label
+        if !@inline_this_is_outer
+          if @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+            @a.mov_r(R_X13, @inline_env[:this][1])
+          elsif @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :spill_x
+            @a.ldr_x(R_X13, R_SP, @inline_env[:this][1])
+          else
+            @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+          @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+          @a.cmp_r(R_X13, R_X9)
+          @a.b_cond(CC_NE, l_wta_slow)
+          @a.ldr_x(R_X10, R_SP, wta_c[3])
+          @a.cbnz_x(R_X10, l_wta_slow)
+        if cv_bi_d != nil && cv_bi_d >= 0
+          @a.ldr_x(R_X10, R_SP, wta_c[2])
+          @a.mov_imm32(R_X11, cv_bi_d)
+          @a.cmp_r(R_X11, R_X10)
+          @a.b_cond(CC_HS, l_wta_slow)
+          @a.ldr_x(R_X9, R_SP, wta_c[1])
+          @a.ldr_x(R_X0, R_X9, cv_bi_d * 8)
+        else
+          gen_expr_i32(e.b)
+          @a.sxtw(R_X11, R_X0)
+          @a.ldr_x(R_X10, R_SP, wta_c[2])
+          @a.cmp_r(R_X11, R_X10)
+          @a.b_cond(CC_HS, l_wta_slow)
+          @a.ldr_x(R_X9, R_SP, wta_c[1])
+          @a.ldr_x_idx(R_X0, R_X9, R_X11)
+        @a.ldr_x(R_X10, R_X19, RT_K_HOLE_BITS * 8)
+        @a.cmp_r(R_X0, R_X10)
+        @a.b_cond(CC_EQ, l_wta_slow)
+        @a.bind(l_wta_done)
+        cb_wtac = ->()
+          @a.bind(l_wta_slow)
+          sv_sh_wc = @known_shapes
+          sv_ep_wc = @epoch_verified_now
+          @known_shapes = {}
+          @epoch_verified_now = false
+          gen_expr_any(e.a)
+          if cv_bi_d != nil && cv_bi_d >= 0
+            @a.mov_r(R_X1, R_X0)
+            @a.mov_imm64(R_X2, wvalue_bits(cv_bi_d.to_f) ## i64)
+          else
+            push_x(R_X0)
+            gen_expr_i32(e.b)
+            emit_box_i32(R_X2, R_X0)
+            pop_x(R_X1)
+          call_rt(RT_GETV)
+          @known_shapes = sv_sh_wc
+          @epoch_verified_now = sv_ep_wc
+          @a.b(l_wta_done)
+        add_cold_stub(cb_wtac)
+        return nil
+      ali_d = local_idx(e.a)
+      r_bi_d = peek_i32_reg(e.b)
+      if cv_bi_d != nil
+        gen_expr_any(e.a)
+        @a.mov_r(R_X13, R_X0)
+        @a.mov_imm32(R_X11, cv_bi_d)
+        @a.sxtw(R_X11, R_X11)
+      elsif ali_d >= 0 && r_bi_d != nil
+        load_slot_any(R_X13, ali_d)
+        @a.sxtw(R_X11, r_bi_d)
+      else
+        gen_expr_any(e.a)
+        push_x(R_X0)
+        gen_expr_i32(e.b)                # w0 = idx
+        @a.sxtw(R_X11, R_X0)
+        pop_x(R_X13)                     # x13 = container WValue
+      ta_ic = i64[5]
+      ta_ic[0] = 0; ta_ic[1] = 0; ta_ic[2] = 0; ta_ic[3] = -1; ta_ic[4] = 0
+      jit_keep(ta_ic)
+      ta_ic_p = jit_i64_ptr(ta_ic)
+      ab_ep_p = jit_arr_slots_ptr(wvalue_bits(JS_AB_EPOCH) ## i64)
+      l_chk_ta = @a.new_label
+      l_ta_i32 = @a.new_label
       l_slow = @a.new_label
       l_done = @a.new_label
       @a.lsr_xi(R_X9, R_X13, 48)
       @a.movz_x(R_X10, 0xFFF4)
       @a.cmp_r(R_X9, R_X10)
-      @a.b_cond(CC_NE, l_slow)
+      @a.b_cond(CC_NE, l_chk_ta)
       @a.and_x_ptr47(R_X9, R_X13)
       @a.ldrb(R_X10, R_X9, 2)          # aflags
       @a.and_w_lowmask(R_X10, R_X10, 4)
-      @a.cmp_wi(R_X10, 1)              # JS_AF_ARRAY && no holes && no ext
-      @a.b_cond(CC_NE, l_slow)
+      @a.tst_x_lowmask(R_X10, 1)       # JS_AF_ARRAY bit set (allows BOTH dense=1 AND holey=3 with ZERO branch!)
+      @a.b_cond(CC_EQ, l_slow)
+      @a.cmp_wi(R_X10, 4)              # reject JS_AF_EXT
+      @a.b_cond(CC_HS, l_slow)
       @a.ldrsw(R_X10, R_X9, 8)         # size
       @a.cmp_r(R_X11, R_X10)
       @a.b_cond(CC_HS, l_slow)
@@ -8034,20 +16468,337 @@ OSR_RETURN = 2
       @a.add_r(R_X11, R_X11, R_X10)
       @a.ldr_x(R_X9, R_X9, 16)         # slots
       @a.ldr_x_idx(R_X0, R_X9, R_X11)
+      @a.ldr_x(R_X10, R_X19, RT_K_HOLE_BITS * 8)
+      @a.cmp_r(R_X0, R_X10)
+      @a.b_cond(CC_EQ, l_slow)
+      @a.bind(l_done)
+      cb_ta = ->()
+        # Out-of-line TypedArray 1-entry IC (Uint8Array / Int32Array — ZERO RT_GETV, ZERO hot-loop bloat!)
+        @a.bind(l_chk_ta)
+        @a.mov_imm64(R_X9, ta_ic_p)
+        @a.ldr_x(R_X10, R_X9, 32)      # ta_ic[4] == ta_bits
+        @a.cmp_r(R_X13, R_X10)
+        @a.b_cond(CC_NE, l_slow)
+        @a.mov_imm64(R_X10, ab_ep_p)
+        @a.ldr_x(R_X10, R_X10, 0)
+        @a.and_x_lowmask(R_X10, R_X10, 48)
+        @a.ldr_x(R_X12, R_X9, 24)      # ta_ic[3] == ab_epoch
+        @a.cmp_r(R_X10, R_X12)
+        @a.b_cond(CC_NE, l_slow)
+        @a.ldr_x(R_X10, R_X9, 8)       # ta_ic[1] == len
+        @a.cmp_r(R_X11, R_X10)
+        @a.b_cond(CC_HS, l_slow)
+        @a.ldr_x(R_X12, R_X9, 16)      # ta_ic[2] == kind
+        @a.ldr_x(R_X9, R_X9, 0)        # ta_ic[0] == raw_ptr
+        @a.cmp_i(R_X12, 1)
+        @a.b_cond(CC_NE, l_ta_i32)
+        @a.ldrb_idx(R_X0, R_X9, R_X11)
+        emit_box_i32(R_X0, R_X0)
+        @a.b(l_done)
+        @a.bind(l_ta_i32)
+        @a.cmp_i(R_X12, 5)
+        @a.b_cond(CC_NE, l_slow)
+        @a.ldr_w_idx(R_X0, R_X9, R_X11)
+        emit_box_i32(R_X0, R_X0)
+        @a.b(l_done)
+        @a.bind(l_slow)
+        l_do_getv = @a.new_label
+        # Populate ta_ic if R_X13 is a valid Uint8Array or Int32Array!
+        @a.sub_i(R_X9, R_X13, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_do_getv)
+        @a.cbz_x(R_X9, l_do_getv)
+        o_sv = push_x(R_X13)
+        i_sv = push_x(R_X11)
+        @a.mov_r(R_X1, R_X13)
+        @a.mov_imm64(R_X2, wvalue_bits(ta_ic) ## i64)
+        call_rt(RT_TA_INFO)
+        @a.ldr_x(R_X11, R_SP, i_sv)
+        @a.ldr_x(R_X13, R_SP, o_sv)
+        @tmp_depth -= 2
+        @a.cmp_i(R_X0, 2)
+        @a.b_cond(CC_NE, l_do_getv)
+        @a.mov_imm64(R_X9, ta_ic_p)
+        @a.str_x(R_X13, R_X9, 32)
+        @a.bind(l_do_getv)
+        @a.mov_r(R_X1, R_X13)
+        emit_box_i32(R_X2, R_X11)
+        call_rt(RT_GETV)
+        @a.b(l_done)
+      add_cold_stub(cb_ta)
+      return nil
+    # 7. General computed `o[k]` (inline dense/holey WArray fast path + 16-entry `(shape, key_bits)` dynamic string-key IC!)
+    if @for_in_ctx != nil && @for_in_ctx.size >= 6 && local_idx(e.a) == @for_in_ctx[4] && e.b.kind == :ident && e.b.x != nil && e.b.x.binding == @for_in_ctx[0]
+      @a.ldr_x(R_X0, R_SP, @for_in_ctx[5])
+      return nil
+    # Ultra-fast hoisted read-only `this.<arr>[pure_key]` inside `gen_while_loop` (`this.blocks[packet.id]` -> ZERO tag/aflags/start/slots/gkpic!)
+    if @while_this_arr != nil && !ast_has_call?(e.b) && e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.a != nil && e.a.a.kind == :this && e.a.b.str == @while_this_arr[0]
+      wta_d = @while_this_arr
+      l_wd_pre = @a.new_label
+      l_wd_post = @a.new_label
+      l_wd_done = @a.new_label
+      l_wd_fp = @a.new_label
+      l_wd_iok = @a.new_label
+      eb_pure_wta = e.b.kind == :num || e.b.kind == :ident || (e.b.kind == :member && !e.b.has?(F_COMPUTED) && e.b.a != nil && shape_key(e.b.a) != -1 && @known_shapes[shape_key(e.b.a)] != nil)
+      if !@inline_this_is_outer
+        if @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+          @a.mov_r(R_X13, @inline_env[:this][1])
+        elsif @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :spill_x
+          @a.ldr_x(R_X13, R_SP, @inline_env[:this][1])
+        else
+          @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+        @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+        @a.cmp_r(R_X13, R_X9)
+        @a.b_cond(CC_NE, l_wd_pre)
+        @a.ldr_x(R_X10, R_SP, wta_d[3])
+        @a.cbnz_x(R_X10, l_wd_pre)
+      gen_expr_any(e.b)
+      if !eb_pure_wta
+        @a.ldr_x(R_X10, R_SP, wta_d[3])
+        @a.cbnz_x(R_X10, l_wd_post)
+      @a.mov_r(R_X12, R_X0)
+      # Branchless zero-FP small-int 0..7 index decode (exact for 0..7; rejects 8.0 and all other values to l_wd_fp!)
+      @a.sub_r(R_X9, R_X12, R_X20)
+      @a.ror_xi(R_X10, R_X9, 50)
+      @a.sub_i(R_X10, R_X10, 4092)
+      @a.cmp_i(R_X10, 11)
+      @a.ccmp_r(R_X12, R_X20, 4, CC_HI)
+      @a.b_cond(CC_NE, l_wd_fp)
+      @a.lsl_xi(R_X10, R_X10, 2)
+      @a.mov_imm64(R_X11, 0x7654F3F2FFF1)
+      @a.lsr_x(R_X11, R_X11, R_X10)
+      @a.and_x_lowmask(R_X11, R_X11, 4)
+      @a.cmp_r(R_X12, R_X20)
+      @a.csel_x(R_X11, R_XZR, R_X11, CC_EQ)
+      @a.cmp_i(R_X11, 7)
+      @a.b_cond(CC_HI, l_wd_fp)
+      @a.bind(l_wd_iok)
+      @a.ldr_x(R_X10, R_SP, wta_d[2])
+      @a.cmp_r(R_X11, R_X10)
+      @a.b_cond(CC_HS, l_wd_post)
+      @a.ldr_x(R_X9, R_SP, wta_d[1])
+      @a.ldr_x_idx(R_X0, R_X9, R_X11)
+      @a.ldr_x(R_X10, R_X19, RT_K_HOLE_BITS * 8)
+      @a.cmp_r(R_X0, R_X10)
+      @a.b_cond(CC_EQ, l_wd_post)
+      @a.bind(l_wd_done)
+      cb_wtad = ->()
+        @a.bind(l_wd_fp)
+        @a.cmp_r(R_X9, R_X21)
+        @a.b_cond(CC_HS, l_wd_post)
+        @a.fmov_d_x(R_D0, R_X9)
+        @a.fcvtzs_w_d(R_X11, R_D0)
+        @a.scvtf_d_w(R_D1, R_X11)
+        @a.fcmp_d(R_D0, R_D1)
+        @a.b_cond(CC_NE, l_wd_post)
+        @a.sxtw(R_X11, R_X11)
+        @a.b(l_wd_iok)
+        @a.bind(l_wd_pre)
+        sv_sh_wd = @known_shapes
+        sv_ep_wd = @epoch_verified_now
+        @known_shapes = {}
+        @epoch_verified_now = false
+        gen_expr_any(e.a)
+        push_x(R_X0)
+        gen_expr_any(e.b)
+        @a.mov_r(R_X2, R_X0)
+        pop_x(R_X1)
+        call_rt(RT_GETV)
+        @a.b(l_wd_done)
+        @a.bind(l_wd_post)
+        @known_shapes = {}
+        @epoch_verified_now = false
+        push_x(R_X12)
+        gen_expr_any(e.a)
+        @a.mov_r(R_X1, R_X0)
+        pop_x(R_X2)
+        call_rt(RT_GETV)
+        @known_shapes = sv_sh_wd
+        @epoch_verified_now = sv_ep_wd
+        @a.b(l_wd_done)
+      add_cold_stub(cb_wtad)
+      return nil
+    # Zero-spill evaluation when `e.b` is a pure inline-env/num leaf (preserves exact left-to-right JS eval order!),
+    # OR when both `e.a` and `e.b` are pure reads!
+    rb_cg = (e.b.kind == :ident && e.b.x != nil && e.b.x.binding != nil && @inline_env != nil && @inline_env[e.b.x.binding] != nil && (@inline_env[e.b.x.binding][0] == :reg_x || @inline_env[e.b.x.binding][0] == :spill_x)) ? @inline_env[e.b.x.binding] : nil
+    if rb_cg != nil
+      gen_expr_any(e.a)
+      @a.mov_r(R_X13, R_X0)
+      rb_cg[0] == :reg_x ? @a.mov_r(R_X12, rb_cg[1]) : @a.ldr_x(R_X12, R_SP, rb_cg[1])
+    elsif e.b.kind == :num
+      gen_expr_any(e.a)
+      @a.mov_r(R_X13, R_X0)
+      @a.mov_imm64(R_X12, wvalue_bits(e.b.a) ## i64)
+    else
+      ea_pure_rd = false
+      if e.a.kind == :ident && shape_key(e.a) != -1
+        ea_pure_rd = true
+      elsif e.a.kind == :member && !e.a.has?(F_COMPUTED) && e.a.a != nil && e.a.a.kind == :this && @known_shapes[-2] != nil
+        if @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64) && @inline_this_sh.slot_of(e.a.b.str) >= 0 && (@inline_this_sh.attrs_of(e.a.b.str) & ATTR_ACCESSOR) == 0
+          ea_pure_rd = true
+        elsif jit_ic_valid?(e.a.x) && e.a.x[0] == @known_shapes[-2] && e.a.x[2] == 0 && e.a.x[1] != 0
+          ea_pure_rd = true
+      eb_pure_rd = e.b.kind == :num || (e.b.kind == :ident && shape_key(e.b) != -1) || (e.b.kind == :member && !e.b.has?(F_COMPUTED) && e.b.a != nil && shape_key(e.b.a) != -1 && @known_shapes[shape_key(e.b.a)] != nil)
+      if ea_pure_rd && eb_pure_rd
+        gen_expr_any(e.b)
+        @a.mov_r(R_X12, R_X0)              # x12 = key
+        if e.a.kind == :ident
+          emit_read_binding_any(e.a.x.binding, R_X13, e.a.x)
+        else
+          gen_expr_any(e.a)                # pure known-shape this.<prop> (never clobbers R_X12!)
+          @a.mov_r(R_X13, R_X0)
+      else
+        gen_expr_any(e.a)
+        push_x(R_X0)
+        gen_expr_any(e.b)
+        @a.mov_r(R_X12, R_X0)              # x12 = key
+        pop_x(R_X13)                       # x13 = obj
+    gkpic = i64[192]
+    gki = 0
+    while gki < 192
+      gkpic[gki] = 0
+      gki += 1
+    gkeep = Array.new(128, nil)
+    jit_keep(gkpic)
+    jit_keep(gkeep)
+    gkpic_p = jit_i64_ptr(gkpic)
+    l_chk_kpic = @a.new_label
+    l_gkp_p1 = @a.new_label
+    l_gkp_hit = @a.new_label
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    l_holey = @a.new_label
+    if @for_in_ctx != nil && e.b.kind == :ident && e.b.x != nil && e.b.x.binding == @for_in_ctx[0]
+      l_not_fic = @a.new_label
+      @a.ldr_x(R_X10, R_SP, @for_in_ctx[3])
+      @a.cbz_x(R_X10, l_not_fic)
+      @a.sub_i(R_X9, R_X13, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_not_fic)
+      @a.cbz_x(R_X9, l_not_fic)
+      @a.ldrb(R_X10, R_X9, 4)
+      @a.cmp_wi(R_X10, KIND_OBJECT)
+      @a.b_cond(CC_NE, l_not_fic)
+      @a.ldr_x(R_X14, R_X9, 8)
+      @a.ldr_x(R_X10, R_SP, @for_in_ctx[1])
+      @a.cmp_r(R_X14, R_X10)
+      @a.b_cond(CC_NE, l_not_fic)
+      # Direct O(1) inline-slot load at [obj_ptr, (idx + 3) * 8] (skips array check & kpic hash!)
+      @a.ldr_x(R_X10, R_SP, @for_in_ctx[2])
+      @a.add_i(R_X10, R_X10, 3)
+      @a.ldr_x_idx(R_X0, R_X9, R_X10)
       @a.b(l_done)
+      @a.bind(l_not_fic)
+    @a.lsr_xi(R_X9, R_X13, 48)
+    @a.movz_x(R_X10, 0xFFF4)
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_NE, l_chk_kpic)
+    # Branchless zero-FP small-int 0..7 index decode (exact for 0..7; rejects 8.0 and all other values to l_idx_fp_g!)
+    l_idx_fp_g = @a.new_label
+    l_idx_ok_g = @a.new_label
+    @a.sub_r(R_X9, R_X12, R_X20)
+    @a.ror_xi(R_X10, R_X9, 50)
+    @a.sub_i(R_X10, R_X10, 4092)
+    @a.cmp_i(R_X10, 11)
+    @a.ccmp_r(R_X12, R_X20, 4, CC_HI)
+    @a.b_cond(CC_NE, l_idx_fp_g)
+    @a.lsl_xi(R_X10, R_X10, 2)
+    @a.mov_imm64(R_X11, 0x7654F3F2FFF1)
+    @a.lsr_x(R_X11, R_X11, R_X10)
+    @a.and_x_lowmask(R_X11, R_X11, 4)
+    @a.cmp_r(R_X12, R_X20)
+    @a.csel_x(R_X11, R_XZR, R_X11, CC_EQ)
+    @a.cmp_i(R_X11, 7)
+    @a.b_cond(CC_HI, l_idx_fp_g)
+    @a.bind(l_idx_ok_g)
+    cb_ifg = ->()
+      @a.bind(l_idx_fp_g)
+      @a.cmp_r(R_X9, R_X21)
+      @a.b_cond(CC_HS, l_slow)
+      @a.fmov_d_x(R_D0, R_X9)
+      @a.fcvtzs_w_d(R_X11, R_D0)
+      @a.scvtf_d_w(R_D1, R_X11)
+      @a.fcmp_d(R_D0, R_D1)
+      @a.b_cond(CC_NE, l_slow)
+      @a.sxtw(R_X11, R_X11)
+      @a.b(l_idx_ok_g)
+    add_cold_stub(cb_ifg)
+    @a.and_x_ptr47(R_X9, R_X13)
+    @a.ldrb(R_X10, R_X9, 2)
+    @a.and_w_lowmask(R_X10, R_X10, 4)
+    @a.tst_x_lowmask(R_X10, 1)
+    @a.b_cond(CC_EQ, l_slow)
+    @a.cmp_wi(R_X10, 4)
+    @a.b_cond(CC_HS, l_slow)
+    @a.ldrsw(R_X10, R_X9, 8)
+    @a.cmp_r(R_X11, R_X10)
+    @a.b_cond(CC_HS, l_slow)
+    @a.ldrsw(R_X10, R_X9, 4)
+    @a.add_r(R_X11, R_X11, R_X10)
+    @a.ldr_x(R_X9, R_X9, 16)
+    @a.ldr_x_idx(R_X0, R_X9, R_X11)
+    @a.ldr_x(R_X10, R_X19, RT_K_HOLE_BITS * 8)
+    @a.cmp_r(R_X0, R_X10)
+    @a.b_cond(CC_EQ, l_slow)
+    @a.bind(l_done)
+    cb = ->()
+      # Out-of-line 64-entry 2-way linear-probe `(shape, key_bits) -> slot_enc` IC for dynamic string-key `obj[k]`!
+      @a.bind(l_chk_kpic)
+      l_gkp_ext = @a.new_label
+      @a.sub_i(R_X9, R_X13, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X14, R_X9, 8)           # obj.@shape
+      @a.eor_r(R_X15, R_X14, R_X12)
+      @a.mov_imm64(R_X11, -7046029254386353131)
+      @a.mul_x(R_X15, R_X15, R_X11)
+      @a.lsr_xi(R_X15, R_X15, 58)        # h0 in 0..63
+      @a.add_r(R_X10, R_X15, R_X15, 1)   # h0 * 3
+      @a.mov_imm64(R_X11, gkpic_p)
+      @a.add_r(R_X11, R_X11, R_X10, 3)   # gkpic_p + h0 * 24
+      @a.ldr_x(R_X10, R_X11, 0)
+      @a.cmp_r(R_X10, R_X14)
+      @a.b_cond(CC_NE, l_gkp_p1)
+      @a.ldr_x(R_X10, R_X11, 8)
+      @a.cmp_r(R_X10, R_X12)
+      @a.b_cond(CC_NE, l_gkp_p1)
+      @a.bind(l_gkp_hit)
+      @a.ldr_x(R_X10, R_X11, 16)         # slot_enc
+      @a.cmp_i(R_X10, 0)
+      @a.b_cond(CC_LE, l_gkp_ext)
+      @a.add_i(R_X10, R_X10, 1)
+      @a.ldr_x_idx(R_X0, R_X9, R_X10)
+      @a.b(l_done)
+      @a.bind(l_gkp_ext)
+      @a.cbz_x(R_X10, l_slow)
+      @a.sub_r(R_X10, R_XZR, R_X10)
+      @a.sub_i(R_X10, R_X10, 1)
+      @a.ldr_x(R_X11, R_X9, 16)          # @ext WArray
+      @a.and_x_ptr47(R_X11, R_X11)
+      @a.ldr_x(R_X11, R_X11, 16)         # slots
+      @a.ldr_x_idx(R_X0, R_X11, R_X10)
+      @a.b(l_done)
+      @a.bind(l_gkp_p1)
+      @a.add_i(R_X15, R_X15, 1)
+      @a.and_x_lowmask(R_X15, R_X15, 6)
+      @a.add_r(R_X10, R_X15, R_X15, 1)
+      @a.mov_imm64(R_X11, gkpic_p)
+      @a.add_r(R_X11, R_X11, R_X10, 3)
+      @a.ldr_x(R_X10, R_X11, 0)
+      @a.cmp_r(R_X10, R_X14)
+      @a.b_cond(CC_NE, l_slow)
+      @a.ldr_x(R_X10, R_X11, 8)
+      @a.cmp_r(R_X10, R_X12)
+      @a.b_cond(CC_EQ, l_gkp_hit)
       @a.bind(l_slow)
       @a.mov_r(R_X1, R_X13)
-      emit_box_i32(R_X2, R_X11)
-      call_rt(RT_GETV)
-      @a.bind(l_done)
-      return nil
-    # 7. General computed `o[k]`
-    gen_expr_any(e.a)
-    push_x(R_X0)
-    gen_expr_any(e.b)
-    @a.mov_r(R_X2, R_X0)
-    pop_x(R_X1)
-    call_rt(RT_GETV)
+      @a.mov_r(R_X2, R_X12)
+      @a.mov_imm64(R_X3, wvalue_bits(gkpic) ## i64)
+      @a.mov_imm64(R_X4, wvalue_bits(gkeep) ## i64)
+      call_rt(RT_GET_KEY_PIC_MISS)
+      @a.b(l_done)
+    add_cold_stub(cb)
     nil
 
   -> emit_flush_promoted_rw(own_li, rw_ls)
@@ -8188,65 +16939,491 @@ OSR_RETURN = 2
         @a.b(l_done)
       add_cold_stub(cb)
       return nil
-    # Plain `o.prop = rhs` or general compound assign
-    gen_expr_any(t.a)
-    push_x(R_X0)
+    # Plain `o.prop = rhs` or general compound assign (zero-spill when `o` is `:this`, immutable local/param, or pure `this.<known_slot>`!)
+    no_spill_o = false
+    no_spill_this_enc = 0
     if op == "="
+      if t.a.kind == :this
+        no_spill_o = true
+      elsif t.a.kind == :ident && t.a.x != nil && t.a.x.binding != nil
+        tb_o = t.a.x.binding
+        if @inline_env != nil && @inline_env[tb_o] != nil
+          iv_o = @inline_env[tb_o]
+          no_spill_o = (iv_o[0] == :spill_x || iv_o[0] == :reg_x) && !inline_stmt_writes_binding?(rhs, tb_o)
+        else
+          li_o = local_idx(t.a)
+          no_spill_o = li_o >= 0 && @info.types[li_o] == JT_ANY && !stmt_writes_local?(rhs, li_o)
+      elsif t.a.kind == :member && !t.a.has?(F_COMPUTED) && t.a.a != nil && t.a.a.kind == :this && @known_shapes[-2] != nil && !ast_has_call?(rhs) && !ast_has_write?(rhs)
+        th_ms = @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64) ? @inline_this_sh : wvalue_from_bits(@known_shapes[-2])
+        if th_ms.is_a?(JS:Shape) && !th_ms.dict
+          sl_ms = th_ms.slot_of(t.a.b.str)
+          if sl_ms >= 0 && (th_ms.attrs_of(t.a.b.str) & ATTR_ACCESSOR) == 0
+            no_spill_this_enc = sl_ms < th_ms.inline ? (th_ms.ibase + sl_ms) : (0 - (sl_ms - th_ms.inline) - 1)
+            no_spill_o = true
+    if no_spill_o
       gen_expr_any(rhs)
+      @a.mov_r(R_X12, R_X0)   # val
+      if no_spill_this_enc != 0
+        if @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+          r_th_ms = @inline_env[:this][1]
+          if no_spill_this_enc > 0 && no_spill_this_enc <= 31
+            @a.ldr_x(R_X13, r_th_ms, (no_spill_this_enc + 1) * 8 - 4)
+          else
+            @a.sub_i(R_X9, r_th_ms, 4)
+            emit_slot_load(R_X13, R_X9, no_spill_this_enc)
+        elsif @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :spill_x
+          @a.ldr_x(R_X9, R_SP, @inline_env[:this][1])
+          @a.sub_i(R_X9, R_X9, 4)
+          emit_slot_load(R_X13, R_X9, no_spill_this_enc)
+        else
+          @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+          @a.sub_i(R_X9, R_X9, 4)
+          emit_slot_load(R_X13, R_X9, no_spill_this_enc)
+      elsif t.a.kind == :this
+        if @inline_env != nil && @inline_env[:this] != nil
+          iv_t = @inline_env[:this]
+          if iv_t[0] == :spill_x
+            @a.ldr_x(R_X13, R_SP, iv_t[1])
+          elsif iv_t[0] == :reg_x
+            @a.mov_r(R_X13, iv_t[1])
+          else
+            gen_expr_any(t.a)
+            @a.mov_r(R_X13, R_X0)
+        else
+          @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+      elsif @inline_env != nil && @inline_env[t.a.x.binding] != nil
+        iv_o = @inline_env[t.a.x.binding]
+        if iv_o[0] == :spill_x
+          @a.ldr_x(R_X13, R_SP, iv_o[1])
+        else
+          @a.mov_r(R_X13, iv_o[1])
+      else
+        load_slot_any(R_X13, local_idx(t.a))
     else
-      @a.ldr_x(R_X1, R_SP, @tmp_base + (@tmp_depth - 1) * 8)
-      @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
-      call_rt(RT_GETV)
+      gen_expr_any(t.a)
       push_x(R_X0)
-      gen_expr_any(rhs)
-      @a.mov_r(R_X2, R_X0)
-      pop_x(R_X1)
-      bop = op.slice(0, op.size - 1)
-      call_rt(bop == "+" ? RT_ADD : (bop == "-" ? RT_SUB : (bop == "*" ? RT_MUL : (bop == "/" ? RT_DIV : (bop == "%" ? RT_MOD : (bop == "|" ? RT_BITOR : (bop == "&" ? RT_BITAND : (bop == "^" ? RT_BITXOR : (bop == "<<" ? RT_SHL : (bop == ">>" ? RT_SAR : RT_SHR))))))))))
-    @a.mov_r(R_X12, R_X0)   # val
-    pop_x(R_X13)            # obj
-    # Fast inline-cached set for warm existing own slot or warm inline transition
-    if sh_warm != 0 && ns_warm == 0 && sl_warm != 0
+      if op == "="
+        gen_expr_any(rhs)
+      else
+        @a.ldr_x(R_X1, R_SP, @tmp_base + (@tmp_depth - 1) * 8)
+        @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
+        call_rt(RT_GETV)
+        push_x(R_X0)
+        gen_expr_any(rhs)
+        @a.mov_r(R_X2, R_X0)
+        pop_x(R_X1)
+        bop = op.slice(0, op.size - 1)
+        call_rt(bop == "+" ? RT_ADD : (bop == "-" ? RT_SUB : (bop == "*" ? RT_MUL : (bop == "/" ? RT_DIV : (bop == "%" ? RT_MOD : (bop == "|" ? RT_BITOR : (bop == "&" ? RT_BITAND : (bop == "^" ? RT_BITXOR : (bop == "<<" ? RT_SHL : (bop == ">>" ? RT_SAR : RT_SHR))))))))))
+      @a.mov_r(R_X12, R_X0)   # val
+      pop_x(R_X13)            # obj
+    # Fast inline-cached set for warm shape-transition own-property add (`this.x = v` inside constructors!)
+    s_bli = shape_key(t.a)
+    @known_shapes.delete("this." + key)
+    if s_bli != -1 && op == "=" && @known_shapes[s_bli] != nil
+      ksh_s = (s_bli == -2 && @inline_this_sh != nil && @known_shapes[-2] == (wvalue_bits(@inline_this_sh) ## i64)) ? @inline_this_sh : wvalue_from_bits(@known_shapes[s_bli])
+      if ksh_s.is_a?(JS:Shape) && !ksh_s.dict
+        sl_in = ksh_s.slot_of(key)
+        if sl_in >= 0 && ksh_s.attrs_of(key) == ATTR_DEFAULT
+          enc_in = sl_in < ksh_s.inline ? (ksh_s.ibase + sl_in) : (0 - (sl_in - ksh_s.inline) - 1)
+          @a.sub_i(R_X9, R_X13, 4)
+          emit_slot_store(R_X9, enc_in, R_X12)
+          @a.mov_r(R_X0, R_X12)
+          return nil
+        elsif s_bli == -2 && sl_in < 0 && !ksh_s.nonext && ksh_s.count < ksh_s.inline && ksh_s.inline == OBJ_INLINE && ksh_s.ibase == OBJ_IBASE && key != "__proto__" && (@hoisted_epoch || @epoch_verified_now) && js_proto_chain_plain?(ksh_s.proto, key)
+          ns_in = ksh_s.add(key, ATTR_DEFAULT)
+          jit_keep(ns_in)
+          enc_tr = ns_in.ibase + ns_in.count - 1
+          mark_while_dirty()
+          @a.sub_i(R_X9, R_X13, 4)
+          emit_slot_store(R_X9, enc_tr, R_X12)
+          @a.mov_imm64(R_X11, wvalue_bits(ns_in) ## i64)
+          @a.str_x(R_X11, R_X9, 8)
+          @a.mov_r(R_X0, R_X12)
+          @known_shapes[-2] = wvalue_bits(ns_in) ## i64
+          @inline_this_sh = ns_in if @inline_env != nil
+          return nil
+    if sh_warm != 0 && ns_warm != 0 && (ns_warm & 1) == 0 && sl_warm > 0 && node_ic[3] == JS_EPOCH[0] && @inline_env == nil
+      mark_while_dirty()
+      @known_shapes.delete(s_bli) if s_bli != -1
+      spic_t = i64[16]
+      pk = 0
+      while pk < 16
+        spic_t[pk] = 0
+        pk += 1
+      jit_keep(spic_t)
       l_slow = @a.new_label
       l_done = @a.new_label
+      if !@hoisted_epoch && !@epoch_verified_now
+        ep_now = JS_EPOCH[0]
+        @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+        @a.ldr_x(R_X10, R_X9, 0)
+        @a.mov_imm64(R_X11, ep_now)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_slow)
       @a.sub_i(R_X9, R_X13, 4)
-      @a.tst_x_lowmask(R_X9, 4)
+      @a.tst_wobj_bad(R_X9)
       @a.b_cond(CC_NE, l_slow)
-      @a.lsr_xi(R_X10, R_X9, 48)
-      @a.cbnz_x(R_X10, l_slow)
       @a.cbz_x(R_X9, l_slow)
       @a.ldr_x(R_X10, R_X9, 8)
       @a.mov_imm64(R_X11, sh_warm)
       @a.cmp_r(R_X10, R_X11)
       @a.b_cond(CC_NE, l_slow)
       emit_slot_store(R_X9, sl_warm, R_X12)
+      @a.mov_imm64(R_X11, ns_warm)
+      @a.str_x(R_X11, R_X9, 8)         # update obj.@shape = new_shape!
+      @a.mov_r(R_X0, R_X12)
+      @a.bind(l_done)
+      cb = ->()
+        @a.bind(l_slow)
+        emit_ic_set_4way_probe(key, spic_t, l_done)
+      add_cold_stub(cb)
+      return nil
+    # Fast 2-way inline-cached set for 2-shape polymorphic own slot (persistent `i64[16]` PIC or `ic[2] = old_s | 1`)!
+    is_spic16_2way = node_ic.size == 16 && sh_warm != 0 && ns_warm == 0 && sl_warm != 0 && node_ic[4] != 0 && node_ic[6] == 0 && node_ic[5] != 0
+    is_sic4_2way = sh_warm != 0 && (ns_warm & 1) != 0 && sl_warm != 0 && node_ic[3] != 0
+    if is_spic16_2way || is_sic4_2way
+      sh2_s = is_spic16_2way ? node_ic[4] : (ns_warm ^ 1)
+      sl2_s = is_spic16_2way ? node_ic[5] : node_ic[3]
+      if node_ic.size == 16
+        spic_2 = node_ic
+      else
+        spic_2 = i64[16]
+        pk = 0
+        while pk < 16
+          spic_2[pk] = 0
+          pk += 1
+        spic_2[0] = sh_warm; spic_2[1] = sl_warm
+        spic_2[4] = sh2_s; spic_2[5] = sl2_s
+        t.x = spic_2 if !@in_cold_stub && @inline_env == nil
+      jit_keep(spic_2)
+      l_chk2_s = @a.new_label
+      l_slow = @a.new_label
+      l_done = @a.new_label
+      @a.sub_i(R_X9, R_X13, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X10, R_X9, 8)
+      emit_cmp_shape(R_X10, sh_warm)
+      @a.b_cond(CC_NE, l_chk2_s)
+      emit_slot_store(R_X9, sl_warm, R_X12)
       @a.mov_r(R_X0, R_X12)
       @a.b(l_done)
+      @a.bind(l_chk2_s)
+      emit_cmp_shape(R_X10, sh2_s)
+      @a.b_cond(CC_NE, l_slow)
+      emit_slot_store(R_X9, sl2_s, R_X12)
+      @a.mov_r(R_X0, R_X12)
+      @a.bind(l_done)
+      cb = ->()
+        @a.bind(l_slow)
+        emit_ic_set_4way_probe(key, spic_2, l_done)
+      add_cold_stub(cb)
+      return nil
+    # Fast inline-cached set for warm existing own slot (with persistent 4-way polymorphic fallback PIC!)
+    if sh_warm != 0 && ns_warm == 0 && sl_warm != 0
+      if s_bli != -1 && @known_shapes[s_bli] == sh_warm
+        @a.sub_i(R_X9, R_X13, 4)
+        emit_slot_store(R_X9, sl_warm, R_X12)
+        @a.mov_r(R_X0, R_X12)
+        return nil
+      if node_ic.size == 16
+        spic = node_ic
+      else
+        spic = i64[16]
+        pk = 0
+        while pk < 16
+          spic[pk] = 0
+          pk += 1
+        spic[0] = sh_warm; spic[1] = sl_warm
+        t.x = spic if !@in_cold_stub && @inline_env == nil
+      jit_keep(spic)
+      l_slow = @a.new_label
+      l_done = @a.new_label
+      @a.sub_i(R_X9, R_X13, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X10, R_X9, 8)
+      r_hs_s = @hoisted_shapes[sh_warm]
+      if r_hs_s != nil
+        @a.cmp_r(R_X10, r_hs_s)
+      elsif @sh_spill_slots[sh_warm] != nil
+        @a.ldr_x(R_X11, R_SP, @sh_spill_slots[sh_warm])
+        @a.cmp_r(R_X10, R_X11)
+      else
+        @a.mov_imm64(R_X11, sh_warm)
+        @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+      emit_slot_store(R_X9, sl_warm, R_X12)
+      @a.mov_r(R_X0, R_X12)
+      @a.bind(l_done)
+      cb = ->()
+        @a.bind(l_slow)
+        emit_ic_set_4way_probe(key, spic, l_done)
+      add_cold_stub(cb)
+      return nil
+    # Fast specialization when `this` has a known monomorphic shape even if node_ic is cold!
+    if op == "=" && s_bli == -2
+      cand_sh_b = @inline_this_sh != nil ? (wvalue_bits(@inline_this_sh) ## i64) : @this_mono_sh
+      if cand_sh_b != 0
+        cand_sh = @inline_this_sh != nil ? @inline_this_sh : wvalue_from_bits(cand_sh_b)
+        if cand_sh.is_a?(JS:Shape) && !cand_sh.dict
+          sl_c = cand_sh.slot_of(key)
+          if sl_c >= 0 && cand_sh.attrs_of(key) == ATTR_DEFAULT
+            enc_c = sl_c < cand_sh.inline ? (cand_sh.ibase + sl_c) : (0 - (sl_c - cand_sh.inline) - 1)
+            jit_keep(cand_sh)
+            spic_c = i64[16]
+            pk_c = 0
+            while pk_c < 16
+              spic_c[pk_c] = 0
+              pk_c += 1
+            jit_keep(spic_c)
+            l_slow = @a.new_label
+            l_done = @a.new_label
+            @a.sub_i(R_X9, R_X13, 4)
+            @a.tst_wobj_bad(R_X9)
+            @a.b_cond(CC_NE, l_slow)
+            @a.cbz_x(R_X9, l_slow)
+            @a.ldr_x(R_X10, R_X9, 8)
+            emit_cmp_shape(R_X10, cand_sh_b)
+            @a.b_cond(CC_NE, l_slow)
+            emit_slot_store(R_X9, enc_c, R_X12)
+            @a.mov_r(R_X0, R_X12)
+            @a.bind(l_done)
+            cb_c = ->()
+              @a.bind(l_slow)
+              emit_ic_set_4way_probe(key, spic_c, l_done)
+            add_cold_stub(cb_c)
+            return nil
+    # Dynamic 4-way write & shape-transition PIC fast path for cold/inlined own-slot writes (populated on first run!)
+    @known_shapes.delete(s_bli) if s_bli != -1
+    if !@in_cold_stub && @inline_env == nil && t.x.is_a?(Array) && t.x.size == 16 && t.x[0].is_a?(Int)
+      spic_g = t.x
+    else
+      spic_g = i64[16]
+      pk = 0
+      while pk < 16
+        spic_g[pk] = 0
+        pk += 1
+      if !@in_cold_stub && @inline_env == nil && (t.x == nil || (jit_ic_valid?(t.x) && t.x[0] == 0))
+        t.x = spic_g
+    jit_keep(spic_g)
+    spic_ptr = jit_i64_ptr(spic_g)
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    l_tr_fast = @a.new_label
+    @a.sub_i(R_X9, R_X13, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_slow)
+    @a.cbz_x(R_X9, l_slow)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.mov_imm64(R_X11, spic_ptr)
+    @a.ldr_x(R_X14, R_X11, 0)         # spic[0] = shape0
+    @a.cmp_r(R_X10, R_X14)
+    @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X15, R_X11, 16)        # spic[2] = new_shape (0 = existing slot)
+    @a.ldr_x(R_X14, R_X11, 8)         # spic[1] = slot_enc (> 0 inline ivar!)
+    @a.cmp_i(R_X14, 0)
+    @a.b_cond(CC_LE, l_slow)
+    @a.cbnz_x(R_X15, l_tr_fast)
+    @a.add_i(R_X14, R_X14, 1)
+    @a.str_x_idx(R_X12, R_X9, R_X14)
+    @a.mov_r(R_X0, R_X12)
+    @a.b(l_done)
+    @a.bind(l_tr_fast)
+    mark_while_dirty()
+    @a.ldr_x(R_X10, R_X11, 24)        # spic[3] = cached JS_EPOCH[0]
+    @a.ldr_x(R_X0, R_X19, RT_K_EPOCH_PTR * 8)
+    @a.ldr_x(R_X0, R_X0, 0)
+    @a.cmp_r(R_X0, R_X10)
+    @a.b_cond(CC_NE, l_slow)
+    @a.add_i(R_X14, R_X14, 1)
+    @a.str_x_idx(R_X12, R_X9, R_X14)
+    @a.str_x(R_X15, R_X9, 8)          # update obj.@shape = new_shape!
+    @a.mov_r(R_X0, R_X12)
+    @a.bind(l_done)
+    saved_td_ps = @tmp_depth
+    px_ic_s = i64[4]
+    px_ic_s[0] = 0; px_ic_s[1] = 0; px_ic_s[2] = 0; px_ic_s[3] = 0
+    px_keep_s = Array.new(2, nil)
+    jit_keep(px_ic_s)
+    jit_keep(px_keep_s)
+    px_ic_sp = jit_i64_ptr(px_ic_s)
+    px_offs_s = js_proxy_ivar_offs()
+    cb = ->()
       @a.bind(l_slow)
+      # Inline ARM64 JS:Proxy `set` trap dispatch (direct `blr trap_fn.code.jit_fast_fp` + post-call invariant check!)
+      l_not_px_s = @a.new_label
+      l_px_miss_s = @a.new_label
+      l_px_miss_sp = @a.new_label
+      l_px_inv_s = @a.new_label
+      @a.sub_i(R_X9, R_X13, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_not_px_s)
+      @a.cbz_x(R_X9, l_not_px_s)
+      @a.ldr_w(R_X10, R_X9, 0)
+      @a.and_w_lowmask(R_X10, R_X10, 16)
+      @a.ldr_x(R_X11, R_X19, RT_K_PROXY_CLSID * 8)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_not_px_s)
+      @a.mov_imm64(R_X14, px_ic_sp)
+      @a.ldr_x(R_X10, R_X14, 0)          # hsh
+      @a.cbz_x(R_X10, l_px_miss_s)
+      @a.ldr_x(R_X1, R_X9, px_offs_s[1]) # h = proxy.@handler
+      @a.sub_i(R_X11, R_X1, 4)
+      @a.tst_wobj_bad(R_X11)
+      @a.b_cond(CC_NE, l_px_miss_s)
+      @a.cbz_x(R_X11, l_px_miss_s)
+      @a.ldr_x(R_X15, R_X11, 8)          # h.@shape
+      @a.cmp_r(R_X15, R_X10)
+      @a.b_cond(CC_NE, l_px_miss_s)
+      @a.ldr_x(R_X15, R_X14, 8)          # trap_sl_enc (> 0)
+      @a.add_i(R_X15, R_X15, 1)
+      @a.ldr_x_idx(R_X0, R_X11, R_X15)   # trap_fn
+      @a.sub_i(R_X11, R_X0, 4)
+      @a.tst_wobj_bad(R_X11)
+      @a.b_cond(CC_NE, l_px_miss_s)
+      @a.cbz_x(R_X11, l_px_miss_s)
+      @a.ldrb(R_X15, R_X11, 4)
+      @a.and_w_lowmask(R_X15, R_X15, 4)
+      @a.cmp_wi(R_X15, 2)                # KIND_FUNCTION
+      @a.b_cond(CC_NE, l_px_miss_s)
+      @a.ldr_x(R_X15, R_X11, 24)         # trap_fn.@code
+      @a.sub_i(R_X15, R_X15, 4)
+      @a.ldr_x(R_X16, R_X15, 96)         # jit_fast_fp
+      @a.and_x_lowmask(R_X16, R_X16, 48)
+      @a.cbz_x(R_X16, l_px_miss_s)
+      @a.ldr_x(R_X3, R_X9, px_offs_s[0]) # tgt = proxy.@target
+      old_td_ps = @tmp_depth
+      @tmp_depth = saved_td_ps
+      pxs_sv_o = push_x(R_X13)
+      pxs_sv_v = push_x(R_X12)
+      pxs_sv_t = push_x(R_X3)
+      @a.mov_r(R_X5, R_X12)              # val
+      @a.mov_r(R_X6, R_X13)              # receiver = proxy
+      @a.mov_imm64(R_X4, wvalue_bits(key) ## i64)
+      @a.movz_x(R_X2, 4)                 # argc = 4 (target, key, val, receiver)
+      @a.movz_x(R_X7, 0)
+      emit_blr_x16()
+      @a.cmp_i(R_X0, 6)                  # JSR_SLOW -> re-run safely via RT_PROXY_SET_MISS
+      @a.b_cond(CC_EQ, l_px_miss_sp)
+      @a.cmp_i(R_X0, 2)                  # true?
+      @a.b_cond(CC_NE, l_px_inv_s)
+      @a.ldr_x(R_X1, R_SP, pxs_sv_t)
+      @a.sub_i(R_X9, R_X1, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_px_inv_s)
+      @a.cbz_x(R_X9, l_px_inv_s)
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.mov_imm64(R_X14, px_ic_sp)
+      @a.ldr_x(R_X11, R_X14, 16)         # cached configurable tgt_shape
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_px_inv_s)
+      @a.ldr_x(R_X0, R_SP, pxs_sv_v)     # return val
+      @a.b(l_done)
+      @a.bind(l_px_inv_s)
+      @a.mov_r(R_X4, R_X0)               # ok_res
+      @a.ldr_x(R_X1, R_SP, pxs_sv_t)
+      @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
+      @a.ldr_x(R_X3, R_SP, pxs_sv_v)
+      @a.movz_x(R_X5, @jf.strict ? 2 : 1)
+      call_rt(RT_PROXY_SET_INV)
+      @a.b(l_done)
+      @a.bind(l_px_miss_sp)
+      @a.ldr_x(R_X13, R_SP, pxs_sv_o)
+      @a.ldr_x(R_X12, R_SP, pxs_sv_v)
+      @a.bind(l_px_miss_s)
       @a.mov_r(R_X1, R_X13)
       @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
       @a.mov_r(R_X3, R_X12)
-      @a.mov_imm64(R_X4, wvalue_bits(node_ic) ## i64)
-      @a.mov_imm64(R_X5, wvalue_bits(0) ## i64)
+      @a.mov_imm64(R_X4, wvalue_bits(px_ic_s) ## i64)
+      @a.mov_imm64(R_X5, wvalue_bits(px_keep_s) ## i64)
       @a.movz_x(R_X6, @jf.strict ? 2 : 1)
-      call_rt(RT_SETP_MISS)
-      @a.bind(l_done)
-      return nil
+      call_rt(RT_PROXY_SET_MISS)
+      @a.b(l_done)
+      @tmp_depth = old_td_ps
+      @a.bind(l_not_px_s)
+      emit_ic_set_4way_probe(key, spic_g, l_done)
+    add_cold_stub(cb)
+    nil
+
+  # 4-way dynamic own-slot write AND inline shape-transition PIC probe (`R_X13` = obj, `R_X12` = val)!
+  # Layout of spic (`i64[16]`): 4 entries of `[shape, slot_enc, new_shape (0 = existing), epoch]`.
+  -> emit_ic_set_4way_probe(key, spic, l_done)
+    spic_ptr = jit_i64_ptr(spic)
+    l_rt = @a.new_label
+    l_store = @a.new_label
+    l_ext = @a.new_label
+    l_trans = @a.new_label
+    @a.sub_i(R_X9, R_X13, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_rt)
+    @a.cbz_x(R_X9, l_rt)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.mov_imm64(R_X11, spic_ptr)
+    ei = 0
+    while ei < 4
+      l_nxt = ei < 3 ? @a.new_label : l_rt
+      @a.ldr_x(R_X14, R_X11, ei * 32)
+      @a.cmp_r(R_X10, R_X14)
+      @a.b_cond(CC_NE, l_nxt)
+      @a.ldr_x(R_X15, R_X11, ei * 32 + 16)     # new_shape (0 = existing slot)
+      @a.ldr_x(R_X14, R_X11, ei * 32 + 8)      # slot_enc
+      @a.cbz_x(R_X15, l_store)
+      @a.ldr_x(R_X10, R_X11, ei * 32 + 24)     # cached JS_EPOCH[0]
+      @a.b(l_trans)
+      @a.bind(l_nxt) if ei < 3
+      ei += 1
+    @a.bind(l_trans)
+    mark_while_dirty()
+    @a.ldr_x(R_X0, R_X19, RT_K_EPOCH_PTR * 8)
+    @a.ldr_x(R_X0, R_X0, 0)
+    @a.cmp_r(R_X0, R_X10)
+    @a.b_cond(CC_NE, l_rt)
+    @a.cmp_i(R_X14, 0)
+    @a.b_cond(CC_LE, l_rt)
+    @a.add_i(R_X14, R_X14, 1)
+    @a.str_x_idx(R_X12, R_X9, R_X14)
+    @a.str_x(R_X15, R_X9, 8)                   # obj.@shape = new_shape!
+    @a.mov_r(R_X0, R_X12)
+    @a.b(l_done)
+    @a.bind(l_store)
+    @a.cbz_x(R_X14, l_rt)
+    @a.cmp_i(R_X14, 0)
+    @a.b_cond(CC_LT, l_ext)
+    @a.add_i(R_X14, R_X14, 1)
+    @a.str_x_idx(R_X12, R_X9, R_X14)
+    @a.mov_r(R_X0, R_X12)
+    @a.b(l_done)
+    @a.bind(l_ext)
+    @a.sub_r(R_X14, R_XZR, R_X14)
+    @a.sub_i(R_X14, R_X14, 1)
+    @a.ldr_x(R_X15, R_X9, 16)
+    @a.and_x_ptr47(R_X15, R_X15)
+    @a.ldr_x(R_X15, R_X15, 16)
+    @a.str_x_idx(R_X12, R_X15, R_X14)
+    @a.mov_r(R_X0, R_X12)
+    @a.b(l_done)
+    @a.bind(l_rt)
     @a.mov_r(R_X1, R_X13)
     @a.mov_imm64(R_X2, wvalue_bits(key) ## i64)
     @a.mov_r(R_X3, R_X12)
-    @a.mov_imm64(R_X4, wvalue_bits(node_ic) ## i64)
-    @a.mov_imm64(R_X5, wvalue_bits(0) ## i64)
-    @a.movz_x(R_X6, @jf.strict ? 2 : 1)
-    call_rt(RT_SETP_MISS)
+    @a.mov_imm64(R_X4, wvalue_bits(spic) ## i64)
+    @a.movz_x(R_X5, @jf.strict ? 2 : 1)
+    call_rt(RT_SET_PIC_MISS)
+    @a.b(l_done)
     nil
 
   # ---- Calls, Intrinsics, Polymorphic Inlining, & Array HOF Inlining ----
 
   -> gen_call_any(e)
     c = e.a
-    # 1. Scalar-replaced closure call `f(a0, ...)`!
+    # 1. Scalar-replaced closure call `f(a0, ...)` or inlined local helper `push(...)` / `pop()`!
     if c.kind == :ident
+      if c.x != nil && c.x.binding != nil && @info.inlined_fns[c.x.binding] != nil
+        emit_inlined_fn_call(@info.inlined_fns[c.x.binding], e.list, :any)
+        return nil
       li = local_idx(c)
       if li >= 0 && @info.sra_clos[li] != nil
         sc = @info.sra_clos[li]
@@ -8267,40 +17444,68 @@ OSR_RETURN = 2
           @a.mov_r(R_X1, R_X0)
           call_rt(RT_MATH_ROUND)
           return nil
-      # 2b. `arr.push(x)` inline fast path (10 instructions, zero function calls!)
-      if mname == "push" && e.list.size == 1
-        gen_array_push_inline(c.a, e.list[0])
-        return nil
+      # 2b. `arr.push(x)` & `arr.pop()` & `fn.call(thisArg, ...)` inline fast paths!
+      site_is_user_fn = e.x.is_a?(Array) && e.x.size >= 2
+      rec_li_k = local_idx(c.a)
+      rec_is_known_arr = rec_li_k >= 0 && (@hoisted_arrs[rec_li_k] != nil || @info.local_arrs[rec_li_k] != nil)
+      if !site_is_user_fn
+        if mname == "push" && e.list.size == 1
+          gen_array_push_inline(c.a, e.list[0])
+          return nil
+        if mname == "pop" && e.list.size == 0
+          gen_array_pop_inline(c.a)
+          return nil
+        if mname == "slice" && e.list.size == 0
+          gen_arr_fast_rt_intrinsic(c.a, "slice", e.list, RT_ARR_SLICE0)
+          return nil
+        if mname == "indexOf" && e.list.size == 1
+          gen_indexof1_intrinsic(c.a, e.list[0])
+          return nil
+        if mname == "splice" && e.list.size == 2 && e.list[1].kind == :num && e.list[1].a == ~1.0
+          gen_arr_fast_rt_intrinsic(c.a, "splice", [e.list[0]], RT_ARR_SPLICE1, e.list)
+          return nil
+        if mname == "call" && e.list.size >= 1 && e.list.size <= 5 && gen_fn_call_inline(c.a, e.list)
+          return nil
+      # 2b1. `ta.fill(x)` inline ARM64 fill loop on hoisted integer TypedArray!
+      if mname == "fill" && e.list.size == 1
+        bli_f = local_idx(c.a)
+        if bli_f >= 0 && @hoisted_tas[bli_f] != nil && gen_ta_fill_inline(bli_f, e.list[0], true)
+          return nil
       # 2b2. Guarded String/Array fast-call intrinsics (split, join, indexOf, slice, charCodeAt)!
-      if (mname == "split" || mname == "indexOf" || mname == "charCodeAt") && e.list.size == 1
-        rt_id = mname == "split" ? RT_STR_SPLIT_CH : (mname == "indexOf" ? RT_STR_INDEXOF : RT_STR_CHARCODE)
-        gen_str_method_intrinsic(c.a, mname, e.list, rt_id)
-        return nil
-      if mname == "indexOf" && e.list.size == 2
-        gen_str_method_intrinsic(c.a, "indexOf", e.list, RT_STR_INDEXOF2)
-        return nil
-      if mname == "slice" && (e.list.size == 1 || e.list.size == 2)
-        gen_str_method_intrinsic(c.a, mname, e.list, RT_STR_SLICE)
-        return nil
+      # Skip String/Collection native intrinsics when call site already observed a user JS method (`e.x`) or known Array!
+      if !site_is_user_fn && !rec_is_known_arr
+        if (mname == "split" || mname == "charCodeAt") && e.list.size == 1
+          rt_id = mname == "split" ? RT_STR_SPLIT_CH : RT_STR_CHARCODE
+          gen_str_method_intrinsic(c.a, mname, e.list, rt_id)
+          return nil
+        if mname == "indexOf" && e.list.size == 2
+          gen_str_method_intrinsic(c.a, "indexOf", e.list, RT_STR_INDEXOF2)
+          return nil
+        if mname == "slice" && (e.list.size == 1 || e.list.size == 2)
+          gen_str_method_intrinsic(c.a, mname, e.list, RT_STR_SLICE)
+          return nil
       if mname == "join" && e.list.size <= 1
         gen_arr_join_intrinsic(c.a, e.list)
         return nil
       # 2b2b. Array.isArray(x) & Object.keys(x) fast intrinsics!
       if mname == "isArray" && e.list.size == 1 && c.a.kind == :ident && c.a.str == "Array" && gen_array_is_array_intrinsic(c.a, e.list[0])
         return nil
-      if mname == "keys" && e.list.size == 1 && c.a.kind == :ident && c.a.str == "Object" && gen_object_keys_intrinsic(c.a, e.list[0])
+      if mname == "keys" && e.list.size == 1 && c.a.kind == :ident && c.a.str == "Object" && gen_object_keys_intrinsic(c.a, e.list[0], @info.ro_keys_calls[e] == true)
         return nil
       # 2b3. Guarded Map/Set/WeakMap fast-call intrinsics (get, set, add, has, delete)!
-      if mname == "get" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "get", e.list, :map_wm, RT_MAP_GET)
-        return nil
-      if mname == "set" && e.list.size == 2 && gen_coll_method_intrinsic(c.a, "set", e.list, :map_wm, RT_MAP_SET)
-        return nil
-      if mname == "add" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "add", e.list, :set, RT_SET_ADD)
-        return nil
-      if mname == "has" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "has", e.list, :all, RT_SET_HAS)
-        return nil
-      if mname == "delete" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "delete", e.list, :all, RT_MAP_DELETE)
-        return nil
+      if !site_is_user_fn
+        if mname == "get" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "get", e.list, :map_wm, RT_MAP_GET)
+          return nil
+        if mname == "set" && e.list.size == 2 && gen_coll_method_intrinsic(c.a, "set", e.list, :map_wm, RT_MAP_SET)
+          return nil
+        if mname == "add" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "add", e.list, :set, RT_SET_ADD)
+          return nil
+        if mname == "has" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "has", e.list, :all, RT_SET_HAS)
+          return nil
+        if mname == "delete" && e.list.size == 1 && gen_coll_method_intrinsic(c.a, "delete", e.list, :all, RT_MAP_DELETE)
+          return nil
+        if mname == "forEach" && e.list.size == 1 && gen_set_foreach_call_inline(c.a, e.list[0])
+          return nil
       # 2b4. Guarded Promise.prototype.then & Promise.resolve intrinsics!
       if mname == "then" && (e.list.size == 1 || e.list.size == 2) && gen_prom_then_intrinsic(c.a, e.list)
         return nil
@@ -8336,14 +17541,42 @@ OSR_RETURN = 2
             if mname == "reduce" && e.list.size == 2
               gen_inline_array_reduce(c.a, cb_jf, e.list[1])
               return nil
-      # 2c2. Virtual struct method inlining & chained SRA (`ro.add(rd.mul(t))`, `p.sub(c).norm()`, `oc.dot(rd)`!)
+      # 2c2. Virtual struct method inlining & chained SRA (`ro.add(rd.mul(t))`, `p.sub(c).norm()`, `oc.dot(rd)`, `s.hit(ro, rd)`!)
       if gen_vstruct_call_any(e)
         return nil
-      # 2d. Polymorphic method call inlining (`shapes[j].area()` with 1..4 observed shapes!)
-      if e.x.is_a?(Array) && e.x.size >= 2 && e.list.size <= 2
-        if gen_poly_method_inline(e, c, e.x)
+      if !@is_osr && gen_vstruct_method_f64_inline(e)
+        emit_box_f64(R_X0, R_D0)
+        return nil
+      # Resolve warmed call-site profile, or infer from `@this_prop_shapes` for cold sibling branches (`this.scheduler.<m>(...)`)!
+      prof_call = e.x
+      if prof_call == nil && c.a.kind == :member && !c.a.has?(F_COMPUTED) && c.a.a.kind == :this
+        psh = @this_prop_shapes[c.a.b.str]
+        if psh.is_a?(JS:Shape) && !psh.dict && psh.slot_of(mname) < 0 && psh.proto.is_a?(JS:Object)
+          pfn = psh.proto.get_own(mname)
+          prof_call = [psh, pfn] if pfn.is_a?(JS:Function)
+      # 2d. Polymorphic method call inlining (simple 1-stmt / empty `{}` methods!)
+      if prof_call.is_a?(Array) && prof_call.size >= 2 && e.list.size <= 2
+        if gen_poly_method_inline(e, c, prof_call)
           return nil
-      # 2e. Standard method call with IC + direct JIT entry dispatch!
+      # 2d1. General 1..4-way polymorphic small multi-stmt method inlining (TCB.run, Task.run, Scheduler.*, Constraint.execute/recalculate!)
+      if prof_call.is_a?(Array) && prof_call.size >= 2 && prof_call.size <= 8 && e.list.size <= 3 && @mono_inline_depth < 6
+        if try_gen_poly_multi_method_inline(e, c, prof_call)
+          return nil
+      # 2d2. Static own-slot method call on read-only global object (`Strength.stronger/weaker/weakestOf`, `NS.fn` — even inside inlined methods!)
+      if e.list.size <= 4 && c.a.kind == :ident && c.a.x != nil && c.a.x.binding != nil && c.a.x.binding.global?
+        gb_o = c.a.x.binding
+        if @info.global_objs[gb_o] != nil
+          if gen_global_own_method_call(e, c, mname, @info.global_objs[gb_o][1], nil)
+            return nil
+        elsif gb_o.writes <= 1
+          gc_o = wk_cell(gb_o)
+          if gen_global_own_method_call(e, c, mname, gc_o.value, gc_o)
+            return nil
+      # 2e. Dynamic self-updating 4-way polymorphic direct `jit_fast_fp` method call IC (nargs <= 4)!
+      if e.list.size <= 4
+        gen_dynamic_poly_call_ic(e, c, mname)
+        return nil
+      # 2e-fallback. Standard method call with IC + direct JIT entry dispatch (nargs > 4)!
       gen_expr_any(c.a)
       push_x(R_X0)    # save receiver `this`
       node_ic = wk_ic(c)
@@ -8357,6 +17590,39 @@ OSR_RETURN = 2
     if c.kind == :member && c.has?(F_COMPUTED)
       gen_expr_any(c.a)
       rec_off = push_x(R_X0)    # save receiver `this`
+      if can_i32?(c.b)
+        gen_expr_i32(c.b)
+        @a.sxtw(R_X11, R_X0)
+        @a.ldr_x(R_X13, R_SP, rec_off)
+        l_arr_slow = @a.new_label
+        l_arr_done = @a.new_label
+        @a.lsr_xi(R_X9, R_X13, 48)
+        @a.movz_x(R_X10, 0xFFF4)
+        @a.cmp_r(R_X9, R_X10)
+        @a.b_cond(CC_NE, l_arr_slow)
+        @a.and_x_ptr47(R_X9, R_X13)
+        @a.ldrb(R_X10, R_X9, 2)
+        @a.and_w_lowmask(R_X10, R_X10, 4)
+        @a.cmp_wi(R_X10, 1)
+        @a.b_cond(CC_NE, l_arr_slow)
+        @a.ldrsw(R_X10, R_X9, 8)
+        @a.cmp_r(R_X11, R_X10)
+        @a.b_cond(CC_HS, l_arr_slow)
+        @a.ldrsw(R_X10, R_X9, 4)
+        @a.add_r(R_X11, R_X11, R_X10)
+        @a.ldr_x(R_X9, R_X9, 16)
+        @a.ldr_x_idx(R_X0, R_X9, R_X11)
+        @a.bind(l_arr_done)
+        cb_cm = ->()
+          @a.bind(l_arr_slow)
+          @a.ldr_x(R_X1, R_SP, rec_off)
+          emit_box_i32(R_X2, R_X11)
+          call_rt(RT_GETV)
+          @a.b(l_arr_done)
+        add_cold_stub(cb_cm)
+        push_x(R_X0)            # save callee `f`
+        gen_call_with_saved_f_this(e.list)
+        return nil
       gen_expr_any(c.b)
       @a.mov_r(R_X2, R_X0)      # key
       @a.ldr_x(R_X1, R_SP, rec_off)
@@ -8365,16 +17631,332 @@ OSR_RETURN = 2
       gen_call_with_saved_f_this(e.list)
       return nil
 
-    # 3. Direct guarded JIT call to a known function `step(bodies, 0.001)`!
-    if c.kind == :ident && c.x != nil && c.x.binding != nil && c.x.binding.global? && e.list.size <= 4
+    # 3. Direct guarded JIT call to a known function `step(bodies, 0.001)` (plus `String(i32)` & 1-stmt object-literal factory `h(...)`!)
+    if c.kind == :ident && c.x != nil && c.x.binding != nil && c.x.binding.global?
       cell = wk_cell(c.x.binding)
       fv = cell.value
-      if fv.is_a?(JS:Function) && fv.code != nil && fv.code.node.is_a?(JaFunc)
+      # 3a. Fast `String(x)` -> inline ARM64 0..999 ASCII string (ZERO RT call!) + RT_INT_TO_STR fallback!
+      if c.str == "String" && e.list.size == 1 && fv == js_realm().intrinsics["String"]
+        jit_keep(cell)
+        jit_keep(fv)
+        emit_u3_to_str_inline = ->(r_iv, l_rt_fb, l_ok_done)
+          l_d2 = @a.new_label
+          l_d3 = @a.new_label
+          @a.cmp_wi(r_iv, 999)
+          @a.b_cond(CC_HI, l_rt_fb)        # unsigned HI catches both < 0 and >= 1000!
+          @a.cmp_wi(r_iv, 10)
+          @a.b_cond(CC_HS, l_d2)
+          @a.add_wi(R_X0, r_iv, 48)
+          @a.lsl_xi(R_X0, R_X0, 4)
+          @a.orr_r(R_X0, R_X0, R_X0)
+          @a.movz_x(R_X11, 2)
+          @a.orr_r(R_X0, R_X0, R_X11)
+          @a.movk_x(R_X0, 0xFFF9, 3)
+          @a.b(l_ok_done)
+          @a.bind(l_d2)
+          @a.cmp_wi(r_iv, 100)
+          @a.b_cond(CC_HS, l_d3)
+          @a.movz_x(R_X11, 52429)
+          @a.mul_w(R_X9, r_iv, R_X11)
+          @a.lsr_xi(R_X9, R_X9, 19)        # q = iv / 10
+          @a.movz_x(R_X11, 10)
+          @a.mul_w(R_X11, R_X9, R_X11)
+          @a.sub_w(R_X11, r_iv, R_X11)     # r = iv - q * 10
+          @a.add_wi(R_X9, R_X9, 48)
+          @a.add_wi(R_X11, R_X11, 48)
+          @a.lsl_xi(R_X9, R_X9, 4)
+          @a.lsl_xi(R_X11, R_X11, 12)
+          @a.orr_r(R_X0, R_X9, R_X11)
+          @a.movz_x(R_X11, 4)
+          @a.orr_r(R_X0, R_X0, R_X11)
+          @a.movk_x(R_X0, 0xFFF9, 3)
+          @a.b(l_ok_done)
+          @a.bind(l_d3)
+          @a.movz_x(R_X11, 5243)
+          @a.mul_w(R_X14, r_iv, R_X11)
+          @a.lsr_xi(R_X14, R_X14, 19)      # q0 = iv / 100
+          @a.movz_x(R_X11, 100)
+          @a.mul_w(R_X11, R_X14, R_X11)
+          @a.sub_w(R_X15, r_iv, R_X11)     # rem = iv - q0 * 100
+          @a.movz_x(R_X11, 52429)
+          @a.mul_w(R_X9, R_X15, R_X11)
+          @a.lsr_xi(R_X9, R_X9, 19)        # q1 = rem / 10
+          @a.movz_x(R_X11, 10)
+          @a.mul_w(R_X11, R_X9, R_X11)
+          @a.sub_w(R_X11, R_X15, R_X11)    # r = rem - q1 * 10
+          @a.add_wi(R_X14, R_X14, 48)
+          @a.add_wi(R_X9, R_X9, 48)
+          @a.add_wi(R_X11, R_X11, 48)
+          @a.lsl_xi(R_X14, R_X14, 4)
+          @a.lsl_xi(R_X9, R_X9, 12)
+          @a.lsl_xi(R_X11, R_X11, 20)
+          @a.orr_r(R_X0, R_X14, R_X9)
+          @a.orr_r(R_X0, R_X0, R_X11)
+          @a.movz_x(R_X11, 6)
+          @a.orr_r(R_X0, R_X0, R_X11)
+          @a.movk_x(R_X0, 0xFFF9, 3)
+          @a.b(l_ok_done)
+        if can_i32?(e.list[0])
+          gen_expr_i32(e.list[0])
+          @a.mov_w(R_X12, R_X0)
+          iv_off = @tmp_base + @tmp_depth * 8
+          @max_tmp = @tmp_depth + 1 if @tmp_depth + 1 > @max_tmp
+          l_str_slow = @a.new_label
+          l_str_rt = @a.new_label
+          l_str_done = @a.new_label
+          @a.mov_imm64(R_X9, (wvalue_bits(cell) ## i64) - 4)
+          @a.ldr_x(R_X10, R_X9, 8)
+          @a.mov_imm64(R_X11, wvalue_bits(fv) ## i64)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_str_slow)
+          emit_u3_to_str_inline.call(R_X12, l_str_rt, l_str_done)
+          @a.bind(l_str_done)
+          cb_st = ->()
+            @a.bind(l_str_rt)
+            @a.sxtw(R_X1, R_X12)
+            @a.movk_x(R_X1, 0xFFFA, 3)
+            call_rt(RT_INT_TO_STR)
+            @a.b(l_str_done)
+            @a.bind(l_str_slow)
+            @a.str_w(R_X12, R_SP, iv_off)
+            @a.mov_imm64(R_X1, wvalue_bits(cell) ## i64)
+            call_rt(RT_GGET)
+            @a.mov_r(R_X1, R_X0)
+            @a.movz_x(R_X2, 0)
+            @a.ldrsw(R_X10, R_SP, iv_off)
+            emit_box_i32(R_X3, R_X10)
+            call_rt(RT_CALL_1)
+            @a.b(l_str_done)
+          add_cold_stub(cb_st)
+          return nil
+        gen_expr_any(e.list[0])
+        @a.mov_r(R_X12, R_X0)
+        av_off = @tmp_base + @tmp_depth * 8
+        @max_tmp = @tmp_depth + 1 if @tmp_depth + 1 > @max_tmp
+        l_str_slow = @a.new_label
+        l_str_tostr = @a.new_label
+        l_str_rt = @a.new_label
+        l_str_done = @a.new_label
+        @a.mov_imm64(R_X9, (wvalue_bits(cell) ## i64) - 4)
+        @a.ldr_x(R_X10, R_X9, 8)
+        @a.mov_imm64(R_X11, wvalue_bits(fv) ## i64)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_str_slow)
+        @a.sub_r(R_X9, R_X12, R_X20)
+        @a.cmp_r(R_X9, R_X21)
+        @a.b_cond(CC_HS, l_str_tostr)
+        @a.fmov_d_x(R_D0, R_X9)
+        @a.fcvtzs_w_d(R_X10, R_D0)
+        @a.scvtf_d_w(R_D1, R_X10)
+        @a.fcmp_d(R_D0, R_D1)
+        @a.b_cond(CC_NE, l_str_tostr)
+        emit_u3_to_str_inline.call(R_X10, l_str_rt, l_str_done)
+        @a.bind(l_str_done)
+        cb_st = ->()
+          @a.bind(l_str_rt)
+          @a.sxtw(R_X1, R_X10)
+          @a.movk_x(R_X1, 0xFFFA, 3)
+          call_rt(RT_INT_TO_STR)
+          @a.b(l_str_done)
+          @a.bind(l_str_tostr)
+          @a.mov_r(R_X1, R_X12)
+          call_rt(RT_TO_STRING)
+          @a.b(l_str_done)
+          @a.bind(l_str_slow)
+          @a.str_x(R_X12, R_SP, av_off)
+          @a.mov_imm64(R_X1, wvalue_bits(cell) ## i64)
+          call_rt(RT_GGET)
+          @a.mov_r(R_X1, R_X0)
+          @a.movz_x(R_X2, 0)
+          @a.ldr_x(R_X3, R_SP, av_off)
+          call_rt(RT_CALL_1)
+          @a.b(l_str_done)
+        add_cold_stub(cb_st)
+        return nil
+      # 3b. Inline 1-stmt global object-literal factory `function h(a,b,c,d){ return {k0:a, k1:b, ...}; }` -> direct RT_LIT!
+      if e.list.size <= 6 && fv.is_a?(JS:Function) && fv.code != nil && fv.code.node.is_a?(JaFunc)
         target_jf = fv.code.node
-        # Ensure callee is compiled too!
-        if fv.code.jit_fp == 0 && fv.code.jit_state == 0 && target_jf != @jf && jit_eligible_fn?(target_jf)
-          jit_compile_and_install(fv.code)
-        if fv.code.jit_fp != 0
+        re_f = jit_inline_return_expr(target_jf)
+        if re_f != nil && re_f.kind == :object && target_jf.free.size == 0 && !target_jf.uses_this && target_jf.self_binding == nil && re_f.list.size >= 1 && re_f.list.size <= 6 && jit_plain_obj_keys(re_f) != nil
+          p_idxs = []
+          ok_fac = true
+          fi = 0
+          while fi < re_f.list.size && ok_fac
+            ve = re_f.list[fi].b
+            if ve.kind == :ident && ve.x != nil && ve.x.binding != nil && ve.x.binding.kind == :param && ve.x.binding.scope.func == target_jf
+              pi = target_jf.params.index(ve.x.binding)
+              pi != nil ? p_idxs.push(pi) : (ok_fac = false)
+            else
+              ok_fac = false
+            fi += 1
+          if ok_fac
+            fac_sh = js_lit_shape(jit_plain_obj_keys(re_f))
+            jit_keep(cell)
+            jit_keep(fv)
+            jit_keep(fac_sh)
+            n_fac = e.list.size
+            arg_offs = []
+            ai = 0
+            while ai < n_fac
+              gen_expr_any(e.list[ai])
+              arg_offs.push(push_x(R_X0))
+              ai += 1
+            l_fac_slow = @a.new_label
+            l_fac_done = @a.new_label
+            @a.mov_imm64(R_X9, (wvalue_bits(cell) ## i64) - 4)
+            @a.ldr_x(R_X10, R_X9, 8)
+            @a.mov_imm64(R_X11, wvalue_bits(fv) ## i64)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_NE, l_fac_slow)
+            if !JS_GC_ON[0]
+              emit_alloc_obj_inline(fac_sh)
+              fi = 0
+              while fi < p_idxs.size
+                pi = p_idxs[fi]
+                if pi < n_fac
+                  @a.ldr_x(R_X10, R_SP, arg_offs[pi])
+                  @a.str_x(R_X10, R_X9, 24 + fi * 8)
+                fi += 1
+            else
+              @a.mov_imm64(R_X1, wvalue_bits(fac_sh) ## i64)
+              @a.movz_x(R_X2, 0)
+              @a.movz_x(R_X3, 0)
+              @a.movz_x(R_X4, 0)
+              @a.movz_x(R_X5, 0)
+              @a.movz_x(R_X6, 0)
+              @a.movz_x(R_X7, 0)
+              fi = 0
+              while fi < p_idxs.size
+                pi = p_idxs[fi]
+                @a.ldr_x(R_X2 + fi, R_SP, arg_offs[pi]) if pi < n_fac
+                fi += 1
+              call_rt(RT_LIT)
+            @a.bind(l_fac_done)
+            cb_fac = ->()
+              @a.bind(l_fac_slow)
+              @a.mov_imm64(R_X1, wvalue_bits(cell) ## i64)
+              call_rt(RT_GGET)
+              if n_fac <= 4
+                @a.mov_r(R_X1, R_X0)
+                @a.movz_x(R_X2, 0)
+                @a.ldr_x(R_X3, R_SP, arg_offs[0]) if n_fac >= 1
+                @a.ldr_x(R_X4, R_SP, arg_offs[1]) if n_fac >= 2
+                @a.ldr_x(R_X5, R_SP, arg_offs[2]) if n_fac >= 3
+                @a.ldr_x(R_X6, R_SP, arg_offs[3]) if n_fac >= 4
+                call_rt(RT_CALL_0 + n_fac)
+              else
+                cf_sv = push_x(R_X0)
+                call_rt(RT_NEW_ARR)
+                ca_sv = push_x(R_X0)
+                qi = 0
+                while qi < n_fac
+                  @a.ldr_x(R_X0, R_SP, arg_offs[qi])
+                  emit_inline_push_to_off(ca_sv, R_X0)
+                  qi += 1
+                @a.ldr_x(R_X1, R_SP, cf_sv)
+                @a.movz_x(R_X2, 0)
+                @a.ldr_x(R_X3, R_SP, ca_sv)
+                call_rt(RT_CALL_N)
+                @tmp_depth -= 2
+              @a.b(l_fac_done)
+            add_cold_stub(cb_fac)
+            @tmp_depth -= n_fac
+            return nil
+      if e.list.size <= 4 && fv.is_a?(JS:Function) && fv.code != nil && fv.code.node.is_a?(JaFunc)
+        target_jf = fv.code.node
+        # Fast direct self-recursion via `bl @l_fast_entry` (cloneAndNormalize, diff, queryCount — ZERO indirect fp load!)
+        if target_jf == @jf && @l_fast_entry != nil && !@is_osr
+          n_sr = e.list.size
+          jit_keep(cell)
+          jit_keep(fv)
+          # Skip stack spills for trailing simple_call_leaf? args (e.g. `patches` in `diff(ac[i], bc[i], patches)`, `cls` in `queryCount(ch[i], cls)`)!
+          n_eval = n_sr
+          while n_eval > 0 && simple_call_leaf?(e.list[n_eval - 1])
+            n_eval -= 1
+          arg_offs = []
+          ai = 0
+          while ai < n_eval
+            gen_expr_any(e.list[ai])
+            arg_offs.push(push_x(R_X0))
+            ai += 1
+          l_sr_slow = @a.new_label
+          l_sr_done = @a.new_label
+          @a.mov_imm64(R_X9, (wvalue_bits(cell) ## i64) - 4)
+          @a.ldr_x(R_X10, R_X9, 8)
+          @a.mov_imm64(R_X0, wvalue_bits(fv) ## i64)
+          @a.cmp_r(R_X10, R_X0)
+          @a.b_cond(CC_NE, l_sr_slow)
+          @a.movz_x(R_X1, 0)
+          @a.movz_x(R_X2, n_sr)
+          ai2 = 0
+          while ai2 < n_sr
+            if ai2 < n_eval
+              @a.ldr_x(R_X3 + ai2, R_SP, arg_offs[ai2])
+            else
+              emit_load_leaf_any(R_X3 + ai2, e.list[ai2])
+            ai2 += 1
+          @a.bl(@l_fast_entry)
+          @a.cmp_i(R_X0, 6)
+          @a.b_cond(CC_EQ, l_sr_slow)
+          @a.bind(l_sr_done)
+          cb_sr = ->()
+            @a.bind(l_sr_slow)
+            @a.mov_imm64(R_X1, wvalue_bits(cell) ## i64)
+            call_rt(RT_GGET)
+            @a.mov_r(R_X1, R_X0)
+            @a.movz_x(R_X2, 0)
+            ai3 = 0
+            while ai3 < n_sr
+              if ai3 < n_eval
+                @a.ldr_x(R_X3 + ai3, R_SP, arg_offs[ai3])
+              else
+                emit_load_leaf_any(R_X3 + ai3, e.list[ai3])
+              ai3 += 1
+            call_rt(RT_CALL_0 + n_sr)
+            @a.b(l_sr_done)
+          add_cold_stub(cb_sr)
+          @tmp_depth -= n_eval
+          @known_shapes = {}
+          @epoch_verified_now = false
+          return nil
+        # Direct 1-arg 2-await async chain call (`processItem(x)` -> zero-dispatch RT_SM_FAST2!)
+        if e.list.size == 1 && fv.code.sm_code != nil && fv.code.sm_code.fast_kind == 2
+          sc_f2 = fv.code.sm_code
+          jit_keep(cell)
+          jit_keep(fv)
+          jit_keep(sc_f2)
+          gen_expr_any(e.list[0])
+          a0_f2_off = push_x(R_X0)
+          l_f2_slow = @a.new_label
+          l_f2_done = @a.new_label
+          @a.mov_imm64(R_X9, (wvalue_bits(cell) ## i64) - 4)
+          @a.ldr_x(R_X10, R_X9, 8)
+          @a.mov_imm64(R_X11, wvalue_bits(fv) ## i64)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_f2_slow)
+          @a.mov_imm64(R_X1, wvalue_bits(sc_f2) ## i64)
+          @a.mov_r(R_X2, R_X11)
+          @a.ldr_x(R_X3, R_SP, a0_f2_off)
+          call_rt(RT_SM_FAST2)
+          @a.bind(l_f2_done)
+          cb_f2 = ->()
+            @a.bind(l_f2_slow)
+            @a.mov_imm64(R_X1, wvalue_bits(cell) ## i64)
+            call_rt(RT_GGET)
+            @a.mov_r(R_X1, R_X0)
+            @a.movz_x(R_X2, 0)
+            @a.ldr_x(R_X3, R_SP, a0_f2_off)
+            call_rt(RT_CALL_1)
+            @a.b(l_f2_done)
+          add_cold_stub(cb_f2)
+          @tmp_depth -= 1
+          @known_shapes = {}
+          @epoch_verified_now = false
+          return nil
+        # Ensure callee is compiled too (wait for warm_args if it takes params and hasn't run yet!)
+        if fv.code.jit_fp == 0 && fv.code.jit_state == 0 && target_jf != @jf && jit_eligible_fn?(target_jf) && (target_jf.params.size == 0 || fv.code.warm_args != nil)
+          jit_compile_and_install(fv.code, fv.code.warm_args)
+        if fv.code.jit_fp != 0 && fv.code.region_info == nil
           gen_direct_jit_call(c, fv, e.list)
           return nil
 
@@ -8460,6 +18042,7 @@ OSR_RETURN = 2
 
   # Direct call to a known compiled JS:Function `fv` (e.g. `step(bodies, 0.001)` or `fib(30)`!)
   -> gen_direct_jit_call(c_node, fv, arg_nodes)
+    @epoch_verified_now = false
     cell = wk_cell(c_node.x.binding)
     jit_keep(cell)
     jit_keep(fv)
@@ -8502,10 +18085,15 @@ OSR_RETURN = 2
         call_rt(RT_CALL_0 + n)
         @a.b(l_done)
       add_cold_stub(cb)
+      @known_shapes = {}
+      @epoch_verified_now = false
       return nil
-    # Evaluate args onto tmp stack
+    # Evaluate non-leaf prefix onto tmp stack (skip spilling trailing simple_call_leaf? args like `patches`!)
+    n_eval = n
+    while n_eval > 0 && simple_call_leaf?(arg_nodes[n_eval - 1])
+      n_eval -= 1
     i = 0
-    while i < n
+    while i < n_eval
       gen_expr_any(arg_nodes[i])
       push_x(R_X0)
       i += 1
@@ -8517,19 +18105,17 @@ OSR_RETURN = 2
     @a.mov_imm64(R_X10, wvalue_bits(fv) ## i64)
     @a.cmp_r(R_X0, R_X10)
     @a.b_cond(CC_NE, l_slow)
-    # Fast direct ARM64 call into target_fp(f, this=0, argc=n, a0..a3, more=0)!
+    # Fast direct ARM64 call into target_fp(f, this=0, argc=n, a0..a3)!
     @a.movz_x(R_X1, 0)
     @a.movz_x(R_X2, n)
-    @a.movz_x(R_X3, 0)
-    @a.movz_x(R_X4, 0)
-    @a.movz_x(R_X5, 0)
-    @a.movz_x(R_X6, 0)
-    @a.movz_x(R_X7, 0)
-    base_off = @tmp_base + (@tmp_depth - n) * 8
-    @a.ldr_x(R_X3, R_SP, base_off) if n >= 1
-    @a.ldr_x(R_X4, R_SP, base_off + 8) if n >= 2
-    @a.ldr_x(R_X5, R_SP, base_off + 16) if n >= 3
-    @a.ldr_x(R_X6, R_SP, base_off + 24) if n >= 4
+    base_off = @tmp_base + (@tmp_depth - n_eval) * 8
+    ai2 = 0
+    while ai2 < n
+      if ai2 < n_eval
+        @a.ldr_x(R_X3 + ai2, R_SP, base_off + ai2 * 8)
+      else
+        emit_load_leaf_any(R_X3 + ai2, arg_nodes[ai2])
+      ai2 += 1
     @a.call_abs(R_X16, target_fp)
     # Check if fast_rec returned JSR_SLOW (6)
     @a.cmp_i(R_X0, 6)
@@ -8541,27 +18127,48 @@ OSR_RETURN = 2
       call_rt(RT_GGET)
       @a.mov_r(R_X1, R_X0)
       @a.movz_x(R_X2, 0)
-      @a.ldr_x(R_X3, R_SP, base_off) if n >= 1
-      @a.ldr_x(R_X4, R_SP, base_off + 8) if n >= 2
-      @a.ldr_x(R_X5, R_SP, base_off + 16) if n >= 3
-      @a.ldr_x(R_X6, R_SP, base_off + 24) if n >= 4
+      ai3 = 0
+      while ai3 < n
+        if ai3 < n_eval
+          @a.ldr_x(R_X3 + ai3, R_SP, base_off + ai3 * 8)
+        else
+          emit_load_leaf_any(R_X3 + ai3, arg_nodes[ai3])
+        ai3 += 1
       call_rt(RT_CALL_0 + n)
       @a.b(l_done)
     add_cold_stub(cb)
-    @tmp_depth -= n
+    @tmp_depth -= n_eval
+    @known_shapes = {}
+    @epoch_verified_now = false
     nil
+
+  # Verify that `sh.proto` chain STILL resolves `mname` to `fn` at compile time (guards against stale AST profiles after prototype mutation!).
+  -> js_shape_proto_method_eq?(sh, mname, fn)
+    return false if !sh.is_a?(JS:Shape) || sh.dict || sh.slot_of(mname) >= 0
+    p = sh.proto
+    hops = 0
+    while p.is_a?(JS:Base) && hops < 16
+      ps = p.shape
+      sl = ps.slot_of(mname)
+      if sl >= 0
+        return false if ps.dict || (ps.attrs_of(mname) & ATTR_ACCESSOR) != 0
+        return p.slot_get(sl) == fn
+      p = ps.proto
+      hops += 1
+    false
 
   # Zero-boxing, zero-spill polymorphic method inliner returning unboxed f64 in R_D0!
   # Used directly by `gen_expr_to_i32` / `gen_expr_f64` (e.g. `(t + shapes[j].area()) | 0`!).
   -> gen_poly_method_inline_f64(call_e, mem_e, prof)
     npairs = prof.size / 2
     return false if npairs == 0 || npairs > 4 || call_e.list.size != 0
+    mname_s = mem_e.b.str
     targets = []
     i = 0
     while i < npairs
       sh = prof[i * 2]
       fn = prof[i * 2 + 1]
-      return false if !sh.is_a?(JS:Shape) || !fn.is_a?(JS:Function) || fn.code == nil || !fn.code.node.is_a?(JaFunc)
+      return false if !sh.is_a?(JS:Shape) || !fn.is_a?(JS:Function) || fn.code == nil || !fn.code.node.is_a?(JaFunc) || !js_shape_proto_method_eq?(sh, mname_s, fn)
       tjf = fn.code.node
       re = jit_inline_return_expr(tjf)
       return false if re == nil || tjf.free.size > 0 || tjf.params.size != 0
@@ -8779,29 +18386,1941 @@ OSR_RETURN = 2
       @a.fdiv_d(dst, da, db)
     nil
 
-  # Polymorphic speculative method inlining (`shapes[j].area()` for 1..4 observed shapes!).
+  # Pre-scan warmed polymorphic callees for read-only global int32 & object constants so the caller hoists them ONCE in prologue!
+  -> scan_ast_global_i32s(n)
+    return nil if n == nil || (@info.global_i32s.size >= 32 && @info.global_objs.size >= 16)
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size && (@info.global_i32s.size < 32 || @info.global_objs.size < 16)
+        scan_ast_global_i32s(n[i])
+        i += 1
+      return nil
+    return nil if !n.is_a?(JsNode)
+    k = n.kind
+    return nil if k == :function || k == :arrow || k == :class
+    if k == :ident && n.x != nil && n.x.binding != nil
+      gb = n.x.binding
+      if gb.global? && gb.writes <= 1 && @info.global_i32s[gb] == nil && @info.global_tas[gb] == nil && @info.global_objs[gb] == nil && n.str != "undefined" && n.str != "NaN" && n.str != "Infinity"
+        gc = wk_cell(gb)
+        gv = gc.value
+        if js_number?(gv) && @info.global_i32s.size < 32
+          bi = jsr_i32(wvalue_bits(gv) ## i64)
+          if bi != (1099511627776 ## i64) && bi.to_f == gv && !(gv == ~0.0 && (~1.0 / gv) < ~0.0)
+            @info.global_i32s[gb] = [bi, gc, gv]
+        elsif gv.is_a?(JS:Base) && !gv.shape.dict && !gv.exotic? && @info.global_objs.size < 16
+          @info.global_objs[gb] = [gc, gv]
+      return nil
+    scan_ast_global_i32s(n.a)
+    scan_ast_global_i32s(n.b)
+    scan_ast_global_i32s(n.c)
+    scan_ast_global_i32s(n.d)
+    scan_ast_global_i32s(n.list)
+    nil
+
+  -> collect_callee_global_i32s(n, visited, depth, max_depth)
+    return nil if n == nil || depth >= max_depth || (@info.global_i32s.size >= 32 && @info.global_objs.size >= 16)
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size && (@info.global_i32s.size < 32 || @info.global_objs.size < 16)
+        collect_callee_global_i32s(n[i], visited, depth, max_depth)
+        i += 1
+      return nil
+    return nil if !n.is_a?(JsNode)
+    k = n.kind
+    return nil if k == :function || k == :arrow || k == :class
+    if k == :call && n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.x.is_a?(Array) && n.x.size >= 2 && n.x.size <= 8
+      pi = 0
+      np = n.x.size / 2
+      while pi < np && (@info.global_i32s.size < 32 || @info.global_objs.size < 16)
+        fn = n.x[pi * 2 + 1]
+        if fn.is_a?(JS:Function) && fn.code != nil && fn.code.node.is_a?(JaFunc)
+          tjf = fn.code.node
+          if tjf != @jf && visited[tjf] == nil && tjf.node.b.is_a?(Array)
+            visited[tjf] = true
+            scan_ast_global_i32s(tjf.node.b)
+            collect_callee_global_i32s(tjf.node.b, visited, depth + 1, max_depth) if depth + 1 < max_depth
+        pi += 1
+    collect_callee_global_i32s(n.a, visited, depth, max_depth)
+    collect_callee_global_i32s(n.b, visited, depth, max_depth)
+    collect_callee_global_i32s(n.c, visited, depth, max_depth)
+    collect_callee_global_i32s(n.d, visited, depth, max_depth)
+    collect_callee_global_i32s(n.list, visited, depth, max_depth)
+    nil
+
+  -> collect_poly_shapes_deep(n, out, visited, depth, max_depth)
+    return nil if n == nil || out.size >= 8 || depth >= max_depth
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size && out.size < 8
+        collect_poly_shapes_deep(n[i], out, visited, depth, max_depth)
+        i += 1
+      return nil
+    return nil if !n.is_a?(JsNode)
+    k = n.kind
+    return nil if k == :function || k == :arrow || k == :class
+    if k == :member && !n.has?(F_COMPUTED) && jit_ic_valid?(n.x)
+      skip_sra = false
+      if depth == 0
+        mli_s = local_idx(n.a)
+        skip_sra = true if mli_s >= 0 && (@info.sra_objs[mli_s] != nil || @info.sra_vs[mli_s] != nil)
+      if !skip_sra
+        shb = n.x[0]
+        if shb != 0 && n.x[2] == 0 && n.x[1] != 0
+          sh_o = wvalue_from_bits(shb)
+          out.push(sh_o) if sh_o.is_a?(JS:Shape) && !out.include?(sh_o) && out.size < 8
+    if k == :call && n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.x.is_a?(Array) && n.x.size >= 2 && n.x.size <= 8
+      ps_d = wk_sort_poly_prof(n, n.x)
+      q = 0
+      while q < ps_d.size && out.size < 8
+        sh = ps_d[q]
+        out.push(sh) if sh.is_a?(JS:Shape) && !out.include?(sh) && out.size < 8
+        fn = ps_d[q + 1]
+        if fn.is_a?(JS:Function) && fn.code != nil && fn.code.node.is_a?(JaFunc)
+          tjf = fn.code.node
+          if tjf != @jf && visited[tjf] == nil && tjf.node.b.is_a?(Array) && depth + 1 < max_depth
+            visited[tjf] = true
+            collect_poly_shapes_deep(tjf.node.b, out, visited, depth + 1, max_depth)
+        q += 2
+    collect_poly_shapes_deep(n.a, out, visited, depth, max_depth)
+    collect_poly_shapes_deep(n.b, out, visited, depth, max_depth)
+    collect_poly_shapes_deep(n.c, out, visited, depth, max_depth)
+    collect_poly_shapes_deep(n.d, out, visited, depth, max_depth)
+    collect_poly_shapes_deep(n.list, out, visited, depth, max_depth) if n.list.is_a?(Array)
+    nil
+
+  # Classify a constant / read-only global value inside an inlined small method!
+  # Returns [:lit, wval_bits, i32_or_nil] | [:gnum, cell, wval_bits, i32_val] | [:gprop, cell, gv, gsh, genc] | nil
+  -> poly_const_info(e)
+    return nil if e == nil
+    k = e.kind
+    return [:lit, 2, nil] if k == :true
+    return [:lit, 1, nil] if k == :false
+    return [:lit, wvalue_bits(JS_NULL) ## i64, nil] if k == :null
+    if k == :num
+      sv = jit_signed_i32_val(e)
+      return [:lit, wvalue_bits(e.a) ## i64, sv]
+    if k == :unary && e.str == "-"
+      sv = jit_signed_i32_val(e)
+      return [:lit, wvalue_bits(sv.to_f) ## i64, sv] if sv != nil
+    if k == :ident && e.x != nil && e.x.binding != nil && e.x.binding.global? && e.x.binding.writes <= 1
+      gc = wk_cell(e.x.binding)
+      gv = gc.value
+      if js_number?(gv)
+        bi = jsr_i32(wvalue_bits(gv) ## i64)
+        if bi != (1099511627776 ## i64) && bi.to_f == gv && !(gv == ~0.0 && (~1.0 / gv) < ~0.0)
+          return [:gnum, gc, wvalue_bits(gv) ## i64, bi]
+    if k == :member && !e.has?(F_COMPUTED) && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && e.a.x.binding.global? && e.a.x.binding.writes <= 1
+      gc = wk_cell(e.a.x.binding)
+      gv = gc.value
+      if gv.is_a?(JS:Base) && !gv.shape.dict && !gv.exotic?
+        gsh = gv.shape
+        gsl = gsh.slot_of(e.b.str)
+        if gsl >= 0 && (gsh.attrs_of(e.b.str) & ATTR_ACCESSOR) == 0
+          genc = gsl < gsh.inline ? (gsh.ibase + gsl) : (0 - (gsl - gsh.inline) - 1)
+          obs = gv.get_own(e.b.str)
+          obs_b = (js_number?(obs) && obs == obs) ? (wvalue_bits(obs) ## i64) : nil
+          obs_z = obs_b != nil && obs == ~0.0
+          return [:gprop, gc, gv, gsh, genc, obs_b, obs_z]
+    nil
+
+  # Load a poly_const_info into `dst_x` (checking cell/shape guard -> `l_slow` if mutated!). Clobbers R_X9, R_X14.
+  -> emit_poly_const_load(dst_x, ci, l_slow, need_val = true)
+    ck = ci[0]
+    if ck == :lit
+      @a.mov_imm64(dst_x, ci[1]) if need_val
+    elsif ck == :gnum
+      gc = ci[1]
+      jit_keep(gc)
+      if @hoisted_cells[wvalue_bits(gc) ## i64] == ci[2]
+        @a.mov_imm64(dst_x, ci[2]) if need_val
+        return nil
+      @a.mov_imm64(R_X9, (wvalue_bits(gc) ## i64) - 4)
+      @a.ldr_x(dst_x, R_X9, 8)
+      @a.mov_imm64(R_X14, ci[2])
+      @a.cmp_r(dst_x, R_X14)
+      @a.b_cond(CC_NE, l_slow)
+    else
+      # :gprop -> if already guarded in prologue (`@hoisted_gobj_shapes`), 2-insn direct slot load!
+      gc = ci[1]
+      gv = ci[2]
+      gsh = ci[3]
+      jit_keep(gc)
+      jit_keep(gv)
+      jit_keep(gsh)
+      hgo_p = @hoisted_gobj_shapes[wvalue_bits(gc) ## i64]
+      if hgo_p != nil && hgo_p[0] == gv && hgo_p[1] == gsh
+        @a.mov_imm64(R_X9, (wvalue_bits(gv) ## i64) - 4)
+        emit_slot_load(dst_x, R_X9, ci[4])
+        return nil
+      @a.mov_imm64(R_X9, (wvalue_bits(gc) ## i64) - 4)
+      @a.ldr_x(R_X14, R_X9, 8)
+      @a.mov_imm64(dst_x, wvalue_bits(gv) ## i64)
+      @a.cmp_r(R_X14, dst_x)
+      @a.b_cond(CC_NE, l_slow)
+      @a.sub_i(R_X9, dst_x, 4)
+      @a.ldr_x(R_X14, R_X9, 8)
+      @a.mov_imm64(dst_x, wvalue_bits(gsh) ## i64)
+      @a.cmp_r(R_X14, dst_x)
+      @a.b_cond(CC_NE, l_slow)
+      emit_slot_load(dst_x, R_X9, ci[4])
+    nil
+
+  -> stmts_always_return?(stmts)
+    return false if stmts == nil
+    if stmts.is_a?(Array)
+      return false if stmts.size == 0
+      return stmts_always_return?(stmts[stmts.size - 1])
+    return false if !stmts.is_a?(JsNode)
+    k = stmts.kind
+    return true if k == :return
+    return stmts_always_return?(stmts.list) if k == :block
+    return stmts_always_return?(stmts.b) && stmts_always_return?(stmts.c) if k == :if && stmts.c != nil
+    false
+
+  # Classify a single-statement (or linked-list append) method body on receiver shape `sh` for direct polymorphic inlining!
+  # Returns plan array `[:empty]`, `[:ret_expr, re]`, `[:set_const, enc, ci]`, `[:set_bit, enc, op, ci]`,
+  # `[:pre_inc, enc]`, `[:ret_cmp, enc, op, ci]`, `[:ret_cond_prop, enc, op, ci, enc_t, enc_f]`,
+  # `[:ret_held_or_susp, enc, ci_mask, ci_eq]`, `[:list_append, enc, is_strict_null]`, or nil.
+  -> poly_classify_method(tjf, sh, nargs)
+    return nil if tjf.free.size > 0 || tjf.dynamic || tjf.mapped_args || tjf.args_binding != nil || !tjf.simple || tjf.node.has?(F_GENERATOR) || tjf.node.has?(F_ASYNC) || tjf.self_binding != nil
+    return nil if tjf.scope.has_env? || (tjf.body_scope != nil && tjf.body_scope.has_env?)
+    stmts = tjf.node.b
+    return nil if !stmts.is_a?(Array)
+    # 0. General 1-arg singly-linked-list tail append:
+    # `this.<p> = null; if (q == null) return this; var peek, next = q; while ((peek = next.<p>) != null) next = peek; next.<p> = this; return q;`
+    if nargs == 1 && tjf.params.size == 1 && stmts.size == 6
+      q_b = tjf.params[0]
+      s0 = stmts[0]; s1 = stmts[1]; s2 = stmts[2]; s3 = stmts[3]; s4 = stmts[4]; s5 = stmts[5]
+      if s0.kind == :expr_stmt && s0.a != nil && s0.a.kind == :assign && s0.a.str == "=" && s0.a.a.kind == :member && !s0.a.a.has?(F_COMPUTED) && s0.a.a.a.kind == :this && s0.a.b.kind == :null
+        lp = s0.a.a.b.str
+        sl_la = sh.slot_of(lp)
+        if sl_la >= 0 && sh.attrs_of(lp) == ATTR_DEFAULT
+          # s1: `if (q == null) return this;` (or `===`)
+          s1_ret = (s1.kind == :if && s1.c == nil && s1.b != nil) ? (s1.b.kind == :block && s1.b.list.size == 1 ? s1.b.list[0] : s1.b) : nil
+          if s1_ret != nil && s1_ret.kind == :return && s1_ret.a != nil && s1_ret.a.kind == :this && s1.a != nil && s1.a.kind == :binary && (s1.a.str == "==" || s1.a.str == "===") && s1.a.a.kind == :ident && s1.a.a.x != nil && s1.a.a.x.binding == q_b && s1.a.b.kind == :null
+            # s2: `var peek, next = q;` (2 declarators, one initialized to q!)
+            if s2.kind == :var_decl && s2.list.size == 2
+              d0 = s2.list[0]; d1 = s2.list[1]
+              pk_b = nil; nx_b = nil
+              if d0.b == nil && d1.b != nil && d1.b.kind == :ident && d1.b.x != nil && d1.b.x.binding == q_b
+                pk_b = d0.a.x.binding; nx_b = d1.a.x.binding
+              elsif d1.b == nil && d0.b != nil && d0.b.kind == :ident && d0.b.x != nil && d0.b.x.binding == q_b
+                pk_b = d1.a.x.binding; nx_b = d0.a.x.binding
+              if pk_b != nil && nx_b != nil && pk_b != nx_b && pk_b != q_b && nx_b != q_b
+                # s3: `while ((peek = next.<lp>) != null) next = peek;`
+                w_body = (s3.kind == :while && s3.b != nil) ? (s3.b.kind == :block && s3.b.list.size == 1 ? s3.b.list[0] : s3.b) : nil
+                if w_body != nil && s3.a != nil && s3.a.kind == :binary && (s3.a.str == "!=" || s3.a.str == "!==") && s3.a.b.kind == :null && s3.a.a.kind == :assign && s3.a.a.str == "=" && s3.a.a.a.kind == :ident && s3.a.a.a.x != nil && s3.a.a.a.x.binding == pk_b && s3.a.a.b.kind == :member && !s3.a.a.b.has?(F_COMPUTED) && s3.a.a.b.b.str == lp && s3.a.a.b.a.kind == :ident && s3.a.a.b.a.x != nil && s3.a.a.b.a.x.binding == nx_b
+                  if w_body.kind == :expr_stmt && w_body.a != nil && w_body.a.kind == :assign && w_body.a.str == "=" && w_body.a.a.kind == :ident && w_body.a.a.x != nil && w_body.a.a.x.binding == nx_b && w_body.a.b.kind == :ident && w_body.a.b.x != nil && w_body.a.b.x.binding == pk_b
+                    # s4: `next.<lp> = this;` && s5: `return q;`
+                    if s4.kind == :expr_stmt && s4.a != nil && s4.a.kind == :assign && s4.a.str == "=" && s4.a.a.kind == :member && !s4.a.a.has?(F_COMPUTED) && s4.a.a.b.str == lp && s4.a.a.a.kind == :ident && s4.a.a.a.x != nil && s4.a.a.a.x.binding == nx_b && s4.a.b.kind == :this
+                      if s5.kind == :return && s5.a != nil && s5.a.kind == :ident && s5.a.x != nil && s5.a.x.binding == q_b
+                        enc_la = sl_la < sh.inline ? (sh.ibase + sl_la) : (0 - (sl_la - sh.inline) - 1)
+                        return [:list_append, enc_la, s1.a.str == "===", s3.a.str == "!=="]
+      return nil
+    return nil if nargs != 0 || tjf.params.size != 0
+    return [:empty] if stmts.size == 0
+    return nil if stmts.size != 1
+    st = stmts[0]
+    # 1. `this.prop = const` OR `this.prop = this.prop & K` / `this.prop | K` OR `this.m1().p = this.m2().p`
+    if st.kind == :expr_stmt && st.a != nil && st.a.kind == :assign && st.a.str == "="
+      lhs = st.a.a
+      rhs = st.a.b
+      if lhs.kind == :member && !lhs.has?(F_COMPUTED) && lhs.a.kind == :this
+        sl = sh.slot_of(lhs.b.str)
+        if sl >= 0 && sh.attrs_of(lhs.b.str) == ATTR_DEFAULT
+          enc = sl < sh.inline ? (sh.ibase + sl) : (0 - (sl - sh.inline) - 1)
+          ci = poly_const_info(rhs)
+          return [:set_const, enc, ci] if ci != nil
+          if rhs.kind == :binary && (rhs.str == "&" || rhs.str == "|") && rhs.a.kind == :member && !rhs.a.has?(F_COMPUTED) && rhs.a.a.kind == :this && rhs.a.b.str == lhs.b.str
+            ci2 = poly_const_info(rhs.b)
+            if ci2 != nil && (ci2[0] == :gnum || (ci2[0] == :lit && ci2[2] != nil))
+              return [:set_bit, enc, rhs.str, ci2]
+      # 1b. Single-check paired copy `this.m1().prop = this.m2().prop` (e.g. `this.output().value = this.input().value`!)
+      if lhs.kind == :member && !lhs.has?(F_COMPUTED) && rhs.kind == :member && !rhs.has?(F_COMPUTED) && lhs.b.str == rhs.b.str
+        if lhs.a.kind == :call && lhs.a.list.size == 0 && lhs.a.a.kind == :member && !lhs.a.a.has?(F_COMPUTED) && lhs.a.a.a.kind == :this && rhs.a.kind == :call && rhs.a.list.size == 0 && rhs.a.a.kind == :member && !rhs.a.a.has?(F_COMPUTED) && rhs.a.a.a.kind == :this
+          ic_l = lhs.x
+          ic_r = rhs.x
+          if jit_ic_valid?(ic_l) && jit_ic_valid?(ic_r) && ic_l[0] != 0 && ic_l[2] == 0 && ic_l[1] != 0 && ic_r[0] == ic_l[0] && ic_r[2] == 0 && ic_r[1] == ic_l[1]
+            m1_n = lhs.a.a.b.str
+            m2_n = rhs.a.a.b.str
+            if sh.slot_of(m1_n) < 0 && sh.slot_of(m2_n) < 0
+              fn1 = nil
+              fn2 = nil
+              pp_c = sh.proto
+              hp_c = 0
+              while pp_c.is_a?(JS:Base) && hp_c < 16 && (fn1 == nil || fn2 == nil)
+                ps_c = pp_c.shape
+                if fn1 == nil
+                  s1 = ps_c.slot_of(m1_n)
+                  if s1 >= 0 && !ps_c.dict && (ps_c.attrs_of(m1_n) & ATTR_ACCESSOR) == 0
+                    fn1 = pp_c.slot_get(s1)
+                if fn2 == nil
+                  s2 = ps_c.slot_of(m2_n)
+                  if s2 >= 0 && !ps_c.dict && (ps_c.attrs_of(m2_n) & ATTR_ACCESSOR) == 0
+                    fn2 = pp_c.slot_get(s2)
+                pp_c = ps_c.proto
+                hp_c += 1
+              if fn1.is_a?(JS:Function) && fn1.code != nil && fn1.code.node.is_a?(JaFunc) && fn2.is_a?(JS:Function) && fn2.code != nil && fn2.code.node.is_a?(JaFunc)
+                p1_c = poly_classify_method(fn1.code.node, sh, 0)
+                p2_c = poly_classify_method(fn2.code.node, sh, 0)
+                if p1_c != nil && p2_c != nil && p1_c[0] == :ret_cond_prop && p2_c[0] == :ret_cond_prop && p1_c[1] == p2_c[1] && p1_c[2] == p2_c[2] && p1_c[3][0] == p2_c[3][0] && p1_c[3][1] == p2_c[3][1] && (p1_c[3][0] != :gprop || p1_c[3][4] == p2_c[3][4]) && p1_c[4] > 0 && p1_c[5] > 0 && p2_c[4] > 0 && p2_c[5] > 0
+                  return [:copy_cond_prop, p1_c[1], p1_c[2], p1_c[3], p1_c[4], p1_c[5], p2_c[4], p2_c[5], ic_l[0], ic_l[1]]
+      return nil
+    return nil if st.kind != :return || st.a == nil
+    re = st.a
+    # 2. `return ++this.prop;` (Planner.newMark!)
+    if re.kind == :update && re.str == "++" && re.has?(F_PREFIX) && re.a.kind == :member && !re.a.has?(F_COMPUTED) && re.a.a.kind == :this
+      sl = sh.slot_of(re.a.b.str)
+      if sl >= 0 && sh.attrs_of(re.a.b.str) == ATTR_DEFAULT
+        enc = sl < sh.inline ? (sh.ibase + sl) : (0 - (sl - sh.inline) - 1)
+        return [:pre_inc, enc]
+    # 3. `return this.a === K ? this.b : this.c` (BinaryConstraint.input/output!)
+    if re.kind == :cond && re.a.kind == :binary && (re.a.str == "===" || re.a.str == "!==" || re.a.str == "==" || re.a.str == "!=")
+      if re.a.a.kind == :member && !re.a.a.has?(F_COMPUTED) && re.a.a.a.kind == :this && re.b.kind == :member && !re.b.has?(F_COMPUTED) && re.b.a.kind == :this && re.c.kind == :member && !re.c.has?(F_COMPUTED) && re.c.a.kind == :this
+        sl_a = sh.slot_of(re.a.a.b.str)
+        sl_b = sh.slot_of(re.b.b.str)
+        sl_c = sh.slot_of(re.c.b.str)
+        ci = poly_const_info(re.a.b)
+        if sl_a >= 0 && (sh.attrs_of(re.a.a.b.str) & ATTR_ACCESSOR) == 0 && sl_b >= 0 && (sh.attrs_of(re.b.b.str) & ATTR_ACCESSOR) == 0 && sl_c >= 0 && (sh.attrs_of(re.c.b.str) & ATTR_ACCESSOR) == 0 && ci != nil
+          ea = sl_a < sh.inline ? (sh.ibase + sl_a) : (0 - (sl_a - sh.inline) - 1)
+          eb = sl_b < sh.inline ? (sh.ibase + sl_b) : (0 - (sl_b - sh.inline) - 1)
+          ec = sl_c < sh.inline ? (sh.ibase + sl_c) : (0 - (sl_c - sh.inline) - 1)
+          return [:ret_cond_prop, ea, re.a.str, ci, eb, ec]
+    # 4. `return this.a !== K` / `return this.a === K` (BinaryConstraint.isSatisfied!)
+    if re.kind == :binary && (re.str == "===" || re.str == "!==" || re.str == "==" || re.str == "!=") && re.a.kind == :member && !re.a.has?(F_COMPUTED) && re.a.a.kind == :this
+      sl_a = sh.slot_of(re.a.b.str)
+      ci = poly_const_info(re.b)
+      if sl_a >= 0 && (sh.attrs_of(re.a.b.str) & ATTR_ACCESSOR) == 0 && ci != nil
+        ea = sl_a < sh.inline ? (sh.ibase + sl_a) : (0 - (sl_a - sh.inline) - 1)
+        return [:ret_cmp, ea, re.str, ci]
+    # 5. `return (this.a & K1) != 0 || (this.a == K2)` (TaskControlBlock.isHeldOrSuspended!)
+    if re.kind == :logical && re.str == "||" && re.a.kind == :binary && (re.a.str == "!=" || re.a.str == "!==") && re.a.b.kind == :num && re.a.b.a == ~0.0
+      if re.a.a.kind == :binary && re.a.a.str == "&" && re.a.a.a.kind == :member && !re.a.a.a.has?(F_COMPUTED) && re.a.a.a.a.kind == :this
+        if re.b.kind == :binary && (re.b.str == "==" || re.b.str == "===") && re.b.a.kind == :member && !re.b.a.has?(F_COMPUTED) && re.b.a.a.kind == :this && re.b.a.b.str == re.a.a.a.b.str
+          sl_a = sh.slot_of(re.a.a.a.b.str)
+          ci1 = poly_const_info(re.a.a.b)
+          ci2 = poly_const_info(re.b.b)
+          if sl_a >= 0 && (sh.attrs_of(re.a.a.a.b.str) & ATTR_ACCESSOR) == 0 && ci1 != nil && ci2 != nil && (ci1[0] == :gnum || (ci1[0] == :lit && ci1[2] != nil)) && (ci2[0] == :gnum || (ci2[0] == :lit && ci2[2] != nil))
+            ea = sl_a < sh.inline ? (sh.ibase + sl_a) : (0 - (sl_a - sh.inline) - 1)
+            return [:ret_held_or_susp, ea, ci1, ci2]
+    # 6. Original simple expression (`this.prop`, bool/null/num, f64 arithmetic)
+    return [:ret_expr, re] if poly_inline_expr_ok?(re, sh)
+    nil
+
+  # Zero-FP-crossing small-int `0..7` branch for `(val & iv1) != 0 || (val == iv2)` (100% exact cold FP fallback!)
+  -> emit_held_or_susp_branch(val_reg, iv1, iv2, l_t, l_f, l_slow)
+    vals = [~1.0, ~1.25, ~1.5, ~1.75, ~2.0, ~2.5, ~3.0, ~3.5, ~4.0, ~5.0, ~6.0, ~7.0]
+    tmask = 0
+    qi = 0
+    while qi < 12
+      v_q = vals[qi]
+      if ((v_q.to_i & iv1) != 0) || (v_q == iv2.to_f)
+        tmask = tmask | (1 << qi)
+      qi += 1
+    res0 = ((0 & iv1) != 0) || (0 == iv2)
+    l_fp = @a.new_label
+    @a.sub_r(R_X14, val_reg, R_X20)
+    @a.cbz_x(R_X14, res0 ? l_t : l_f)
+    @a.ror_xi(R_X14, R_X14, 50)
+    @a.sub_i(R_X14, R_X14, 4092)
+    @a.cmp_i(R_X14, 11)
+    @a.b_cond(CC_HI, l_fp)
+    @a.mov_imm32(R_X15, tmask)
+    @a.lsr_w(R_X15, R_X15, R_X14)
+    @a.tbnz(R_X15, 0, l_t)
+    @a.b(l_f)
+    cb_hs = ->()
+      @a.bind(l_fp)
+      emit_unbox_f64(R_D0, val_reg, l_slow)
+      emit_f64_to_i32(R_X14, R_D0)
+      @a.mov_imm32(R_X15, iv1)
+      @a.and_w(R_X15, R_X14, R_X15)
+      @a.cbnz_w(R_X15, l_t)
+      @a.mov_imm32(R_X15, iv2)
+      @a.scvtf_d_w(R_D1, R_X15)
+      @a.fcmp_d(R_D0, R_D1)
+      @a.b_cond(CC_EQ, l_t)
+      @a.b(l_f)
+    add_cold_stub(cb_hs)
+    nil
+
+  # Emit a classified 1-stmt (or linked-list append) inlined method plan -> boxed WValue in `R_X0`.
+  -> emit_poly_plan(plan, sh, rec_off, tjf, arg_offs, l_slow, r_rec_g = nil, r_a0_g = nil)
+    pk = plan[0]
+    if pk == :empty
+      @a.movz_x(R_X0, 0)
+      return nil
+    if pk == :list_append
+      # Zero-spill register-carried singly-linked-list tail append (Packet.addTo: 14 insns, 0 stack spills!)
+      enc_la = plan[1]
+      is_str1 = plan[2]
+      is_str3 = plan[3]
+      sh_la_b = wvalue_bits(sh) ## i64
+      l_la_loop = @a.new_label
+      l_la_done = @a.new_label
+      l_la_ret_this = @a.new_label
+      l_la_end = @a.new_label
+      @a.ldr_x(R_X10, R_X19, RT_K_NULL_BITS * 8)
+      if r_rec_g != nil
+        @a.sub_i(R_X9, r_rec_g, 4)
+      else
+        @a.ldr_x(R_X13, R_SP, rec_off)
+        @a.sub_i(R_X9, R_X13, 4)
+      emit_slot_store(R_X9, enc_la, R_X10)          # this.link = null
+      if r_a0_g != nil
+        @a.mov_r(R_X14, r_a0_g)
+      else
+        @a.ldr_x(R_X14, R_SP, arg_offs[0])
+      @a.cmp_r(R_X14, R_X10)
+      @a.b_cond(CC_EQ, l_la_ret_this)
+      if !is_str1
+        @a.cbz_x(R_X14, l_la_ret_this)
+        if !(!JS_HAS_HTMLDDA[0] && (@hoisted_epoch || @epoch_verified_now))
+          @a.ldr_x(R_X9, R_X19, RT_K_HTMLDDA_PTR * 8)
+          @a.ldr_x(R_X9, R_X9, 0)
+          @a.cbnz_x(R_X9, l_slow)
+      @a.bind(l_la_loop)
+      @a.sub_i(R_X9, R_X14, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X11, R_X9, 8)
+      emit_cmp_shape(R_X11, sh_la_b)
+      @a.b_cond(CC_NE, l_slow)
+      emit_slot_load(R_X15, R_X9, enc_la)           # peek = next.link
+      @a.cmp_r(R_X15, R_X10)
+      @a.b_cond(CC_EQ, l_la_done)
+      if !is_str3
+        @a.cbz_x(R_X15, l_la_done)
+        if !(!JS_HAS_HTMLDDA[0] && (@hoisted_epoch || @epoch_verified_now))
+          @a.ldr_x(R_X12, R_X19, RT_K_HTMLDDA_PTR * 8)
+          @a.ldr_x(R_X12, R_X12, 0)
+          @a.cbnz_x(R_X12, l_slow)
+      @a.mov_r(R_X14, R_X15)
+      @a.b(l_la_loop)
+      @a.bind(l_la_done)
+      # R_X9 STILL points to `next - 4` and `next.@shape == sh` is ALREADY verified!
+      if r_rec_g != nil
+        emit_slot_store(R_X9, enc_la, r_rec_g)
+      else
+        @a.ldr_x(R_X13, R_SP, rec_off)
+        emit_slot_store(R_X9, enc_la, R_X13)
+      if r_a0_g != nil
+        @a.mov_r(R_X0, r_a0_g)
+      else
+        @a.ldr_x(R_X0, R_SP, arg_offs[0])
+      @a.b(l_la_end)
+      @a.bind(l_la_ret_this)
+      if r_rec_g != nil
+        @a.mov_r(R_X0, r_rec_g)
+      else
+        @a.ldr_x(R_X0, R_SP, rec_off)
+      @a.bind(l_la_end)
+      return nil
+    if pk == :ret_expr
+      emit_poly_inlined_body(plan[1], sh, rec_off, tjf, arg_offs, l_slow)
+      return nil
+    if pk == :set_const
+      emit_poly_const_load(R_X10, plan[2], l_slow)
+      @a.ldr_x(R_X13, R_SP, rec_off) if rec_off >= 0
+      @a.sub_i(R_X9, R_X13, 4)
+      emit_slot_store(R_X9, plan[1], R_X10)
+      @a.movz_x(R_X0, 0)
+      return nil
+    if pk == :set_bit
+      emit_poly_const_load(R_X10, plan[3], l_slow, false)   # checks guard; constant i32 is in plan[3]
+      iv = plan[3][0] == :gnum ? plan[3][3] : plan[3][2]
+      is_and = plan[2] == "&"
+      sb_key = (is_and ? "a13:" : "o13:") + iv.to_s
+      tbl = JIT_SET_BIT_TBLS[sb_key]
+      if tbl == nil
+        idx_i = [1, 1, 1, 1, 2, 2, 3, 3, 4, 5, 6, 7, 0]
+        tbl = i64[13]
+        qi = 0
+        while qi < 13
+          rv = is_and ? (idx_i[qi] & iv) : (idx_i[qi] | iv)
+          rv = rv & 4294967295
+          rv = rv - 4294967296 if rv >= 2147483648
+          tbl[qi] = wvalue_bits(rv.to_f) ## i64
+          qi += 1
+        jit_keep(tbl)
+        JIT_SET_BIT_TBLS[sb_key] = tbl
+      tbl_p = jit_i64_ptr(tbl)
+      l_lut = @a.new_label
+      l_fp = @a.new_label
+      l_st = @a.new_label
+      if r_rec_g != nil
+        @a.mov_r(R_X13, r_rec_g) if r_rec_g != R_X13
+      elsif rec_off >= 0
+        @a.ldr_x(R_X13, R_SP, rec_off)
+      @a.sub_i(R_X9, R_X13, 4)
+      emit_slot_load(R_X10, R_X9, plan[1])
+      # Zero-load 2-cycle branchless fast path for the 2 hottest small-int bitmask inputs (all 0..7 are 1-insn movz!),
+      # falling back cleanly to the 13-entry 0..7 LUT + full FP conversion in the cold stub!
+      va_sb = -1
+      vb_sb = -1
+      if !is_and && (iv == 2 || iv == 4)
+        va_sb = 0
+        vb_sb = 1
+      elsif !is_and && iv == 1
+        va_sb = 0
+        vb_sb = 2
+      elsif is_and && (iv == -5 || iv == 4294967291)
+        va_sb = 4
+        vb_sb = 5
+      if va_sb >= 0
+        ra_sb = is_and ? (va_sb & iv) : (va_sb | iv)
+        rb_sb = is_and ? (vb_sb & iv) : (vb_sb | iv)
+        r_va = R_X20
+        if va_sb != 0
+          @a.mov_imm64(R_X11, wvalue_bits(va_sb.to_f) ## i64)
+          r_va = R_X11
+        @a.mov_imm64(R_X15, wvalue_bits(vb_sb.to_f) ## i64)
+        @a.cmp_r(R_X10, r_va)
+        @a.ccmp_r(R_X10, R_X15, 4, CC_NE)
+        @a.b_cond(CC_NE, l_lut)
+        r_ra = R_X20
+        if ra_sb != 0
+          @a.mov_imm64(R_X14, wvalue_bits(ra_sb.to_f) ## i64)
+          r_ra = R_X14
+        r_rb = R_X20
+        if rb_sb != 0
+          @a.mov_imm64(R_X15, wvalue_bits(rb_sb.to_f) ## i64)
+          r_rb = R_X15
+        @a.cmp_r(R_X10, r_va)
+        @a.csel_x(R_X10, r_ra, r_rb, CC_EQ)
+      else
+        @a.sub_r(R_X14, R_X10, R_X20)
+        @a.ror_xi(R_X14, R_X14, 50)
+        @a.sub_i(R_X14, R_X14, 4092)
+        @a.movz_x(R_X15, 12)
+        @a.cmp_r(R_X10, R_X20)
+        @a.csel_x(R_X14, R_X15, R_X14, CC_EQ)
+        @a.cmp_i(R_X14, 12)
+        @a.b_cond(CC_HI, l_fp)
+        @a.mov_imm64(R_X15, tbl_p)
+        @a.ldr_x_idx(R_X10, R_X15, R_X14)
+      @a.bind(l_st)
+      emit_slot_store(R_X9, plan[1], R_X10)
+      @a.movz_x(R_X0, 0)
+      cb_sb = ->()
+        if va_sb >= 0
+          @a.bind(l_lut)
+          @a.sub_r(R_X14, R_X10, R_X20)
+          @a.ror_xi(R_X14, R_X14, 50)
+          @a.sub_i(R_X14, R_X14, 4092)
+          @a.movz_x(R_X15, 12)
+          @a.cmp_r(R_X10, R_X20)
+          @a.csel_x(R_X14, R_X15, R_X14, CC_EQ)
+          @a.cmp_i(R_X14, 12)
+          @a.b_cond(CC_HI, l_fp)
+          @a.mov_imm64(R_X15, tbl_p)
+          @a.ldr_x_idx(R_X10, R_X15, R_X14)
+          @a.b(l_st)
+        @a.bind(l_fp)
+        emit_unbox_f64(R_D0, R_X10, l_slow)
+        emit_f64_to_i32(R_X10, R_D0)
+        @a.mov_imm32(R_X11, iv)
+        if is_and
+          @a.and_w(R_X10, R_X10, R_X11)
+        else
+          @a.orr_w(R_X10, R_X10, R_X11)
+        emit_box_i32(R_X10, R_X10)
+        @a.b(l_st)
+      add_cold_stub(cb_sb)
+      return nil
+    if pk == :copy_cond_prop
+      # Single-check `this.m1().prop = this.m2().prop` (e.g. `this.output().value = this.input().value` -> ~16 ARM64 insns, R_X13 preserved!)
+      ci_c = plan[3]
+      r_rhs_cc = R_X11
+      hgp_cc = nil
+      if ci_c[0] == :gprop && ci_c.size >= 7 && ci_c[5] != nil
+        gp_k_cc = (wvalue_bits(ci_c[1]) ## i64).to_s + ":" + ci_c[4].to_s
+        hgp_cc = @hoisted_gprops[gp_k_cc]
+        hgp_cc = nil if hgp_cc != nil && hgp_cc[0] != ci_c[5]
+      if hgp_cc != nil && hgp_cc[1] != nil
+        r_rhs_cc = hgp_cc[1]
+        @a.cmp_i(r_rhs_cc, 6)
+        @a.b_cond(CC_EQ, l_slow)
+      else
+        emit_poly_const_load(R_X11, ci_c, l_slow)
+      @a.ldr_x(R_X13, R_SP, rec_off) if rec_off >= 0
+      @a.sub_i(R_X9, R_X13, 4)
+      emit_slot_load(R_X10, R_X9, plan[1])
+      is_eq = plan[2] == "===" || plan[2] == "=="
+      is_strict = plan[2] == "===" || plan[2] == "!=="
+      known_num_bits = nil
+      known_is_zero = false
+      if ci_c[0] == :gnum
+        known_num_bits = ci_c[2]
+        known_is_zero = ci_c[3] == 0
+      elsif ci_c[0] == :lit && ci_c[2] != nil
+        known_num_bits = ci_c[1]
+        known_is_zero = ci_c[2] == 0
+      elsif ci_c[0] == :gprop && ci_c.size >= 7 && ci_c[5] != nil
+        known_num_bits = ci_c[5]
+        known_is_zero = ci_c[6]
+      if known_num_bits != nil
+        if ci_c[0] == :gprop && hgp_cc == nil
+          @a.mov_imm64(R_X14, known_num_bits)
+          @a.cmp_r(R_X11, R_X14)
+          @a.b_cond(CC_NE, l_slow)
+        if !is_strict
+          @a.sub_r(R_X14, R_X10, R_X20)
+          @a.cmp_r(R_X14, R_X21)
+          @a.b_cond(CC_HS, l_slow)
+        if known_is_zero
+          @a.mov_imm64(R_X14, -9223372036854775807 - 1)
+          @a.bic_r(R_X10, R_X10, R_X14)
+          @a.cmp_r(R_X10, R_X20)
+        else
+          @a.cmp_r(R_X10, r_rhs_cc)
+      else
+        emit_unbox_f64(R_D0, R_X10, l_slow)
+        emit_unbox_f64(R_D1, r_rhs_cc, l_slow)
+        @a.fcmp_d(R_D0, R_D1)
+      cc_sel = is_eq ? CC_EQ : CC_NE
+      if plan[6] == plan[5] && plan[7] == plan[4]
+        emit_slot_load(R_X0, R_X9, plan[4])
+        emit_slot_load(R_X14, R_X9, plan[5])
+        @a.csel_x(R_X12, R_X0, R_X14, cc_sel)   # dst_obj
+        @a.csel_x(R_X14, R_X14, R_X0, cc_sel)   # src_obj (R_X13 preserved!)
+      else
+        emit_slot_load(R_X0, R_X9, plan[4])
+        emit_slot_load(R_X14, R_X9, plan[5])
+        @a.csel_x(R_X12, R_X0, R_X14, cc_sel)
+        emit_slot_load(R_X0, R_X9, plan[6])
+        emit_slot_load(R_X14, R_X9, plan[7])
+        @a.csel_x(R_X14, R_X0, R_X14, cc_sel)
+      vsh_b = plan[8]
+      vsl_e = plan[9]
+      # Verify BOTH src_obj & dst_obj shapes BEFORE mutating dst_obj (zero partial writes on l_slow!)
+      @a.sub_i(R_X9, R_X14, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X10, R_X9, 8)
+      emit_cmp_shape(R_X10, vsh_b)
+      @a.b_cond(CC_NE, l_slow)
+      emit_slot_load(R_X15, R_X9, vsl_e)        # x15 = src.prop
+      @a.sub_i(R_X9, R_X12, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X10, R_X9, 8)
+      emit_cmp_shape(R_X10, vsh_b)
+      @a.b_cond(CC_NE, l_slow)
+      emit_slot_store(R_X9, vsl_e, R_X15)       # dst.prop = x15
+      @a.movz_x(R_X0, 0)
+      return nil
+    if pk == :pre_inc
+      @a.ldr_x(R_X13, R_SP, rec_off) if rec_off >= 0
+      @a.sub_i(R_X9, R_X13, 4)
+      emit_slot_load(R_X10, R_X9, plan[1])
+      emit_unbox_f64(R_D0, R_X10, l_slow)
+      @a.fmov_d_one(R_D1)
+      @a.fadd_d(R_D0, R_D0, R_D1)
+      emit_box_f64_nonan(R_X0, R_D0)
+      emit_slot_store(R_X9, plan[1], R_X0)
+      return nil
+    if pk == :ret_cmp || pk == :ret_cond_prop
+      ci_c = plan[3]
+      r_rhs_rc = R_X11
+      hgp_rc = nil
+      if ci_c[0] == :gprop && ci_c.size >= 7 && ci_c[5] != nil
+        gp_k_rc = (wvalue_bits(ci_c[1]) ## i64).to_s + ":" + ci_c[4].to_s
+        hgp_rc = @hoisted_gprops[gp_k_rc]
+        hgp_rc = nil if hgp_rc != nil && hgp_rc[0] != ci_c[5]
+      if hgp_rc != nil && hgp_rc[1] != nil
+        r_rhs_rc = hgp_rc[1]
+        @a.cmp_i(r_rhs_rc, 6)
+        @a.b_cond(CC_EQ, l_slow)
+      else
+        emit_poly_const_load(R_X11, ci_c, l_slow)
+      @a.ldr_x(R_X13, R_SP, rec_off) if rec_off >= 0
+      @a.sub_i(R_X9, R_X13, 4)
+      emit_slot_load(R_X10, R_X9, plan[1])
+      is_eq = plan[2] == "===" || plan[2] == "=="
+      is_strict = plan[2] == "===" || plan[2] == "!=="
+      # Determine whether RHS is a proven non-NaN number -> ZERO FP domain crossings!
+      known_num_bits = nil
+      known_is_zero = false
+      if ci_c[0] == :gnum
+        known_num_bits = ci_c[2]
+        known_is_zero = ci_c[3] == 0
+      elsif ci_c[0] == :lit && ci_c[2] != nil
+        known_num_bits = ci_c[1]
+        known_is_zero = ci_c[2] == 0
+      elsif ci_c[0] == :gprop && ci_c.size >= 7 && ci_c[5] != nil
+        known_num_bits = ci_c[5]
+        known_is_zero = ci_c[6]
+      if known_num_bits != nil
+        if ci_c[0] == :gprop && hgp_rc == nil
+          @a.mov_imm64(R_X14, known_num_bits)
+          @a.cmp_r(R_X11, R_X14)
+          @a.b_cond(CC_NE, l_slow)
+        if !is_strict
+          @a.sub_r(R_X14, R_X10, R_X20)
+          @a.cmp_r(R_X14, R_X21)
+          @a.b_cond(CC_HS, l_slow)
+        if known_is_zero
+          @a.mov_imm64(R_X14, -9223372036854775807 - 1)
+          @a.bic_r(R_X10, R_X10, R_X14)
+          @a.cmp_r(R_X10, R_X20)
+        else
+          @a.cmp_r(R_X10, r_rhs_rc)
+      else
+        # Fallback: both Numbers -> exact fcmp_d (fallback l_slow if either is not a Number!)
+        emit_unbox_f64(R_D0, R_X10, l_slow)
+        emit_unbox_f64(R_D1, r_rhs_rc, l_slow)
+        @a.fcmp_d(R_D0, R_D1)
+      if pk == :ret_cmp
+        @a.movz_x(R_X10, 2)
+        @a.movz_x(R_X11, 1)
+        @a.csel_x(R_X0, R_X10, R_X11, is_eq ? CC_EQ : CC_NE)
+      elsif plan[4] > 0 && plan[5] > 0
+        # Branchless inline slot selection (zero branch mispredicts on BinaryConstraint.input/output!)
+        emit_slot_load(R_X0, R_X9, plan[4])
+        emit_slot_load(R_X12, R_X9, plan[5])
+        @a.csel_x(R_X0, R_X0, R_X12, is_eq ? CC_EQ : CC_NE)
+      else
+        l_f = @a.new_label
+        l_fin = @a.new_label
+        @a.b_cond(is_eq ? CC_NE : CC_EQ, l_f)
+        emit_slot_load(R_X0, R_X9, plan[4])
+        @a.b(l_fin)
+        @a.bind(l_f)
+        emit_slot_load(R_X0, R_X9, plan[5])
+        @a.bind(l_fin)
+      return nil
+    if pk == :ret_held_or_susp
+      emit_poly_const_load(R_X10, plan[2], l_slow, false)
+      emit_poly_const_load(R_X10, plan[3], l_slow, false)
+      iv1 = plan[2][0] == :gnum ? plan[2][3] : plan[2][2]
+      iv2 = plan[3][0] == :gnum ? plan[3][3] : plan[3][2]
+      @a.ldr_x(R_X13, R_SP, rec_off) if rec_off >= 0
+      @a.sub_i(R_X9, R_X13, 4)
+      emit_slot_load(R_X10, R_X9, plan[1])
+      l_tr = @a.new_label
+      l_fl = @a.new_label
+      l_fin = @a.new_label
+      emit_held_or_susp_branch(R_X10, iv1, iv2, l_tr, l_fl, l_slow)
+      @a.bind(l_fl)
+      @a.movz_x(R_X0, 1)
+      @a.b(l_fin)
+      @a.bind(l_tr)
+      @a.movz_x(R_X0, 2)
+      @a.bind(l_fin)
+    nil
+
+  # Polymorphic speculative method inlining & 1..4-way direct jit_fast_fp fallback IC!
   # prof = [shape0, fn0, shape1, fn1, ...].
   -> gen_poly_method_inline(call_e, mem_e, prof)
+    prof = wk_sort_poly_prof(call_e, prof)
     npairs = prof.size / 2
     return false if npairs == 0 || npairs > 4
-    # Verify all observed targets are simple inlineable JS:Functions with zero free vars!
+    nargs = call_e.list.size
+    mname_s = mem_e.b.str
+    # Mode A: Check if ALL observed targets are simple 1-statement inlineable methods!
+    all_inline = nargs <= 2
     targets = []
     i = 0
     while i < npairs
       sh = prof[i * 2]
       fn = prof[i * 2 + 1]
-      return false if !sh.is_a?(JS:Shape) || !fn.is_a?(JS:Function) || fn.code == nil || !fn.code.node.is_a?(JaFunc)
+      return false if !sh.is_a?(JS:Shape) || sh.dict || sh.slot_of(mname_s) >= 0 || !fn.is_a?(JS:Function) || fn.code == nil || !fn.code.node.is_a?(JaFunc) || !js_shape_proto_method_eq?(sh, mname_s, fn)
       tjf = fn.code.node
-      re = jit_inline_return_expr(tjf)
-      return false if re == nil || tjf.free.size > 0 || tjf.params.size != call_e.list.size
-      return false if !poly_inline_expr_ok?(re, sh)
-      targets.push([sh, fn, tjf, re])
+      plan = nil
+      if all_inline
+        plan = poly_classify_method(tjf, sh, nargs)
+        if plan != nil && plan[0] == :list_append
+          return false
+        if plan == nil
+          re = jit_inline_return_expr(tjf)
+          if re != nil && tjf.free.size == 0 && tjf.params.size == nargs && poly_inline_expr_ok?(re, sh)
+            plan = [:ret_expr, re]
+          else
+            all_inline = false
+      targets.push([sh, fn, tjf, plan])
       i += 1
-    # Emit receiver evaluation
+    if all_inline
+      # Test non-empty work target before empty no-op stub when 2-way (e.g. `EqualityConstraint.execute` before `EditConstraint.execute`!)
+      if targets.size == 2 && targets[0][3][0] == :empty && targets[1][3][0] != :empty
+        tmp_t = targets[0]
+        targets[0] = targets[1]
+        targets[1] = tmp_t
+      # Specialize directly if receiver shape is ALREADY verified (e.g. `this.output()`, `this.currentTcb.markAsHeld()`, `packet.addTo()`)!
+      known_this_target = nil
+      rec_sk_p = shape_key(mem_e.a)
+      ksh_p = rec_sk_p != -1 ? @known_shapes[rec_sk_p] : nil
+      if ksh_p != nil
+        ki = 0
+        while ki < targets.size
+          if (wvalue_bits(targets[ki][0]) ## i64) == ksh_p
+            known_this_target = targets[ki]
+            break
+          ki += 1
+      # Zero-spill `nargs == 0` receiver in R_X13 when no target uses `:ret_expr` (kills 5-cycle store-to-load stall on `plan[j].execute()`!)
+      no_rec_spill = nargs == 0
+      if no_rec_spill
+        ti_nr = 0
+        while ti_nr < targets.size
+          no_rec_spill = false if targets[ti_nr][3][0] == :ret_expr
+          ti_nr += 1
+      # Evaluate receiver + args
+      gen_expr_any(mem_e.a)
+      rec_off = -1
+      if no_rec_spill
+        @a.mov_r(R_X13, R_X0)
+      else
+        rec_off = push_x(R_X0)
+      arg_offs = []
+      i = 0
+      while i < nargs
+        gen_expr_any(call_e.list[i])
+        arg_offs.push(push_x(R_X0))
+        i += 1
+      # Attach a 4-way dynamic jit_fast_fp PIC on `l_slow` so newly discovered subclasses stay native-fast!
+      fb_pic = i64[13]
+      fk = 0
+      while fk < 12
+        fb_pic[fk] = 0
+        fk += 1
+      fb_pic[12] = JS_EPOCH[0]
+      jit_keep(fb_pic)
+      fb_pic_p = jit_i64_ptr(fb_pic)
+      l_slow = @a.new_label
+      l_done = @a.new_label
+      if !@hoisted_epoch && !@epoch_verified_now
+        ep_now = JS_EPOCH[0]
+        @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+        @a.ldr_x(R_X10, R_X9, 0)
+        @a.mov_imm64(R_X11, ep_now)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_slow)
+      if known_this_target != nil
+        @a.ldr_x(R_X13, R_SP, rec_off) if rec_off >= 0
+        @a.sub_i(R_X9, R_X13, 4) if known_this_target[3][0] == :ret_expr || known_this_target[3][0] == :set_const
+        jit_keep(known_this_target[0])
+        emit_poly_plan(known_this_target[3], known_this_target[0], rec_off, known_this_target[2], arg_offs, l_slow)
+      else
+        @a.ldr_x(R_X13, R_SP, rec_off) if rec_off >= 0
+        @a.sub_i(R_X9, R_X13, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_slow)
+        @a.cbz_x(R_X9, l_slow)
+        @a.ldr_x(R_X12, R_X9, 8)     # x12 = receiver.@shape
+        i = 0
+        while i < targets.size
+          t = targets[i]
+          sh = t[0]
+          tjf = t[2]
+          plan = t[3]
+          jit_keep(sh)
+          l_next = i + 1 < targets.size ? @a.new_label : l_slow
+          emit_cmp_shape(R_X12, wvalue_bits(sh) ## i64)
+          @a.b_cond(CC_NE, l_next)
+          emit_poly_plan(plan, sh, rec_off, tjf, arg_offs, l_slow)
+          @a.b(l_done) if i + 1 < targets.size
+          @a.bind(l_next) if i + 1 < targets.size
+          i += 1
+      @a.bind(l_done)
+      jit_keep(mname_s)
+      snap_harrs_p = @hoisted_arrs.keys.dup
+      cb = ->()
+        @a.bind(l_slow)
+        rec_off_s = rec_off >= 0 ? rec_off : push_x(R_X13)
+        l_fb_miss = @a.new_label
+        l_fb_call = @a.new_label
+        l_fb_slow = @a.new_label
+        l_fb_fin = @a.new_label
+        @a.mov_imm64(R_X14, fb_pic_p)
+        @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+        @a.ldr_x(R_X10, R_X9, 0)
+        @a.ldr_x(R_X11, R_X14, 96)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_fb_miss)
+        @a.ldr_x(R_X1, R_SP, rec_off_s)
+        @a.sub_i(R_X9, R_X1, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_fb_miss)
+        @a.cbz_x(R_X9, l_fb_miss)
+        @a.ldr_x(R_X12, R_X9, 8)
+        fi = 0
+        while fi < 4
+          l_fnxt = fi < 3 ? @a.new_label : l_fb_miss
+          @a.ldr_x(R_X11, R_X14, fi * 24)
+          @a.cmp_r(R_X12, R_X11)
+          @a.b_cond(CC_NE, l_fnxt)
+          @a.ldr_x(R_X0, R_X14, fi * 24 + 8)
+          @a.ldr_x(R_X16, R_X14, fi * 24 + 16)
+          @a.b(l_fb_call)
+          @a.bind(l_fnxt) if fi < 3
+          fi += 1
+        @a.bind(l_fb_call)
+        @a.movz_x(R_X2, nargs)
+        @a.movz_x(R_X3, 0)
+        @a.movz_x(R_X4, 0)
+        @a.movz_x(R_X5, 0)
+        @a.movz_x(R_X6, 0)
+        @a.movz_x(R_X7, 0)
+        @a.ldr_x(R_X3, R_SP, arg_offs[0]) if nargs >= 1
+        @a.ldr_x(R_X4, R_SP, arg_offs[1]) if nargs >= 2
+        emit_blr_x16()
+        @a.cmp_i(R_X0, 6)
+        @a.b_cond(CC_NE, l_fb_fin)
+        @a.bind(l_fb_slow)
+        @a.ldr_x(R_X1, R_SP, rec_off_s)
+        @a.mov_imm64(R_X2, wvalue_bits(mname_s) ## i64)
+        call_rt(RT_GETV)
+        @a.mov_r(R_X1, R_X0)
+        @a.ldr_x(R_X2, R_SP, rec_off_s)
+        @a.ldr_x(R_X3, R_SP, arg_offs[0]) if nargs >= 1
+        @a.ldr_x(R_X4, R_SP, arg_offs[1]) if nargs >= 2
+        call_rt(RT_CALL_0 + nargs)
+        @a.b(l_fb_fin)
+        @a.bind(l_fb_miss)
+        jit_keep(call_e)
+        jit_keep(@jf)
+        @a.ldr_x(R_X1, R_SP, rec_off_s)
+        @a.mov_imm64(R_X2, wvalue_bits(mname_s) ## i64)
+        @a.mov_imm64(R_X3, wvalue_bits(fb_pic) ## i64)
+        @a.mov_imm64(R_X4, wvalue_bits(call_e) ## i64)
+        @a.mov_imm64(R_X5, wvalue_bits(@jf) ## i64)
+        call_rt(RT_POLY_CALL_MISS)
+        @a.mov_r(R_X1, R_X0)
+        @a.ldr_x(R_X2, R_SP, rec_off_s)
+        @a.ldr_x(R_X3, R_SP, arg_offs[0]) if nargs >= 1
+        @a.ldr_x(R_X4, R_SP, arg_offs[1]) if nargs >= 2
+        call_rt(RT_CALL_0 + nargs)
+        @a.bind(l_fb_fin)
+        @tmp_depth -= 1 if rec_off < 0
+        snap_harrs_p.each ->(hli)
+          hh = @hoisted_arrs[hli]
+          har = @hoisted_arr_regs[hli]
+          if hh != nil
+            load_slot_any(R_X9, hli)
+            @a.and_x_ptr47(R_X9, R_X9)
+            @a.ldrsw(R_X11, R_X9, 4)
+            @a.ldr_x(R_X10, R_X9, 16)
+            @a.add_r(R_X10, R_X10, R_X11, 3)
+            @a.str_x(R_X10, R_SP, hh[0]) if hh[0] > 0
+            @a.mov_r(har[0], R_X10) if har != nil && har[0] != nil
+            @a.ldrsw(R_X10, R_X9, 8)
+            @a.str_x(R_X10, R_SP, hh[1]) if hh[1] > 0
+            @a.mov_r(har[1], R_X10) if har != nil && har[1] != nil
+        @a.b(l_done)
+      add_cold_stub(cb)
+      @tmp_depth -= ((rec_off >= 0 ? 1 : 0) + nargs)
+      return true
+    false
+
+  # Check if `n` (statement list or expression tree) is safe for general multi-stmt monomorphic/polymorphic method inlining.
+  # Allows simple `:while` loops (no break/continue); rejects for/try/switch/nested functions and `:update` on inlined local idents.
+  -> ast_has_call?(n)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if ast_has_call?(n[i])
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return true if k == :call || k == :new
+    return false if k == :function || k == :arrow || k == :class
+    ast_has_call?(n.a) || ast_has_call?(n.b) || ast_has_call?(n.c) || ast_has_call?(n.d) || ast_has_call?(n.list)
+
+  -> ast_has_write?(n)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if ast_has_write?(n[i])
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return true if k == :assign || k == :update
+    return false if k == :function || k == :arrow || k == :class
+    ast_has_write?(n.a) || ast_has_write?(n.b) || ast_has_write?(n.c) || ast_has_write?(n.d) || ast_has_write?(n.list)
+
+  -> mono_inline_ast_ok?(n, tjf, st_cnt, bset, max_st = 22)
+    return true if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return false if !mono_inline_ast_ok?(n[i], tjf, st_cnt, bset, max_st)
+        i += 1
+      return true
+    return true if !n.is_a?(JsNode)
+    k = n.kind
+    return false if k == :do_while || k == :for_in || k == :for_of || k == :try || k == :switch || k == :with || k == :function || k == :arrow || k == :class || k == :labeled || k == :break || k == :continue || k == :super || k == :function_decl
+    if k == :while || k == :for
+      # Never inline `while` loops containing calls (keeps incrementalAdd/addPropagate/makePlan/Scheduler.schedule standalone with full GPRs & avoids 4x code explosion!)
+      return false if k == :while && ast_has_call?(n)
+      # Never inline non-tiny `for` loops (keeps `addConstraintsConsumingTo` & `extractPlan` standalone with unboxed GPR `i`!)
+      if k == :for
+        is_tiny_for = false
+        if n.a != nil && n.b != nil && n.c != nil && n.b.kind == :binary && n.b.str == "<" && n.c.kind == :update && n.c.str == "++" && jit_int32_lit?(n.b.b) && n.b.b.a.to_i <= 4
+          is_tiny_for = true
+        return false if !is_tiny_for
+      st_cnt[0] += 2
+      return false if st_cnt[0] > max_st
+    elsif k == :expr_stmt || k == :var_decl || k == :if || k == :return || k == :throw
+      st_cnt[0] += 1
+      return false if st_cnt[0] > max_st
+    if k == :ident && n.x != nil && n.x.binding != nil
+      b = n.x.binding
+      if !b.global? && b.slot < 0 && b.scope.func == tjf
+        bset[b] = true
+    return false if !mono_inline_ast_ok?(n.a, tjf, st_cnt, bset, max_st) || !mono_inline_ast_ok?(n.b, tjf, st_cnt, bset, max_st) || !mono_inline_ast_ok?(n.c, tjf, st_cnt, bset, max_st) || !mono_inline_ast_ok?(n.d, tjf, st_cnt, bset, max_st)
+    mono_inline_ast_ok?(n.list, tjf, st_cnt, bset, max_st)
+
+  # Direct branch for 0-arg boolean-returning inlined methods (`isHeldOrSuspended()`, `isSatisfied()`, `isInput()`)!
+  # Avoids materializing boxed bool `1`/`2` and running general `emit_truthy_branch`!
+  -> try_gen_poly_bool_branch(call_e, mem_e, prof, target, branch_if_true)
+    prof = wk_sort_poly_prof(call_e, prof)
+    npairs = prof.size / 2
+    return false if npairs == 0 || npairs > 4
+    mname_s = mem_e.b.str
+    targets = []
+    i = 0
+    while i < npairs
+      sh = prof[i * 2]
+      fn = prof[i * 2 + 1]
+      return false if !sh.is_a?(JS:Shape) || sh.dict || sh.slot_of(mname_s) >= 0 || !fn.is_a?(JS:Function) || fn.code == nil || !fn.code.node.is_a?(JaFunc) || !js_shape_proto_method_eq?(sh, mname_s, fn)
+      tjf = fn.code.node
+      plan = poly_classify_method(tjf, sh, 0)
+      return false if plan == nil
+      pk = plan[0]
+      if pk == :ret_held_or_susp || pk == :ret_cmp || (pk == :ret_expr && (plan[1].kind == :true || plan[1].kind == :false))
+        targets.push([sh, plan])
+      elsif pk == :ret_expr && plan[1].kind == :member && !plan[1].has?(F_COMPUTED) && plan[1].a != nil && plan[1].a.kind == :this
+        sl_bp = sh.slot_of(plan[1].b.str)
+        return false if sl_bp < 0 || (sh.attrs_of(plan[1].b.str) & ATTR_ACCESSOR) != 0
+        enc_bp = sl_bp < sh.inline ? (sh.ibase + sl_bp) : (0 - (sl_bp - sh.inline) - 1)
+        targets.push([sh, [:ret_prop, enc_bp]])
+      else
+        return false
+      i += 1
+    known_t_b = nil
+    rec_sk_b = shape_key(mem_e.a)
+    ksh_b = rec_sk_b != -1 ? @known_shapes[rec_sk_b] : nil
+    if ksh_b != nil
+      ki = 0
+      while ki < targets.size
+        if (wvalue_bits(targets[ki][0]) ## i64) == ksh_b
+          known_t_b = targets[ki]
+          break
+        ki += 1
     gen_expr_any(mem_e.a)
-    rec_off = push_x(R_X0)
-    # Evaluate arguments (if any)
+    @a.mov_r(R_X13, R_X0)
+    fb_pic = i64[13]
+    fk = 0
+    while fk < 12
+      fb_pic[fk] = 0
+      fk += 1
+    fb_pic[12] = JS_EPOCH[0]
+    jit_keep(fb_pic)
+    fb_pic_p = jit_i64_ptr(fb_pic)
+    l_slow = @a.new_label
+    l_fall = @a.new_label
+    l_t = branch_if_true ? target : l_fall
+    l_f = branch_if_true ? l_fall : target
+    if !@hoisted_epoch && !@epoch_verified_now
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    t_emit = known_t_b != nil ? [known_t_b] : targets
+    if known_t_b == nil
+      @a.sub_i(R_X9, R_X13, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X12, R_X9, 8)
+    l_tp_slow_shared = nil
+    i = 0
+    while i < t_emit.size
+      sh = t_emit[i][0]
+      plan = t_emit[i][1]
+      jit_keep(sh)
+      l_next = i + 1 < t_emit.size ? @a.new_label : l_slow
+      if known_t_b == nil
+        emit_cmp_shape(R_X12, wvalue_bits(sh) ## i64)
+        @a.b_cond(CC_NE, l_next)
+      pk = plan[0]
+      if pk == :ret_held_or_susp
+        emit_poly_const_load(R_X10, plan[2], l_slow, false)
+        emit_poly_const_load(R_X10, plan[3], l_slow, false)
+        iv1 = plan[2][0] == :gnum ? plan[2][3] : plan[2][2]
+        iv2 = plan[3][0] == :gnum ? plan[3][3] : plan[3][2]
+        @a.sub_i(R_X9, R_X13, 4)
+        emit_slot_load(R_X10, R_X9, plan[1])
+        emit_held_or_susp_branch(R_X10, iv1, iv2, l_t, l_f, l_slow)
+      elsif pk == :ret_cmp
+        ci_c = plan[3]
+        emit_poly_const_load(R_X11, ci_c, l_slow)
+        @a.sub_i(R_X9, R_X13, 4)
+        emit_slot_load(R_X10, R_X9, plan[1])
+        is_eq = plan[2] == "===" || plan[2] == "=="
+        is_strict = plan[2] == "===" || plan[2] == "!=="
+        known_num_bits = nil
+        known_is_zero = false
+        if ci_c[0] == :gnum
+          known_num_bits = ci_c[2]
+          known_is_zero = ci_c[3] == 0
+        elsif ci_c[0] == :lit && ci_c[2] != nil
+          known_num_bits = ci_c[1]
+          known_is_zero = ci_c[2] == 0
+        elsif ci_c[0] == :gprop && ci_c.size >= 7 && ci_c[5] != nil
+          known_num_bits = ci_c[5]
+          known_is_zero = ci_c[6]
+        if known_num_bits != nil
+          if ci_c[0] == :gprop
+            @a.mov_imm64(R_X14, known_num_bits)
+            @a.cmp_r(R_X11, R_X14)
+            @a.b_cond(CC_NE, l_slow)
+          if !is_strict
+            @a.sub_r(R_X14, R_X10, R_X20)
+            @a.cmp_r(R_X14, R_X21)
+            @a.b_cond(CC_HS, l_slow)
+          if known_is_zero
+            @a.mov_imm64(R_X14, -9223372036854775807 - 1)
+            @a.bic_r(R_X10, R_X10, R_X14)
+            @a.cmp_r(R_X10, R_X20)
+          else
+            @a.cmp_r(R_X10, R_X11)
+        else
+          emit_unbox_f64(R_D0, R_X10, l_slow)
+          emit_unbox_f64(R_D1, R_X11, l_slow)
+          @a.fcmp_d(R_D0, R_D1)
+        if branch_if_true
+          @a.b_cond(is_eq ? CC_EQ : CC_NE, target)
+          @a.b(l_fall) if i + 1 < t_emit.size
+        else
+          @a.b_cond(is_eq ? CC_NE : CC_EQ, target)
+          @a.b(l_fall) if i + 1 < t_emit.size
+      elsif pk == :ret_prop
+        @a.sub_i(R_X9, R_X13, 4)
+        emit_slot_load(R_X10, R_X9, plan[1])
+        l_tp_slow_shared = @a.new_label if l_tp_slow_shared == nil
+        @a.cmp_i(R_X10, 2)
+        @a.b_cond(CC_EQ, l_t)
+        @a.cmp_i(R_X10, 1)
+        @a.b_cond(CC_EQ, l_f)
+        @a.cbz_x(R_X10, l_f)
+        @a.b(l_tp_slow_shared)
+      else
+        is_tr = plan[1].kind == :true
+        if is_tr == branch_if_true
+          @a.b(target)
+        else
+          @a.b(l_fall) if i + 1 < t_emit.size
+      @a.bind(l_next) if i + 1 < t_emit.size
+      i += 1
+    @a.bind(l_fall)
+    jit_keep(mname_s)
+    snap_hm_b = @hoisted_marr
+    cb = ->()
+      if l_tp_slow_shared != nil
+        @a.bind(l_tp_slow_shared)
+        emit_truthy_branch(R_X10, target, branch_if_true)
+        @a.b(l_fall)
+      @a.bind(l_slow)
+      rec_off_s = push_x(R_X13)
+      l_fb_miss = @a.new_label
+      l_fb_call = @a.new_label
+      l_fb_chk = @a.new_label
+      @a.mov_imm64(R_X14, fb_pic_p)
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.ldr_x(R_X11, R_X14, 96)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_fb_miss)
+      @a.ldr_x(R_X1, R_SP, rec_off_s)
+      @a.sub_i(R_X9, R_X1, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_fb_miss)
+      @a.cbz_x(R_X9, l_fb_miss)
+      @a.ldr_x(R_X12, R_X9, 8)
+      fi = 0
+      while fi < 4
+        l_fnxt = fi < 3 ? @a.new_label : l_fb_miss
+        @a.ldr_x(R_X11, R_X14, fi * 24)
+        @a.cmp_r(R_X12, R_X11)
+        @a.b_cond(CC_NE, l_fnxt)
+        @a.ldr_x(R_X0, R_X14, fi * 24 + 8)
+        @a.ldr_x(R_X16, R_X14, fi * 24 + 16)
+        @a.b(l_fb_call)
+        @a.bind(l_fnxt) if fi < 3
+        fi += 1
+      @a.bind(l_fb_call)
+      @a.movz_x(R_X2, 0)
+      emit_blr_x16()
+      @a.cmp_i(R_X0, 6)
+      @a.b_cond(CC_NE, l_fb_chk)
+      @a.bind(l_fb_miss)
+      jit_keep(call_e)
+      jit_keep(@jf)
+      @a.ldr_x(R_X1, R_SP, rec_off_s)
+      @a.mov_imm64(R_X2, wvalue_bits(mname_s) ## i64)
+      @a.mov_imm64(R_X3, wvalue_bits(fb_pic) ## i64)
+      @a.mov_imm64(R_X4, wvalue_bits(call_e) ## i64)
+      @a.mov_imm64(R_X5, wvalue_bits(@jf) ## i64)
+      call_rt(RT_POLY_CALL_MISS)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, rec_off_s)
+      call_rt(RT_CALL_0)
+      @a.bind(l_fb_chk)
+      @tmp_depth -= 1
+      if snap_hm_b != nil
+        l_hm_ok = @a.new_label
+        load_slot_any(R_X9, snap_hm_b[0])
+        @a.sub_i(R_X9, R_X9, 4)
+        emit_slot_load(R_X9, R_X9, snap_hm_b[7])
+        @a.lsr_xi(R_X10, R_X9, 48)
+        @a.movz_x(R_X11, 0xFFF4)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_hm_ok)
+        @a.and_x_ptr47(R_X9, R_X9)
+        @a.ldr_x(R_X10, R_X9, 16)
+        @a.ldrsw(R_X11, R_X9, 8)
+        if snap_hm_b[4]
+          @a.mov_r(snap_hm_b[2], R_X10)
+          @a.mov_r(snap_hm_b[3], R_X11)
+        else
+          @a.str_x(R_X10, R_SP, snap_hm_b[2])
+          @a.str_x(R_X11, R_SP, snap_hm_b[3])
+        @a.bind(l_hm_ok)
+      emit_truthy_branch(R_X0, target, branch_if_true)
+      @a.b(l_fall)
+    add_cold_stub(cb)
+    true
+
+  # Scan an inlined method body for read-only params & read-only `this.<prop>` with >= 2 monomorphic own-slot/call uses
+  # and ZERO writes or null-checks, so the inlined arm can guard their shape ONCE before any side effects!
+  -> scan_inline_arm_shape_cands(n, pset, b_cnt, tp_cnt, b_bad, tp_bad)
+    return nil if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        scan_inline_arm_shape_cands(n[i], pset, b_cnt, tp_cnt, b_bad, tp_bad)
+        i += 1
+      return nil
+    return nil if !n.is_a?(JsNode)
+    k = n.kind
+    return nil if k == :function || k == :arrow || k == :class
+    if k == :assign || k == :update
+      if n.a != nil && n.a.kind == :ident && n.a.x != nil && pset[n.a.x.binding]
+        b_bad[n.a.x.binding] = true
+      elsif n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.a.a != nil && n.a.a.kind == :this
+        tp_bad[n.a.b.str] = true
+    elsif k == :binary && (n.str == "==" || n.str == "!=" || n.str == "===" || n.str == "!==")
+      ea = n.a
+      eb = n.b
+      chk_null = ->(x, y)
+        if y != nil && (y.kind == :null || is_undef_node?(y))
+          if x != nil && x.kind == :ident && x.x != nil && pset[x.x.binding]
+            b_bad[x.x.binding] = true
+          elsif x != nil && x.kind == :member && !x.has?(F_COMPUTED) && x.a != nil && x.a.kind == :this
+            tp_bad[x.b.str] = true
+      chk_null.call(ea, eb)
+      chk_null.call(eb, ea)
+    elsif k == :unary && n.str == "!"
+      x = n.a
+      if x != nil && x.kind == :ident && x.x != nil && pset[x.x.binding]
+        b_bad[x.x.binding] = true
+      elsif x != nil && x.kind == :member && !x.has?(F_COMPUTED) && x.a != nil && x.a.kind == :this
+        tp_bad[x.b.str] = true
+    elsif k == :if && n.a != nil
+      x = n.a
+      if x.kind == :ident && x.x != nil && pset[x.x.binding]
+        b_bad[x.x.binding] = true
+      elsif x.kind == :member && !x.has?(F_COMPUTED) && x.a != nil && x.a.kind == :this
+        tp_bad[x.b.str] = true
+    elsif k == :member && !n.has?(F_COMPUTED) && jit_ic_valid?(n.x) && n.x[0] != 0 && n.x[2] == 0 && n.x[1] != 0
+      shb = n.x[0]
+      if n.a != nil && n.a.kind == :ident && n.a.x != nil && pset[n.a.x.binding]
+        bb = n.a.x.binding
+        cur = b_cnt[bb]
+        if cur == nil
+          b_cnt[bb] = [shb, 1, true]
+        elsif cur[0] == shb
+          cur[1] = cur[1] + 1
+        else
+          cur[2] = false
+      elsif n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.a.a != nil && n.a.a.kind == :this
+        pn = n.a.b.str
+        cur = tp_cnt[pn]
+        if cur == nil
+          tp_cnt[pn] = [shb, 1, true]
+        elsif cur[0] == shb
+          cur[1] = cur[1] + 1
+        else
+          cur[2] = false
+    elsif k == :call && n.a != nil && n.a.kind == :member && !n.a.has?(F_COMPUTED) && n.x.is_a?(Array) && n.x.size == 2 && n.x[0].is_a?(JS:Shape)
+      shb = wvalue_bits(n.x[0]) ## i64
+      rc = n.a.a
+      if rc != nil && rc.kind == :ident && rc.x != nil && pset[rc.x.binding]
+        bb = rc.x.binding
+        cur = b_cnt[bb]
+        if cur == nil
+          b_cnt[bb] = [shb, 1, true]
+        elsif cur[0] == shb
+          cur[1] = cur[1] + 1
+        else
+          cur[2] = false
+      elsif rc != nil && rc.kind == :member && !rc.has?(F_COMPUTED) && rc.a != nil && rc.a.kind == :this
+        pn = rc.b.str
+        cur = tp_cnt[pn]
+        if cur == nil
+          tp_cnt[pn] = [shb, 1, true]
+        elsif cur[0] == shb
+          cur[1] = cur[1] + 1
+        else
+          cur[2] = false
+    scan_inline_arm_shape_cands(n.a, pset, b_cnt, tp_cnt, b_bad, tp_bad)
+    scan_inline_arm_shape_cands(n.b, pset, b_cnt, tp_cnt, b_bad, tp_bad)
+    scan_inline_arm_shape_cands(n.c, pset, b_cnt, tp_cnt, b_bad, tp_bad)
+    scan_inline_arm_shape_cands(n.d, pset, b_cnt, tp_cnt, b_bad, tp_bad)
+    scan_inline_arm_shape_cands(n.list, pset, b_cnt, tp_cnt, b_bad, tp_bad)
+    nil
+
+  # General 1..4-way polymorphic small multi-statement method inliner (with hybrid direct jit_fast_fp arms & 4-way `fb_pic` fallback)!
+  -> try_gen_poly_multi_method_inline(call_e, mem_e, prof)
+    return false if @in_cold_stub || @mono_inline_depth >= 5 || @in_cs_promo || @a.len > 6400
+    prof = wk_sort_poly_prof(call_e, prof)
+    npairs = prof.size / 2
+    return false if npairs == 0 || npairs > 4
+    mname_s = mem_e.b.str
     nargs = call_e.list.size
+    return false if @tmp_depth + 1 + nargs + 7 > 56
+    allow_multi = (@mono_inline_depth < 3 && @a.len <= 4800) || (@mono_inline_depth == 3 && @a.len <= 4000)
+    allow_leaf4 = (@mono_inline_depth == 4 && @a.len <= 6400)
+    max_st = @mono_inline_depth == 0 ? 22 : (@mono_inline_depth == 1 ? 18 : (@mono_inline_depth == 2 ? 12 : (allow_leaf4 ? 10 : 8)))
+    # Classify each observed (shape, fn) arm: :poly1 | :inline | :call
+    arms = []
+    any_inlined = false
+    pi = 0
+    while pi < npairs
+      sh = prof[pi * 2]
+      fn = prof[pi * 2 + 1]
+      return false if !sh.is_a?(JS:Shape) || sh.dict || sh.slot_of(mname_s) >= 0 || !fn.is_a?(JS:Function) || fn.code == nil || !fn.code.node.is_a?(JaFunc) || !js_shape_proto_method_eq?(sh, mname_s, fn)
+      tjf = fn.code.node
+      p1 = nargs <= 2 ? poly_classify_method(tjf, sh, nargs) : nil
+      if p1 != nil
+        arms.push([sh, fn, tjf, :poly1, p1, nil])
+        any_inlined = true
+      else
+        can_in = (allow_multi || (allow_leaf4 && !ast_has_call?(tjf.node.b))) && tjf != @jf && !@inlining_jfs.include?(tjf) && !tjf.class_ctor && tjf.free.size == 0 && tjf.strict == @jf.strict && !tjf.dynamic && !tjf.mapped_args && tjf.args_binding == nil && tjf.simple && !tjf.node.has?(F_GENERATOR) && !tjf.node.has?(F_ASYNC) && tjf.self_binding == nil && !tjf.arrow && !tjf.scope.has_env? && (tjf.body_scope == nil || !tjf.body_scope.has_env?) && tjf.params.size <= 3 && tjf.nlocals <= 6 && tjf.node.b.is_a?(Array) && tjf.node.b.size > 0 && jit_eligible_fn?(tjf)
+        bset = nil
+        if can_in
+          st_cnt = [0]
+          bset = {}
+          can_in = mono_inline_ast_ok?(tjf.node.b, tjf, st_cnt, bset, max_st) && st_cnt[0] <= max_st && bset.size <= 6
+        if can_in
+          arms.push([sh, fn, tjf, :inline, nil, bset])
+          any_inlined = true
+        else
+          # Ensure larger target compiles so direct `jit_fast_fp` arm is native-fast!
+          cd0 = fn.code
+          if cd0.jit_fp == 0 && cd0.jit_state == 0 && cd0.jit_hits >= 3 && tjf != @jf && jit_eligible_fn?(tjf) && (cd0.nparams == 0 || cd0.warm_args != nil)
+            jit_compile_and_install(cd0, cd0.warm_args)
+          arms.push([sh, fn, tjf, :call, nil, nil])
+      pi += 1
+    return false if !any_inlined
+    # If receiver shape is ALREADY verified (e.g. `this`, `this.currentTcb`, `this.scheduler`, `packet`), filter to that single arm!
+    known_this_arm = nil
+    rec_sk_m = shape_key(mem_e.a)
+    ksh_m = rec_sk_m != -1 ? @known_shapes[rec_sk_m] : nil
+    if ksh_m != nil
+      ki = 0
+      while ki < arms.size
+        if (wvalue_bits(arms[ki][0]) ## i64) == ksh_m
+          known_this_arm = arms[ki]
+          break
+        ki += 1
+    arms_to_emit = known_this_arm != nil ? [known_this_arm] : arms
+    # In 2-way calls with an :empty no-op arm, test the real-work arm FIRST (`EqualityConstraint.execute` before `EditConstraint.execute`!)
+    if known_this_arm == nil && arms_to_emit.size == 2 && arms_to_emit[0][3] == :poly1 && arms_to_emit[0][4][0] == :empty && !(arms_to_emit[1][3] == :poly1 && arms_to_emit[1][4][0] == :empty)
+      arms_to_emit = [arms_to_emit[1], arms_to_emit[0]]
+    all_arms_rec_g = true
+    ai_chk = 0
+    while ai_chk < arms_to_emit.size
+      a_ck = arms_to_emit[ai_chk]
+      if a_ck[3] != :inline && !(a_ck[3] == :poly1 && (a_ck[4][0] == :empty || a_ck[4][0] == :list_append))
+        all_arms_rec_g = false
+      ai_chk += 1
+    # Check if any `:inline` arm writes its `params[0]`
+    a0_readonly = true
+    if nargs >= 1
+      ci_0 = 0
+      while ci_0 < arms_to_emit.size && a0_readonly
+        if arms_to_emit[ci_0][3] == :inline
+          tjf0 = arms_to_emit[ci_0][2]
+          if tjf0.params.size >= 1 && inline_stmt_writes_binding?(tjf0.node.b, tjf0.params[0])
+            a0_readonly = false
+        ci_0 += 1
+    # Check if arg0 is a compile-time i32 constant or unboxed `:jit_spill_w` not written by any `:inline` arm
+    const_a0_val = nil
+    spill_w_a0_off = -1
+    if nargs == 1 && all_arms_rec_g && a0_readonly
+      if call_e.list[0].kind == :jit_spill_w
+        spill_w_a0_off = call_e.list[0].a
+      else
+        cv0 = const_eval_i32(call_e.list[0])
+        const_a0_val = cv0 if cv0 != nil
+    # Check if arg1 is read-only across all `:inline` arms (for 2-arg caller-GPR aliasing, e.g. `checkPriorityAdd(task, packet)`!)
+    a1_readonly = true
+    if nargs >= 2
+      ci_1 = 0
+      while ci_1 < arms_to_emit.size && a1_readonly
+        if arms_to_emit[ci_1][3] == :inline
+          tjf1 = arms_to_emit[ci_1][2]
+          if tjf1.params.size >= 2 && inline_stmt_writes_binding?(tjf1.node.b, tjf1.params[1])
+            a1_readonly = false
+        ci_1 += 1
+    # Snapshot caller's proven argument shapes & null/non-null proofs BEFORE evaluating receiver/args
+    arg_known_shs = []
+    arg_known_null = []
+    arg_known_nonnull = []
+    caller_ksh_pre = @known_shapes
+    jit_keep(mname_s)
+    saved_td = @tmp_depth
+    saved_fg = @free_gprs.dup
+    is_tail_c = (@in_tail_call_e == call_e && @cur_arm_owned_gprs != nil && @cur_arm_owned_gprs.size > 0)
+    parent_owned_gprs = is_tail_c ? @cur_arm_owned_gprs : nil
+    # Zero-spill GPR-pinned or caller-aliased receiver & args when all arms are `:inline` or `:poly1 :empty`!
+    r_rec_g = nil
+    r_rec_owned = false
+    if all_arms_rec_g
+      if mem_e.a.kind == :this && @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+        r_rec_g = @inline_env[:this][1]
+      elsif mem_e.a.kind == :ident && mem_e.a.x != nil && @inline_env != nil && @inline_env[mem_e.a.x.binding] != nil && @inline_env[mem_e.a.x.binding][0] == :reg_x && !inline_stmt_writes_binding?(call_e.list, mem_e.a.x.binding)
+        r_rec_g = @inline_env[mem_e.a.x.binding][1]
+      elsif @free_gprs.size >= 1
+        r_rec_g = @free_gprs.pop
+        r_rec_owned = true
+    r_a0_g = nil
+    r_a0_owned = false
+    r_a0_scratch = false
+    if all_arms_rec_g && nargs == 1 && const_a0_val == nil && spill_w_a0_off < 0
+      a0_e = call_e.list[0]
+      if a0_readonly && a0_e.kind == :this && @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+        r_a0_g = @inline_env[:this][1]
+      elsif a0_readonly && a0_e.kind == :ident && a0_e.x != nil && @inline_env != nil && @inline_env[a0_e.x.binding] != nil && @inline_env[a0_e.x.binding][0] == :reg_x && !inline_stmt_writes_binding?(mem_e.a, a0_e.x.binding)
+        r_a0_g = @inline_env[a0_e.x.binding][1]
+      elsif @free_gprs.size >= 1
+        r_a0_g = @free_gprs.pop
+        r_a0_owned = true
+      elsif known_this_arm != nil && known_this_arm[3] == :poly1 && known_this_arm[4][0] == :list_append
+        r_a0_g = R_X3
+        r_a0_scratch = true
+    r_a1_g = nil
+    if all_arms_rec_g && nargs == 2 && a1_readonly
+      a1_e = call_e.list[1]
+      if a1_e.kind == :this && @inline_env != nil && @inline_env[:this] != nil && @inline_env[:this][0] == :reg_x
+        r_a1_g = @inline_env[:this][1]
+      elsif a1_e.kind == :ident && a1_e.x != nil && @inline_env != nil && @inline_env[a1_e.x.binding] != nil && @inline_env[a1_e.x.binding][0] == :reg_x && !inline_stmt_writes_binding?(mem_e.a, a1_e.x.binding) && !inline_stmt_writes_binding?(call_e.list[0], a1_e.x.binding)
+        r_a1_g = @inline_env[a1_e.x.binding][1]
+    # Tail-return dead GPR reclaim: if args need zero parent GPR evaluation (0 args, const/spill_w arg0, or aliased arg0),
+    # evaluate receiver first while parent GPRs are live, then reclaim dead parent GPRs immediately for `r_rec_g` + callee!
+    tail_reclaimed_early = false
+    rec_off = -1
+    lcr = @live_cur_reg
+    @live_cur_reg = nil
+    if r_rec_g == nil || r_rec_owned
+      if lcr != nil && mem_e.a.kind == :member && !mem_e.a.has?(F_COMPUTED) && mem_e.a.a != nil && mem_e.a.a.kind == :this && mem_e.a.b.str == lcr[0]
+        if r_rec_g != nil
+          @a.mov_r(r_rec_g, lcr[1])
+        else
+          rec_off = push_x(lcr[1])
+      else
+        gen_expr_any(mem_e.a)
+        if is_tail_c && all_arms_rec_g && r_rec_g == nil && (nargs == 0 || (nargs == 1 && (const_a0_val != nil || spill_w_a0_off >= 0 || (r_a0_g != nil && !r_a0_owned))))
+          ti_e = 0
+          while ti_e < parent_owned_gprs.size
+            rg_p = parent_owned_gprs[ti_e]
+            @free_gprs.push(rg_p) if rg_p != r_a0_g && !@free_gprs.include?(rg_p)
+            ti_e += 1
+          tail_reclaimed_early = true
+          if @free_gprs.size >= 1
+            r_rec_g = @free_gprs.pop
+            r_rec_owned = true
+        if r_rec_g != nil
+          @a.mov_r(r_rec_g, R_X0)
+        else
+          rec_off = push_x(R_X0)
+    arg_offs = []
+    ai = 0
+    while ai < nargs
+      ae_m = call_e.list[ai]
+      ask_m = shape_key(ae_m)
+      arg_known_shs.push(ask_m != -1 ? @known_shapes[ask_m] : nil)
+      arg_known_null.push(ask_m != -1 && @known_null[ask_m] == true)
+      arg_known_nonnull.push(ask_m != -1 && @known_nonnull[ask_m] == true)
+      if ai == 0 && (const_a0_val != nil || spill_w_a0_off >= 0)
+        arg_offs.push(-1)
+      elsif ai == 0 && r_a0_g != nil && !r_a0_owned && !r_a0_scratch
+        arg_offs.push(-1)
+      elsif ai == 0 && r_a0_g != nil
+        gen_expr_any(ae_m)
+        @a.mov_r(r_a0_g, R_X0)
+        arg_offs.push(-1)
+      elsif ai == 1 && r_a1_g != nil
+        arg_offs.push(-1)
+      else
+        gen_expr_any(ae_m)
+        arg_offs.push(push_x(R_X0))
+      ai += 1
+    # Reclaim dead parent GPRs for general tail-return calls AFTER all receiver & argument expressions have been evaluated!
+    if is_tail_c && !tail_reclaimed_early
+      ti_l = 0
+      while ti_l < parent_owned_gprs.size
+        rg_p = parent_owned_gprs[ti_l]
+        @free_gprs.push(rg_p) if rg_p != r_rec_g && rg_p != r_a0_g && rg_p != r_a1_g && !@free_gprs.include?(rg_p)
+        ti_l += 1
+    base_td = @tmp_depth
+    fb_pic = i64[13]
+    fk = 0
+    while fk < 12
+      fb_pic[fk] = 0
+      fk += 1
+    fb_pic[12] = JS_EPOCH[0]
+    jit_keep(fb_pic)
+    fb_pic_p = jit_i64_ptr(fb_pic)
+    l_slow = @a.new_label
+    is_top_loop_tail = (@top_tail_loop_ret != nil && @top_tail_loop_call == call_e && @inline_env == nil)
+    top_tlr = is_top_loop_tail ? @top_tail_loop_ret : nil
+    @top_tail_loop_ret = nil if is_top_loop_tail
+    is_tail_ret = is_top_loop_tail || (@in_tail_call_e == call_e && @inline_env != nil && @inline_ret_mode == :any && @l_ret != nil)
+    l_done = is_top_loop_tail ? top_tlr : (is_tail_ret ? @l_ret : @a.new_label)
+    # Fast `outer_this` identity guard: when calling a monomorphic method whose receiver shape equals the outer `while` loop's `this` shape,
+    # verifying `rec === outer_this && dirty == 0` simultaneously proves WObject tag, shape, JS_EPOCH, hoisted `this.blocks`, outer `currentTcb` shape, AND unboxed counters!
+    this_is_outer_arm = !@in_cold_stub && @while_dirty_off >= 0 && @this_mono_sh != 0 && arms_to_emit.size == 1 && arms_to_emit[0][3] == :inline && (wvalue_bits(arms_to_emit[0][0]) ## i64) == @this_mono_sh
+    if this_is_outer_arm
+      @a.ldr_x(R_X9, R_SP, JF_SLOT_THIS)
+      if r_rec_g != nil
+        @a.cmp_r(r_rec_g, R_X9)
+      else
+        @a.ldr_x(R_X13, R_SP, rec_off)
+        @a.cmp_r(R_X13, R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.ldr_x(R_X10, R_SP, @while_dirty_off)
+      @a.cbnz_x(R_X10, l_slow)
+    else
+      if !@hoisted_epoch && !@epoch_verified_now
+        ep_now = JS_EPOCH[0]
+        @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+        @a.ldr_x(R_X10, R_X9, 0)
+        @a.mov_imm64(R_X11, ep_now)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_slow)
+      if known_this_arm == nil
+        if r_rec_g != nil
+          @a.sub_i(R_X9, r_rec_g, 4)
+        else
+          @a.ldr_x(R_X13, R_SP, rec_off)
+          @a.sub_i(R_X9, R_X13, 4)
+        @a.tst_wobj_bad(R_X9)
+        @a.b_cond(CC_NE, l_slow)
+        @a.cbz_x(R_X9, l_slow)
+        @a.ldr_x(R_X12, R_X9, 8)
+    # Standalone Tier-1 PGO arm counters (`@in_loop_depth == 0`, NEVER inside hot loops!):
+    # Feeds exact steady-state arm frequencies into `wk_sort_poly_prof` when callers inline this function into a hot loop!
+    pgo_arr_p = 0
+    if @in_loop_depth == 0 && !@in_cold_stub && known_this_arm == nil && arms_to_emit.size >= 2 && arms_to_emit.size <= 4
+      old_pgo = WK_POLY_JIT_CNTS[call_e]
+      pgo_shs = []
+      pgo_cnts = i64[4]
+      pgo_cnts[0] = 0; pgo_cnts[1] = 0; pgo_cnts[2] = 0; pgo_cnts[3] = 0
+      pi_pg = 0
+      while pi_pg < arms_to_emit.size
+        shb_pg = wvalue_bits(arms_to_emit[pi_pg][0]) ## i64
+        pgo_shs.push(shb_pg)
+        if old_pgo != nil
+          osh_pg = old_pgo[0]
+          ocn_pg = old_pgo[1]
+          oi_pg = 0
+          while oi_pg < osh_pg.size
+            if osh_pg[oi_pg] == shb_pg
+              pgo_cnts[pi_pg] = ocn_pg[oi_pg]
+              break
+            oi_pg += 1
+        pi_pg += 1
+      jit_keep(pgo_cnts)
+      jit_keep(call_e)
+      WK_POLY_JIT_CNTS[call_e] = [pgo_shs, pgo_cnts]
+      pgo_arr_p = jit_i64_ptr(pgo_cnts)
+    caller_ep_pre = @hoisted_epoch || @epoch_verified_now
+    # When passing a proven non-null arg0, stably sort 0-param arms (which ignore the payload!) AFTER param-taking arms!
+    if known_this_arm == nil && arg_known_nonnull.size >= 1 && arg_known_nonnull[0] && arms_to_emit.size >= 2
+      a_take = []
+      a_zero = []
+      si_nn = 0
+      while si_nn < arms_to_emit.size
+        ar_nn = arms_to_emit[si_nn]
+        if ar_nn[3] == :inline && ar_nn[2].params.size == 0
+          a_zero.push(ar_nn)
+        else
+          a_take.push(ar_nn)
+        si_nn += 1
+      if a_zero.size > 0 && a_take.size > 0
+        arms_to_emit = a_take + a_zero
+    used_l_slow_arm = false
+    all_arms_ep_ok = true
+    ai_arm = 0
+    while ai_arm < arms_to_emit.size
+      arm = arms_to_emit[ai_arm]
+      sh = arm[0]
+      fn = arm[1]
+      tjf = arm[2]
+      ak = arm[3]
+      jit_keep(sh)
+      jit_keep(fn)
+      l_next = ai_arm + 1 < arms_to_emit.size ? @a.new_label : l_slow
+      if known_this_arm == nil && !this_is_outer_arm
+        emit_cmp_shape(R_X12, wvalue_bits(sh) ## i64)
+        @a.b_cond(CC_NE, l_next)
+      if pgo_arr_p != 0
+        @a.mov_imm64(R_X9, pgo_arr_p)
+        @a.ldr_x(R_X10, R_X9, ai_arm * 8)
+        @a.add_i(R_X10, R_X10, 1)
+        @a.str_x(R_X10, R_X9, ai_arm * 8)
+      @tmp_depth = base_td
+      @epoch_verified_now = true
+      arm_jumped_done = false
+      if ak == :poly1
+        emit_poly_plan(arm[4], sh, rec_off, tjf, arg_offs, l_slow, r_rec_g, r_a0_g)
+      elsif ak == :call
+        # Direct `jit_fast_fp` call without PIC scan (e.g. WorkerTask.run)!
+        @a.mov_imm64(R_X10, (wvalue_bits(fn.code) ## i64) - 4)
+        @a.ldr_x(R_X16, R_X10, 96)
+        @a.and_x_lowmask(R_X16, R_X16, 48)
+        @a.cbz_x(R_X16, l_slow)
+        @a.mov_imm64(R_X0, wvalue_bits(fn) ## i64)
+        @a.ldr_x(R_X1, R_SP, rec_off)
+        @a.movz_x(R_X2, nargs)
+        @a.ldr_x(R_X3, R_SP, arg_offs[0]) if nargs >= 1
+        @a.ldr_x(R_X4, R_SP, arg_offs[1]) if nargs >= 2
+        @a.ldr_x(R_X5, R_SP, arg_offs[2]) if nargs >= 3
+        emit_blr_x16()
+        @a.cmp_i(R_X0, 6)
+        @a.b_cond(CC_EQ, l_slow)
+        @epoch_verified_now = false
+      else
+        # Full multi-stmt inlining of `tjf` with `@inline_this_sh = sh`, zero-stall GPR-pinned `:this`/`arg0`, const-arg propagation, and zero-cost arm-entry guards!
+        l_in_ret = @a.new_label
+        new_env = {}
+        r_in_this = r_rec_g == nil && @free_gprs.size > 0 ? @free_gprs.pop : nil
+        r_in_arg0 = (nargs >= 1 && tjf.params.size >= 1 && const_a0_val == nil && spill_w_a0_off < 0 && r_a0_g == nil && @free_gprs.size > 0) ? @free_gprs.pop : nil
+        if r_rec_g != nil
+          new_env[:this] = [:reg_x, r_rec_g]
+        elsif r_in_this != nil
+          @a.ldr_x(r_in_this, R_SP, rec_off)
+          new_env[:this] = [:reg_x, r_in_this]
+        else
+          new_env[:this] = [:spill_x, rec_off]
+        arm_ksh = { -2 => (wvalue_bits(sh) ## i64) }
+        if this_is_outer_arm && @while_outer_cur != nil
+          arm_ksh["this." + @while_outer_cur[0]] = @while_outer_cur[1]
+        arm_knull = {}
+        arm_knonnull = {}
+        pset_arm = {}
+        pi2 = 0
+        while pi2 < tjf.params.size
+          pb = tjf.params[pi2]
+          if pi2 < nargs
+            sk_p2 = -1
+            if pi2 == 0 && const_a0_val != nil
+              new_env[pb] = [:const_i32, const_a0_val]
+            elsif pi2 == 0 && spill_w_a0_off >= 0
+              new_env[pb] = [:spill_w, spill_w_a0_off]
+            elsif pi2 == 0 && r_a0_g != nil
+              new_env[pb] = [:reg_x, r_a0_g]
+              sk_p2 = -2000 - r_a0_g
+            elsif pi2 == 0 && r_in_arg0 != nil
+              @a.ldr_x(r_in_arg0, R_SP, arg_offs[0])
+              new_env[pb] = [:reg_x, r_in_arg0]
+              sk_p2 = -2000 - r_in_arg0
+            elsif pi2 == 1 && r_a1_g != nil
+              new_env[pb] = [:reg_x, r_a1_g]
+              sk_p2 = -2000 - r_a1_g
+            else
+              new_env[pb] = [:spill_x, arg_offs[pi2]]
+              sk_p2 = -1000 - arg_offs[pi2]
+            if sk_p2 != -1
+              arm_ksh[sk_p2] = arg_known_shs[pi2] if arg_known_shs[pi2] != nil
+              if pi2 == 0 && a0_readonly
+                arm_knull[sk_p2] = true if arg_known_null[0]
+                arm_knonnull[sk_p2] = true if arg_known_nonnull[0]
+            pset_arm[pb] = true
+          else
+            zoff = push_x(R_XZR)
+            new_env[pb] = [:spill_x, zoff]
+          pi2 += 1
+        # Guard read-only params (`packet`, `task`) and read-only `this.<prop>` (`this.scheduler`) ONCE BEFORE any side effects -> `l_slow`!
+        b_cnt = {}
+        tp_cnt = {}
+        b_bad = {}
+        tp_bad = {}
+        scan_inline_arm_shape_cands(tjf.node.b, pset_arm, b_cnt, tp_cnt, b_bad, tp_bad)
+        b_cnt.each ->(pb_c, info_c)
+          if info_c[2] && info_c[1] >= 2 && !b_bad[pb_c] && new_env[pb_c] != nil && (new_env[pb_c][0] == :spill_x || new_env[pb_c][0] == :reg_x)
+            sk_c = new_env[pb_c][0] == :reg_x ? (-2000 - new_env[pb_c][1]) : (-1000 - new_env[pb_c][1])
+            if arm_ksh[sk_c] == nil
+              if new_env[pb_c][0] == :reg_x
+                @a.sub_i(R_X9, new_env[pb_c][1], 4)
+              else
+                @a.ldr_x(R_X13, R_SP, new_env[pb_c][1])
+                @a.sub_i(R_X9, R_X13, 4)
+              @a.tst_wobj_bad(R_X9)
+              @a.b_cond(CC_NE, l_slow)
+              @a.cbz_x(R_X9, l_slow)
+              @a.ldr_x(R_X10, R_X9, 8)
+              emit_cmp_shape(R_X10, info_c[0])
+              @a.b_cond(CC_NE, l_slow)
+              arm_ksh[sk_c] = info_c[0]
+              used_l_slow_arm = true
+        this_reg_arm = r_rec_g != nil ? r_rec_g : r_in_this
+        tp_cnt.each ->(pn_c, info_c)
+          if info_c[2] && info_c[1] >= 2 && !tp_bad[pn_c] && arm_ksh["this." + pn_c] == nil && !(!@in_cold_stub && @while_dirty_off >= 0 && @this_mono_sh != 0 && info_c[0] == @this_mono_sh)
+            sl_tp = sh.slot_of(pn_c)
+            if sl_tp >= 0 && (sh.attrs_of(pn_c) & ATTR_ACCESSOR) == 0
+              enc_tp = sl_tp < sh.inline ? (sh.ibase + sl_tp) : (0 - (sl_tp - sh.inline) - 1)
+              if this_reg_arm != nil
+                @a.sub_i(R_X9, this_reg_arm, 4)
+              else
+                @a.ldr_x(R_X9, R_SP, rec_off)
+                @a.sub_i(R_X9, R_X9, 4)
+              emit_slot_load(R_X13, R_X9, enc_tp)
+              @a.sub_i(R_X9, R_X13, 4)
+              @a.tst_wobj_bad(R_X9)
+              @a.b_cond(CC_NE, l_slow)
+              @a.cbz_x(R_X9, l_slow)
+              @a.ldr_x(R_X10, R_X9, 8)
+              emit_cmp_shape(R_X10, info_c[0])
+              @a.b_cond(CC_NE, l_slow)
+              arm_ksh["this." + pn_c] = info_c[0]
+              used_l_slow_arm = true
+        loc_gprs = []
+        arm[5].keys.each ->(lb)
+          if new_env[lb] == nil
+            if @free_gprs.size > 0
+              r_loc = @free_gprs.pop
+              @a.movz_x(r_loc, 0)
+              new_env[lb] = [:reg_x, r_loc]
+              loc_gprs.push(r_loc)
+            else
+              loff = push_x(R_XZR)
+              new_env[lb] = [:spill_x, loff]
+        sub_tps = {}
+        collect_this_prop_shapes(tjf.node.b, sub_tps)
+        arm_owned = []
+        arm_owned.push(r_rec_g) if r_rec_g != nil && (r_rec_owned || (parent_owned_gprs != nil && parent_owned_gprs.include?(r_rec_g)))
+        arm_owned.push(r_a0_g) if r_a0_g != nil && (r_a0_owned || (parent_owned_gprs != nil && parent_owned_gprs.include?(r_a0_g)))
+        arm_owned.push(r_a1_g) if r_a1_g != nil && parent_owned_gprs != nil && parent_owned_gprs.include?(r_a1_g)
+        arm_owned.push(r_in_this) if r_in_this != nil
+        arm_owned.push(r_in_arg0) if r_in_arg0 != nil
+        lgi_o = 0
+        while lgi_o < loc_gprs.size
+          arm_owned.push(loc_gprs[lgi_o])
+          lgi_o += 1
+        old_env = @inline_env
+        old_l_ret = @l_ret
+        old_ret_mode = @inline_ret_mode
+        old_this_sh = @inline_this_sh
+        old_tps = @this_prop_shapes
+        old_owned_g = @cur_arm_owned_gprs
+        old_knull = @known_null
+        old_knonnull = @known_nonnull
+        old_itio = @inline_this_is_outer
+        always_ret_arm = stmts_always_return?(tjf.node.b)
+        @inline_env = new_env
+        @l_ret = is_tail_ret ? l_done : l_in_ret
+        @inline_ret_mode = :any
+        @inline_this_sh = sh
+        @this_prop_shapes = sub_tps
+        @cur_arm_owned_gprs = arm_owned
+        @known_shapes = arm_ksh
+        @known_null = arm_knull
+        @known_nonnull = arm_knonnull
+        @inline_this_is_outer = this_is_outer_arm
+        @mono_inline_depth += 1
+        @inlining_jfs.push(tjf)
+        gen_stmts(tjf.node.b)
+        if !always_ret_arm
+          @a.movz_x(R_X0, 0)
+        @a.bind(l_in_ret) if !is_tail_ret
+        arm_jumped_done = is_tail_ret && always_ret_arm
+        @inlining_jfs.pop
+        @mono_inline_depth -= 1
+        @inline_env = old_env
+        @l_ret = old_l_ret
+        @inline_ret_mode = old_ret_mode
+        @inline_this_sh = old_this_sh
+        @this_prop_shapes = old_tps
+        @cur_arm_owned_gprs = old_owned_g
+        @known_null = old_knull
+        @known_nonnull = old_knonnull
+        @inline_this_is_outer = old_itio
+        lgi = loc_gprs.size - 1
+        while lgi >= 0
+          @free_gprs.push(loc_gprs[lgi])
+          lgi -= 1
+        @free_gprs.push(r_in_arg0) if r_in_arg0 != nil
+        @free_gprs.push(r_in_this) if r_in_this != nil
+      all_arms_ep_ok = false if !@epoch_verified_now
+      if is_tail_ret
+        @a.b(l_done) if !arm_jumped_done
+      else
+        @a.b(l_done) if ai_arm + 1 < arms_to_emit.size
+      @a.bind(l_next) if ai_arm + 1 < arms_to_emit.size
+      ai_arm += 1
+    if is_tail_ret
+      @tail_ret_emitted = true
+    else
+      @a.bind(l_done)
+    @tmp_depth = base_td
+    @epoch_verified_now = (known_this_arm != nil && !used_l_slow_arm && caller_ep_pre && all_arms_ep_ok && ((known_this_arm[3] == :inline && !ast_has_call?(known_this_arm[2].node.b)) || (known_this_arm[3] == :poly1 && known_this_arm[4][0] == :list_append))) ? true : false
+    snap_harrs_m = @hoisted_arrs.keys.dup
+    load_rec_cb = ->(dst)
+      if r_rec_g != nil
+        @a.mov_r(dst, r_rec_g)
+      else
+        @a.ldr_x(dst, R_SP, rec_off)
+    load_a0_cb = ->(dst)
+      if const_a0_val != nil
+        @a.mov_imm64(dst, wvalue_bits(const_a0_val.to_f) ## i64)
+      elsif spill_w_a0_off >= 0
+        @a.ldr_w(R_X9, R_SP, spill_w_a0_off)
+        emit_box_i32(dst, R_X9)
+      elsif r_a0_g != nil
+        @a.mov_r(dst, r_a0_g)
+      else
+        @a.ldr_x(dst, R_SP, arg_offs[0])
+    load_a1_cb = ->(dst)
+      if r_a1_g != nil
+        @a.mov_r(dst, r_a1_g)
+      else
+        @a.ldr_x(dst, R_SP, arg_offs[1])
+    cb = ->()
+      @a.bind(l_slow)
+      a0_cold_off = r_a0_scratch ? push_x(R_X3) : -1
+      load_a0_s = ->(dst)
+        if a0_cold_off >= 0
+          @a.ldr_x(dst, R_SP, a0_cold_off)
+        else
+          load_a0_cb.call(dst)
+      l_fb_miss = @a.new_label
+      l_fb_call = @a.new_label
+      l_fb_fin = @a.new_label
+      @a.mov_imm64(R_X14, fb_pic_p)
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.ldr_x(R_X11, R_X14, 96)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_fb_miss)
+      load_rec_cb.call(R_X1)
+      @a.sub_i(R_X9, R_X1, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_fb_miss)
+      @a.cbz_x(R_X9, l_fb_miss)
+      @a.ldr_x(R_X12, R_X9, 8)
+      fi = 0
+      while fi < 4
+        l_fnxt = fi < 3 ? @a.new_label : l_fb_miss
+        @a.ldr_x(R_X11, R_X14, fi * 24)
+        @a.cmp_r(R_X12, R_X11)
+        @a.b_cond(CC_NE, l_fnxt)
+        @a.ldr_x(R_X0, R_X14, fi * 24 + 8)
+        @a.ldr_x(R_X16, R_X14, fi * 24 + 16)
+        @a.b(l_fb_call)
+        @a.bind(l_fnxt) if fi < 3
+        fi += 1
+      @a.bind(l_fb_call)
+      @a.movz_x(R_X2, nargs)
+      load_a0_s.call(R_X3) if nargs >= 1
+      load_a1_cb.call(R_X4) if nargs >= 2
+      @a.ldr_x(R_X5, R_SP, arg_offs[2]) if nargs >= 3
+      emit_blr_x16()
+      @a.cmp_i(R_X0, 6)
+      @a.b_cond(CC_NE, l_fb_fin)
+      load_rec_cb.call(R_X1)
+      @a.mov_imm64(R_X2, wvalue_bits(mname_s) ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      load_rec_cb.call(R_X2)
+      load_a0_s.call(R_X3) if nargs >= 1
+      load_a1_cb.call(R_X4) if nargs >= 2
+      @a.ldr_x(R_X5, R_SP, arg_offs[2]) if nargs >= 3
+      call_rt(RT_CALL_0 + nargs)
+      @a.b(l_fb_fin)
+      @a.bind(l_fb_miss)
+      jit_keep(call_e)
+      jit_keep(@jf)
+      load_rec_cb.call(R_X1)
+      @a.mov_imm64(R_X2, wvalue_bits(mname_s) ## i64)
+      @a.mov_imm64(R_X3, wvalue_bits(fb_pic) ## i64)
+      @a.mov_imm64(R_X4, wvalue_bits(call_e) ## i64)
+      @a.mov_imm64(R_X5, wvalue_bits(@jf) ## i64)
+      call_rt(RT_POLY_CALL_MISS)
+      @a.mov_r(R_X1, R_X0)
+      load_rec_cb.call(R_X2)
+      load_a0_s.call(R_X3) if nargs >= 1
+      load_a1_cb.call(R_X4) if nargs >= 2
+      @a.ldr_x(R_X5, R_SP, arg_offs[2]) if nargs >= 3
+      call_rt(RT_CALL_0 + nargs)
+      @a.bind(l_fb_fin)
+      snap_harrs_m.each ->(hli)
+        hh = @hoisted_arrs[hli]
+        har = @hoisted_arr_regs[hli]
+        if hh != nil
+          load_slot_any(R_X9, hli)
+          @a.and_x_ptr47(R_X9, R_X9)
+          @a.ldrsw(R_X11, R_X9, 4)
+          @a.ldr_x(R_X10, R_X9, 16)
+          @a.add_r(R_X10, R_X10, R_X11, 3)
+          @a.str_x(R_X10, R_SP, hh[0]) if hh[0] > 0
+          @a.mov_r(har[0], R_X10) if har != nil && har[0] != nil
+          @a.ldrsw(R_X10, R_X9, 8)
+          @a.str_x(R_X10, R_SP, hh[1]) if hh[1] > 0
+          @a.mov_r(har[1], R_X10) if har != nil && har[1] != nil
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @free_gprs = saved_fg
+    @tmp_depth = saved_td
+    if known_this_arm != nil && known_this_arm[3] == :poly1 && known_this_arm[4][0] == :list_append && caller_ksh_pre != nil
+      # `:list_append` only mutates one own slot on objects of shape `sh_la_b` — preserve all non-aliasing caller shapes!
+      sh_la_keep = wvalue_bits(known_this_arm[0]) ## i64
+      kept_sh = {}
+      caller_ksh_pre.each ->(k_p, v_p)
+        kept_sh[k_p] = v_p if v_p != sh_la_keep
+      @known_shapes = kept_sh
+    else
+      @known_shapes = {}
+    true
+
+  # Direct static own-slot method call (and 1-stmt 2-arg comparator/selector inlining!) on a read-only global object!
+  # Handles `Strength.stronger(s1, s2)`, `Strength.weaker(s1, s2)`, `Strength.weakestOf(s1, s2)`, etc.
+  -> gen_global_own_method_call(call_e, mem_e, mname, gv, gcell_guard = nil)
+    return false if !gv.is_a?(JS:Base) || gv.shape.dict || gv.exotic?
+    gsh = gv.shape
+    sl = gsh.slot_of(mname)
+    return false if sl < 0 || (gsh.attrs_of(mname) & ATTR_ACCESSOR) != 0
+    fn = gv.get_own(mname)
+    return false if !fn.is_a?(JS:Function) || fn.code == nil || !fn.code.node.is_a?(JaFunc)
+    genc = sl < gsh.inline ? (gsh.ibase + sl) : (0 - (sl - gsh.inline) - 1)
+    nargs = call_e.list.size
+    jit_keep(gv)
+    jit_keep(gsh)
+    jit_keep(fn)
+    jit_keep(mname)
+    # Evaluate args left-to-right
     arg_offs = []
     i = 0
     while i < nargs
@@ -8810,53 +20329,354 @@ OSR_RETURN = 2
       i += 1
     l_slow = @a.new_label
     l_done = @a.new_label
-    # Guard prototype epoch unchanged (single load + compare!)
-    ep_now = JS_EPOCH[0]
-    @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
-    @a.ldr_x(R_X10, R_X9, 0)
-    @a.mov_imm64(R_X11, ep_now)
-    @a.cmp_r(R_X10, R_X11)
+    gcell_gm = wk_cell(mem_e.a.x.binding)
+    hgo_gm = @hoisted_gobj_shapes[wvalue_bits(gcell_gm) ## i64]
+    gv_hoisted = hgo_gm != nil && hgo_gm[0] == gv && hgo_gm[1] == gsh
+    if gcell_guard != nil && !gv_hoisted
+      jit_keep(gcell_guard)
+      @a.mov_imm64(R_X9, (wvalue_bits(gcell_guard) ## i64) - 4)
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.mov_imm64(R_X11, wvalue_bits(gv) ## i64)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    # Verify gv.@shape == gsh (skip if already guarded in prologue!) AND live own slot == fn!
+    @a.mov_imm64(R_X9, (wvalue_bits(gv) ## i64) - 4)
+    if !gv_hoisted
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.mov_imm64(R_X11, wvalue_bits(gsh) ## i64)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    emit_slot_load(R_X0, R_X9, genc)
+    @a.mov_imm64(R_X11, wvalue_bits(fn) ## i64)
+    @a.cmp_r(R_X0, R_X11)
     @a.b_cond(CC_NE, l_slow)
-    # Check receiver is a WObject instance and load its @shape
-    @a.ldr_x(R_X13, R_SP, rec_off)
-    @a.sub_i(R_X9, R_X13, 4)
-    @a.tst_x_lowmask(R_X9, 4)
-    @a.b_cond(CC_NE, l_slow)
-    @a.lsr_xi(R_X10, R_X9, 48)
-    @a.cbnz_x(R_X10, l_slow)
-    @a.cbz_x(R_X9, l_slow)
-    @a.ldr_x(R_X12, R_X9, 8)     # x12 = receiver.@shape
-    # Dispatch chain across the 1..4 observed shapes!
-    i = 0
-    while i < targets.size
-      t = targets[i]
-      sh = t[0]
-      tjf = t[2]
-      re = t[3]
-      jit_keep(sh)
-      l_next = i + 1 < targets.size ? @a.new_label : l_slow
-      @a.mov_imm64(R_X11, wvalue_bits(sh) ## i64)
-      @a.cmp_r(R_X12, R_X11)
-      @a.b_cond(CC_NE, l_next)
-      # Inlined method body with `this` known to have exact shape `sh` (ptr in R_X9 / rec_off)!
-      emit_poly_inlined_body(re, sh, rec_off, tjf, arg_offs, l_slow)
-      @a.b(l_done)
-      @a.bind(l_next) if i + 1 < targets.size
-      i += 1
-    # Slow fallback for any 5th shape or mutated prototype
-    @a.bind(l_slow)
-    jit_keep(mem_e.b.str)
-    @a.ldr_x(R_X1, R_SP, rec_off)
-    @a.mov_imm64(R_X2, wvalue_bits(mem_e.b.str) ## i64)
-    call_rt(RT_GETV)
-    @a.mov_r(R_X1, R_X0)
-    @a.ldr_x(R_X2, R_SP, rec_off)
+    # Check if 2-arg comparator `return p0.prop < p1.prop` / `>` with warm arg shape!
+    tjf = fn.code.node
+    re = nargs == 2 ? jit_inline_return_expr(tjf) : nil
+    if re != nil && tjf.free.size == 0 && tjf.params.size == 2 && re.kind == :binary && (re.str == "<" || re.str == ">" || re.str == "<=" || re.str == ">=")
+      if re.a.kind == :member && !re.a.has?(F_COMPUTED) && re.b.kind == :member && !re.b.has?(F_COMPUTED) && re.a.b.str == re.b.b.str
+        if re.a.a.kind == :ident && re.a.a.x != nil && re.a.a.x.binding == tjf.params[0] && re.b.a.kind == :ident && re.b.a.x != nil && re.b.a.x.binding == tjf.params[1]
+          ic0 = re.a.x
+          if jit_ic_valid?(ic0) && ic0[0] != 0 && ic0[2] == 0 && ic0[1] != 0
+            ash = ic0[0]
+            asl = ic0[1]
+            # Fast inline `p0.prop < p1.prop` -> zero-FP non-negative finite unsigned compare (cold FP fallback)!
+            l_fp_gm = @a.new_label
+            @a.ldr_x(R_X12, R_SP, arg_offs[0])
+            @a.sub_i(R_X9, R_X12, 4)
+            @a.tst_wobj_bad(R_X9)
+            @a.b_cond(CC_NE, l_slow)
+            @a.cbz_x(R_X9, l_slow)
+            @a.ldr_x(R_X10, R_X9, 8)
+            emit_cmp_shape(R_X10, ash)
+            @a.b_cond(CC_NE, l_slow)
+            emit_slot_load(R_X14, R_X9, asl)
+            @a.ldr_x(R_X12, R_SP, arg_offs[1])
+            @a.sub_i(R_X9, R_X12, 4)
+            @a.tst_wobj_bad(R_X9)
+            @a.b_cond(CC_NE, l_slow)
+            @a.cbz_x(R_X9, l_slow)
+            @a.ldr_x(R_X10, R_X9, 8)
+            emit_cmp_shape(R_X10, ash)
+            @a.b_cond(CC_NE, l_slow)
+            emit_slot_load(R_X15, R_X9, asl)
+            @a.sub_r(R_X9, R_X14, R_X20)
+            @a.sub_r(R_X10, R_X15, R_X20)
+            @a.movz_x(R_X11, 0x7FF0, 3)
+            @a.cmp_r(R_X9, R_X11)
+            @a.b_cond(CC_HS, l_fp_gm)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_HS, l_fp_gm)
+            @a.cmp_r(R_X9, R_X10)
+            cc_gm = re.str == "<" ? CC_LO : (re.str == "<=" ? CC_LS : (re.str == ">" ? CC_HI : CC_HS))
+            @a.movz_x(R_X11, 2)
+            @a.movz_x(R_X12, 1)
+            @a.csel_x(R_X0, R_X11, R_X12, cc_gm)
+            @a.bind(l_done)
+            cb = ->()
+              @a.bind(l_fp_gm)
+              @a.cmp_r(R_X9, R_X21)
+              @a.b_cond(CC_HS, l_slow)
+              @a.cmp_r(R_X10, R_X21)
+              @a.b_cond(CC_HS, l_slow)
+              @a.fmov_d_x(R_D0, R_X9)
+              @a.fmov_d_x(R_D1, R_X10)
+              @a.fcmp_d(R_D0, R_D1)
+              l_tr = @a.new_label
+              emit_f64_cmp_branch(re.str, true, l_tr)
+              @a.movz_x(R_X0, 1)
+              @a.b(l_done)
+              @a.bind(l_tr)
+              @a.movz_x(R_X0, 2)
+              @a.b(l_done)
+              @a.bind(l_slow)
+              @a.mov_imm64(R_X1, wvalue_bits(gv) ## i64)
+              @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
+              call_rt(RT_GETV)
+              @a.mov_r(R_X1, R_X0)
+              @a.mov_imm64(R_X2, wvalue_bits(gv) ## i64)
+              @a.ldr_x(R_X3, R_SP, arg_offs[0])
+              @a.ldr_x(R_X4, R_SP, arg_offs[1])
+              call_rt(RT_CALL_2)
+              @a.b(l_done)
+            add_cold_stub(cb)
+            @tmp_depth -= 2
+            return true
+    # Check if 2-arg selector `return G.cmp(p0, p1) ? p0 : p1` (e.g. `Strength.weakestOf(s1, s2)`!)
+    if re != nil && tjf.free.size == 0 && tjf.params.size == 2 && re.kind == :cond && re.a.kind == :call && re.a.list.size == 2 && re.a.a.kind == :member && !re.a.a.has?(F_COMPUTED) && re.a.a.a.kind == :ident && re.a.a.a.x != nil && re.a.a.a.x.binding == mem_e.a.x.binding
+      if re.b.kind == :ident && re.b.x != nil && re.b.x.binding == tjf.params[0] && re.c.kind == :ident && re.c.x != nil && re.c.x.binding == tjf.params[1] && re.a.list[0].kind == :ident && re.a.list[0].x != nil && re.a.list[0].x.binding == tjf.params[0] && re.a.list[1].kind == :ident && re.a.list[1].x != nil && re.a.list[1].x.binding == tjf.params[1]
+        cm_name = re.a.a.b.str
+        cm_sl = gsh.slot_of(cm_name)
+        if cm_sl >= 0 && (gsh.attrs_of(cm_name) & ATTR_ACCESSOR) == 0
+          cm_fn = gv.get_own(cm_name)
+          if cm_fn.is_a?(JS:Function) && cm_fn.code != nil && cm_fn.code.node.is_a?(JaFunc)
+            cm_jf = cm_fn.code.node
+            cm_re = jit_inline_return_expr(cm_jf)
+            if cm_re != nil && cm_jf.free.size == 0 && cm_jf.params.size == 2 && cm_re.kind == :binary && (cm_re.str == "<" || cm_re.str == ">" || cm_re.str == "<=" || cm_re.str == ">=") && cm_re.a.kind == :member && !cm_re.a.has?(F_COMPUTED) && cm_re.b.kind == :member && !cm_re.b.has?(F_COMPUTED) && cm_re.a.b.str == cm_re.b.b.str && cm_re.a.a.kind == :ident && cm_re.a.a.x != nil && cm_re.a.a.x.binding == cm_jf.params[0] && cm_re.b.a.kind == :ident && cm_re.b.a.x != nil && cm_re.b.a.x.binding == cm_jf.params[1]
+              ic0 = cm_re.a.x
+              if jit_ic_valid?(ic0) && ic0[0] != 0 && ic0[2] == 0 && ic0[1] != 0
+                cm_enc = cm_sl < gsh.inline ? (gsh.ibase + cm_sl) : (0 - (cm_sl - gsh.inline) - 1)
+                jit_keep(cm_fn)
+                emit_slot_load(R_X10, R_X9, cm_enc)
+                @a.mov_imm64(R_X11, wvalue_bits(cm_fn) ## i64)
+                @a.cmp_r(R_X10, R_X11)
+                @a.b_cond(CC_NE, l_slow)
+                ash = ic0[0]
+                asl = ic0[1]
+                l_fp_ws = @a.new_label
+                @a.ldr_x(R_X12, R_SP, arg_offs[0])
+                @a.sub_i(R_X9, R_X12, 4)
+                @a.tst_wobj_bad(R_X9)
+                @a.b_cond(CC_NE, l_slow)
+                @a.cbz_x(R_X9, l_slow)
+                @a.ldr_x(R_X10, R_X9, 8)
+                emit_cmp_shape(R_X10, ash)
+                @a.b_cond(CC_NE, l_slow)
+                emit_slot_load(R_X14, R_X9, asl)
+                @a.ldr_x(R_X13, R_SP, arg_offs[1])
+                @a.sub_i(R_X9, R_X13, 4)
+                @a.tst_wobj_bad(R_X9)
+                @a.b_cond(CC_NE, l_slow)
+                @a.cbz_x(R_X9, l_slow)
+                @a.ldr_x(R_X10, R_X9, 8)
+                emit_cmp_shape(R_X10, ash)
+                @a.b_cond(CC_NE, l_slow)
+                emit_slot_load(R_X15, R_X9, asl)
+                @a.sub_r(R_X9, R_X14, R_X20)
+                @a.sub_r(R_X10, R_X15, R_X20)
+                @a.movz_x(R_X11, 0x7FF0, 3)
+                @a.cmp_r(R_X9, R_X11)
+                @a.b_cond(CC_HS, l_fp_ws)
+                @a.cmp_r(R_X10, R_X11)
+                @a.b_cond(CC_HS, l_fp_ws)
+                @a.cmp_r(R_X9, R_X10)
+                cc_ws = cm_re.str == "<" ? CC_LO : (cm_re.str == "<=" ? CC_LS : (cm_re.str == ">" ? CC_HI : CC_HS))
+                @a.csel_x(R_X0, R_X12, R_X13, cc_ws)
+                @a.bind(l_done)
+                cb = ->()
+                  @a.bind(l_fp_ws)
+                  @a.cmp_r(R_X9, R_X21)
+                  @a.b_cond(CC_HS, l_slow)
+                  @a.cmp_r(R_X10, R_X21)
+                  @a.b_cond(CC_HS, l_slow)
+                  @a.fmov_d_x(R_D0, R_X9)
+                  @a.fmov_d_x(R_D1, R_X10)
+                  @a.fcmp_d(R_D0, R_D1)
+                  l_p0 = @a.new_label
+                  emit_f64_cmp_branch(cm_re.str, true, l_p0)
+                  @a.mov_r(R_X0, R_X13)
+                  @a.b(l_done)
+                  @a.bind(l_p0)
+                  @a.mov_r(R_X0, R_X12)
+                  @a.b(l_done)
+                  @a.bind(l_slow)
+                  @a.mov_imm64(R_X1, wvalue_bits(gv) ## i64)
+                  @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
+                  call_rt(RT_GETV)
+                  @a.mov_r(R_X1, R_X0)
+                  @a.mov_imm64(R_X2, wvalue_bits(gv) ## i64)
+                  @a.ldr_x(R_X3, R_SP, arg_offs[0])
+                  @a.ldr_x(R_X4, R_SP, arg_offs[1])
+                  call_rt(RT_CALL_2)
+                  @a.b(l_done)
+                add_cold_stub(cb)
+                @tmp_depth -= 2
+                return true
+    # General direct `blr fn.@code.@jit_fast_fp`!
+    @a.mov_imm64(R_X10, (wvalue_bits(fn.code) ## i64) - 4)
+    @a.ldr_x(R_X16, R_X10, 96)
+    @a.and_x_lowmask(R_X16, R_X16, 48)
+    @a.cbz_x(R_X16, l_slow)
+    @a.mov_imm64(R_X1, wvalue_bits(gv) ## i64)
+    @a.movz_x(R_X2, nargs)
+    @a.movz_x(R_X3, 0)
+    @a.movz_x(R_X4, 0)
+    @a.movz_x(R_X5, 0)
+    @a.movz_x(R_X6, 0)
+    @a.movz_x(R_X7, 0)
     @a.ldr_x(R_X3, R_SP, arg_offs[0]) if nargs >= 1
     @a.ldr_x(R_X4, R_SP, arg_offs[1]) if nargs >= 2
-    call_rt(RT_CALL_0 + nargs)
+    @a.ldr_x(R_X5, R_SP, arg_offs[2]) if nargs >= 3
+    @a.ldr_x(R_X6, R_SP, arg_offs[3]) if nargs >= 4
+    emit_blr_x16()
+    @a.cmp_i(R_X0, 6)
+    @a.b_cond(CC_EQ, l_slow)
     @a.bind(l_done)
-    @tmp_depth -= (1 + nargs)
+    cb = ->()
+      @a.bind(l_slow)
+      @a.mov_imm64(R_X1, wvalue_bits(gv) ## i64)
+      @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      @a.mov_imm64(R_X2, wvalue_bits(gv) ## i64)
+      @a.ldr_x(R_X3, R_SP, arg_offs[0]) if nargs >= 1
+      @a.ldr_x(R_X4, R_SP, arg_offs[1]) if nargs >= 2
+      @a.ldr_x(R_X5, R_SP, arg_offs[2]) if nargs >= 3
+      @a.ldr_x(R_X6, R_SP, arg_offs[3]) if nargs >= 4
+      call_rt(RT_CALL_0 + nargs)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= nargs
+    @known_shapes = {}
+    @epoch_verified_now = false
     true
+
+  # Dynamic self-updating 4-way polymorphic direct `jit_fast_fp` method dispatch IC (`nargs <= 4`)!
+  # Handles 1..4 receiver shapes with ZERO RT_GETP_MISS / wk_call / wk_act even for shapes discovered AFTER compile!
+  -> gen_dynamic_poly_call_ic(call_e, mem_e, mname)
+    nargs = call_e.list.size
+    pic = i64[13]
+    k = 0
+    while k < 12
+      pic[k] = 0
+      k += 1
+    pic[12] = JS_EPOCH[0]
+    # Pre-seed from Tier-0 call-site profile `call_e.x` if already compiled!
+    if call_e.x.is_a?(Array) && call_e.x.size >= 2
+      np = call_e.x.size / 2
+      np = 4 if np > 4
+      pi = 0
+      slot_w = 0
+      while pi < np
+        sh0 = call_e.x[pi * 2]
+        fn0 = call_e.x[pi * 2 + 1]
+        if sh0.is_a?(JS:Shape) && !sh0.dict && sh0.slot_of(mname) < 0 && fn0.is_a?(JS:Function) && fn0.code != nil && js_shape_proto_method_eq?(sh0, mname, fn0)
+          cd0 = fn0.code
+          if cd0.jit_fp == 0 && cd0.jit_state == 0 && cd0.jit_hits >= 3 && cd0.node.is_a?(JaFunc) && cd0.node != @jf && jit_eligible_fn?(cd0.node) && (cd0.nparams == 0 || cd0.warm_args != nil)
+            jit_compile_and_install(cd0, cd0.warm_args)
+          if cd0.jit_fast_fp != 0
+            pic[slot_w * 3] = wvalue_bits(sh0) ## i64
+            pic[slot_w * 3 + 1] = wvalue_bits(fn0) ## i64
+            pic[slot_w * 3 + 2] = cd0.jit_fast_fp
+            jit_keep(sh0)
+            jit_keep(fn0)
+            slot_w += 1
+        pi += 1
+    jit_keep(pic)
+    jit_keep(mname)
+    pic_p = jit_i64_ptr(pic)
+    # Evaluate receiver `this` and arguments in exact left-to-right JS order!
+    gen_expr_any(mem_e.a)
+    rec_off = push_x(R_X0)
+    arg_offs = []
+    i = 0
+    while i < nargs
+      gen_expr_any(call_e.list[i])
+      arg_offs.push(push_x(R_X0))
+      i += 1
+    l_probe1 = @a.new_label
+    l_do_call = @a.new_label
+    l_miss = @a.new_label
+    l_miss_slow = @a.new_label
+    l_done = @a.new_label
+    # Fast monomorphic inline path (entry 0): ZERO taken branches on hit!
+    @a.mov_imm64(R_X14, pic_p)
+    if !@hoisted_epoch && !@epoch_verified_now
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.ldr_x(R_X11, R_X14, 96)        # pic[12] == cached JS_EPOCH[0]
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_miss)
+    @epoch_verified_now = false
+    @a.ldr_x(R_X1, R_SP, rec_off)     # R_X1 = this
+    @a.sub_i(R_X9, R_X1, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_miss)
+    @a.cbz_x(R_X9, l_miss)
+    @a.ldr_x(R_X12, R_X9, 8)          # R_X12 = receiver.@shape
+    @a.ldr_x(R_X11, R_X14, 0)         # pic[0] = shape0
+    @a.cmp_r(R_X12, R_X11)
+    @a.b_cond(CC_NE, l_probe1)
+    @a.ldr_x(R_X0, R_X14, 8)          # fn0
+    @a.ldr_x(R_X16, R_X14, 16)        # fast_fp0
+    @a.bind(l_do_call)
+    @a.movz_x(R_X2, nargs)
+    @a.ldr_x(R_X3, R_SP, arg_offs[0]) if nargs >= 1
+    @a.ldr_x(R_X4, R_SP, arg_offs[1]) if nargs >= 2
+    @a.ldr_x(R_X5, R_SP, arg_offs[2]) if nargs >= 3
+    @a.ldr_x(R_X6, R_SP, arg_offs[3]) if nargs >= 4
+    emit_blr_x16()
+    @a.cmp_i(R_X0, 6)                 # JSR_SLOW -> slow fallback
+    @a.b_cond(CC_EQ, l_miss_slow)
+    @a.bind(l_done)
+    cb = ->()
+      # Probe PIC entries 1, 2, 3 (polymorphic 2..4-way hit -> jump right back to l_do_call!)
+      @a.bind(l_probe1)
+      l_probe2 = @a.new_label
+      l_probe3 = @a.new_label
+      @a.ldr_x(R_X11, R_X14, 24)
+      @a.cmp_r(R_X12, R_X11)
+      @a.b_cond(CC_NE, l_probe2)
+      @a.ldr_x(R_X0, R_X14, 32)
+      @a.ldr_x(R_X16, R_X14, 40)
+      @a.b(l_do_call)
+      @a.bind(l_probe2)
+      @a.ldr_x(R_X11, R_X14, 48)
+      @a.cmp_r(R_X12, R_X11)
+      @a.b_cond(CC_NE, l_probe3)
+      @a.ldr_x(R_X0, R_X14, 56)
+      @a.ldr_x(R_X16, R_X14, 64)
+      @a.b(l_do_call)
+      @a.bind(l_probe3)
+      @a.ldr_x(R_X11, R_X14, 72)
+      @a.cmp_r(R_X12, R_X11)
+      @a.b_cond(CC_NE, l_miss)
+      @a.ldr_x(R_X0, R_X14, 80)
+      @a.ldr_x(R_X16, R_X14, 88)
+      @a.b(l_do_call)
+      @a.bind(l_miss)
+      jit_keep(call_e)
+      jit_keep(@jf)
+      @a.ldr_x(R_X1, R_SP, rec_off)
+      @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
+      @a.mov_imm64(R_X3, wvalue_bits(pic) ## i64)
+      @a.mov_imm64(R_X4, wvalue_bits(call_e) ## i64)
+      @a.mov_imm64(R_X5, wvalue_bits(@jf) ## i64)
+      call_rt(RT_POLY_CALL_MISS)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, rec_off)
+      @a.ldr_x(R_X3, R_SP, arg_offs[0]) if nargs >= 1
+      @a.ldr_x(R_X4, R_SP, arg_offs[1]) if nargs >= 2
+      @a.ldr_x(R_X5, R_SP, arg_offs[2]) if nargs >= 3
+      @a.ldr_x(R_X6, R_SP, arg_offs[3]) if nargs >= 4
+      call_rt(RT_CALL_0 + nargs)
+      @a.b(l_done)
+      @a.bind(l_miss_slow)
+      @a.ldr_x(R_X1, R_SP, rec_off)
+      @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, rec_off)
+      @a.ldr_x(R_X3, R_SP, arg_offs[0]) if nargs >= 1
+      @a.ldr_x(R_X4, R_SP, arg_offs[1]) if nargs >= 2
+      @a.ldr_x(R_X5, R_SP, arg_offs[2]) if nargs >= 3
+      @a.ldr_x(R_X6, R_SP, arg_offs[3]) if nargs >= 4
+      call_rt(RT_CALL_0 + nargs)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= (1 + nargs)
+    @known_shapes = {}
+    nil
 
   # Check if method return expression only reads known own data slots of `this` + numbers/params!
   -> poly_inline_expr_ok?(e, sh)
@@ -8942,16 +20762,21 @@ OSR_RETURN = 2
   -> gen_array_push_inline(arr_e, val_e, need_val = true)
     bli = local_idx(arr_e)
     r_arr = (bli >= 0 && @info.types[bli] == JT_ANY) ? @info.reg_gpr[bli] : nil
+    is_local_arr = bli >= 0 && @info.local_arrs[bli] == true
     arr_off = -1
     if r_arr == nil
       gen_expr_any(arr_e)
       arr_off = push_x(R_X0)
-    gen_expr_any(val_e)
-    @a.mov_r(R_X12, R_X0)                 # x12 = val
+    if can_i32?(val_e)
+      gen_expr_i32(val_e)
+      emit_box_i32(R_X12, R_X0)
+    else
+      gen_expr_any(val_e)
+      @a.mov_r(R_X12, R_X0)               # x12 = val
     l_slow = @a.new_label
     l_done = @a.new_label
-    # Verify Array.prototype unchanged (skip if hoisted once at OSR loop entry!)
-    if !@hoisted_epoch
+    # Verify Array.prototype unchanged (skip if hoisted or already verified!)
+    if !@hoisted_epoch && !@epoch_verified_now
       ep_now = JS_EPOCH[0]
       @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
       @a.ldr_x(R_X10, R_X9, 0)
@@ -8962,19 +20787,25 @@ OSR_RETURN = 2
       @a.mov_r(R_X13, r_arr)
     else
       @a.ldr_x(R_X13, R_SP, arr_off)
-    @a.lsr_xi(R_X9, R_X13, 48)
-    @a.movz_x(R_X10, 0xFFF4)
-    @a.cmp_r(R_X9, R_X10)
-    @a.b_cond(CC_NE, l_slow)
-    @a.and_x_ptr47(R_X9, R_X13)           # x9 = WArray*
-    @a.ldrb(R_X10, R_X9, 2)               # aflags
-    @a.and_w_lowmask(R_X10, R_X10, 4)
-    @a.cmp_wi(R_X10, 1)                   # JS_AF_ARRAY (plain, no holes, no ext)
-    @a.b_cond(CC_NE, l_slow)
-    @a.ldrsw(R_X10, R_X9, 4)              # start
-    @a.ldrsw(R_X11, R_X9, 8)              # size
-    @a.ldrsw(R_X14, R_X9, 12)             # cap
-    @a.add_r(R_X15, R_X10, R_X11)         # start + size
+    if !is_local_arr
+      @a.lsr_xi(R_X9, R_X13, 48)
+      @a.movz_x(R_X10, 0xFFF4)
+      @a.cmp_r(R_X9, R_X10)
+      @a.b_cond(CC_NE, l_slow)
+      @a.and_x_ptr47(R_X9, R_X13)         # x9 = WArray*
+      @a.ldrb(R_X10, R_X9, 2)             # aflags
+      @a.and_w_lowmask(R_X10, R_X10, 4)
+      @a.cmp_wi(R_X10, 1)                 # JS_AF_ARRAY (plain, no holes, no ext)
+      @a.b_cond(CC_NE, l_slow)
+      @a.ldrsw(R_X10, R_X9, 4)            # start
+      @a.ldrsw(R_X11, R_X9, 8)            # size
+      @a.ldrsw(R_X14, R_X9, 12)           # cap
+      @a.add_r(R_X15, R_X10, R_X11)       # start + size
+    else
+      @a.and_x_ptr47(R_X9, R_X13)         # local `var a = []` guaranteed dense with start == 0!
+      @a.ldrsw(R_X11, R_X9, 8)            # size
+      @a.ldrsw(R_X14, R_X9, 12)           # cap
+      @a.mov_r(R_X15, R_X11)
     @a.cmp_r(R_X15, R_X14)
     @a.b_cond(CC_GE, l_slow)              # full -> grow via RT_ARR_PUSH
     @a.ldr_x(R_X14, R_X9, 16)             # slots
@@ -8995,6 +20826,674 @@ OSR_RETURN = 2
     add_cold_stub(cb)
     @tmp_depth -= 1 if arr_off >= 0
     nil
+
+  # Unified 1-arg `x.indexOf(arg)` fast intrinsic: dispatches inline to String (0xFFF9) OR dense JS Array (0xFFF4)!
+  -> gen_indexof1_intrinsic(recv_e, arg_e)
+    jit_keep("indexOf")
+    gen_expr_any(recv_e)
+    rec_off = push_x(R_X0)
+    gen_expr_any(arg_e)
+    arg_off = push_x(R_X0)
+    l_chk_arr = @a.new_label
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X1, R_SP, rec_off)
+    @a.lsr_xi(R_X9, R_X1, 48)
+    @a.movz_x(R_X10, 0xFFF9)            # String tag
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_NE, l_chk_arr)
+    @a.ldr_x(R_X2, R_SP, arg_off)
+    if arg_e.kind == :string && arg_e.str.size == 1 && arg_e.str.byte_at(0) < 128
+      l_io_rt = @a.new_label
+      l_io_hit = @a.new_label
+      l_io_miss = @a.new_label
+      emit_inline_ascii_indexof1(R_X1, arg_e.str.byte_at(0), false, l_io_rt, l_io_hit, l_io_miss)
+      @a.bind(l_io_hit)
+      emit_box_i32(R_X0, R_X12)
+      @a.b(l_done)
+      @a.bind(l_io_miss)
+      @a.mov_imm64(R_X0, wvalue_bits(~-1.0) ## i64)
+      @a.b(l_done)
+      @a.bind(l_io_rt)
+    call_rt(RT_STR_INDEXOF)
+    @a.b(l_done)
+    @a.bind(l_chk_arr)
+    @a.movz_x(R_X10, 0xFFF4)            # WArray tag
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_NE, l_slow)
+    @a.and_x_ptr47(R_X9, R_X1)
+    @a.ldrb(R_X10, R_X9, 2)
+    @a.and_w_lowmask(R_X10, R_X10, 4)
+    @a.cmp_wi(R_X10, 1)                 # dense plain JS_AF_ARRAY
+    @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X2, R_SP, arg_off)
+    # Fast pure-ARM64 linear identity scan for WObject / null / bool / undef keys (ZERO RT_ARR_INDEXOF call!)
+    l_aio_rt = @a.new_label
+    l_aio_scan = @a.new_label
+    l_aio_lp = @a.new_label
+    l_aio_hit = @a.new_label
+    l_aio_miss = @a.new_label
+    @a.cmp_i(R_X2, 2)
+    @a.b_cond(CC_LS, l_aio_scan)
+    @a.sub_i(R_X10, R_X2, 4)
+    @a.tst_wobj_bad(R_X10)
+    @a.b_cond(CC_NE, l_aio_rt)
+    @a.cbz_x(R_X10, l_aio_rt)
+    @a.ldrb(R_X11, R_X10, 4)
+    @a.cbz_x(R_X11, l_aio_rt)
+    @a.bind(l_aio_scan)
+    @a.ldrsw(R_X10, R_X9, 4)            # start
+    @a.ldrsw(R_X11, R_X9, 8)            # size
+    @a.ldr_x(R_X12, R_X9, 16)           # slots
+    @a.add_r(R_X12, R_X12, R_X10, 3)    # slots + start * 8
+    @a.movz_x(R_X13, 0)
+    @a.bind(l_aio_lp)
+    @a.cmp_w(R_X13, R_X11)
+    @a.b_cond(CC_GE, l_aio_miss)
+    @a.ldr_x_idx(R_X14, R_X12, R_X13)
+    @a.cmp_r(R_X14, R_X2)
+    @a.b_cond(CC_EQ, l_aio_hit)
+    @a.add_wi(R_X13, R_X13, 1)
+    @a.b(l_aio_lp)
+    @a.bind(l_aio_hit)
+    emit_box_i32(R_X0, R_X13)
+    @a.b(l_done)
+    @a.bind(l_aio_miss)
+    @a.mov_imm64(R_X0, wvalue_bits(~-1.0) ## i64)
+    @a.b(l_done)
+    @a.bind(l_aio_rt)
+    call_rt(RT_ARR_INDEXOF)
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @a.ldr_x(R_X1, R_SP, rec_off)
+      @a.mov_imm64(R_X2, wvalue_bits("indexOf") ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, rec_off)
+      @a.ldr_x(R_X3, R_SP, arg_off)
+      call_rt(RT_CALL_1)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= 2
+    nil
+
+  # Inline ARM64 void `arr.splice(idx, 1)` on dense plain JS Array (ZERO RT call, ZERO removed-array allocation!)
+  -> gen_array_splice1_void_inline(arr_e, idx_e, cnt_e)
+    jit_keep("splice")
+    gen_expr_any(arr_e)
+    arr_off = push_x(R_X0)
+    idx_is_i32 = can_i32?(idx_e)
+    if idx_is_i32
+      gen_expr_i32(idx_e)
+      emit_box_i32(R_X0, R_X0)
+    else
+      gen_expr_any(idx_e)
+    idx_off = push_x(R_X0)
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X1, R_SP, arr_off)
+    @a.lsr_xi(R_X9, R_X1, 48)
+    @a.movz_x(R_X10, 0xFFF4)
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_NE, l_slow)
+    @a.and_x_ptr47(R_X9, R_X1)
+    @a.ldrb(R_X10, R_X9, 2)
+    @a.and_w_lowmask(R_X10, R_X10, 4)
+    @a.cmp_wi(R_X10, 1)                 # dense plain JS_AF_ARRAY
+    @a.b_cond(CC_NE, l_slow)
+    # Unbox exact non-negative int32 `idx` < size
+    @a.ldr_x(R_X2, R_SP, idx_off)
+    @a.sub_r(R_X10, R_X2, R_X20)
+    @a.cmp_r(R_X10, R_X21)
+    @a.b_cond(CC_HS, l_slow)
+    @a.fmov_d_x(R_D0, R_X10)
+    @a.fcvtzs_w_d(R_X11, R_D0)
+    @a.scvtf_d_w(R_D1, R_X11)
+    @a.fcmp_d(R_D0, R_D1)
+    @a.b_cond(CC_NE, l_slow)
+    @a.sxtw(R_X11, R_X11)               # x11 = idx (signed)
+    @a.ldrsw(R_X12, R_X9, 8)            # x12 = size
+    @a.cmp_r(R_X11, R_X12)
+    @a.b_cond(CC_HS, l_slow)            # < 0 or >= size -> slow (handles negative/OOB)
+    @a.ldrsw(R_X10, R_X9, 4)            # start
+    @a.ldr_x(R_X13, R_X9, 16)           # slots
+    @a.add_r(R_X13, R_X13, R_X10, 3)    # slots + start * 8
+    @a.sub_i(R_X12, R_X12, 1)           # last = size - 1
+    l_sp_lp = @a.new_label
+    l_sp_end = @a.new_label
+    @a.bind(l_sp_lp)
+    @a.cmp_r(R_X11, R_X12)
+    @a.b_cond(CC_GE, l_sp_end)
+    @a.add_i(R_X14, R_X11, 1)
+    @a.ldr_x_idx(R_X15, R_X13, R_X14)
+    @a.str_x_idx(R_X15, R_X13, R_X11)
+    @a.mov_r(R_X11, R_X14)
+    @a.b(l_sp_lp)
+    @a.bind(l_sp_end)
+    @a.str_x_idx(R_XZR, R_X13, R_X12)   # clear tail slot
+    @a.str_w(R_X12, R_X9, 8)            # size = last
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @a.ldr_x(R_X1, R_SP, arr_off)
+      @a.mov_imm64(R_X2, wvalue_bits("splice") ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, arr_off)
+      @a.ldr_x(R_X3, R_SP, idx_off)
+      @a.mov_imm64(R_X4, wvalue_bits(~1.0) ## i64)
+      call_rt(RT_CALL_2)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= 2
+    nil
+
+  # Guarded dense JS Array fast runtime intrinsic (`slice()`, `indexOf(x)`, `splice(i, 1)`)!
+  -> gen_arr_fast_rt_intrinsic(arr_e, mname, rt_args, rt_id, full_args = nil)
+    jit_keep(mname)
+    full_args = rt_args if full_args == nil
+    gen_expr_any(arr_e)
+    arr_off = push_x(R_X0)
+    a_offs = []
+    i = 0
+    while i < full_args.size
+      gen_expr_any(full_args[i])
+      a_offs.push(push_x(R_X0))
+      i += 1
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X1, R_SP, arr_off)
+    @a.lsr_xi(R_X9, R_X1, 48)
+    @a.movz_x(R_X10, 0xFFF4)
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_NE, l_slow)
+    @a.and_x_ptr47(R_X9, R_X1)
+    @a.ldrb(R_X10, R_X9, 2)
+    @a.and_w_lowmask(R_X10, R_X10, 4)
+    @a.cmp_wi(R_X10, 1)                 # dense plain JS_AF_ARRAY
+    @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X2, R_SP, a_offs[0]) if rt_args.size >= 1
+    call_rt(rt_id)
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @a.ldr_x(R_X1, R_SP, arr_off)
+      @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, arr_off)
+      @a.ldr_x(R_X3, R_SP, a_offs[0]) if full_args.size >= 1
+      @a.ldr_x(R_X4, R_SP, a_offs[1]) if full_args.size >= 2
+      call_rt(RT_CALL_0 + full_args.size)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= (1 + full_args.size)
+    nil
+
+  # Inline dense `arr.pop()` (zero-spill fast path + local-array skip-tag fast path!)
+  -> gen_array_pop_inline(arr_e)
+    jit_keep("pop")
+    bli = local_idx(arr_e)
+    r_arr = (bli >= 0 && @info.types[bli] == JT_ANY) ? @info.reg_gpr[bli] : nil
+    is_local_arr = bli >= 0 && @info.local_arrs[bli] == true
+    if r_arr != nil
+      @a.mov_r(R_X13, r_arr)
+    else
+      gen_expr_any(arr_e)
+      @a.mov_r(R_X13, R_X0)
+    l_slow = @a.new_label
+    l_empty = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch && !@epoch_verified_now
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    if !is_local_arr
+      @a.lsr_xi(R_X9, R_X13, 48)
+      @a.movz_x(R_X10, 0xFFF4)
+      @a.cmp_r(R_X9, R_X10)
+      @a.b_cond(CC_NE, l_slow)
+      @a.and_x_ptr47(R_X9, R_X13)
+      @a.ldrb(R_X10, R_X9, 2)           # aflags
+      @a.and_w_lowmask(R_X10, R_X10, 4)
+      @a.cmp_wi(R_X10, 1)               # dense plain JS_AF_ARRAY
+      @a.b_cond(CC_NE, l_slow)
+      @a.ldrsw(R_X11, R_X9, 8)          # size
+      @a.cbz_x(R_X11, l_empty)
+      @a.sub_wi(R_X11, R_X11, 1)        # new_size = size - 1
+      @a.ldrsw(R_X10, R_X9, 4)          # start
+      @a.add_r(R_X10, R_X10, R_X11)     # idx = start + new_size
+    else
+      @a.and_x_ptr47(R_X9, R_X13)       # local `var a = [...]` guaranteed dense with start == 0!
+      @a.ldrsw(R_X11, R_X9, 8)          # size
+      @a.cbz_x(R_X11, l_empty)
+      @a.sub_wi(R_X11, R_X11, 1)        # new_size = size - 1
+      @a.mov_r(R_X10, R_X11)
+    @a.ldr_x(R_X14, R_X9, 16)           # slots
+    @a.ldr_x_idx(R_X0, R_X14, R_X10)    # val = slots[idx]
+    @a.str_x_idx(R_XZR, R_X14, R_X10)   # clear slot
+    @a.str_w(R_X11, R_X9, 8)            # store new_size
+    @a.b(l_done)
+    @a.bind(l_empty)
+    @a.movz_x(R_X0, 0)
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      arr_off_s = r_arr == nil ? push_x(R_X13) : -1
+      @a.mov_r(R_X1, r_arr != nil ? r_arr : R_X13)
+      @a.mov_imm64(R_X2, wvalue_bits("pop") ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      if r_arr != nil
+        @a.mov_r(R_X2, r_arr)
+      else
+        @a.ldr_x(R_X2, R_SP, arr_off_s)
+      call_rt(RT_CALL_0)
+      @tmp_depth -= 1 if arr_off_s >= 0
+      @a.b(l_done)
+    add_cold_stub(cb)
+    nil
+
+  -> ast_has_return?(n)
+    return false if n == nil
+    if n.is_a?(Array)
+      i = 0
+      while i < n.size
+        return true if ast_has_return?(n[i])
+        i += 1
+      return false
+    return false if !n.is_a?(JsNode)
+    k = n.kind
+    return true if k == :return
+    return false if k == :function || k == :arrow || k == :class
+    ast_has_return?(n.a) || ast_has_return?(n.b) || ast_has_return?(n.c) || ast_has_return?(n.d) || ast_has_return?(n.list)
+
+  # Inline `fn.call(thisArg, a0..a3)` directly to `fn.code.jit_fast_fp` (or inline small static super-calls `Base.call(this, ...)` / `Base.prototype.m.call(this, ...)`!)
+  -> gen_fn_call_inline(fn_e, arg_nodes)
+    r_fc = js_realm()
+    orig_fc = r_fc != nil ? r_fc.intrinsics["%FunctionProto_call%"] : nil
+    return false if JS_FN_OWN_CALL[0] || r_fc == nil || orig_fc == nil || r_fc.function_proto == nil || r_fc.function_proto.get_own("call") != orig_fc
+    jit_keep("call")
+    n = arg_nodes.size       # 1..5 (arg0 = thisArg, arg1.. = forwarded args)
+    # Fast path A: Inline small static `Base.call(this, ...)` and `Base.prototype.m.call(this, ...)` directly into caller!
+    if !@in_cold_stub && @mono_inline_depth < 4 && @a.len <= 5200 && n >= 1 && n <= 4 && arg_nodes[0].kind == :this && !ast_has_call?(arg_nodes) && !ast_has_write?(arg_nodes) && @tmp_depth + 10 <= 56
+      sc_kind = 0
+      cell_sc = nil
+      gv_sc = nil
+      fsh_sc = nil
+      penc_sc = 0
+      pr_sc = nil
+      psh_sc = nil
+      menc_sc = 0
+      target_fn = nil
+      if fn_e.kind == :ident && fn_e.x != nil && fn_e.x.binding != nil && fn_e.x.binding.global? && fn_e.x.binding.writes <= 1
+        cell_sc = wk_cell(fn_e.x.binding)
+        gv_sc = cell_sc.value
+        if gv_sc.is_a?(JS:Function)
+          sc_kind = 1
+          target_fn = gv_sc
+      elsif fn_e.kind == :member && !fn_e.has?(F_COMPUTED) && fn_e.a != nil && fn_e.a.kind == :member && !fn_e.a.has?(F_COMPUTED) && fn_e.a.b.str == "prototype" && fn_e.a.a != nil && fn_e.a.a.kind == :ident && fn_e.a.a.x != nil && fn_e.a.a.x.binding != nil && fn_e.a.a.x.binding.global? && fn_e.a.a.x.binding.writes <= 1
+        cell_sc = wk_cell(fn_e.a.a.x.binding)
+        gv_sc = cell_sc.value
+        if gv_sc.is_a?(JS:Function) && !gv_sc.shape.dict
+          fsh_sc = gv_sc.shape
+          psl_sc = fsh_sc.slot_of("prototype")
+          if psl_sc >= 0 && (fsh_sc.attrs_of("prototype") & ATTR_ACCESSOR) == 0
+            pr_sc = gv_sc.get_own("prototype")
+            if pr_sc.is_a?(JS:Object) && !pr_sc.shape.dict
+              psh_sc = pr_sc.shape
+              msl_sc = psh_sc.slot_of(fn_e.b.str)
+              if msl_sc >= 0 && (psh_sc.attrs_of(fn_e.b.str) & ATTR_ACCESSOR) == 0
+                mf_sc = pr_sc.get_own(fn_e.b.str)
+                if mf_sc.is_a?(JS:Function)
+                  sc_kind = 2
+                  penc_sc = psl_sc < fsh_sc.inline ? (fsh_sc.ibase + psl_sc) : (0 - (psl_sc - fsh_sc.inline) - 1)
+                  menc_sc = msl_sc < psh_sc.inline ? (psh_sc.ibase + msl_sc) : (0 - (msl_sc - psh_sc.inline) - 1)
+                  target_fn = mf_sc
+      if sc_kind != 0 && target_fn.code != nil && target_fn.code.node.is_a?(JaFunc) && !target_fn.shape.dict && target_fn.shape.proto == r_fc.function_proto && target_fn.shape.slot_of("call") < 0
+        tjf = target_fn.code.node
+        can_sc = tjf != @jf && !@inlining_jfs.include?(tjf) && !tjf.class_ctor && tjf.free.size == 0 && tjf.strict == @jf.strict && !tjf.dynamic && !tjf.mapped_args && tjf.args_binding == nil && tjf.simple && !tjf.node.has?(F_GENERATOR) && !tjf.node.has?(F_ASYNC) && tjf.self_binding == nil && !tjf.arrow && !tjf.scope.has_env? && (tjf.body_scope == nil || !tjf.body_scope.has_env?) && tjf.params.size <= 3 && tjf.nlocals <= 6 && tjf.node.b.is_a?(Array) && tjf.node.b.size > 0 && jit_eligible_fn?(tjf)
+        bset_sc = nil
+        if can_sc
+          st_cnt_sc = [0]
+          bset_sc = {}
+          can_sc = mono_inline_ast_ok?(tjf.node.b, tjf, st_cnt_sc, bset_sc, 12) && st_cnt_sc[0] <= 12 && bset_sc.size <= 6
+        if can_sc
+          tsh_sc = target_fn.shape
+          jit_keep(cell_sc)
+          jit_keep(gv_sc)
+          jit_keep(target_fn)
+          jit_keep(tsh_sc)
+          if sc_kind == 2
+            jit_keep(fsh_sc)
+            jit_keep(pr_sc)
+            jit_keep(psh_sc)
+          l_in_slow = @a.new_label
+          l_in_done = @a.new_label
+          l_in_ret = @a.new_label
+          used_slow_sc = false
+          if !@hoisted_epoch && !@epoch_verified_now
+            ep_now = JS_EPOCH[0]
+            @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+            @a.ldr_x(R_X10, R_X9, 0)
+            @a.mov_imm64(R_X11, ep_now)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_NE, l_in_slow)
+            used_slow_sc = true
+          hgo_sc = @hoisted_gobj_shapes[wvalue_bits(cell_sc) ## i64]
+          if sc_kind == 1 && hgo_sc != nil && hgo_sc[0] == gv_sc && hgo_sc[1] == tsh_sc
+            nil
+          else
+            used_slow_sc = true
+            @a.mov_imm64(R_X9, (wvalue_bits(cell_sc) ## i64) - 4)
+            @a.ldr_x(R_X10, R_X9, 8)
+            @a.mov_imm64(R_X11, wvalue_bits(gv_sc) ## i64)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_NE, l_in_slow)
+            if sc_kind == 1
+              @a.sub_i(R_X9, R_X11, 4)
+              @a.ldr_x(R_X10, R_X9, 8)
+              @a.mov_imm64(R_X12, wvalue_bits(tsh_sc) ## i64)
+              @a.cmp_r(R_X10, R_X12)
+              @a.b_cond(CC_NE, l_in_slow)
+            else
+              @a.sub_i(R_X9, R_X11, 4)
+              @a.ldr_x(R_X10, R_X9, 8)
+              @a.mov_imm64(R_X12, wvalue_bits(fsh_sc) ## i64)
+              @a.cmp_r(R_X10, R_X12)
+              @a.b_cond(CC_NE, l_in_slow)
+              emit_slot_load(R_X10, R_X9, penc_sc)
+              @a.mov_imm64(R_X12, wvalue_bits(pr_sc) ## i64)
+              @a.cmp_r(R_X10, R_X12)
+              @a.b_cond(CC_NE, l_in_slow)
+              @a.sub_i(R_X9, R_X12, 4)
+              @a.ldr_x(R_X10, R_X9, 8)
+              @a.mov_imm64(R_X12, wvalue_bits(psh_sc) ## i64)
+              @a.cmp_r(R_X10, R_X12)
+              @a.b_cond(CC_NE, l_in_slow)
+              emit_slot_load(R_X10, R_X9, menc_sc)
+              @a.mov_imm64(R_X12, wvalue_bits(target_fn) ## i64)
+              @a.cmp_r(R_X10, R_X12)
+              @a.b_cond(CC_NE, l_in_slow)
+              @a.sub_i(R_X9, R_X12, 4)
+              @a.ldr_x(R_X10, R_X9, 8)
+              @a.mov_imm64(R_X12, wvalue_bits(tsh_sc) ## i64)
+              @a.cmp_r(R_X10, R_X12)
+              @a.b_cond(CC_NE, l_in_slow)
+          saved_td_sc = @tmp_depth
+          popped_gprs = []
+          new_env = {}
+          if @inline_env != nil && @inline_env[:this] != nil && (@inline_env[:this][0] == :reg_x || @inline_env[:this][0] == :spill_x)
+            if @known_shapes[-2] == nil
+              used_slow_sc = true
+              if @inline_env[:this][0] == :reg_x
+                @a.sub_i(R_X9, @inline_env[:this][1], 4)
+              else
+                @a.ldr_x(R_X9, R_SP, @inline_env[:this][1])
+                @a.sub_i(R_X9, R_X9, 4)
+              @a.tst_wobj_bad(R_X9)
+              @a.b_cond(CC_NE, l_in_slow)
+              @a.cbz_x(R_X9, l_in_slow)
+            new_env[:this] = @inline_env[:this]
+          else
+            @a.ldr_x(R_X13, R_SP, JF_SLOT_THIS)
+            if @known_shapes[-2] == nil
+              used_slow_sc = true
+              @a.sub_i(R_X9, R_X13, 4)
+              @a.tst_wobj_bad(R_X9)
+              @a.b_cond(CC_NE, l_in_slow)
+              @a.cbz_x(R_X9, l_in_slow)
+            if @free_gprs.size > 0
+              r_th_sc = @free_gprs.pop
+              popped_gprs.push(r_th_sc)
+              @a.mov_r(r_th_sc, R_X13)
+              new_env[:this] = [:reg_x, r_th_sc]
+            else
+              new_env[:this] = [:spill_x, JF_SLOT_THIS]
+          pi_sc = 0
+          while pi_sc < tjf.params.size
+            pb_sc = tjf.params[pi_sc]
+            if pi_sc + 1 < n
+              ae_sc = arg_nodes[pi_sc + 1]
+              pw_sc = inline_stmt_writes_binding?(tjf.node.b, pb_sc)
+              aliased_sc = false
+              if !pw_sc && ae_sc.kind == :ident && ae_sc.x != nil && ae_sc.x.binding != nil
+                if @inline_env != nil && @inline_env[ae_sc.x.binding] != nil && (@inline_env[ae_sc.x.binding][0] == :reg_x || @inline_env[ae_sc.x.binding][0] == :spill_x)
+                  new_env[pb_sc] = @inline_env[ae_sc.x.binding]
+                  aliased_sc = true
+                elsif @inline_env == nil
+                  li_ae = local_idx(ae_sc)
+                  if li_ae >= 0 && @info.types[li_ae] == JT_ANY && @info.reg_gpr[li_ae] != nil
+                    new_env[pb_sc] = [:reg_x, @info.reg_gpr[li_ae]]
+                    aliased_sc = true
+              if !aliased_sc
+                gen_expr_any(ae_sc)
+                if @free_gprs.size > 0
+                  r_p_sc = @free_gprs.pop
+                  popped_gprs.push(r_p_sc)
+                  @a.mov_r(r_p_sc, R_X0)
+                  new_env[pb_sc] = [:reg_x, r_p_sc]
+                else
+                  poff_sc = push_x(R_X0)
+                  new_env[pb_sc] = [:spill_x, poff_sc]
+            else
+              zoff_sc = push_x(R_XZR)
+              new_env[pb_sc] = [:spill_x, zoff_sc]
+            pi_sc += 1
+          bset_sc.keys.each ->(lb_sc)
+            if new_env[lb_sc] == nil
+              if @free_gprs.size > 0
+                r_l_sc = @free_gprs.pop
+                popped_gprs.push(r_l_sc)
+                @a.movz_x(r_l_sc, 0)
+                new_env[lb_sc] = [:reg_x, r_l_sc]
+              else
+                loff_sc = push_x(R_XZR)
+                new_env[lb_sc] = [:spill_x, loff_sc]
+          sub_tps_sc = {}
+          collect_this_prop_shapes(tjf.node.b, sub_tps_sc)
+          old_env = @inline_env
+          old_l_ret = @l_ret
+          old_ret_mode = @inline_ret_mode
+          old_this_sh = @inline_this_sh
+          old_tps = @this_prop_shapes
+          old_owned_g = @cur_arm_owned_gprs
+          old_knull = @known_null
+          old_knonnull = @known_nonnull
+          old_itio = @inline_this_is_outer
+          always_ret_sc = stmts_always_return?(tjf.node.b)
+          has_ret_sc = ast_has_return?(tjf.node.b)
+          in_ksh_sc = {}
+          in_ksh_sc[-2] = @known_shapes[-2] if @known_shapes[-2] != nil
+          @inline_env = new_env
+          @l_ret = l_in_ret
+          @inline_ret_mode = :any
+          @inline_this_sh = in_ksh_sc[-2] != nil ? wvalue_from_bits(in_ksh_sc[-2]) : nil
+          @this_prop_shapes = sub_tps_sc
+          @cur_arm_owned_gprs = nil
+          @known_shapes = in_ksh_sc
+          @known_null = {}
+          @known_nonnull = {}
+          @inline_this_is_outer = false
+          @epoch_verified_now = true
+          @mono_inline_depth += 1
+          @inlining_jfs.push(tjf)
+          gen_stmts(tjf.node.b)
+          @a.movz_x(R_X0, 0) if !always_ret_sc
+          @a.bind(l_in_ret)
+          post_ksh_sc = @known_shapes
+          post_ep_sc = @epoch_verified_now
+          @inlining_jfs.pop
+          @mono_inline_depth -= 1
+          @inline_env = old_env
+          @l_ret = old_l_ret
+          @inline_ret_mode = old_ret_mode
+          @inline_this_sh = old_this_sh
+          @this_prop_shapes = old_tps
+          @cur_arm_owned_gprs = old_owned_g
+          @known_null = old_knull
+          @known_nonnull = old_knonnull
+          @inline_this_is_outer = old_itio
+          pgi = popped_gprs.size - 1
+          while pgi >= 0
+            @free_gprs.push(popped_gprs[pgi])
+            pgi -= 1
+          @tmp_depth = saved_td_sc
+          if used_slow_sc
+            @a.bind(l_in_done)
+            cb_sc_in = ->()
+              @a.bind(l_in_slow)
+              sv_ks_cb = @known_shapes
+              @known_shapes = {}
+              gen_expr_any(fn_e)
+              fn_off_cb = push_x(R_X0)
+              a_offs_cb = []
+              ci_cb = 0
+              while ci_cb < n
+                gen_expr_any(arg_nodes[ci_cb])
+                a_offs_cb.push(push_x(R_X0))
+                ci_cb += 1
+              @a.ldr_x(R_X1, R_SP, fn_off_cb)
+              @a.mov_imm64(R_X2, wvalue_bits("call") ## i64)
+              call_rt(RT_GETV)
+              @a.mov_r(R_X1, R_X0)
+              @a.ldr_x(R_X2, R_SP, fn_off_cb)
+              @a.ldr_x(R_X3, R_SP, a_offs_cb[0])
+              @a.ldr_x(R_X4, R_SP, a_offs_cb[1]) if n >= 2
+              @a.ldr_x(R_X5, R_SP, a_offs_cb[2]) if n >= 3
+              @a.ldr_x(R_X6, R_SP, a_offs_cb[3]) if n >= 4
+              call_rt(RT_CALL_0 + n)
+              @tmp_depth -= (1 + n)
+              @known_shapes = sv_ks_cb
+              @a.b(l_in_done)
+            add_cold_stub(cb_sc_in)
+            @known_shapes = {}
+            @epoch_verified_now = false
+          elsif !has_ret_sc
+            @known_shapes = post_ksh_sc
+            @epoch_verified_now = post_ep_sc
+            @inline_this_sh = wvalue_from_bits(post_ksh_sc[-2]) if @inline_env != nil && post_ksh_sc[-2] != nil
+          else
+            @known_shapes = {}
+            @epoch_verified_now = false
+          return true
+    gen_expr_any(fn_e)
+    fn_off = push_x(R_X0)
+    arg_offs = []
+    i = 0
+    while i < n
+      gen_expr_any(arg_nodes[i])
+      arg_offs.push(push_x(R_X0))
+      i += 1
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch && !@epoch_verified_now
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    # Eagerly compile known static `.call` target (e.g. `Constraint.call`, `BinaryConstraint.call`, `BinaryConstraint.prototype.addToGraph.call`)!
+    if fn_e.kind == :ident && fn_e.x != nil && fn_e.x.binding != nil && fn_e.x.binding.global?
+      gv_fc = wk_cell(fn_e.x.binding).value
+      if gv_fc.is_a?(JS:Function) && gv_fc.code != nil && gv_fc.code.jit_fp == 0 && gv_fc.code.jit_state == 0 && gv_fc.code.node.is_a?(JaFunc) && gv_fc.code.node != @jf && jit_eligible_fn?(gv_fc.code.node)
+        jit_compile_and_install(gv_fc.code, gv_fc.code.warm_args)
+    elsif fn_e.kind == :member && !fn_e.has?(F_COMPUTED) && fn_e.a != nil && fn_e.a.kind == :member && !fn_e.a.has?(F_COMPUTED) && fn_e.a.b.str == "prototype" && fn_e.a.a != nil && fn_e.a.a.kind == :ident && fn_e.a.a.x != nil && fn_e.a.a.x.binding != nil && fn_e.a.a.x.binding.global?
+      gv_c = wk_cell(fn_e.a.a.x.binding).value
+      if gv_c.is_a?(JS:Function)
+        pr_c = gv_c.get_own("prototype")
+        if pr_c.is_a?(JS:Object)
+          mf_c = pr_c.get_own(fn_e.b.str)
+          if mf_c.is_a?(JS:Function) && mf_c.code != nil && mf_c.code.jit_fp == 0 && mf_c.code.jit_state == 0 && mf_c.code.node.is_a?(JaFunc) && mf_c.code.node != @jf && jit_eligible_fn?(mf_c.code.node)
+            jit_compile_and_install(mf_c.code, mf_c.code.warm_args)
+    # Guard receiver `fn` is a JS:Function with `jit_fast_fp != 0` AND `thisArg` is a WObject (no sloppy ToObject needed!)
+    @a.ldr_x(R_X0, R_SP, fn_off)
+    @a.sub_i(R_X9, R_X0, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_slow)
+    @a.cbz_x(R_X9, l_slow)
+    @a.ldrb(R_X10, R_X9, 4)
+    @a.and_w_lowmask(R_X10, R_X10, 4)
+    @a.cmp_wi(R_X10, 2)                 # KIND_FUNCTION
+    @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X10, R_X9, 24)           # fn.@code
+    @a.sub_i(R_X10, R_X10, 4)
+    @a.ldr_x(R_X16, R_X10, 96)          # code.@jit_fast_fp
+    @a.and_x_lowmask(R_X16, R_X16, 48)
+    @a.cbz_x(R_X16, l_slow)
+    @a.ldr_x(R_X1, R_SP, arg_offs[0])   # thisArg
+    @a.sub_i(R_X9, R_X1, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_slow)
+    @a.cbz_x(R_X9, l_slow)
+    @a.movz_x(R_X2, n - 1)
+    @a.ldr_x(R_X3, R_SP, arg_offs[1]) if n >= 2
+    @a.ldr_x(R_X4, R_SP, arg_offs[2]) if n >= 3
+    @a.ldr_x(R_X5, R_SP, arg_offs[3]) if n >= 4
+    @a.ldr_x(R_X6, R_SP, arg_offs[4]) if n >= 5
+    emit_blr_x16()
+    @a.cmp_i(R_X0, 6)                   # JSR_SLOW
+    @a.b_cond(CC_EQ, l_slow)
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @a.ldr_x(R_X1, R_SP, fn_off)
+      @a.mov_imm64(R_X2, wvalue_bits("call") ## i64)
+      call_rt(RT_GETV)
+      if n <= 4
+        @a.mov_r(R_X1, R_X0)
+        @a.ldr_x(R_X2, R_SP, fn_off)
+        @a.ldr_x(R_X3, R_SP, arg_offs[0])
+        @a.ldr_x(R_X4, R_SP, arg_offs[1]) if n >= 2
+        @a.ldr_x(R_X5, R_SP, arg_offs[2]) if n >= 3
+        @a.ldr_x(R_X6, R_SP, arg_offs[3]) if n >= 4
+        call_rt(RT_CALL_0 + n)
+      else
+        cf_sv = push_x(R_X0)
+        call_rt(RT_NEW_ARR)
+        ca_sv = push_x(R_X0)
+        qi = 0
+        while qi < n
+          @a.ldr_x(R_X0, R_SP, arg_offs[qi])
+          emit_inline_push_to_off(ca_sv, R_X0)
+          qi += 1
+        @a.ldr_x(R_X1, R_SP, cf_sv)
+        @a.ldr_x(R_X2, R_SP, fn_off)
+        @a.ldr_x(R_X3, R_SP, ca_sv)
+        call_rt(RT_CALL_N)
+        @tmp_depth -= 2
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= (1 + n)
+    @known_shapes = {}
+    @epoch_verified_now = false
+    true
 
   # ---- Inlined Dense Higher-Order Array Methods: map / filter / reduce ----
   # Guards: epoch unchanged (Array.prototype + species untouched), receiver is dense plain array!
@@ -9375,7 +21874,7 @@ OSR_RETURN = 2
       @a.ldr_x(R_X4, R_SP, base + 8) if n >= 2
       @a.ldr_x(R_X5, R_SP, base + 16) if n >= 3
       @a.ldr_x(R_X6, R_SP, base + 24) if n >= 4
-      @a.blr(R_X16)
+      emit_blr_x16()
       @a.cmp_i(R_X0, 6)   # JSR_SLOW from fast_rec
       @a.b_cond(CC_EQ, l_slow)
       @a.b(l_done)
@@ -9389,6 +21888,8 @@ OSR_RETURN = 2
       call_rt(RT_CALL_0 + n)
       @a.bind(l_done)
       @tmp_depth -= (n + 2)
+      @known_shapes = {}
+      @epoch_verified_now = false
       return nil
     # > 4 arguments: build Array and call RT_CALL_N
     call_rt(RT_NEW_ARR)
@@ -9403,15 +21904,139 @@ OSR_RETURN = 2
     @a.ldr_x(R_X2, R_SP, a_off - 16)
     call_rt(RT_CALL_N)
     @tmp_depth -= 3
+    @known_shapes = {}
+    @epoch_verified_now = false
     nil
 
   -> gen_new_any(e)
     n = e.list.size
-    # Fast path: known pure field-init constructor `new C(a0..ak)` -> direct shaped RT_LIT (ZERO wk_call!)
+    # Fast path 0: `new Array()` or `new Array(n)` -> direct 1-malloc inline JS Array!
+    if (n == 0 || n == 1) && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && e.a.x.binding.global?
+      r_na = js_realm()
+      arr_ctor = r_na.intrinsics["Array"]
+      cell_na = wk_cell(e.a.x.binding)
+      if arr_ctor != nil && cell_na.value == arr_ctor
+        jit_keep(cell_na)
+        jit_keep(arr_ctor)
+        a0_off_na = -1
+        if n == 1
+          gen_expr_any(e.list[0])
+          a0_off_na = push_x(R_X0)
+        l_slow_na = @a.new_label
+        l_done_na = @a.new_label
+        if !@hoisted_epoch && !@epoch_verified_now
+          ep_now = JS_EPOCH[0]
+          @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+          @a.ldr_x(R_X10, R_X9, 0)
+          @a.mov_imm64(R_X11, ep_now)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_slow_na)
+        @a.mov_imm64(R_X9, (wvalue_bits(cell_na) ## i64) - 4)
+        @a.ldr_x(R_X10, R_X9, 8)
+        @a.mov_imm64(R_X11, wvalue_bits(arr_ctor) ## i64)
+        @a.cmp_r(R_X10, R_X11)
+        @a.b_cond(CC_NE, l_slow_na)
+        if n == 0
+          call_rt(RT_NEW_ARR)
+        else
+          @a.ldr_x(R_X1, R_SP, a0_off_na)
+          call_rt(RT_NEW_ARR_N)
+        @a.bind(l_done_na)
+        cb_na = ->()
+          @a.bind(l_slow_na)
+          @a.mov_imm64(R_X1, wvalue_bits(cell_na) ## i64)
+          call_rt(RT_GGET)
+          ic_na = i64[8]
+          jit_keep(ic_na)
+          @a.mov_r(R_X1, R_X0)
+          @a.mov_imm64(R_X2, wvalue_bits(ic_na) ## i64)
+          @a.mov_imm64(R_X3, wvalue_bits(0) ## i64)
+          @a.ldr_x(R_X4, R_SP, a0_off_na) if n == 1
+          call_rt(RT_NEW_0 + n)
+          @a.b(l_done_na)
+        add_cold_stub(cb_na)
+        @tmp_depth -= n
+        return nil
+      # Fast path 0b: `new Map()` or `new Set()` (0 args) -> direct RT_NEW_MAP / RT_NEW_SET (skips js_construct + js_coll_ctor!)
+      if n == 0
+        map_ctor = r_na.intrinsics["Map"]
+        set_ctor = r_na.intrinsics["Set"]
+        is_mc = map_ctor != nil && cell_na.value == map_ctor
+        is_sc = !is_mc && set_ctor != nil && cell_na.value == set_ctor
+        if is_mc || is_sc
+          ctor_c = is_mc ? map_ctor : set_ctor
+          jit_keep(cell_na)
+          jit_keep(ctor_c)
+          l_slow_mc = @a.new_label
+          l_done_mc = @a.new_label
+          if !@hoisted_epoch && !@epoch_verified_now
+            ep_now = JS_EPOCH[0]
+            @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+            @a.ldr_x(R_X10, R_X9, 0)
+            @a.mov_imm64(R_X11, ep_now)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_NE, l_slow_mc)
+          @a.mov_imm64(R_X9, (wvalue_bits(cell_na) ## i64) - 4)
+          @a.ldr_x(R_X10, R_X9, 8)
+          @a.mov_imm64(R_X11, wvalue_bits(ctor_c) ## i64)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_slow_mc)
+          coll_hint = i64[2]
+          coll_hint[0] = 8
+          coll_hint[1] = 16
+          jit_keep(coll_hint)
+          @a.mov_imm64(R_X1, wvalue_bits(coll_hint) ## i64)
+          call_rt(is_mc ? RT_NEW_MAP : RT_NEW_SET)
+          @a.bind(l_done_mc)
+          cb_mc = ->()
+            @a.bind(l_slow_mc)
+            @a.mov_imm64(R_X1, wvalue_bits(cell_na) ## i64)
+            call_rt(RT_GGET)
+            ic_mc = i64[8]
+            jit_keep(ic_mc)
+            @a.mov_r(R_X1, R_X0)
+            @a.mov_imm64(R_X2, wvalue_bits(ic_mc) ## i64)
+            @a.mov_imm64(R_X3, wvalue_bits(0) ## i64)
+            call_rt(RT_NEW_0)
+            @a.b(l_done_mc)
+          add_cold_stub(cb_mc)
+          return nil
+    # Fast path 1: known pure field-init constructor `new C(a0..ak)` (params, literals, `p || lit`, `[]`, `Global.prop`!) -> direct shaped alloc!
     if n <= 6 && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && e.a.x.binding.global?
       cell = wk_cell(e.a.x.binding)
       ci = jit_pure_ctor_info(cell.value)
-      if ci != nil && ci[6] && ci[2].size <= 6 && ci[1].params.size == ci[2].size
+      can_lit_fp1 = false
+      gprop_specs = {}
+      has_extra_fp1 = false
+      if ci != nil && ci[2].size <= (JS_GC_ON[0] ? 6 : 8)
+        can_lit_fp1 = true
+        fi0 = 0
+        while fi0 < ci[3].size && can_lit_fp1
+          ex0 = ci[3][fi0]
+          ek0 = ex0.kind
+          if ek0 == :num || ek0 == :true || ek0 == :false || ek0 == :null || ek0 == :string || (ek0 == :ident && ex0.x != nil && ex0.x.binding != nil && ex0.x.binding.kind == :param && ex0.x.binding.scope.func == ci[1])
+            nil
+          elsif !JS_GC_ON[0] && ek0 == :array && ex0.list != nil && ex0.list.size == 0
+            has_extra_fp1 = true
+          elsif !JS_GC_ON[0] && !JS_HAS_HTMLDDA[0] && ek0 == :logical && ex0.str == "||"
+            has_extra_fp1 = true
+          elsif !JS_GC_ON[0] && ek0 == :member && !ex0.has?(F_COMPUTED) && ex0.a != nil && ex0.a.kind == :ident && ex0.a.x != nil && ex0.a.x.binding != nil && ex0.a.x.binding.global?
+            gcell = wk_cell(ex0.a.x.binding)
+            gv = gcell != nil ? gcell.value : nil
+            if gv.is_a?(JS:Base) && !gv.shape.dict && js_ivar_cacheable?(gv)
+              gsh = gv.shape
+              gsl = gsh.slot_of(ex0.b.str)
+              if gsl >= 0 && gsl < gsh.inline && (gsh.attrs_of(ex0.b.str) & ATTR_ACCESSOR) == 0
+                gprop_specs[fi0] = [gcell, gv, gsh, gsh.ibase + gsl]
+                has_extra_fp1 = true
+              else
+                can_lit_fp1 = false
+            else
+              can_lit_fp1 = false
+          else
+            can_lit_fp1 = false
+          fi0 += 1
+      if can_lit_fp1
         fv = ci[0]
         cjf = ci[1]
         keys = ci[2]
@@ -9429,7 +22054,7 @@ OSR_RETURN = 2
           ai += 1
         l_slow = @a.new_label
         l_done = @a.new_label
-        if !@hoisted_epoch
+        if !@hoisted_epoch && !@epoch_verified_now
           ep_now = JS_EPOCH[0]
           @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
           @a.ldr_x(R_X10, R_X9, 0)
@@ -9441,20 +22066,166 @@ OSR_RETURN = 2
         @a.mov_imm64(R_X11, wvalue_bits(fv) ## i64)
         @a.cmp_r(R_X10, R_X11)
         @a.b_cond(CC_NE, l_slow)
-        @a.mov_imm64(R_X1, wvalue_bits(final_sh) ## i64)
-        @a.movz_x(R_X2, 0)
-        @a.movz_x(R_X3, 0)
-        @a.movz_x(R_X4, 0)
-        @a.movz_x(R_X5, 0)
-        @a.movz_x(R_X6, 0)
-        @a.movz_x(R_X7, 0)
-        fi = 0
-        while fi < keys.size
-          pi = cjf.params.index(exprs[fi].x.binding)
-          if pi != nil && pi < n
-            @a.ldr_x(R_X2 + fi, R_SP, arg_offs[pi])
-          fi += 1
-        call_rt(RT_LIT)
+        # Guard any GlobalObj.prop fields BEFORE allocating the instance (so l_slow is 100% clean!)
+        gprop_offs = {}
+        gprop_specs.each ->(fidx, sp)
+          jit_keep(sp[0])
+          jit_keep(sp[1])
+          jit_keep(sp[2])
+          hgo_ct = @hoisted_gobj_shapes[wvalue_bits(sp[0]) ## i64]
+          if hgo_ct != nil && hgo_ct[0] == sp[1] && hgo_ct[1] == sp[2]
+            @a.mov_imm64(R_X9, (wvalue_bits(sp[1]) ## i64) - 4)
+            @a.ldr_x(R_X10, R_X9, (sp[3] + 1) * 8)
+            gprop_offs[fidx] = push_x(R_X10)
+          else
+            @a.mov_imm64(R_X9, (wvalue_bits(sp[0]) ## i64) - 4)
+            @a.ldr_x(R_X10, R_X9, 8)
+            @a.mov_imm64(R_X11, wvalue_bits(sp[1]) ## i64)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_NE, l_slow)
+            @a.sub_i(R_X9, R_X10, 4)
+            @a.ldr_x(R_X10, R_X9, 8)
+            @a.mov_imm64(R_X11, wvalue_bits(sp[2]) ## i64)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_NE, l_slow)
+            @a.ldr_x(R_X10, R_X9, (sp[3] + 1) * 8)
+            gprop_offs[fidx] = push_x(R_X10)
+        # Guard `||` params against BigInt (`kind == 0`, e.g. `0n` is falsy!) BEFORE allocating!
+        if has_extra_fp1
+          fi_or = 0
+          while fi_or < keys.size
+            ex_or = exprs[fi_or]
+            if ex_or.kind == :logical && ex_or.str == "||"
+              pi_or = cjf.params.index(ex_or.a.x.binding)
+              if pi_or != nil && pi_or < n
+                l_or_notobj = @a.new_label
+                @a.ldr_x(R_X10, R_SP, arg_offs[pi_or])
+                @a.sub_i(R_X9, R_X10, 4)
+                @a.tst_wobj_bad(R_X9)
+                @a.b_cond(CC_NE, l_or_notobj)
+                @a.cbz_x(R_X9, l_or_notobj)
+                @a.ldrb(R_X10, R_X9, 4)
+                @a.cbz_x(R_X10, l_slow)
+                @a.bind(l_or_notobj)
+            fi_or += 1
+        # Pre-allocate any empty `[]` fields BEFORE `emit_alloc_obj_inline` so R_X9 stays intact!
+        arr_fld_offs = {}
+        if has_extra_fp1
+          fi_a = 0
+          while fi_a < keys.size
+            if exprs[fi_a].kind == :array
+              if !JS_GC_ON[0] && !JS_MULTI_REALM[0]
+                emit_alloc_arr0_inline()
+              else
+                call_rt(RT_NEW_ARR)
+              arr_fld_offs[fi_a] = push_x(R_X0)
+            fi_a += 1
+        if !JS_GC_ON[0]
+          emit_alloc_obj_inline(final_sh)
+          fi = 0
+          while fi < keys.size
+            ex = exprs[fi]
+            ek = ex.kind
+            if ek == :ident
+              pi = cjf.params.index(ex.x.binding)
+              if pi != nil && pi < n
+                @a.ldr_x(R_X10, R_SP, arg_offs[pi])
+                @a.str_x(R_X10, R_X9, 24 + fi * 8)
+            elsif ek == :num
+              @a.mov_imm64(R_X10, wvalue_bits(ex.a) ## i64)
+              @a.str_x(R_X10, R_X9, 24 + fi * 8)
+            elsif ek == :true
+              @a.movz_x(R_X10, 2)
+              @a.str_x(R_X10, R_X9, 24 + fi * 8)
+            elsif ek == :false
+              @a.movz_x(R_X10, 1)
+              @a.str_x(R_X10, R_X9, 24 + fi * 8)
+            elsif ek == :null
+              @a.ldr_x(R_X10, R_X19, RT_K_NULL_BITS * 8)
+              @a.str_x(R_X10, R_X9, 24 + fi * 8)
+            elsif ek == :string
+              jit_keep(ex.str)
+              @a.mov_imm64(R_X10, wvalue_bits(ex.str) ## i64)
+              @a.str_x(R_X10, R_X9, 24 + fi * 8)
+            elsif ek == :array
+              @a.ldr_x(R_X10, R_SP, arr_fld_offs[fi])
+              @a.str_x(R_X10, R_X9, 24 + fi * 8)
+            elsif ek == :member
+              @a.ldr_x(R_X10, R_SP, gprop_offs[fi])
+              @a.str_x(R_X10, R_X9, 24 + fi * 8)
+            elsif ek == :logical && ex.str == "||"
+              pi = cjf.params.index(ex.a.x.binding)
+              def_e = ex.b
+              l_or_def = @a.new_label
+              l_or_set = @a.new_label
+              if pi != nil && pi < n
+                @a.ldr_x(R_X10, R_SP, arg_offs[pi])
+                # Pure-integer truthy check (ZERO FP crossings, preserves R_X9=obj_ptr and R_X0=obj_wval!)
+                # Falsy: 0(undef), 1(false), NULL, +0.0, -0.0, NaN, "".
+                @a.cmp_i(R_X10, 1)
+                @a.b_cond(CC_LS, l_or_def)
+                @a.ldr_x(R_X11, R_X19, RT_K_NULL_BITS * 8)
+                @a.cmp_r(R_X10, R_X11)
+                @a.b_cond(CC_EQ, l_or_def)
+                @a.mov_imm64(R_X11, -1970324836974592)  # 0xFFF9000000000000 ("")
+                @a.cmp_r(R_X10, R_X11)
+                @a.b_cond(CC_EQ, l_or_def)
+                @a.sub_r(R_X11, R_X10, R_X20)
+                @a.cmp_r(R_X11, R_X21)
+                @a.b_cond(CC_HS, l_or_set)
+                @a.lsl_xi(R_X11, R_X11, 1)
+                @a.cbz_x(R_X11, l_or_def)
+                @a.lsr_xi(R_X12, R_X11, 53)
+                @a.cmp_i(R_X12, 2047)
+                @a.b_cond(CC_NE, l_or_set)
+                @a.lsl_xi(R_X12, R_X11, 11)
+                @a.cbnz_x(R_X12, l_or_def)
+                @a.b(l_or_set)
+              @a.bind(l_or_def)
+              if def_e.kind == :num
+                @a.mov_imm64(R_X10, wvalue_bits(def_e.a) ## i64)
+              elsif def_e.kind == :true
+                @a.movz_x(R_X10, 2)
+              elsif def_e.kind == :false
+                @a.movz_x(R_X10, 1)
+              elsif def_e.kind == :null
+                @a.ldr_x(R_X10, R_X19, RT_K_NULL_BITS * 8)
+              elsif def_e.kind == :string
+                jit_keep(def_e.str)
+                @a.mov_imm64(R_X10, wvalue_bits(def_e.str) ## i64)
+              @a.bind(l_or_set)
+              @a.str_x(R_X10, R_X9, 24 + fi * 8)
+            fi += 1
+          @tmp_depth -= (gprop_offs.size + arr_fld_offs.size)
+        else
+          @a.mov_imm64(R_X1, wvalue_bits(final_sh) ## i64)
+          @a.movz_x(R_X2, 0)
+          @a.movz_x(R_X3, 0)
+          @a.movz_x(R_X4, 0)
+          @a.movz_x(R_X5, 0)
+          @a.movz_x(R_X6, 0)
+          @a.movz_x(R_X7, 0)
+          fi = 0
+          while fi < keys.size
+            ex = exprs[fi]
+            ek = ex.kind
+            if ek == :ident
+              pi = cjf.params.index(ex.x.binding)
+              if pi != nil && pi < n
+                @a.ldr_x(R_X2 + fi, R_SP, arg_offs[pi])
+            elsif ek == :num
+              @a.mov_imm64(R_X2 + fi, wvalue_bits(ex.a) ## i64)
+            elsif ek == :true
+              @a.movz_x(R_X2 + fi, 2)
+            elsif ek == :false
+              @a.movz_x(R_X2 + fi, 1)
+            elsif ek == :null
+              @a.ldr_x(R_X2 + fi, R_X19, RT_K_NULL_BITS * 8)
+            elsif ek == :string
+              jit_keep(ex.str)
+              @a.mov_imm64(R_X2 + fi, wvalue_bits(ex.str) ## i64)
+            fi += 1
+          call_rt(RT_LIT)
         @a.bind(l_done)
         cb = ->()
           @a.bind(l_slow)
@@ -9482,8 +22253,8 @@ OSR_RETURN = 2
             a_sv = push_x(R_X0)
             k2 = 0
             while k2 < n
-              @a.ldr_x(R_X10, R_SP, arg_offs[k2])
-              emit_inline_push_to_off(a_sv, R_X10)
+              @a.ldr_x(R_X0, R_SP, arg_offs[k2])
+              emit_inline_push_to_off(a_sv, R_X0)
               k2 += 1
             @a.ldr_x(R_X1, R_SP, f_sv)
             @a.ldr_x(R_X2, R_SP, a_sv)
@@ -9493,6 +22264,137 @@ OSR_RETURN = 2
         add_cold_stub(cb)
         @tmp_depth -= n
         return nil
+      # Fast path 2: ANY general JS constructor `new Ctor(a0..a4)` -> RT_NEW_OBJ(root_shape) + direct `blr jit_fast_fp`!
+      fv_g = cell.value
+      if n <= 5 && fv_g.is_a?(JS:Function) && !fv_g.is_a?(JS:Method) && fv_g.code != nil && fv_g.code.node.is_a?(JaFunc) && (fv_g.code.flags & CODE_CTOR) != 0 && (fv_g.code.flags & CODE_DERIVED) == 0 && jit_eligible_fn?(fv_g.code.node)
+        proto_g = fv_g.get("prototype", fv_g)
+        if proto_g.is_a?(JS:Object) && !proto_g.shape.dict && !fv_g.shape.dict
+          fsh_g = fv_g.shape
+          psl_g = fsh_g.slot_of("prototype")
+          if psl_g >= 0 && (fsh_g.attrs_of("prototype") & ATTR_ACCESSOR) == 0
+            penc_g = psl_g < fsh_g.inline ? (fsh_g.ibase + psl_g) : (0 - (psl_g - fsh_g.inline) - 1)
+            if fv_g.code.jit_fp == 0 && fv_g.code.jit_state == 0 && fv_g.code.node != @jf && (fv_g.code.nparams == 0 || fv_g.code.warm_args != nil)
+              jit_compile_and_install(fv_g.code, fv_g.code.warm_args)
+            rsh_g = js_root_shape(proto_g, OBJ_INLINE, OBJ_IBASE)
+            jit_keep(cell)
+            jit_keep(fv_g)
+            jit_keep(fsh_g)
+            jit_keep(proto_g)
+            jit_keep(rsh_g)
+            arg_offs = []
+            ai = 0
+            while ai < n
+              gen_expr_any(e.list[ai])
+              arg_offs.push(push_x(R_X0))
+              ai += 1
+            obj_off = @tmp_base + @tmp_depth * 8
+            @tmp_depth += 1
+            @max_tmp = @tmp_depth if @tmp_depth > @max_tmp
+            l_slow = @a.new_label
+            l_ret_o = @a.new_label
+            l_done = @a.new_label
+            if !@hoisted_epoch && !@epoch_verified_now
+              ep_now = JS_EPOCH[0]
+              @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+              @a.ldr_x(R_X10, R_X9, 0)
+              @a.mov_imm64(R_X11, ep_now)
+              @a.cmp_r(R_X10, R_X11)
+              @a.b_cond(CC_NE, l_slow)
+            @a.mov_imm64(R_X9, (wvalue_bits(cell) ## i64) - 4)
+            @a.ldr_x(R_X10, R_X9, 8)
+            @a.mov_imm64(R_X11, wvalue_bits(fv_g) ## i64)
+            @a.cmp_r(R_X10, R_X11)
+            @a.b_cond(CC_NE, l_slow)
+            # Verify `fv_g.prototype` was not reassigned since compile time!
+            @a.sub_i(R_X9, R_X11, 4)
+            @a.ldr_x(R_X10, R_X9, 8)
+            @a.mov_imm64(R_X12, wvalue_bits(fsh_g) ## i64)
+            @a.cmp_r(R_X10, R_X12)
+            @a.b_cond(CC_NE, l_slow)
+            emit_slot_load(R_X10, R_X9, penc_g)
+            @a.mov_imm64(R_X12, wvalue_bits(proto_g) ## i64)
+            @a.cmp_r(R_X10, R_X12)
+            @a.b_cond(CC_NE, l_slow)
+            # Dynamically load fv_g.@code.@jit_fast_fp (offset 96) so it activates automatically once Ctor compiles!
+            @a.mov_imm64(R_X10, (wvalue_bits(fv_g.code) ## i64) - 4)
+            @a.ldr_x(R_X16, R_X10, 96)
+            @a.and_x_lowmask(R_X16, R_X16, 48)
+            @a.cbz_x(R_X16, l_slow)
+            # Allocate fresh JS:Object with root shape rsh_g
+            if !JS_GC_ON[0]
+              emit_alloc_obj_inline(rsh_g)
+            else
+              @a.mov_imm64(R_X1, wvalue_bits(rsh_g) ## i64)
+              call_rt(RT_NEW_OBJ)
+            @a.str_x(R_X0, R_SP, obj_off)
+            # Call Ctor.code.jit_fast_fp(fv_g, o, n, a0..a4)
+            @a.mov_r(R_X1, R_X0)
+            @a.mov_imm64(R_X0, wvalue_bits(fv_g) ## i64)
+            @a.movz_x(R_X2, n)
+            @a.ldr_x(R_X3, R_SP, arg_offs[0]) if n >= 1
+            @a.ldr_x(R_X4, R_SP, arg_offs[1]) if n >= 2
+            @a.ldr_x(R_X5, R_SP, arg_offs[2]) if n >= 3
+            @a.ldr_x(R_X6, R_SP, arg_offs[3]) if n >= 4
+            @a.ldr_x(R_X7, R_SP, arg_offs[4]) if n >= 5
+            @a.mov_imm64(R_X10, (wvalue_bits(fv_g.code) ## i64) - 4)
+            @a.ldr_x(R_X16, R_X10, 96)
+            @a.and_x_lowmask(R_X16, R_X16, 48)
+            emit_blr_x16()
+            @a.cmp_i(R_X0, 6)
+            @a.b_cond(CC_EQ, l_slow)
+            @a.cbz_x(R_X0, l_ret_o)          # returned undefined -> return `o`!
+            @a.lsr_xi(R_X9, R_X0, 48)
+            @a.movz_x(R_X10, 0xFFF4)
+            @a.cmp_r(R_X9, R_X10)
+            @a.b_cond(CC_EQ, l_done)         # returned WArray -> keep R_X0
+            @a.sub_i(R_X9, R_X0, 4)
+            @a.tst_wobj_bad(R_X9)
+            @a.b_cond(CC_NE, l_ret_o)        # primitive -> return `o`
+            @a.ldr_x(R_X10, R_X19, RT_K_NULL_BITS * 8)
+            @a.cmp_r(R_X0, R_X10)
+            @a.b_cond(CC_NE, l_done)         # returned JS object -> keep R_X0
+            @a.bind(l_ret_o)
+            @a.ldr_x(R_X0, R_SP, obj_off)
+            @a.bind(l_done)
+            cb = ->()
+              @a.bind(l_slow)
+              @a.mov_imm64(R_X1, wvalue_bits(cell) ## i64)
+              call_rt(RT_GGET)
+              if n <= 4
+                ic = i64[8]
+                jit_keep(ic)
+                @a.mov_r(R_X1, R_X0)
+                @a.mov_imm64(R_X2, wvalue_bits(ic) ## i64)
+                if n <= 2
+                  @a.mov_imm64(R_X3, wvalue_bits(0) ## i64)
+                  @a.ldr_x(R_X4, R_SP, arg_offs[0]) if n >= 1
+                  @a.ldr_x(R_X5, R_SP, arg_offs[1]) if n >= 2
+                  call_rt(RT_NEW_0 + n)
+                else
+                  @a.ldr_x(R_X3, R_SP, arg_offs[0])
+                  @a.ldr_x(R_X4, R_SP, arg_offs[1])
+                  @a.ldr_x(R_X5, R_SP, arg_offs[2])
+                  @a.ldr_x(R_X6, R_SP, arg_offs[3]) if n >= 4
+                  call_rt(n == 3 ? RT_NEW_3 : RT_NEW_4)
+              else
+                f_sv = push_x(R_X0)
+                call_rt(RT_NEW_ARR)
+                a_sv = push_x(R_X0)
+                k2 = 0
+                while k2 < n
+                  @a.ldr_x(R_X0, R_SP, arg_offs[k2])
+                  emit_inline_push_to_off(a_sv, R_X0)
+                  k2 += 1
+                @a.ldr_x(R_X1, R_SP, f_sv)
+                @a.ldr_x(R_X2, R_SP, a_sv)
+                call_rt(RT_NEW_N)
+                @tmp_depth -= 2
+              @a.b(l_done)
+            add_cold_stub(cb)
+            @tmp_depth -= (n + 1)
+            @known_shapes = {}
+            @epoch_verified_now = false
+            return nil
     gen_expr_any(e.a)
     f_off = push_x(R_X0)
     if n <= 4
@@ -9517,6 +22419,8 @@ OSR_RETURN = 2
         @a.ldr_x(R_X6, R_SP, f_off + 32) if n >= 4
         call_rt(n == 3 ? RT_NEW_3 : RT_NEW_4)
       @tmp_depth -= (1 + n)
+      @known_shapes = {}
+      @epoch_verified_now = false
       return nil
     call_rt(RT_NEW_ARR)
     a_off = push_x(R_X0)
@@ -9529,14 +22433,198 @@ OSR_RETURN = 2
     @a.ldr_x(R_X2, R_SP, a_off)
     call_rt(RT_NEW_N)
     @tmp_depth -= 2
+    @known_shapes = {}
+    @epoch_verified_now = false
+    nil
+
+  # Inline ARM64 JS:Object allocator: bump-allocates in escape-scoped arena when active,
+  # else direct C `blr @w_object_new` in out-of-line cold stub!
+  # Returns WValue in R_X0 and raw WObject* (`R_X0 - 4`) in R_X9 (all ivars 1..9 guaranteed 0/nil!).
+  -> emit_alloc_obj_inline(sh)
+    l_cold = @a.new_label
+    l_ok = @a.new_label
+    @a.ldr_x(R_X10, R_X19, RT_K_ARENA_PTR * 8)
+    @a.ldp_x(R_X9, R_X11, R_X10, 0)
+    @a.cbz_x(R_X9, l_cold)
+    @a.add_i(R_X12, R_X9, 96)
+    @a.cmp_r(R_X12, R_X11)
+    @a.b_cond(CC_HI, l_cold)
+    @a.str_x(R_X12, R_X10, 0)
+    @a.ldr_x(R_X11, R_X10, 48)
+    @a.str_x(R_X11, R_X9, 0)
+    @a.mov_imm64(R_X11, wvalue_bits(sh) ## i64)
+    @a.str_x(R_X11, R_X9, 8)
+    @a.add_i(R_X0, R_X9, 4)
+    @a.bind(l_ok)
+    cb = ->()
+      l_heap = @a.new_label
+      @a.bind(l_cold)
+      @a.cbz_x(R_X9, l_heap)
+      @a.mov_imm64(R_X1, wvalue_bits(sh) ## i64)
+      call_rt(RT_ARENA_GROW_OBJ)
+      @a.sub_i(R_X9, R_X0, 4)
+      @a.b(l_ok)
+      @a.bind(l_heap)
+      @a.ldr_x(R_X0, R_X19, RT_K_JS_OBJ_CLS * 8)
+      @a.ldr_x(R_X16, R_X19, RT_K_W_OBJ_NEW * 8)
+      emit_blr_x16()
+      @a.sub_i(R_X9, R_X0, 4)
+      @a.movz_x(R_X10, KIND_OBJECT)
+      @a.strb(R_X10, R_X9, 4)
+      @a.mov_imm64(R_X10, wvalue_bits(sh) ## i64)
+      @a.str_x(R_X10, R_X9, 8)
+      @a.b(l_ok)
+    add_cold_stub(cb)
+    nil
+
+  # Inline ARM64 fixed-size dense JS Array allocator (n in 1..6): bump-allocates in escape-scoped arena
+  # when active & allow_arr == 1, else direct C `blr @w_array_new_inline` in out-of-line cold stub!
+  # Returns WValue in R_X0 and raw element slots pointer (`WValue*`) in R_X9!
+  -> emit_alloc_arr_inline(n)
+    cap = (n + 1) & -2
+    sz = 32 + cap * 8
+    h0 = (JS_AF_ARRAY << 16) | 16834
+    h1 = (cap << 32) | n
+    l_cold = @a.new_label
+    l_ok = @a.new_label
+    @a.ldr_x(R_X10, R_X19, RT_K_ARENA_PTR * 8)
+    @a.ldr_x(R_X12, R_X10, 40)
+    @a.cbz_x(R_X12, l_cold)
+    @a.ldp_x(R_X9, R_X11, R_X10, 0)
+    @a.cbz_x(R_X9, l_cold)
+    @a.add_i(R_X12, R_X9, sz)
+    @a.cmp_r(R_X12, R_X11)
+    @a.b_cond(CC_HI, l_cold)
+    @a.str_x(R_X12, R_X10, 0)
+    @a.mov_imm64(R_X11, h0)
+    @a.str_x(R_X11, R_X9, 0)
+    @a.mov_imm64(R_X11, h1)
+    @a.str_x(R_X11, R_X9, 8)
+    @a.add_i(R_X11, R_X9, 32)
+    @a.str_x(R_X11, R_X9, 16)
+    @a.mov_r(R_X0, R_X9)
+    @a.movk_x(R_X0, 0xFFF4, 3)
+    @a.mov_r(R_X9, R_X11)
+    @a.bind(l_ok)
+    cb = ->()
+      l_heap = @a.new_label
+      @a.bind(l_cold)
+      @a.ldr_x(R_X10, R_X19, RT_K_ARENA_PTR * 8)
+      @a.ldr_x(R_X12, R_X10, 40)
+      @a.cbz_x(R_X12, l_heap)
+      @a.ldr_x(R_X9, R_X10, 0)
+      @a.cbz_x(R_X9, l_heap)
+      @a.mov_imm64(R_X1, wvalue_bits(n + ~0.0) ## i64)
+      call_rt(RT_ARENA_GROW_ARR)
+      @a.and_x_ptr47(R_X9, R_X0)
+      @a.ldr_x(R_X9, R_X9, 16)
+      @a.b(l_ok)
+      @a.bind(l_heap)
+      @a.movz_x(R_X0, 65)
+      @a.movz_x(R_X1, n)
+      @a.ldr_x(R_X16, R_X19, RT_K_W_ARR_INL * 8)
+      emit_blr_x16()
+      @a.and_x_ptr47(R_X9, R_X0)
+      @a.movz_x(R_X10, JS_AF_ARRAY)
+      @a.strb(R_X10, R_X9, 2)
+      @a.ldr_x(R_X9, R_X9, 16)
+      @a.b(l_ok)
+    add_cold_stub(cb)
+    nil
+
+  # Inline ARM64 empty JS Array `[]` allocator: bump-allocates a 64-byte cap-4 inline WArray
+  # inside the escape-scoped arena when active & allow_arr == 1 (ZERO malloc/GC, 0..4 pushes inline!),
+  # else direct C `blr @w_array_new_inline(65, 0)` in out-of-line cold stub!
+  -> emit_alloc_arr0_inline
+    h0 = (JS_AF_ARRAY << 16) | 16834
+    h1 = 4 << 32
+    l_cold = @a.new_label
+    l_ok = @a.new_label
+    @a.ldr_x(R_X10, R_X19, RT_K_ARENA_PTR * 8)
+    @a.ldr_x(R_X12, R_X10, 40)
+    @a.cbz_x(R_X12, l_cold)
+    @a.ldp_x(R_X9, R_X11, R_X10, 0)
+    @a.cbz_x(R_X9, l_cold)
+    @a.add_i(R_X12, R_X9, 64)
+    @a.cmp_r(R_X12, R_X11)
+    @a.b_cond(CC_HI, l_cold)
+    @a.str_x(R_X12, R_X10, 0)
+    @a.mov_imm64(R_X11, h0)
+    @a.str_x(R_X11, R_X9, 0)
+    @a.mov_imm64(R_X11, h1)
+    @a.str_x(R_X11, R_X9, 8)
+    @a.add_i(R_X11, R_X9, 32)
+    @a.str_x(R_X11, R_X9, 16)
+    @a.mov_r(R_X0, R_X9)
+    @a.movk_x(R_X0, 0xFFF4, 3)
+    @a.bind(l_ok)
+    cb = ->()
+      l_heap = @a.new_label
+      @a.bind(l_cold)
+      @a.ldr_x(R_X10, R_X19, RT_K_ARENA_PTR * 8)
+      @a.ldr_x(R_X12, R_X10, 40)
+      @a.cbz_x(R_X12, l_heap)
+      @a.ldr_x(R_X9, R_X10, 0)
+      @a.cbz_x(R_X9, l_heap)
+      call_rt(RT_ARENA_GROW_ARR0)
+      @a.b(l_ok)
+      @a.bind(l_heap)
+      @a.movz_x(R_X0, 65)
+      @a.movz_x(R_X1, 0)
+      @a.ldr_x(R_X16, R_X19, RT_K_W_ARR_INL * 8)
+      emit_blr_x16()
+      @a.and_x_ptr47(R_X9, R_X0)
+      @a.movz_x(R_X10, JS_AF_ARRAY)
+      @a.strb(R_X10, R_X9, 2)
+      @a.b(l_ok)
+    add_cold_stub(cb)
     nil
 
   -> gen_array_lit(e)
+    n = e.list.size
+    if n == 0
+      if !JS_GC_ON[0] && !JS_MULTI_REALM[0]
+        emit_alloc_arr0_inline()
+      else
+        call_rt(RT_NEW_ARR)
+      return nil
+    if n <= 6 && !JS_GC_ON[0] && !JS_MULTI_REALM[0]
+      i = 0
+      while i < n
+        gen_expr_any(e.list[i])
+        push_x(R_X0)
+        i += 1
+      base = @tmp_base + (@tmp_depth - n) * 8
+      emit_alloc_arr_inline(n)
+      i = 0
+      while i < n
+        @a.ldr_x(R_X10, R_SP, base + i * 8)
+        @a.str_x(R_X10, R_X9, i * 8)
+        i += 1
+      @tmp_depth -= n
+      return nil
+    if n == 1
+      gen_expr_any(e.list[0])
+      @a.mov_r(R_X1, R_X0)
+      call_rt(RT_ARR_1)
+      return nil
+    if n <= 3
+      i = 0
+      while i < n
+        gen_expr_any(e.list[i])
+        push_x(R_X0)
+        i += 1
+      base = @tmp_base + (@tmp_depth - n) * 8
+      @a.ldr_x(R_X1, R_SP, base)
+      @a.ldr_x(R_X2, R_SP, base + 8)
+      @a.ldr_x(R_X3, R_SP, base + 16) if n >= 3
+      call_rt(n == 2 ? RT_ARR_2 : RT_ARR_3)
+      @tmp_depth -= n
+      return nil
     call_rt(RT_NEW_ARR)
-    return nil if e.list.size == 0
     a_off = push_x(R_X0)
     i = 0
-    while i < e.list.size
+    while i < n
       gen_expr_any(e.list[i])
       emit_inline_push_to_off(a_off, R_X0)
       i += 1
@@ -9549,12 +22637,30 @@ OSR_RETURN = 2
     if n == 0
       sh0 = js_root_shape(js_realm().object_proto, OBJ_INLINE, OBJ_IBASE)
       jit_keep(sh0)
-      @a.mov_imm64(R_X1, wvalue_bits(sh0) ## i64)
-      call_rt(RT_NEW_OBJ)
+      if !JS_GC_ON[0]
+        emit_alloc_obj_inline(sh0)
+      else
+        @a.mov_imm64(R_X1, wvalue_bits(sh0) ## i64)
+        call_rt(RT_NEW_OBJ)
       return nil
     ks = jit_plain_obj_keys(e)
     sh = js_lit_shape(ks)
     jit_keep(sh)
+    if n <= 8 && !JS_GC_ON[0]
+      i = 0
+      while i < n
+        gen_expr_any(e.list[i].b)
+        push_x(R_X0)
+        i += 1
+      base = @tmp_base + (@tmp_depth - n) * 8
+      emit_alloc_obj_inline(sh)
+      i = 0
+      while i < n
+        @a.ldr_x(R_X10, R_SP, base + i * 8)
+        @a.str_x(R_X10, R_X9, 24 + i * 8)
+        i += 1
+      @tmp_depth -= n
+      return nil
     if n <= 6
       i = 0
       while i < n
@@ -9639,13 +22745,269 @@ OSR_RETURN = 2
       @a.ldr_x(R_X3, R_SP, a1_off)
     elsif rt_id == RT_STR_SLICE
       @a.movz_x(R_X3, 0)
-    call_rt(rt_id)
+    if rt_id == RT_STR_CHARCODE
+      # Fast inline ARM64 flat ASCII `charCodeAt(idx)` for mode 7 heap, mode 6 slab, & mode 1..5 inline (ZERO RT call!)
+      l_cc_rt = @a.new_label
+      l_cc_slab = @a.new_label
+      l_cc_inl = @a.new_label
+      l_cc_nan = @a.new_label
+      @a.sub_r(R_X9, R_X2, R_X20)
+      @a.cmp_r(R_X9, R_X21)
+      @a.b_cond(CC_HS, l_cc_rt)
+      @a.fmov_d_x(R_D0, R_X9)
+      @a.fcvtzs_w_d(R_X12, R_D0)
+      @a.scvtf_d_w(R_D1, R_X12)
+      @a.fcmp_d(R_D0, R_D1)
+      @a.b_cond(CC_NE, l_cc_rt)
+      @a.sxtw(R_X12, R_X12)
+      @a.lsr_xi(R_X9, R_X1, 1)
+      @a.and_x_lowmask(R_X9, R_X9, 3)
+      @a.cmp_i(R_X9, 7)
+      @a.b_cond(CC_NE, l_cc_slab)
+      @a.and_x_ptr47(R_X10, R_X1)
+      @a.ldr_w(R_X11, R_X10, 8)
+      @a.cmp_wi(R_X11, 0)
+      @a.b_cond(CC_GE, l_cc_rt)
+      @a.and_w_lowmask(R_X11, R_X11, 31)
+      @a.cmp_r(R_X12, R_X11)
+      @a.b_cond(CC_HS, l_cc_nan)
+      @a.add_i(R_X10, R_X10, 16)
+      @a.ldrb_idx(R_X0, R_X10, R_X12)
+      emit_box_i32(R_X0, R_X0)
+      @a.b(l_done)
+      @a.bind(l_cc_slab)
+      @a.cmp_i(R_X9, 6)
+      @a.b_cond(CC_NE, l_cc_inl)
+      @a.ldr_x(R_X10, R_X19, RT_K_SLAB_BASE * 8)
+      @a.cbz_x(R_X10, l_cc_rt)
+      @a.lsr_xi(R_X14, R_X1, 4)
+      @a.and_x_lowmask(R_X14, R_X14, 24)
+      @a.add_r(R_X10, R_X10, R_X14, 5)
+      @a.ldrb(R_X11, R_X10, 0)
+      @a.movz_x(R_X14, 9)
+      @a.and_w(R_X11, R_X11, R_X14)
+      @a.cmp_wi(R_X11, 9)
+      @a.b_cond(CC_NE, l_cc_rt)
+      @a.ldrb(R_X11, R_X10, 1)
+      @a.cmp_r(R_X12, R_X11)
+      @a.b_cond(CC_HS, l_cc_nan)
+      @a.add_i(R_X10, R_X10, 2)
+      @a.ldrb_idx(R_X0, R_X10, R_X12)
+      emit_box_i32(R_X0, R_X0)
+      @a.b(l_done)
+      @a.bind(l_cc_inl)
+      @a.cmp_i(R_X9, 5)
+      @a.b_cond(CC_HI, l_cc_rt)
+      @a.mov_imm64(R_X10, 8830587504640)
+      @a.tst_r(R_X1, R_X10)
+      @a.b_cond(CC_NE, l_cc_rt)
+      @a.cmp_r(R_X12, R_X9)
+      @a.b_cond(CC_HS, l_cc_nan)
+      @a.lsr_xi(R_X10, R_X1, 4)
+      @a.lsl_xi(R_X11, R_X12, 3)
+      @a.lsr_x(R_X0, R_X10, R_X11)
+      @a.and_w_lowmask(R_X0, R_X0, 8)
+      emit_box_i32(R_X0, R_X0)
+      @a.b(l_done)
+      @a.bind(l_cc_nan)
+      @a.ldr_x(R_X0, R_X19, RT_K_NAN_BITS * 8)
+      @a.b(l_done)
+      @a.bind(l_cc_rt)
+      call_rt(RT_STR_CHARCODE)
+    elsif rt_id == RT_STR_SLICE && n == 2
+      # Fast inline ARM64 flat ASCII `s.slice(a, b)` producing 0..5-byte inline strings (ZERO RT call!)
+      l_sl_rt = @a.new_label
+      l_sl_slab = @a.new_label
+      l_sl_inl = @a.new_label
+      l_sl_bytes = @a.new_label
+      l_sl_blp = @a.new_label
+      l_sl_empty = @a.new_label
+      @a.sub_r(R_X9, R_X2, R_X20)
+      @a.cmp_r(R_X9, R_X21)
+      @a.b_cond(CC_HS, l_sl_rt)
+      @a.fmov_d_x(R_D0, R_X9)
+      @a.fcvtzs_w_d(R_X12, R_D0)
+      @a.scvtf_d_w(R_D1, R_X12)
+      @a.fcmp_d(R_D0, R_D1)
+      @a.b_cond(CC_NE, l_sl_rt)
+      @a.sxtw(R_X12, R_X12)
+      @a.cmp_i(R_X12, 0)
+      @a.b_cond(CC_LT, l_sl_rt)
+      @a.sub_r(R_X9, R_X3, R_X20)
+      @a.cmp_r(R_X9, R_X21)
+      @a.b_cond(CC_HS, l_sl_rt)
+      @a.fmov_d_x(R_D0, R_X9)
+      @a.fcvtzs_w_d(R_X14, R_D0)
+      @a.scvtf_d_w(R_D1, R_X14)
+      @a.fcmp_d(R_D0, R_D1)
+      @a.b_cond(CC_NE, l_sl_rt)
+      @a.sxtw(R_X14, R_X14)
+      @a.subs_r(R_X15, R_X14, R_X12)
+      @a.cmp_i(R_X15, 5)
+      @a.b_cond(CC_HI, l_sl_rt)
+      @a.lsr_xi(R_X9, R_X1, 1)
+      @a.and_x_lowmask(R_X9, R_X9, 3)
+      @a.cmp_i(R_X9, 7)
+      @a.b_cond(CC_NE, l_sl_slab)
+      @a.and_x_ptr47(R_X10, R_X1)
+      @a.ldr_w(R_X11, R_X10, 8)
+      @a.cmp_wi(R_X11, 0)
+      @a.b_cond(CC_GE, l_sl_rt)
+      @a.and_w_lowmask(R_X11, R_X11, 31)
+      @a.cmp_r(R_X14, R_X11)
+      @a.b_cond(CC_HI, l_sl_rt)
+      @a.cbz_x(R_X15, l_sl_empty)
+      @a.add_i(R_X10, R_X10, 16)
+      @a.add_r(R_X10, R_X10, R_X12)
+      @a.add_i(R_X9, R_X12, 8)
+      @a.cmp_r(R_X9, R_X11)
+      @a.b_cond(CC_HI, l_sl_bytes)
+      @a.ldr_x(R_X0, R_X10, 0)
+      @a.movn_x(R_X9, 0)
+      @a.lsl_xi(R_X11, R_X15, 3)
+      @a.lsl_x(R_X9, R_X9, R_X11)
+      @a.bic_r(R_X0, R_X0, R_X9)
+      @a.lsl_xi(R_X0, R_X0, 4)
+      @a.lsl_xi(R_X11, R_X15, 1)
+      @a.orr_r(R_X0, R_X0, R_X11)
+      @a.movk_x(R_X0, 0xFFF9, 3)
+      @a.b(l_done)
+      @a.bind(l_sl_slab)
+      @a.cmp_i(R_X9, 6)
+      @a.b_cond(CC_NE, l_sl_inl)
+      @a.ldr_x(R_X10, R_X19, RT_K_SLAB_BASE * 8)
+      @a.cbz_x(R_X10, l_sl_rt)
+      @a.lsr_xi(R_X11, R_X1, 4)
+      @a.and_x_lowmask(R_X11, R_X11, 24)
+      @a.add_r(R_X10, R_X10, R_X11, 5)
+      @a.ldrb(R_X11, R_X10, 0)
+      @a.movz_x(R_X9, 9)
+      @a.and_w(R_X11, R_X11, R_X9)
+      @a.cmp_wi(R_X11, 9)
+      @a.b_cond(CC_NE, l_sl_rt)
+      @a.ldrb(R_X11, R_X10, 1)
+      @a.cmp_r(R_X14, R_X11)
+      @a.b_cond(CC_HI, l_sl_rt)
+      @a.cbz_x(R_X15, l_sl_empty)
+      @a.add_i(R_X10, R_X10, 2)
+      @a.add_r(R_X10, R_X10, R_X12)
+      @a.bind(l_sl_bytes)
+      @a.movz_x(R_X0, 0)
+      @a.movz_x(R_X9, 4)
+      @a.mov_r(R_X11, R_X15)
+      @a.bind(l_sl_blp)
+      @a.ldrb(R_X14, R_X10, 0)
+      @a.add_i(R_X10, R_X10, 1)
+      @a.lsl_x(R_X14, R_X14, R_X9)
+      @a.orr_r(R_X0, R_X0, R_X14)
+      @a.add_i(R_X9, R_X9, 8)
+      @a.subs_i(R_X11, R_X11, 1)
+      @a.b_cond(CC_NE, l_sl_blp)
+      @a.lsl_xi(R_X11, R_X15, 1)
+      @a.orr_r(R_X0, R_X0, R_X11)
+      @a.movk_x(R_X0, 0xFFF9, 3)
+      @a.b(l_done)
+      @a.bind(l_sl_inl)
+      @a.cmp_i(R_X9, 5)
+      @a.b_cond(CC_HI, l_sl_rt)
+      @a.mov_imm64(R_X10, 8830587504640)
+      @a.tst_r(R_X1, R_X10)
+      @a.b_cond(CC_NE, l_sl_rt)
+      @a.cmp_r(R_X14, R_X9)
+      @a.b_cond(CC_HI, l_sl_rt)
+      @a.cbz_x(R_X15, l_sl_empty)
+      @a.lsr_xi(R_X0, R_X1, 4)
+      @a.lsl_xi(R_X11, R_X12, 3)
+      @a.lsr_x(R_X0, R_X0, R_X11)
+      @a.movn_x(R_X9, 0)
+      @a.lsl_xi(R_X11, R_X15, 3)
+      @a.lsl_x(R_X9, R_X9, R_X11)
+      @a.bic_r(R_X0, R_X0, R_X9)
+      @a.lsl_xi(R_X0, R_X0, 4)
+      @a.lsl_xi(R_X11, R_X15, 1)
+      @a.orr_r(R_X0, R_X0, R_X11)
+      @a.movk_x(R_X0, 0xFFF9, 3)
+      @a.b(l_done)
+      @a.bind(l_sl_empty)
+      @a.movz_x(R_X0, 0xFFF9, 3)
+      @a.b(l_done)
+      @a.bind(l_sl_rt)
+      call_rt(RT_STR_SLICE)
+    elsif rt_id == RT_STR_INDEXOF && n == 1 && arg_nodes[0].kind == :string && arg_nodes[0].str.size == 1 && arg_nodes[0].str.byte_at(0) < 128
+      l_io1_rt = @a.new_label
+      l_io1_hit = @a.new_label
+      l_io1_miss = @a.new_label
+      emit_inline_ascii_indexof1(R_X1, arg_nodes[0].str.byte_at(0), false, l_io1_rt, l_io1_hit, l_io1_miss)
+      @a.bind(l_io1_hit)
+      emit_box_i32(R_X0, R_X12)
+      @a.b(l_done)
+      @a.bind(l_io1_miss)
+      @a.mov_imm64(R_X0, wvalue_bits(~-1.0) ## i64)
+      @a.b(l_done)
+      @a.bind(l_io1_rt)
+      call_rt(RT_STR_INDEXOF)
+    elsif rt_id == RT_STR_INDEXOF2 && n == 2 && arg_nodes[0].kind == :string && arg_nodes[0].str.size == 1 && arg_nodes[0].str.byte_at(0) < 128
+      # Fast inline ARM64 1-byte ASCII `s.indexOf(const_1char, from)` loop (ZERO RT call!)
+      l_io2_rt = @a.new_label
+      l_io2_hit = @a.new_label
+      l_io2_miss = @a.new_label
+      @a.sub_r(R_X9, R_X3, R_X20)
+      @a.cmp_r(R_X9, R_X21)
+      @a.b_cond(CC_HS, l_io2_rt)
+      @a.fmov_d_x(R_D0, R_X9)
+      @a.fcvtzs_w_d(R_X12, R_D0)
+      @a.scvtf_d_w(R_D1, R_X12)
+      @a.fcmp_d(R_D0, R_D1)
+      @a.b_cond(CC_NE, l_io2_rt)
+      @a.sxtw(R_X12, R_X12)
+      emit_inline_ascii_indexof1(R_X1, arg_nodes[0].str.byte_at(0), true, l_io2_rt, l_io2_hit, l_io2_miss)
+      @a.bind(l_io2_hit)
+      emit_box_i32(R_X0, R_X12)
+      @a.b(l_done)
+      @a.bind(l_io2_miss)
+      @a.mov_imm64(R_X0, wvalue_bits(~-1.0) ## i64)
+      @a.b(l_done)
+      @a.bind(l_io2_rt)
+      call_rt(RT_STR_INDEXOF2)
+    else
+      call_rt(rt_id)
     @a.bind(l_done)
     cb = ->()
       @a.bind(l_slow)
       @a.ldr_x(R_X1, R_SP, rec_off)
       @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
       call_rt(RT_GETV)
+      # Direct jit_fast_fp dispatch on user JS:Function before falling back to RT_CALL_0+n!
+      l_rt_call = @a.new_label
+      @a.sub_i(R_X9, R_X0, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_rt_call)
+      @a.cbz_x(R_X9, l_rt_call)
+      @a.ldrb(R_X10, R_X9, 4)
+      @a.and_w_lowmask(R_X10, R_X10, 4)
+      @a.cmp_wi(R_X10, 2)
+      @a.b_cond(CC_NE, l_rt_call)
+      @a.ldr_x(R_X10, R_X9, 24)
+      @a.sub_i(R_X10, R_X10, 4)
+      @a.ldr_x(R_X16, R_X10, 96)
+      @a.and_x_lowmask(R_X16, R_X16, 48)
+      @a.cbz_x(R_X16, l_rt_call)
+      @a.ldr_x(R_X1, R_SP, rec_off)
+      @a.movz_x(R_X2, n)
+      @a.movz_x(R_X3, 0)
+      @a.movz_x(R_X4, 0)
+      @a.movz_x(R_X5, 0)
+      @a.movz_x(R_X6, 0)
+      @a.movz_x(R_X7, 0)
+      @a.ldr_x(R_X3, R_SP, a0_off) if n >= 1
+      @a.ldr_x(R_X4, R_SP, a1_off) if n >= 2
+      emit_blr_x16()
+      @a.cmp_i(R_X0, 6)
+      @a.b_cond(CC_NE, l_done)
+      @a.ldr_x(R_X1, R_SP, rec_off)
+      @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
+      call_rt(RT_GETV)
+      @a.bind(l_rt_call)
       @a.mov_r(R_X1, R_X0)
       @a.ldr_x(R_X2, R_SP, rec_off)
       @a.ldr_x(R_X3, R_SP, a0_off) if n >= 1
@@ -9657,6 +23019,164 @@ OSR_RETURN = 2
     nil
 
   # Guarded Map.prototype.{get,set,has,delete}, Set.prototype.{add,has,delete} & WeakMap.prototype.{get,set,has,delete} intrinsic!
+  # Inline ARM64 `set.forEach(function (eff) { eff(); })` (0-capture 1-param thunk-invoking callback):
+  # Eliminates closure allocation, RT_CALL_1, and js_coll_for_each overhead, calling each element's jit_fast_fp directly!
+  -> gen_set_foreach_call_inline(rec_e, cb_node)
+    return false if cb_node == nil || (cb_node.kind != :function && cb_node.kind != :arrow) || !cb_node.x.is_a?(JaFunc)
+    cb_jf = cb_node.x
+    return false if cb_jf.free.size > 0 || cb_jf.params.size != 1 || cb_jf.uses_this || cb_jf.self_binding != nil
+    pb0 = cb_jf.params[0]
+    call_st = nil
+    if cb_jf.arrow && cb_node.has?(F_EXPR_BODY)
+      call_st = cb_node.b
+    elsif cb_node.b.is_a?(Array) && cb_node.b.size == 1 && (cb_node.b[0].kind == :expr_stmt || cb_node.b[0].kind == :return)
+      call_st = cb_node.b[0].a
+    return false if call_st == nil || call_st.kind != :call || call_st.list.size != 0 || call_st.a == nil || call_st.a.kind != :ident || call_st.a.x == nil || call_st.a.x.binding != pb0
+    r = js_realm()
+    sp = r.intrinsics["Set.prototype"]
+    return false if sp == nil || sp.get_own("forEach") != r.intrinsics["%Set_forEach%"]
+    mp_off = js_mapdata_metap_off()
+    return false if mp_off <= 0
+    set_sh = js_root_shape(sp, SP_INLINE, SP_IBASE)
+    jit_keep(set_sh)
+    jit_keep("forEach")
+    gen_expr_any(rec_e)
+    rec_off = push_x(R_X0)
+    idx_off = push_x(R_XZR)
+    gen_off = push_x(R_XZR)
+    base_off = push_x(R_XZR)
+    mp_sv_off = push_x(R_XZR)
+    l_slow = @a.new_label
+    l_loop = @a.new_label
+    l_next = @a.new_label
+    l_call_rt = @a.new_label
+    l_done_undef = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch && !@epoch_verified_now
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X9, R_SP, rec_off)
+    @a.sub_i(R_X9, R_X9, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_slow)
+    @a.cbz_x(R_X9, l_slow)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.mov_imm64(R_X11, wvalue_bits(set_sh) ## i64)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_NE, l_slow)
+    # Load MapData meta_p, save initial (gen, base_idx, meta_p), start idx = 0!
+    @a.ldr_x(R_X9, R_X9, 32)
+    @a.sub_i(R_X9, R_X9, 4)
+    @a.ldr_x(R_X12, R_X9, mp_off)
+    @a.and_x_lowmask(R_X12, R_X12, 48)
+    @a.str_x(R_X12, R_SP, mp_sv_off)
+    @a.ldr_x(R_X10, R_X12, 96)         # meta[12] = gen
+    @a.str_x(R_X10, R_SP, gen_off)
+    @a.ldr_x(R_X10, R_X12, 104)        # meta[13] = base_idx
+    @a.str_x(R_X10, R_SP, base_off)
+    @a.str_x(R_XZR, R_SP, idx_off)
+    @a.bind(l_loop)
+    @a.ldr_x(R_X12, R_SP, mp_sv_off)
+    @a.ldr_x(R_X10, R_SP, idx_off)
+    @a.ldr_x(R_X11, R_X12, 40)         # meta[5] = len
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_GE, l_done_undef)
+    @a.ldr_x(R_X9, R_X12, 16)          # meta[2] = kptr
+    @a.ldr_x_idx(R_X0, R_X9, R_X10)    # eff = keys[idx]
+    @a.add_i(R_X10, R_X10, 1)
+    @a.str_x(R_X10, R_SP, idx_off)
+    @a.ldr_x(R_X11, R_X19, RT_K_HOLE_BITS * 8)
+    @a.cmp_r(R_X0, R_X11)
+    @a.b_cond(CC_EQ, l_loop)
+    # Direct ARM64 `blr eff.code.jit_fast_fp(eff, undef, 0)`!
+    @a.sub_i(R_X9, R_X0, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_call_rt)
+    @a.cbz_x(R_X9, l_call_rt)
+    @a.ldrb(R_X10, R_X9, 4)
+    @a.and_w_lowmask(R_X10, R_X10, 4)
+    @a.cmp_wi(R_X10, 2)
+    @a.b_cond(CC_NE, l_call_rt)
+    @a.ldr_x(R_X10, R_X9, 24)
+    @a.sub_i(R_X10, R_X10, 4)
+    @a.ldr_x(R_X16, R_X10, 96)
+    @a.and_x_lowmask(R_X16, R_X16, 48)
+    @a.cbz_x(R_X16, l_call_rt)
+    @a.movz_x(R_X1, 0)                 # this = undefined
+    @a.movz_x(R_X2, 0)                 # argc = 0
+    @a.movz_x(R_X3, 0)
+    @a.movz_x(R_X4, 0)
+    @a.movz_x(R_X5, 0)
+    @a.movz_x(R_X6, 0)
+    @a.movz_x(R_X7, 0)
+    emit_blr_x16()
+    @a.cmp_i(R_X0, 6)                  # JSR_SLOW -> reload & call via RT_CALL_0
+    @a.b_cond(CC_EQ, l_call_rt)
+    @a.bind(l_next)
+    # Check gen & base_idx unchanged (handles Set.clear / compact_prefix during iteration per ECMA-262 §24.2.4.6!)
+    @a.ldr_x(R_X12, R_SP, mp_sv_off)
+    @a.ldr_x(R_X9, R_X12, 96)
+    @a.ldr_x(R_X10, R_SP, gen_off)
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_EQ, l_chk_base_fe = @a.new_label)
+    @a.str_x(R_X9, R_SP, gen_off)
+    @a.ldr_x(R_X9, R_X12, 104)
+    @a.str_x(R_X9, R_SP, base_off)
+    @a.str_x(R_XZR, R_SP, idx_off)
+    @a.b(l_loop)
+    @a.bind(l_chk_base_fe)
+    @a.ldr_x(R_X9, R_X12, 104)
+    @a.ldr_x(R_X10, R_SP, base_off)
+    @a.cmp_r(R_X9, R_X10)
+    @a.b_cond(CC_EQ, l_loop)
+    # Compacted prefix shifted entries left by (new_base - old_base)
+    @a.sub_r(R_X11, R_X9, R_X10)
+    @a.str_x(R_X9, R_SP, base_off)
+    @a.ldr_x(R_X10, R_SP, idx_off)
+    @a.cmp_r(R_X10, R_X11)
+    @a.sub_r(R_X9, R_X10, R_X11)
+    @a.csel_x(R_X10, R_XZR, R_X9, CC_LT)
+    @a.str_x(R_X10, R_SP, idx_off)
+    @a.b(l_loop)
+    @a.bind(l_done_undef)
+    @a.movz_x(R_X0, 0)
+    @a.bind(l_done)
+    cb_fe = ->()
+      @a.bind(l_call_rt)
+      # Reload keys[idx - 1] and invoke via RT_CALL_0 (also handles JSR_SLOW!)
+      @a.ldr_x(R_X12, R_SP, mp_sv_off)
+      @a.ldr_x(R_X10, R_SP, idx_off)
+      @a.sub_i(R_X10, R_X10, 1)
+      @a.ldr_x(R_X9, R_X12, 16)
+      @a.ldr_x_idx(R_X1, R_X9, R_X10)
+      @a.movz_x(R_X2, 0)
+      call_rt(RT_CALL_0)
+      @a.b(l_next)
+      @a.bind(l_slow)
+      code_cb = wk_code(cb_jf)
+      jit_keep(code_cb)
+      @a.mov_imm64(R_X1, wvalue_bits(code_cb) ## i64)
+      @a.movz_x(R_X2, 0)
+      call_rt(RT_CLOSURE)
+      @a.str_x(R_X0, R_SP, idx_off)    # reuse unused tmp slot for closure
+      @a.ldr_x(R_X1, R_SP, rec_off)
+      @a.mov_imm64(R_X2, wvalue_bits("forEach") ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, rec_off)
+      @a.ldr_x(R_X3, R_SP, idx_off)
+      call_rt(RT_CALL_1)
+      @a.b(l_done)
+    add_cold_stub(cb_fe)
+    @tmp_depth -= 5
+    @known_shapes = {}
+    @epoch_verified_now = false
+    true
+
   -> gen_coll_method_intrinsic(rec_e, mname, arg_nodes, kind, rt_id)
     r = js_realm()
     mp = r.intrinsics["Map.prototype"]
@@ -9677,29 +23197,48 @@ OSR_RETURN = 2
     jit_keep(map_sh)
     jit_keep(set_sh)
     jit_keep(wm_sh) if wm_sh != nil
-    gen_expr_any(rec_e)
-    rec_off = push_x(R_X0)
     n = arg_nodes.size
+    rec_li = local_idx(rec_e)
+    rec_fast_loc = rec_li >= 0 && @info.types[rec_li] == JT_ANY && !stmt_writes_local?(arg_nodes, rec_li)
+    rec_off = -1
     a0_off = -1
     a1_off = -1
-    if n >= 1
+    n_pushed_cm = 0
+    if rec_fast_loc && n == 1
+      gen_expr_any(arg_nodes[0])
+      @a.mov_r(R_X2, R_X0)
+      load_slot_any(R_X1, rec_li)
+    elsif rec_fast_loc && n == 2
       gen_expr_any(arg_nodes[0])
       a0_off = push_x(R_X0)
-    if n >= 2
+      n_pushed_cm += 1
       gen_expr_any(arg_nodes[1])
-      a1_off = push_x(R_X0)
+      @a.mov_r(R_X3, R_X0)
+      load_slot_any(R_X1, rec_li)
+    else
+      gen_expr_any(rec_e)
+      rec_off = push_x(R_X0)
+      n_pushed_cm += 1
+      if n >= 1
+        gen_expr_any(arg_nodes[0])
+        a0_off = push_x(R_X0)
+        n_pushed_cm += 1
+      if n >= 2
+        gen_expr_any(arg_nodes[1])
+        a1_off = push_x(R_X0)
+        n_pushed_cm += 1
     l_slow = @a.new_label
     l_fast = @a.new_label
     l_wm_set = (has_wm && rt_id == RT_MAP_SET) ? @a.new_label : nil
     l_done = @a.new_label
-    if !@hoisted_epoch
+    if !@hoisted_epoch && !@epoch_verified_now
       ep_now = JS_EPOCH[0]
       @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
       @a.ldr_x(R_X10, R_X9, 0)
       @a.mov_imm64(R_X11, ep_now)
       @a.cmp_r(R_X10, R_X11)
       @a.b_cond(CC_NE, l_slow)
-    @a.ldr_x(R_X1, R_SP, rec_off)
+    @a.ldr_x(R_X1, R_SP, rec_off) if rec_off >= 0
     @a.sub_i(R_X9, R_X1, 4)
     @a.tst_wobj_bad(R_X9)
     @a.b_cond(CC_NE, l_slow)
@@ -9734,20 +23273,30 @@ OSR_RETURN = 2
         @a.b_cond(CC_EQ, l_fast)
       @a.b(l_slow)
     if l_wm_set != nil
+      # WeakMap#set inline fast path: verify key is a JS:Base object (kind != 0), then run shared inline ARM64 MapData insert!
+      # Non-object / Symbol / BigInt keys fall through to RT_WM_SET for exact ECMAScript validation/TypeError!
       cb_wm = ->()
         @a.bind(l_wm_set)
-        @a.ldr_x(R_X2, R_SP, a0_off)
-        @a.ldr_x(R_X3, R_SP, a1_off)
+        l_wm_rt = @a.new_label
+        @a.ldr_x(R_X2, R_SP, a0_off) if a0_off >= 0
+        @a.ldr_x(R_X3, R_SP, a1_off) if a1_off >= 0
+        @a.sub_i(R_X10, R_X2, 4)
+        @a.tst_wobj_bad(R_X10)
+        @a.b_cond(CC_NE, l_wm_rt)
+        @a.cbz_x(R_X10, l_wm_rt)
+        @a.ldrb(R_X11, R_X10, 4)
+        @a.cbnz_x(R_X11, l_fast)
+        @a.bind(l_wm_rt)
         call_rt(RT_WM_SET)
         @a.b(l_done)
       add_cold_stub(cb_wm)
     @a.bind(l_fast)
-    @a.ldr_x(R_X2, R_SP, a0_off) if n >= 1
-    @a.ldr_x(R_X3, R_SP, a1_off) if n >= 2
+    @a.ldr_x(R_X2, R_SP, a0_off) if n >= 1 && a0_off >= 0
+    @a.ldr_x(R_X3, R_SP, a1_off) if n >= 2 && a1_off >= 0
     # Pure inline ARM64 open-addressed hash probe for immediate keys (Number / InlineStr <= 5B / Nil / Bool)!
     # Falls back seamlessly to l_rt (call_rt(rt_id)) for long strings, objects, NaN, BigInt, or grow/rehash!
     mp_off = js_mapdata_metap_off()
-    if mp_off > 0 && (rt_id == RT_MAP_GET || rt_id == RT_SET_HAS || rt_id == RT_MAP_SET || rt_id == RT_SET_ADD)
+    if mp_off > 0 && (rt_id == RT_MAP_GET || rt_id == RT_SET_HAS || rt_id == RT_MAP_SET || rt_id == RT_SET_ADD || rt_id == RT_MAP_DELETE)
       key_is_i32 = n >= 1 && can_i32?(arg_nodes[0])
       val_is_num = n >= 2 && (can_i32?(arg_nodes[1]) || can_f64?(arg_nodes[1]))
       l_rt = @a.new_label
@@ -9765,10 +23314,12 @@ OSR_RETURN = 2
       @a.and_x_lowmask(R_X12, R_X12, 48)
       @a.ldr_x(R_X13, R_X12, 8)         # x13 = mask
       @a.cbz_x(R_X13, l_rt)
-      # For Map#set, verify value x3 is immediate (skip when statically known numeric!)
+      # For Map#set, check young-gen @vals FIRST (3 insns! covers heap objects in fresh Maps); only check immediate val if @vals is old-gen!
       if rt_id == RT_MAP_SET && !val_is_num
         l_vok = @a.new_label
-        l_vstr = @a.new_label
+        @a.ldr_x(R_X10, R_X12, 80)   # meta[10] = raw WArray* of @vals
+        @a.ldrb(R_X10, R_X10, 3)     # vals->gc_flags
+        @a.tbz(R_X10, 2, l_vok)      # W_GC_OLD = (1 << 2): young-gen @vals needs no write barrier!
         @a.cmp_i(R_X3, 2)
         @a.b_cond(CC_LS, l_vok)
         @a.sub_r(R_X10, R_X3, R_X20)
@@ -9792,12 +23343,12 @@ OSR_RETURN = 2
         @a.sub_r(R_X10, R_X2, R_X20)
         @a.cmp_r(R_X10, R_X21)
         @a.b_cond(CC_HS, l_chk_str)
-        # Number: reject NaN to l_rt; map -0.0 and +0.0 -> x20 (+0.0)
-        @a.fmov_d_x(R_D16, R_X10)
-        @a.fcmp_d(R_D16, R_D16)
-        @a.b_cond(CC_VS, l_rt)
+        # Number: pure-integer NaN/Inf/-0.0 check (ZERO FP domain crossing!): map -0.0 and +0.0 -> x20 (+0.0)
         @a.lsl_xi(R_X11, R_X10, 1)
         @a.cbz_x(R_X11, l_is_zero)
+        @a.lsr_xi(R_X14, R_X11, 53)
+        @a.cmp_i(R_X14, 2047)
+        @a.b_cond(CC_EQ, l_rt)
         @a.mov_r(R_X14, R_X2)
         @a.b(l_hash)
         @a.bind(l_is_zero)
@@ -9810,16 +23361,35 @@ OSR_RETURN = 2
         @a.mov_r(R_X14, R_X2)
         @a.b(l_hash)
         @a.bind(l_chk_inl_str)
+        l_chk_wobj_k = @a.new_label
         @a.lsr_xi(R_X10, R_X2, 48)
         @a.movz_x(R_X11, 0xFFF9)
         @a.cmp_r(R_X10, R_X11)
-        @a.b_cond(CC_NE, l_rt)
+        @a.b_cond(CC_NE, l_chk_wobj_k)
         @a.tst_x_lowmask(R_X2, 1)
         @a.b_cond(CC_NE, l_rt)
         @a.lsr_xi(R_X10, R_X2, 1)
         @a.and_x_lowmask(R_X10, R_X10, 3)
         @a.cmp_i(R_X10, 5)
         @a.b_cond(CC_HI, l_rt)
+        @a.mov_r(R_X14, R_X2)
+        @a.b(l_hash)
+        # JS:Base WObject key (WeakMap object keys, Set function/object elements — kind != 0, pointer-identity hashed!)
+        @a.bind(l_chk_wobj_k)
+        @a.sub_i(R_X10, R_X2, 4)
+        @a.tst_wobj_bad(R_X10)
+        @a.b_cond(CC_NE, l_rt)
+        @a.cbz_x(R_X10, l_rt)
+        @a.ldrb(R_X11, R_X10, 4)
+        @a.cbz_x(R_X11, l_rt)
+        if rt_id == RT_MAP_SET || rt_id == RT_SET_ADD
+          # Guard young-gen @keys (meta[11]) so storing a heap WObject key needs no write barrier!
+          @a.ldr_x(R_X10, R_X12, 88)   # meta[11] = raw WArray* of @keys
+          @a.ldrb(R_X10, R_X10, 3)     # keys->gc_flags
+          l_k_young = @a.new_label
+          @a.tbz(R_X10, 2, l_k_young)
+          @a.b(l_rt)                   # old-gen @keys -> fall back to RT write barrier!
+          @a.bind(l_k_young)
         @a.mov_r(R_X14, R_X2)
       # 1-multiply 31-bit hash -> R_X15 (bit-exact with jmap_hash64!)
       @a.bind(l_hash)
@@ -9836,7 +23406,7 @@ OSR_RETURN = 2
       @a.ldr_x(R_X9, R_X12, 0)
       @a.ldr_x(R_X10, R_X12, 16)
       @a.and_r(R_X11, R_X15, R_X13)
-      if rt_id == RT_MAP_GET || rt_id == RT_SET_HAS
+      if rt_id == RT_MAP_GET || rt_id == RT_SET_HAS || rt_id == RT_MAP_DELETE
         @a.bind(l_ploop)
         @a.ldrsw_idx(R_X16, R_X9, R_X11)
         @a.cbz_x(R_X16, l_pmiss)
@@ -9854,6 +23424,25 @@ OSR_RETURN = 2
         if rt_id == RT_MAP_GET
           @a.ldr_x(R_X10, R_X12, 24)
           @a.ldr_x_idx(R_X0, R_X10, R_X16)
+        elsif rt_id == RT_MAP_DELETE
+          # Delete entry `ei = x16` at bucket `idx = x11`: mark tombstone, clear key/val, size--, advance first_live!
+          @a.movn_x(R_X17, 0)
+          @a.str_w_idx(R_X17, R_X9, R_X11)        # buckets[idx] = -1
+          @a.ldr_x(R_X17, R_X19, RT_K_HOLE_BITS * 8)
+          @a.str_x_idx(R_X17, R_X10, R_X16)       # keys[ei] = JS_HOLE
+          @a.ldr_x(R_X10, R_X12, 24)              # vptr
+          @a.str_x_idx(R_XZR, R_X10, R_X16)       # vals[ei] = nil
+          @a.ldr_x(R_X17, R_X12, 56)              # meta[7] = size
+          @a.sub_i(R_X17, R_X17, 1)
+          @a.str_x(R_X17, R_X12, 56)
+          l_skip_fl = @a.new_label
+          @a.ldr_x(R_X17, R_X12, 72)              # meta[9] = first_live
+          @a.cmp_r(R_X16, R_X17)
+          @a.b_cond(CC_NE, l_skip_fl)
+          @a.add_i(R_X17, R_X17, 1)
+          @a.str_x(R_X17, R_X12, 72)
+          @a.bind(l_skip_fl)
+          @a.movz_x(R_X0, 2)                      # return true
         else
           @a.movz_x(R_X0, 2)
         @a.b(l_done)
@@ -9928,17 +23517,312 @@ OSR_RETURN = 2
     @a.bind(l_done)
     cb = ->()
       @a.bind(l_slow)
+      a0_s = (n >= 1 && a0_off < 0) ? push_x(R_X2) : a0_off
+      a1_s = (n >= 2 && a1_off < 0) ? push_x(R_X3) : a1_off
+      if rec_off >= 0
+        @a.ldr_x(R_X1, R_SP, rec_off)
+      else
+        load_slot_any(R_X1, rec_li)
+      @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
+      call_rt(RT_GETV)
+      # Direct jit_fast_fp dispatch on user JS:Function before falling back to RT_CALL_0+n!
+      l_rt_call = @a.new_label
+      @a.sub_i(R_X9, R_X0, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_rt_call)
+      @a.cbz_x(R_X9, l_rt_call)
+      @a.ldrb(R_X10, R_X9, 4)
+      @a.and_w_lowmask(R_X10, R_X10, 4)
+      @a.cmp_wi(R_X10, 2)
+      @a.b_cond(CC_NE, l_rt_call)
+      @a.ldr_x(R_X10, R_X9, 24)
+      @a.sub_i(R_X10, R_X10, 4)
+      @a.ldr_x(R_X16, R_X10, 96)
+      @a.and_x_lowmask(R_X16, R_X16, 48)
+      @a.cbz_x(R_X16, l_rt_call)
+      if rec_off >= 0
+        @a.ldr_x(R_X1, R_SP, rec_off)
+      else
+        load_slot_any(R_X1, rec_li)
+      @a.movz_x(R_X2, n)
+      @a.movz_x(R_X3, 0)
+      @a.movz_x(R_X4, 0)
+      @a.movz_x(R_X5, 0)
+      @a.movz_x(R_X6, 0)
+      @a.movz_x(R_X7, 0)
+      @a.ldr_x(R_X3, R_SP, a0_s) if n >= 1
+      @a.ldr_x(R_X4, R_SP, a1_s) if n >= 2
+      emit_blr_x16()
+      @a.cmp_i(R_X0, 6)
+      @a.b_cond(CC_NE, l_done)
+      if rec_off >= 0
+        @a.ldr_x(R_X1, R_SP, rec_off)
+      else
+        load_slot_any(R_X1, rec_li)
+      @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
+      call_rt(RT_GETV)
+      @a.bind(l_rt_call)
+      @a.mov_r(R_X1, R_X0)
+      if rec_off >= 0
+        @a.ldr_x(R_X2, R_SP, rec_off)
+      else
+        load_slot_any(R_X2, rec_li)
+      @a.ldr_x(R_X3, R_SP, a0_s) if n >= 1
+      @a.ldr_x(R_X4, R_SP, a1_s) if n >= 2
+      call_rt(RT_CALL_0 + n)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    @tmp_depth -= n_pushed_cm
+    true
+
+  # ---- Inlined Non-Escaping Local Helper Call, TypedArray#fill, Map/Set Size & First-Entry Fusion ----
+
+  -> emit_inlined_fn_call(ih, arg_nodes, mode)
+    hjf = ih[0]
+    pvs = ih[1]
+    i = 0
+    while i < pvs.size
+      ae = i < arg_nodes.size ? arg_nodes[i] : nil
+      if ae != nil
+        emit_store_expr_to_slot(pvs[i], ae)
+      else
+        @a.movz_x(R_X0, 0)
+        store_slot_any(pvs[i], R_X0)
+      i += 1
+    old_l_ret = @l_ret
+    old_mode = @inline_ret_mode
+    l_in_ret = @a.new_label
+    @l_ret = l_in_ret
+    @inline_ret_mode = mode
+    @known_shapes = {}
+    gen_stmts(hjf.node.b)
+    if mode == :any || mode == :i32 || mode == :u32
+      @a.movz_x(R_X0, 0)
+    elsif mode == :f64
+      @a.mov_imm64(R_X9, 0x7FF8000000000000)
+      @a.fmov_d_x(R_D0, R_X9)
+    @a.bind(l_in_ret)
+    @l_ret = old_l_ret
+    @inline_ret_mode = old_mode
+    @known_shapes = {}
+    nil
+
+  # Inline ARM64 fill loop for hoisted integer TypedArray (`head.fill(-1)`, `gScore.fill(1e9)`!).
+  -> gen_ta_fill_inline(bli, val_e, need_val = true)
+    h = @hoisted_tas[bli]
+    kind = h[2]
+    return false if kind != 0 && kind != 1 && kind != 5 && kind != 6
+    jit_keep("fill")
+    tr = @hoisted_ta_regs[bli]
+    l_slow = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    gen_expr_to_i32(val_e)
+    @a.mov_w(R_X12, R_X0)
+    if tr != nil && tr[0] != nil
+      @a.mov_r(R_X9, tr[0])
+    else
+      @a.ldr_x(R_X9, R_SP, h[0])
+    if tr != nil && tr[1] != nil
+      @a.mov_r(R_X10, tr[1])
+    else
+      @a.ldr_x(R_X10, R_SP, h[1])
+    l_lp_done = @a.new_label
+    @a.cmp_i(R_X10, 0)
+    @a.b_cond(CC_LE, l_lp_done)
+    if kind == 5 || kind == 6
+      # 64-bit paired store loop: fills 2 int32s (8 bytes) per iteration!
+      @a.lsl_xi(R_X13, R_X12, 32)
+      @a.orr_r(R_X12, R_X12, R_X13)
+      @a.lsr_xi(R_X13, R_X10, 1)
+      l_tail = @a.new_label
+      @a.cbz_x(R_X13, l_tail)
+      @a.movz_x(R_X11, 0)
+      l_lp2 = @a.new_label
+      @a.bind(l_lp2)
+      @a.str_x_idx(R_X12, R_X9, R_X11)
+      @a.add_i(R_X11, R_X11, 1)
+      @a.cmp_r(R_X11, R_X13)
+      @a.b_cond(CC_LT, l_lp2)
+      @a.bind(l_tail)
+      @a.tst_x_lowmask(R_X10, 1)
+      @a.b_cond(CC_EQ, l_lp_done)
+      @a.sub_i(R_X11, R_X10, 1)
+      @a.str_w_idx(R_X12, R_X9, R_X11)
+    else
+      @a.movz_x(R_X11, 0)
+      l_lp1 = @a.new_label
+      @a.bind(l_lp1)
+      @a.strb_idx(R_X12, R_X9, R_X11)
+      @a.add_i(R_X11, R_X11, 1)
+      @a.cmp_r(R_X11, R_X10)
+      @a.b_cond(CC_LT, l_lp1)
+    @a.bind(l_lp_done)
+    load_slot_any(R_X0, bli) if need_val
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      gen_expr_any(val_e)
+      v_off = push_x(R_X0)
+      load_slot_any(R_X1, bli)
+      @a.mov_imm64(R_X2, wvalue_bits("fill") ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      load_slot_any(R_X2, bli)
+      @a.ldr_x(R_X3, R_SP, v_off)
+      call_rt(RT_CALL_1)
+      @tmp_depth -= 1
+      @a.b(l_done)
+    add_cold_stub(cb)
+    true
+
+  # Guarded inline ARM64 `map.size` / `set.size` getter (ZERO RT_GETP_MISS!)
+  -> gen_coll_size_inline(e)
+    r = js_realm()
+    mp = r.intrinsics["Map.prototype"]
+    sp = r.intrinsics["Set.prototype"]
+    mp_off = js_mapdata_metap_off()
+    return false if mp == nil || sp == nil || mp_off <= 0
+    map_sh = js_root_shape(mp, SP_INLINE, SP_IBASE)
+    set_sh = js_root_shape(sp, SP_INLINE, SP_IBASE)
+    jit_keep(map_sh)
+    jit_keep(set_sh)
+    jit_keep("size")
+    gen_expr_any(e.a)
+    @a.mov_r(R_X13, R_X0)
+    l_slow = @a.new_label
+    l_hit = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    @a.sub_i(R_X9, R_X13, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.mov_imm64(R_X11, wvalue_bits(map_sh) ## i64)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_EQ, l_hit)
+    @a.mov_imm64(R_X11, wvalue_bits(set_sh) ## i64)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_NE, l_slow)
+    @a.bind(l_hit)
+    @a.ldr_x(R_X9, R_X9, 32)             # MapData
+    @a.sub_i(R_X9, R_X9, 4)
+    @a.ldr_x(R_X12, R_X9, mp_off)
+    @a.and_x_lowmask(R_X12, R_X12, 48)
+    @a.ldr_x(R_X10, R_X12, 56)           # meta[7] = size
+    emit_box_i32(R_X0, R_X10)
+    @a.bind(l_done)
+    node_ic = wk_ic(e)
+    cb = ->()
+      @a.bind(l_slow)
+      emit_ic_get(R_X13, "size", node_ic, -1)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    true
+
+  # Guarded inline ARM64 fusion for `map.keys().next().value` / `map.values().next().value` / `set.values().next().value`!
+  # ZERO MapIterator allocation, ZERO `{value, done}` object allocation, O(1) amortized tombstone skip via meta[9]!
+  -> gen_coll_first_entry_inline(rec_e, is_values, full_e)
+    r = js_realm()
+    mp = r.intrinsics["Map.prototype"]
+    sp = r.intrinsics["Set.prototype"]
+    mp_off = js_mapdata_metap_off()
+    return false if mp == nil || sp == nil || mp_off <= 0
+    return false if r.object_proto != nil && r.object_proto.get_own("value") != JS_HOLE
+    map_sh = js_root_shape(mp, SP_INLINE, SP_IBASE)
+    set_sh = js_root_shape(sp, SP_INLINE, SP_IBASE)
+    mname = is_values ? "values" : "keys"
+    jit_keep(map_sh)
+    jit_keep(set_sh)
+    jit_keep(mname)
+    jit_keep("next")
+    jit_keep("value")
+    gen_expr_any(rec_e)
+    rec_off = push_x(R_X0)
+    l_slow = @a.new_label
+    l_hit = @a.new_label
+    l_scan = @a.new_label
+    l_found = @a.new_label
+    l_empty = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    @a.sub_i(R_X9, R_X0, 4)
+    @a.tst_wobj_bad(R_X9)
+    @a.b_cond(CC_NE, l_slow)
+    @a.ldr_x(R_X10, R_X9, 8)
+    @a.mov_imm64(R_X11, wvalue_bits(map_sh) ## i64)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_EQ, l_hit)
+    @a.mov_imm64(R_X11, wvalue_bits(set_sh) ## i64)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_NE, l_slow)
+    @a.bind(l_hit)
+    @a.ldr_x(R_X9, R_X9, 32)             # MapData
+    @a.sub_i(R_X9, R_X9, 4)
+    @a.ldr_x(R_X12, R_X9, mp_off)
+    @a.and_x_lowmask(R_X12, R_X12, 48)
+    @a.ldr_x(R_X10, R_X12, 16)           # kptr = meta[2]
+    @a.ldr_x(R_X13, R_X12, 40)           # len = meta[5]
+    @a.ldr_x(R_X14, R_X12, 72)           # fl = meta[9]
+    @a.ldr_x(R_X15, R_X19, RT_K_HOLE_BITS * 8)
+    @a.bind(l_scan)
+    @a.cmp_r(R_X14, R_X13)
+    @a.b_cond(CC_GE, l_empty)
+    @a.ldr_x_idx(R_X0, R_X10, R_X14)
+    @a.cmp_r(R_X0, R_X15)
+    @a.b_cond(CC_NE, l_found)
+    @a.add_i(R_X14, R_X14, 1)
+    @a.b(l_scan)
+    @a.bind(l_found)
+    @a.str_x(R_X14, R_X12, 72)           # cache updated meta[9] = first_live!
+    if is_values
+      @a.ldr_x(R_X10, R_X12, 24)         # vptr = meta[3]
+      @a.ldr_x_idx(R_X0, R_X10, R_X14)
+    @a.b(l_done)
+    @a.bind(l_empty)
+    @a.str_x(R_X14, R_X12, 72)
+    @a.movz_x(R_X0, 0)                   # undefined
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
       @a.ldr_x(R_X1, R_SP, rec_off)
       @a.mov_imm64(R_X2, wvalue_bits(mname) ## i64)
       call_rt(RT_GETV)
       @a.mov_r(R_X1, R_X0)
       @a.ldr_x(R_X2, R_SP, rec_off)
-      @a.ldr_x(R_X3, R_SP, a0_off) if n >= 1
-      @a.ldr_x(R_X4, R_SP, a1_off) if n >= 2
-      call_rt(RT_CALL_0 + n)
+      call_rt(RT_CALL_0)
+      it_off = push_x(R_X0)
+      @a.mov_r(R_X1, R_X0)
+      @a.mov_imm64(R_X2, wvalue_bits("next") ## i64)
+      call_rt(RT_GETV)
+      @a.mov_r(R_X1, R_X0)
+      @a.ldr_x(R_X2, R_SP, it_off)
+      call_rt(RT_CALL_0)
+      @tmp_depth -= 1
+      @a.mov_r(R_X1, R_X0)
+      @a.mov_imm64(R_X2, wvalue_bits("value") ## i64)
+      call_rt(RT_GETV)
       @a.b(l_done)
     add_cold_stub(cb)
-    @tmp_depth -= (1 + n)
+    @tmp_depth -= 1
     true
 
   # Guarded Promise.prototype.then(on_f[, on_r]) fast-call intrinsic!
@@ -10184,7 +24068,7 @@ OSR_RETURN = 2
     @a.ldr_x(R_X0, R_X12, 8)
     @a.ldr_x(R_X1, R_X12, 16)
     @a.mov_imm64(R_X3, caps_p)
-    @a.blr(R_X16)
+    emit_blr_x16()
     # Update re.s0 (lastIndex) if global || sticky
     @a.ldr_x(R_X5, R_SP, gs_off)
     @a.cbz_x(R_X5, l_store_end)
@@ -10385,8 +24269,8 @@ OSR_RETURN = 2
     @tmp_depth -= 1
     true
 
-  # Guarded Object.keys(o) fast-call intrinsic (uses cached Shape#enum_str_keys!)
-  -> gen_object_keys_intrinsic(obj_ident, arg_e)
+  # Guarded Object.keys(o) fast-call intrinsic (uses cached Shape#enum_str_keys; zero-alloc when `ro`!)
+  -> gen_object_keys_intrinsic(obj_ident, arg_e, ro = false)
     return false if obj_ident.x == nil || obj_ident.x.binding == nil || !obj_ident.x.binding.global?
     r = js_realm()
     obj_ctor = r.intrinsics["Object"]
@@ -10413,7 +24297,7 @@ OSR_RETURN = 2
     @a.cmp_r(R_X10, R_X11)
     @a.b_cond(CC_NE, l_slow)
     @a.ldr_x(R_X1, R_SP, a0_off)
-    call_rt(RT_OBJ_KEYS)
+    call_rt(ro ? RT_OBJ_KEYS_RO : RT_OBJ_KEYS)
     @a.bind(l_done)
     cb = ->()
       @a.bind(l_slow)
@@ -10550,81 +24434,135 @@ OSR_RETURN = 2
     false
 
   # Emit a load of field `fname` from virtual struct rep `vs_rep` into `dst_d`!
-  # vs_rep: `[:sra, JitSraVs]` | `[:stack, base_off, keys]`
+  # vs_rep: `[:sra, JitSraVs]` | `[:fregs, reg_arr, keys, m, vsh]` | `[:stack, base_off, keys, m, ...]`
   -> emit_vs_field_load(dst_d, vs_rep, fname)
-    if vs_rep[0] == :sra
+    rk = vs_rep[0]
+    if rk == :sra
       slot = vs_rep[1].field_slots[fname]
       load_slot_f64(dst_d, slot)
+    elsif rk == :fregs
+      idx = vs_rep[2].index(fname)
+      reg = vs_rep[1][idx]
+      @a.fmov_d(dst_d, reg) if dst_d != reg
     else
       idx = vs_rep[2].index(fname)
       @a.ldr_d(dst_d, R_SP, vs_rep[1] + idx * 8)
     nil
 
-  # Evaluate a pure scalar expression inside an inlined vstruct method -> unboxed f64 in `R_D0`!
-  -> emit_vs_scalar_f64(e, sh, this_rep, p_env, loc_env)
+  # Return an already-resident FP register holding scalar leaf `e`, or nil if it must be loaded.
+  -> peek_vs_scalar_freg(e, this_rep, p_env, loc_env)
+    k = e.kind
+    if k == :member && !e.has?(F_COMPUTED)
+      rep = nil
+      if e.a.kind == :this
+        rep = this_rep
+      elsif e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && p_env != nil && p_env[e.a.x.binding] != nil
+        rep = p_env[e.a.x.binding]
+      if rep != nil
+        if rep[0] == :sra
+          slot = rep[1].field_slots[e.b.str]
+          return @info.reg_fpr[slot]
+        elsif rep[0] == :fregs
+          idx = rep[2].index(e.b.str)
+          return rep[1][idx]
+    if k == :ident && e.x != nil && e.x.binding != nil
+      b = e.x.binding
+      if p_env != nil && p_env[b] != nil && p_env[b][0] == :scalar_freg
+        return p_env[b][1]
+    nil
+
+  # Load a pure leaf of `emit_vs_scalar_f64` into `dst_d` (or return its existing FP reg if resident!). Returns reg or nil.
+  -> try_vs_scalar_leaf(dst_d, e, this_rep, p_env, loc_env)
+    pr = peek_vs_scalar_freg(e, this_rep, p_env, loc_env)
+    return pr if pr != nil
     k = e.kind
     if k == :num
-      bits = jit_f64_bits(wvalue_bits(e.a) ## i64)
-      @a.mov_imm64(R_X9, bits)
-      @a.fmov_d_x(R_D0, R_X9)
-      return nil
+      @a.mov_imm64(R_X9, jit_f64_bits(wvalue_bits(e.a) ## i64))
+      @a.fmov_d_x(dst_d, R_X9)
+      return dst_d
     if k == :true
       @a.mov_imm64(R_X9, jit_f64_bits(wvalue_bits(~1.0) ## i64))
-      @a.fmov_d_x(R_D0, R_X9)
-      return nil
+      @a.fmov_d_x(dst_d, R_X9)
+      return dst_d
     if k == :false || k == :null
-      @a.fmov_d_x(R_D0, R_XZR)
-      return nil
+      @a.fmov_d_x(dst_d, R_XZR)
+      return dst_d
     if k == :ident && e.x != nil && e.x.binding != nil
       b = e.x.binding
       if loc_env != nil && loc_env[0] == b
-        @a.ldr_d(R_D0, R_SP, loc_env[1])
-        return nil
+        @a.ldr_d(dst_d, R_SP, loc_env[1])
+        return dst_d
       if p_env != nil && p_env[b] != nil && p_env[b][0] == :scalar_spill
-        @a.ldr_d(R_D0, R_SP, p_env[b][1])
-        return nil
+        @a.ldr_d(dst_d, R_SP, p_env[b][1])
+        return dst_d
     if k == :member && !e.has?(F_COMPUTED)
       if e.a.kind == :this
-        emit_vs_field_load(R_D0, this_rep, e.b.str)
-        return nil
+        emit_vs_field_load(dst_d, this_rep, e.b.str)
+        return dst_d
       if e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil && p_env != nil && p_env[e.a.x.binding] != nil
-        emit_vs_field_load(R_D0, p_env[e.a.x.binding], e.b.str)
-        return nil
+        emit_vs_field_load(dst_d, p_env[e.a.x.binding], e.b.str)
+        return dst_d
+    nil
+
+  # Evaluate a pure scalar expression inside an inlined vstruct method -> unboxed f64 in `dst_d` (ZERO stack spills for leaves/FMAs!)
+  -> emit_vs_scalar_f64(e, sh, this_rep, p_env, loc_env, dst_d = R_D0)
+    lr = try_vs_scalar_leaf(dst_d, e, this_rep, p_env, loc_env)
+    if lr != nil
+      @a.fmov_d(dst_d, lr) if lr != dst_d
+      return nil
+    k = e.kind
     if k == :unary && e.str == "-"
-      emit_vs_scalar_f64(e.a, sh, this_rep, p_env, loc_env)
-      @a.fneg_d(R_D0, R_D0)
+      emit_vs_scalar_f64(e.a, sh, this_rep, p_env, loc_env, dst_d)
+      @a.fneg_d(dst_d, dst_d)
       return nil
     if k == :binary
       op = e.str
-      # Fused `a + (x * y)` -> FMADD_D (3-cycle FMA on Apple Silicon!)
+      # Fused `a + (x * y)` / `a - (x * y)` -> FMADD_D / FMSUB_D with ZERO stack traffic on leaf operands!
       if (op == "+" || op == "-") && e.b.kind == :binary && e.b.str == "*"
-        emit_vs_scalar_f64(e.a, sh, this_rep, p_env, loc_env)
+        emit_vs_scalar_f64(e.a, sh, this_rep, p_env, loc_env, R_D0)
+        rx = try_vs_scalar_leaf(R_D1, e.b.a, this_rep, p_env, loc_env)
+        ry = rx != nil ? try_vs_scalar_leaf(R_D2, e.b.b, this_rep, p_env, loc_env) : nil
+        if rx != nil && ry != nil
+          if op == "+"
+            @a.fmadd_d(dst_d, rx, ry, R_D0)
+          else
+            @a.fmsub_d(dst_d, rx, ry, R_D0)
+          return nil
         a_off = push_d(R_D0)
-        emit_vs_scalar_f64(e.b.a, sh, this_rep, p_env, loc_env)
+        emit_vs_scalar_f64(e.b.a, sh, this_rep, p_env, loc_env, R_D0)
         x_off = push_d(R_D0)
-        emit_vs_scalar_f64(e.b.b, sh, this_rep, p_env, loc_env)
+        emit_vs_scalar_f64(e.b.b, sh, this_rep, p_env, loc_env, R_D0)
         @a.ldr_d(R_D1, R_SP, x_off)
         @a.ldr_d(R_D2, R_SP, a_off)
         @tmp_depth -= 2
         if op == "+"
-          @a.fmadd_d(R_D0, R_D1, R_D0, R_D2)
+          @a.fmadd_d(dst_d, R_D1, R_D0, R_D2)
         else
-          @a.fmsub_d(R_D0, R_D1, R_D0, R_D2)
+          @a.fmsub_d(dst_d, R_D1, R_D0, R_D2)
         return nil
-      emit_vs_scalar_f64(e.a, sh, this_rep, p_env, loc_env)
+      ra = try_vs_scalar_leaf(R_D1, e.a, this_rep, p_env, loc_env)
+      rb = ra != nil ? try_vs_scalar_leaf(R_D2, e.b, this_rep, p_env, loc_env) : nil
+      if ra != nil && rb != nil
+        emit_f64_op(op, dst_d, ra, rb)
+        return nil
+      emit_vs_scalar_f64(e.a, sh, this_rep, p_env, loc_env, R_D0)
+      rb2 = try_vs_scalar_leaf(R_D1, e.b, this_rep, p_env, loc_env)
+      if rb2 != nil
+        emit_f64_op(op, dst_d, R_D0, rb2)
+        return nil
       a_off = push_d(R_D0)
-      emit_vs_scalar_f64(e.b, sh, this_rep, p_env, loc_env)
+      emit_vs_scalar_f64(e.b, sh, this_rep, p_env, loc_env, R_D0)
       @a.ldr_d(R_D1, R_SP, a_off)
       @tmp_depth -= 1
-      emit_f64_op(op, R_D0, R_D1, R_D0)
+      emit_f64_op(op, dst_d, R_D1, R_D0)
       return nil
     if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED)
       if e.a.a.kind == :ident && e.a.a.str == "Math" && e.list.size == 1
-        emit_vs_scalar_f64(e.list[0], sh, this_rep, p_env, loc_env)
+        emit_vs_scalar_f64(e.list[0], sh, this_rep, p_env, loc_env, dst_d)
         if e.a.b.str == "sqrt"
-          @a.fsqrt_d(R_D0, R_D0)
+          @a.fsqrt_d(dst_d, dst_d)
         elsif e.a.b.str == "abs"
-          @a.fabs_d(R_D0, R_D0)
+          @a.fabs_d(dst_d, dst_d)
         return nil
       # Nested scalar method call on `this` (e.g. `this.dot(this)` inside `norm()`!)
       if e.a.a.kind == :this && e.list.size == 1
@@ -10638,7 +24576,7 @@ OSR_RETURN = 2
             sub_penv[sub_tjf.params[0]] = this_rep
           elsif ae0.kind == :ident && ae0.x != nil && p_env != nil && p_env[ae0.x.binding] != nil
             sub_penv[sub_tjf.params[0]] = p_env[ae0.x.binding]
-          emit_vs_scalar_f64(sub_mi[2], sh, this_rep, sub_penv, nil)
+          emit_vs_scalar_f64(sub_mi[2], sh, this_rep, sub_penv, nil, dst_d)
           return nil
     nil
 
@@ -10742,16 +24680,95 @@ OSR_RETURN = 2
             q += 1
         @tmp_depth = saved_td
         return [:stack, out_off, keys, m]
+    # 3b. Direct unboxed value-struct function call (`trace(p, rdir, depth - 1)` or `trace(cam, new Vec(...).norm(), 2)` -> ZERO allocs!)
+    if e.kind == :call && e.a.kind == :ident && e.a.x != nil && e.a.x.binding != nil
+      cb = e.a.x.binding
+      is_self_vs = @in_vs_entry && cb == @jf.binding && @l_vs_entry_lbl != nil
+      target_sig = nil
+      target_fp = 0
+      gcell = nil
+      gfv = nil
+      if is_self_vs
+        target_sig = @info.vs_fn_sig
+      elsif cb.global?
+        gcell = wk_cell(cb)
+        gfv = gcell.value
+        if gfv.is_a?(JS:Function) && gfv.code != nil && gfv.code.jit_vs_fp != 0 && gfv.code.jit_vs_sig != nil
+          target_sig = gfv.code.jit_vs_sig
+          target_fp = gfv.code.jit_vs_fp
+      if target_sig != nil && target_sig[1][4] == sh && e.list.size == target_sig[0].size
+        out_off = @tmp_base + @tmp_depth * 8
+        @tmp_depth += m
+        @max_tmp = @tmp_depth if @tmp_depth > @max_tmp
+        saved_td = @tmp_depth
+        if !is_self_vs
+          jit_keep(gcell)
+          jit_keep(gfv)
+          @a.mov_imm64(R_X9, (wvalue_bits(gcell) ## i64) - 4)
+          @a.ldr_x(R_X10, R_X9, 8)
+          @a.mov_imm64(R_X11, wvalue_bits(gfv) ## i64)
+          @a.cmp_r(R_X10, R_X11)
+          @a.b_cond(CC_NE, l_slow)
+        pspecs = target_sig[0]
+        arg_reps = []
+        ai = 0
+        while ai < pspecs.size
+          ps = pspecs[ai]
+          if ps[0] == :vs
+            arg_reps.push(gen_vstruct_to_rep(e.list[ai], ps[1], l_slow))
+          elsif ps[0] == :i32
+            gen_expr_i32(e.list[ai])
+            arg_reps.push([:i32_spill, push_w(R_X0)])
+          else
+            gen_expr_f64(e.list[ai])
+            arg_reps.push([:f64_spill, push_d(R_D0)])
+          ai += 1
+        fp_i = 0
+        int_i = 0
+        ai = 0
+        while ai < pspecs.size
+          ps = pspecs[ai]
+          ar = arg_reps[ai]
+          if ps[0] == :vs
+            pkeys = ps[1][2]
+            q = 0
+            while q < pkeys.size
+              emit_vs_field_load(R_D0 + fp_i, ar, pkeys[q])
+              fp_i += 1
+              q += 1
+          elsif ps[0] == :i32
+            @a.ldr_w(R_X1 + int_i, R_SP, ar[1])
+            int_i += 1
+          else
+            @a.ldr_d(R_D0 + fp_i, R_SP, ar[1])
+            fp_i += 1
+          ai += 1
+        if is_self_vs
+          @a.bl(@l_vs_entry_lbl)
+        else
+          @a.mov_imm64(R_X16, target_fp)
+          emit_blr_x16()
+        @a.cbnz_w(R_X0, l_slow)
+        q = 0
+        while q < m
+          @a.str_d(R_D0 + q, R_SP, out_off + q * 8)
+          q += 1
+        @tmp_depth = saved_td
+        return [:stack, out_off, keys, m]
     # 4. Existing heap object (`ro`, `rd`, `this.c`, `hitS.c`, `light`, `hitS.col`, `rcol`) -> guarded unbox into `m` f64 slots!
     jit_keep(sh)
     out_off = @tmp_base + @tmp_depth * 8
     @tmp_depth += m
     @max_tmp = @tmp_depth if @tmp_depth > @max_tmp
-    gen_expr_any(e)
-    @a.sub_i(R_X9, R_X0, 4)
-    @a.tst_wobj_bad(R_X9)
-    @a.b_cond(CC_NE, l_slow)
-    @a.cbz_x(R_X9, l_slow)
+    if e.kind == :ident && e.x != nil && e.x.binding != nil && @info.global_objs[e.x.binding] != nil && @info.global_objs[e.x.binding][1].is_a?(JS:Object)
+      gv_vs = @info.global_objs[e.x.binding][1]
+      @a.mov_imm64(R_X9, (wvalue_bits(gv_vs) ## i64) - 4)
+    else
+      gen_expr_any(e)
+      @a.sub_i(R_X9, R_X0, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
     @a.ldr_x(R_X10, R_X9, 8)
     @a.mov_imm64(R_X11, wvalue_bits(sh) ## i64)
     @a.cmp_r(R_X10, R_X11)
@@ -10765,6 +24782,424 @@ OSR_RETURN = 2
       @a.str_d(R_D0, R_SP, out_off + q * 8)
       q += 1
     [:stack, out_off, keys, m]
+
+  # Resolve an inlineable multi-stmt pure-numeric method call taking vstruct/scalar args (e.g. `spheres[i].hit(ro, rd)`)!
+  -> resolve_vstruct_method_f64(e)
+    return nil if @is_osr || !e.is_a?(JsNode) || e.kind != :call || e.a.kind != :member || e.a.has?(F_COMPUTED)
+    prof = (e.x.is_a?(Array) && e.x.size == 2 && e.x[0].is_a?(JS:Shape) && e.x[1].is_a?(JS:Function)) ? e.x : jit_infer_global_arr_method(e.a, @info.global_objs)
+    return nil if prof == nil
+    sh = prof[0]
+    fn = prof[1]
+    return nil if sh.dict || sh.slot_of(e.a.b.str) >= 0
+    arg_cis = []
+    ai = 0
+    while ai < e.list.size
+      ae = e.list[ai]
+      aci = resolve_vstruct_expr_ci(ae)
+      if aci == nil && ae.kind == :ident
+        ali = local_idx(ae)
+        if ali >= 0 && @known_vs_sh[ali] != nil
+          aci = jit_vs_ctor_info_for_shape(@known_vs_sh[ali])
+        elsif ae.x != nil && ae.x.binding != nil && @info.global_objs[ae.x.binding] != nil
+          gv = @info.global_objs[ae.x.binding][1]
+          aci = jit_vs_ctor_info_for_shape(gv.shape) if gv.is_a?(JS:Object)
+      arg_cis.push(aci)
+      ai += 1
+    info_m = jit_vs_method_f64_info(fn, sh, arg_cis)
+    return nil if info_m == nil
+    [sh, fn, info_m]
+
+  # Return already-resident FP reg for scalar leaf inside `gen_vstruct_method_f64_inline`, or load into `dr` (returns reg or nil).
+  -> try_vs_m_leaf_reg(dr, e, v_env, f_env, this_f_env)
+    k = e.kind
+    if k == :num
+      @a.mov_imm64(R_X9, jit_f64_bits(wvalue_bits(e.a) ## i64))
+      @a.fmov_d_x(dr, R_X9)
+      return dr
+    if k == :ident && e.x != nil && f_env[e.x.binding] != nil
+      fv = f_env[e.x.binding]
+      return fv[1] if fv[0] == :freg
+      @a.ldr_d(dr, R_SP, fv[1])
+      return dr
+    if k == :member && !e.has?(F_COMPUTED)
+      if e.a.kind == :this && this_f_env[e.b.str] != nil
+        tv = this_f_env[e.b.str]
+        return tv[1] if tv[0] == :freg
+        @a.ldr_d(dr, R_SP, tv[1])
+        return dr
+      if e.a.kind == :ident && e.a.x != nil && v_env[e.a.x.binding] != nil
+        rep = v_env[e.a.x.binding]
+        if rep[0] == :fregs
+          return rep[1][rep[2].index(e.b.str)]
+        elsif rep[0] == :sra
+          fr = @info.reg_fpr[rep[1].field_slots[e.b.str]]
+          return fr if fr != nil
+        emit_vs_field_load(dr, rep, e.b.str)
+        return dr
+    nil
+
+  # Evaluate pure scalar f64 expression inside an inlined multi-stmt vstruct method (`Sphere.prototype.hit`) -> `dst_d`!
+  -> emit_vs_m_f64_expr(e, sh, v_env, f_env, this_f_env, dst_d = R_D0)
+    lr = try_vs_m_leaf_reg(dst_d, e, v_env, f_env, this_f_env)
+    if lr != nil
+      @a.fmov_d(dst_d, lr) if lr != dst_d
+      return nil
+    k = e.kind
+    if k == :unary && e.str == "-"
+      ra = try_vs_m_leaf_reg(R_D1, e.a, v_env, f_env, this_f_env)
+      if ra != nil
+        @a.fneg_d(dst_d, ra)
+        return nil
+      emit_vs_m_f64_expr(e.a, sh, v_env, f_env, this_f_env, dst_d)
+      @a.fneg_d(dst_d, dst_d)
+      return nil
+    if k == :binary
+      op = e.str
+      if (op == "+" || op == "-") && e.b.kind == :binary && e.b.str == "*"
+        emit_vs_m_f64_expr(e.a, sh, v_env, f_env, this_f_env, R_D0)
+        rx = try_vs_m_leaf_reg(R_D1, e.b.a, v_env, f_env, this_f_env)
+        ry = rx != nil ? try_vs_m_leaf_reg(R_D2, e.b.b, v_env, f_env, this_f_env) : nil
+        if rx != nil && ry != nil
+          if op == "+"
+            @a.fmadd_d(dst_d, rx, ry, R_D0)
+          else
+            @a.fmsub_d(dst_d, rx, ry, R_D0)
+          return nil
+        a_off = push_d(R_D0)
+        emit_vs_m_f64_expr(e.b.a, sh, v_env, f_env, this_f_env, R_D0)
+        x_off = push_d(R_D0)
+        emit_vs_m_f64_expr(e.b.b, sh, v_env, f_env, this_f_env, R_D0)
+        @a.ldr_d(R_D1, R_SP, x_off)
+        @a.ldr_d(R_D2, R_SP, a_off)
+        @tmp_depth -= 2
+        if op == "+"
+          @a.fmadd_d(dst_d, R_D1, R_D0, R_D2)
+        else
+          @a.fmsub_d(dst_d, R_D1, R_D0, R_D2)
+        return nil
+      ra = try_vs_m_leaf_reg(R_D1, e.a, v_env, f_env, this_f_env)
+      rb = ra != nil ? try_vs_m_leaf_reg(R_D2, e.b, v_env, f_env, this_f_env) : nil
+      if ra != nil && rb != nil
+        emit_f64_op(op, dst_d, ra, rb)
+        return nil
+      emit_vs_m_f64_expr(e.a, sh, v_env, f_env, this_f_env, R_D0)
+      rb2 = try_vs_m_leaf_reg(R_D1, e.b, v_env, f_env, this_f_env)
+      if rb2 != nil
+        emit_f64_op(op, dst_d, R_D0, rb2)
+        return nil
+      a_off = push_d(R_D0)
+      emit_vs_m_f64_expr(e.b, sh, v_env, f_env, this_f_env, R_D0)
+      @a.ldr_d(R_D1, R_SP, a_off)
+      @tmp_depth -= 1
+      emit_f64_op(op, dst_d, R_D1, R_D0)
+      return nil
+    if k == :cond
+      c = e.a
+      l_el = @a.new_label
+      l_en = @a.new_label
+      ra = try_vs_m_leaf_reg(R_D0, c.a, v_env, f_env, this_f_env)
+      if ra == nil
+        emit_vs_m_f64_expr(c.a, sh, v_env, f_env, this_f_env, R_D0)
+        ra = R_D0
+      if c.b.kind == :num && c.b.a == ~0.0
+        @a.fcmp_d0(ra)
+      else
+        rb = try_vs_m_leaf_reg(R_D1, c.b, v_env, f_env, this_f_env)
+        if rb != nil
+          @a.fcmp_d(ra, rb)
+        else
+          ca_off = push_d(ra)
+          emit_vs_m_f64_expr(c.b, sh, v_env, f_env, this_f_env, R_D0)
+          @a.ldr_d(R_D1, R_SP, ca_off)
+          @tmp_depth -= 1
+          @a.fcmp_d(R_D1, R_D0)
+      emit_f64_cmp_branch(c.str, false, l_el)
+      emit_vs_m_f64_expr(e.b, sh, v_env, f_env, this_f_env, dst_d)
+      @a.b(l_en)
+      @a.bind(l_el)
+      emit_vs_m_f64_expr(e.c, sh, v_env, f_env, this_f_env, dst_d)
+      @a.bind(l_en)
+      return nil
+    if k == :call && e.a.kind == :member && !e.a.has?(F_COMPUTED)
+      if e.a.a.kind == :ident && e.a.a.str == "Math"
+        mn = e.a.b.str
+        if e.list.size == 1
+          ra = try_vs_m_leaf_reg(dst_d, e.list[0], v_env, f_env, this_f_env)
+          if ra == nil
+            emit_vs_m_f64_expr(e.list[0], sh, v_env, f_env, this_f_env, dst_d)
+            ra = dst_d
+          @a.fsqrt_d(dst_d, ra) if mn == "sqrt"
+          @a.fabs_d(dst_d, ra) if mn == "abs"
+          return nil
+        if e.list.size == 2
+          emit_vs_m_f64_expr(e.list[0], sh, v_env, f_env, this_f_env, R_D0)
+          rb = try_vs_m_leaf_reg(R_D1, e.list[1], v_env, f_env, this_f_env)
+          if rb != nil
+            @a.fmin_d(dst_d, R_D0, rb) if mn == "min"
+            @a.fmax_d(dst_d, R_D0, rb) if mn == "max"
+            return nil
+          a_off = push_d(R_D0)
+          emit_vs_m_f64_expr(e.list[1], sh, v_env, f_env, this_f_env, R_D0)
+          @a.ldr_d(R_D1, R_SP, a_off)
+          @tmp_depth -= 1
+          @a.fmin_d(dst_d, R_D1, R_D0) if mn == "min"
+          @a.fmax_d(dst_d, R_D1, R_D0) if mn == "max"
+          return nil
+      if e.a.a.kind == :ident && e.a.a.x != nil && v_env[e.a.a.x.binding] != nil
+        rec_rep = v_env[e.a.a.x.binding]
+        vsh = rec_rep[0] == :sra ? rec_rep[1].ctor_info[4] : rec_rep[4]
+        mfn = vsh.proto.get_own(e.a.b.str)
+        mi = jit_vstruct_method_info(mfn, vsh)
+        sub_tjf = mi[1]
+        sub_penv = {}
+        ai = 0
+        while ai < sub_tjf.params.size
+          ae = e.list[ai]
+          if ae.kind == :ident && ae.x != nil && v_env[ae.x.binding] != nil
+            sub_penv[sub_tjf.params[ai]] = v_env[ae.x.binding]
+          else
+            emit_vs_m_f64_expr(ae, sh, v_env, f_env, this_f_env, R_D0)
+            sub_penv[sub_tjf.params[ai]] = [:scalar_spill, push_d(R_D0)]
+          ai += 1
+        emit_vs_scalar_f64(mi[2], vsh, rec_rep, sub_penv, nil, dst_d)
+        return nil
+    nil
+
+  # Inline multi-stmt pure-numeric method taking vstruct/scalar args (e.g. `spheres[i].hit(ro, rd)`) -> f64 in R_D0!
+  # Register-allocates `this.<vs/num>` and local `vs/f64` variables directly into caller-saved FP regs `D18..D31` (ZERO stack traffic)!
+  -> gen_vstruct_method_f64_inline(e)
+    rm = resolve_vstruct_method_f64(e)
+    return false if rm == nil
+    sh = rm[0]
+    info_m = rm[2]
+    tjf = info_m[0]
+    this_vs = info_m[1]
+    this_num = info_m[2]
+    loc_kinds = info_m[3]
+    arg_cis = info_m[4]
+    jit_keep(sh)
+    l_slow = @a.new_label
+    l_m_ret = @a.new_label
+    l_done = @a.new_label
+    if !@hoisted_epoch
+      ep_now = JS_EPOCH[0]
+      @a.ldr_x(R_X9, R_X19, RT_K_EPOCH_PTR * 8)
+      @a.ldr_x(R_X10, R_X9, 0)
+      @a.mov_imm64(R_X11, ep_now)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+    saved_td = @tmp_depth
+    # 1. Evaluate receiver and arguments in exact JS order BEFORE allocating scratch FP regs D18..D31!
+    gen_expr_any(e.a.a)
+    rec_off = push_x(R_X0)
+    v_env = {}
+    f_env = {}
+    pi = 0
+    while pi < tjf.params.size
+      pb = tjf.params[pi]
+      if arg_cis[pi] != nil
+        rep = gen_vstruct_to_rep(e.list[pi], arg_cis[pi], l_slow)
+        rep = [rep[0], rep[1], rep[2], rep[3], arg_cis[pi][4]] if rep[0] == :stack
+        v_env[pb] = rep
+      else
+        gen_expr_f64(e.list[pi])
+        f_env[pb] = [:spill, push_d(R_D0)]
+      pi += 1
+    # 2. Guard receiver shape == sh (keeping unmasked `recv*` in R_X13 across `this.*` unboxes!)
+    @a.ldr_x(R_X0, R_SP, rec_off)
+    @a.sub_i(R_X13, R_X0, 4)
+    @a.tst_wobj_bad(R_X13)
+    @a.b_cond(CC_NE, l_slow)
+    @a.cbz_x(R_X13, l_slow)
+    @a.ldr_x(R_X10, R_X13, 8)
+    @a.mov_imm64(R_X11, wvalue_bits(sh) ## i64)
+    @a.cmp_r(R_X10, R_X11)
+    @a.b_cond(CC_NE, l_slow)
+    # Allocate pure leaf caller-saved FP regs D18..D31 (14 regs — ZERO stack spills in Sphere.prototype.hit!)
+    next_d = R_D18
+    # 3. Preload & unbox `this.<vstruct_field>` (e.g. `this.c` -> D18..D20) and `this.<num_field>` (`this.r2` -> D21)!
+    this_vs_env = {}
+    this_vs.each ->(fnm, vci)
+      vsh = vci[4]
+      vkeys = vci[2]
+      jit_keep(vsh)
+      sl = sh.slot_of(fnm)
+      enc = sl < sh.inline ? (sh.ibase + sl) : (0 - (sl - sh.inline) - 1)
+      emit_slot_load(R_X10, R_X13, enc)
+      @a.sub_i(R_X9, R_X10, 4)
+      @a.tst_wobj_bad(R_X9)
+      @a.b_cond(CC_NE, l_slow)
+      @a.cbz_x(R_X9, l_slow)
+      @a.ldr_x(R_X10, R_X9, 8)
+      @a.mov_imm64(R_X11, wvalue_bits(vsh) ## i64)
+      @a.cmp_r(R_X10, R_X11)
+      @a.b_cond(CC_NE, l_slow)
+      if next_d + vkeys.size <= R_D31 + 1
+        regs = []
+        q = 0
+        while q < vkeys.size
+          vsl = vsh.slot_of(vkeys[q])
+          venc = vsl < vsh.inline ? (vsh.ibase + vsl) : (0 - (vsl - vsh.inline) - 1)
+          emit_slot_load(R_X10, R_X9, venc)
+          dr = next_d
+          next_d += 1
+          emit_unbox_f64(dr, R_X10, l_slow)
+          regs.push(dr)
+          q += 1
+        this_vs_env[fnm] = [:fregs, regs, vkeys, vkeys.size, vsh]
+      else
+        v_off = @tmp_base + @tmp_depth * 8
+        @tmp_depth += vkeys.size
+        @max_tmp = @tmp_depth if @tmp_depth > @max_tmp
+        q = 0
+        while q < vkeys.size
+          vsl = vsh.slot_of(vkeys[q])
+          venc = vsl < vsh.inline ? (vsh.ibase + vsl) : (0 - (vsl - vsh.inline) - 1)
+          emit_slot_load(R_X10, R_X9, venc)
+          emit_unbox_f64(R_D0, R_X10, l_slow)
+          @a.str_d(R_D0, R_SP, v_off + q * 8)
+          q += 1
+        this_vs_env[fnm] = [:stack, v_off, vkeys, vkeys.size, vsh]
+    this_f_env = {}
+    this_num.keys.each ->(fnm)
+      sl = sh.slot_of(fnm)
+      enc = sl < sh.inline ? (sh.ibase + sl) : (0 - (sl - sh.inline) - 1)
+      emit_slot_load(R_X10, R_X13, enc)
+      if next_d <= R_D31
+        dr = next_d
+        next_d += 1
+        emit_unbox_f64(dr, R_X10, l_slow)
+        this_f_env[fnm] = [:freg, dr]
+      else
+        emit_unbox_f64(R_D0, R_X10, l_slow)
+        this_f_env[fnm] = [:spill, push_d(R_D0)]
+    # 4. Execute statements of `tjf.node.b` directly in unboxed f64 FP registers!
+    stmts = tjf.node.b
+    si = 0
+    while si < stmts.size
+      st = stmts[si]
+      if st.kind == :var_decl
+        lb = st.list[0].a.x.binding
+        rhs = st.list[0].b
+        lk = loc_kinds[lb]
+        if lk[0] == :vs
+          vci = lk[1]
+          mi = lk[2]
+          vsh = vci[4]
+          vkeys = vci[2]
+          rec_rep = v_env[rhs.a.a.x.binding]
+          sub_tjf = mi[1]
+          sub_penv = {}
+          ai = 0
+          while ai < sub_tjf.params.size
+            ae = rhs.list[ai]
+            if ae.kind == :member && !ae.has?(F_COMPUTED) && ae.a.kind == :this
+              sub_penv[sub_tjf.params[ai]] = this_vs_env[ae.b.str]
+            elsif ae.kind == :ident && ae.x != nil && v_env[ae.x.binding] != nil
+              sub_penv[sub_tjf.params[ai]] = v_env[ae.x.binding]
+            else
+              emit_vs_m_f64_expr(ae, sh, v_env, f_env, this_f_env, R_D0)
+              sub_penv[sub_tjf.params[ai]] = [:scalar_spill, push_d(R_D0)]
+            ai += 1
+          loc_env = nil
+          if mi[3] != nil
+            emit_vs_scalar_f64(mi[3][1], vsh, rec_rep, sub_penv, nil, R_D0)
+            loc_env = [mi[3][0], push_d(R_D0)]
+          use_regs = next_d + vkeys.size <= R_D31 + 1
+          out_regs = []
+          out_off = 0
+          if use_regs
+            q0 = 0
+            while q0 < vkeys.size
+              out_regs.push(next_d)
+              next_d += 1
+              q0 += 1
+          else
+            out_off = @tmp_base + @tmp_depth * 8
+            @tmp_depth += vkeys.size
+            @max_tmp = @tmp_depth if @tmp_depth > @max_tmp
+          if mi[0] == :vstruct_new
+            new_node = mi[4]
+            q = 0
+            while q < vkeys.size
+              if use_regs
+                emit_vs_scalar_f64(new_node.list[q], vsh, rec_rep, sub_penv, loc_env, out_regs[q])
+              else
+                emit_vs_scalar_f64(new_node.list[q], vsh, rec_rep, sub_penv, loc_env, R_D0)
+                @a.str_d(R_D0, R_SP, out_off + q * 8)
+              q += 1
+          else
+            call_node = mi[4]
+            sub2 = mi[5]
+            sub2_penv = {}
+            sai = 0
+            while sai < sub2[1].params.size
+              emit_vs_scalar_f64(call_node.list[sai], vsh, rec_rep, sub_penv, loc_env, R_D0)
+              sub2_penv[sub2[1].params[sai]] = [:scalar_spill, push_d(R_D0)]
+              sai += 1
+            new_node = sub2[4]
+            q = 0
+            while q < vkeys.size
+              if use_regs
+                emit_vs_scalar_f64(new_node.list[q], vsh, rec_rep, sub2_penv, nil, out_regs[q])
+              else
+                emit_vs_scalar_f64(new_node.list[q], vsh, rec_rep, sub2_penv, nil, R_D0)
+                @a.str_d(R_D0, R_SP, out_off + q * 8)
+              q += 1
+          v_env[lb] = use_regs ? [:fregs, out_regs, vkeys, vkeys.size, vsh] : [:stack, out_off, vkeys, vkeys.size, vsh]
+        else
+          if next_d <= R_D31
+            dr = next_d
+            next_d += 1
+            emit_vs_m_f64_expr(rhs, sh, v_env, f_env, this_f_env, dr)
+            f_env[lb] = [:freg, dr]
+          else
+            emit_vs_m_f64_expr(rhs, sh, v_env, f_env, this_f_env, R_D0)
+            f_env[lb] = [:spill, push_d(R_D0)]
+      elsif st.kind == :if
+        c = st.a
+        l_skip = @a.new_label
+        ra = try_vs_m_leaf_reg(R_D0, c.a, v_env, f_env, this_f_env)
+        if ra == nil
+          emit_vs_m_f64_expr(c.a, sh, v_env, f_env, this_f_env, R_D0)
+          ra = R_D0
+        if c.b.kind == :num && c.b.a == ~0.0
+          @a.fcmp_d0(ra)
+        else
+          rb = try_vs_m_leaf_reg(R_D1, c.b, v_env, f_env, this_f_env)
+          if rb != nil
+            @a.fcmp_d(ra, rb)
+          else
+            ca_off = push_d(ra)
+            emit_vs_m_f64_expr(c.b, sh, v_env, f_env, this_f_env, R_D0)
+            @a.ldr_d(R_D1, R_SP, ca_off)
+            @tmp_depth -= 1
+            @a.fcmp_d(R_D1, R_D0)
+        emit_f64_cmp_branch(c.str, false, l_skip)
+        emit_vs_m_f64_expr(st.b.a, sh, v_env, f_env, this_f_env, R_D0)
+        @a.b(l_m_ret)
+        @a.bind(l_skip)
+      elsif st.kind == :return
+        emit_vs_m_f64_expr(st.a, sh, v_env, f_env, this_f_env, R_D0)
+      si += 1
+    @a.bind(l_m_ret)
+    @tmp_depth = saved_td
+    @a.bind(l_done)
+    cb = ->()
+      @a.bind(l_slow)
+      @tmp_depth = saved_td
+      emit_vstruct_call_fallback(e)
+      l_tn = @a.new_label
+      emit_unbox_f64(R_D0, R_X0, l_tn)
+      @a.b(l_done)
+      @a.bind(l_tn)
+      @a.mov_r(R_X1, R_X0)
+      call_rt(RT_TO_NUMBER)
+      @a.sub_r(R_X15, R_X0, R_X20)
+      @a.fmov_d_x(R_D0, R_X15)
+      @a.b(l_done)
+    add_cold_stub(cb)
+    true
 
   # Assign a value-struct expression directly into SRA_VS virtual f64 slots (`var oc = ro.sub(this.c)` -> ZERO allocs!)
   -> gen_sra_vs_assign(li, rhs)
@@ -11137,6 +25572,11 @@ OSR_RETURN = 2
     ccall("w_value_free_w", @str_cc_ics) if @str_cc_ics != nil
     ccall("w_value_free_w", @str_io_ics) if @str_io_ics != nil
     ccall("w_value_free_w", @free_gprs) if @free_gprs != nil
+    ccall("w_value_free_w", @const_loop_bounds) if @const_loop_bounds != nil
+    ccall("w_value_free_w", @const_i_vals) if @const_i_vals != nil
+    ccall("w_value_free_w", @scoped_ta_ub) if @scoped_ta_ub != nil
+    ccall("w_value_free_w", @guarded_ub_locals) if @guarded_ub_locals != nil
+    ccall("w_value_free_w", @hoisted_gobj_shapes) if @hoisted_gobj_shapes != nil
     ccall("w_value_free_w", self)
     nil
 
@@ -11145,6 +25585,7 @@ OSR_RETURN = 2
 -> jit_compile_and_install(code, warm_args = nil)
   return false if !JIT_ENABLED[0] || !jit_mem_ready?()
   return code.jit_fp != 0 if code.jit_state != 0
+  warm_args = code.warm_args if warm_args == nil
   jf = code.node
   if JST_ENABLED[0] && code.jst_state != -1
     if code.jst_desc != nil
@@ -11165,27 +25606,95 @@ OSR_RETURN = 2
   fp = comp.compile_fn()
   fast_off = comp.fast_entry_off
   rep_off = comp.repeat_entry_off
+  vs_off = comp.vs_entry_off
+  vs_sig = info.vs_fn_sig
   fast_rec = info.fast_rec
   sra_vs_n = info.sra_vs.size
   mono_sh_d = info.mono_arr_num_sh
+  ri = fp != 0 ? jit_region_analyze(jf, info) : nil
   comp.release
   info.release
   if fp == 0
     return false
   code.jit_fp = fp
-  code.jit_fast_fp = fast_off >= 0 ? (fp + fast_off) : fp
+  if ri != nil
+    jit_keep(ri)
+    code.region_info = ri
+    code.jit_fast_fp = 0
+  else
+    code.jit_fast_fp = fast_off >= 0 ? (fp + fast_off) : fp
   code.jit_repeat_fp = rep_off >= 0 ? (fp + rep_off) : 0
+  if vs_off >= 0 && vs_sig != nil
+    jit_keep(vs_sig)
+    code.jit_vs_fp = fp + vs_off
+    code.jit_vs_sig = vs_sig
   code.jit_state = 1
-  ccall("w_eputs", "\[js-jit] compiled fn " + jf.name.to_s + " (" + fast_rec.to_s + " rep=" + (rep_off >= 0).to_s + " mono=" + (mono_sh_d != 0).to_s + " sra_vs=" + sra_vs_n.to_s + ")") if JIT_DEBUG[0]
+  ccall("w_eputs", "\[js-jit] compiled fn " + jf.name.to_s + " (" + fast_rec.to_s + " rep=" + (rep_off >= 0).to_s + " vs=" + (vs_off >= 0).to_s + " mono=" + (mono_sh_d != 0).to_s + " sra_vs=" + sra_vs_n.to_s + " region=" + (ri != nil ? ri[0].to_s : "no") + ")") if JIT_DEBUG[0]
+  true
+
+JIT_SET_BIT_TBLS = {}
+JIT_RECOMP_CNT = {}
+JIT_OLD_FAST_FPS = {}
+
+-> jit_recompile_fn(code)
+  return false if code == nil || code.jit_fp == 0 || code.jit_state != 1 || !code.node.is_a?(JaFunc)
+  jf = code.node
+  rc = JIT_RECOMP_CNT[jf] || 0
+  return false if rc >= 12
+  JIT_RECOMP_CNT[jf] = rc + 1
+  old_ffp = code.jit_fast_fp
+  code.jit_state = 0
+  ok = jit_compile_and_install(code, code.warm_args)
+  if !ok
+    code.jit_state = 1
+    return false
+  new_ffp = code.jit_fast_fp
+  if old_ffp != 0 && new_ffp != 0 && new_ffp != old_ffp
+    olds = JIT_OLD_FAST_FPS[jf]
+    if olds == nil
+      olds = []
+      JIT_OLD_FAST_FPS[jf] = olds
+    olds.push(old_ffp) if !olds.include?(old_ffp)
+    oi = 0
+    while oi < olds.size
+      ofp = olds[oi]
+      delta = new_ffp - ofp
+      if (delta & 3) == 0 && delta >= -134217728 && delta < 134217728
+        jit_mem_patch32(ofp, 0x14000000 | ((delta >> 2) & 0x03FFFFFF))
+      oi += 1
   true
 
 # Enter a JITted JS function from `js_dispatch` / `wk_call`.
 -> jit_enter_fn(code, f, this, argc, a0, a1, a2, a3, more)
+  nt = JS_NEW_TARGET[0]
+  JS_NEW_TARGET[0] = nil
   js_ui_pump_maybe() if JS_UI_PUMP_HOOK[0] != nil
   d = JS_CALL_DEPTH[0] + 1
   js_throw_range("Maximum call stack size exceeded") if d > 1200
   if d == 1 || JIT_RT_TBL[RT_K_SP_LIMIT] == 0
     JIT_RT_TBL[RT_K_SP_LIMIT] = jit_cur_sp() - 2097152
+  ri = code.region_info
+  use_arena = false
+  prom_cells = nil
+  if ri != nil && JS_ARENA_STATE[2] == 0 && !JS_GC_ON[0] && !JS_MULTI_REALM[0] && JS_EPOCH[0] == ri[1]
+    gs = ri[2]
+    g_ok = true
+    gi = 0
+    while gi < gs.size && g_ok
+      g = gs[gi]
+      g_ok = false if g[0].value != g[1]
+      gi += 1
+    if g_ok && ri.size >= 5 && ri[4] != nil
+      shgs = ri[4]
+      si_g = 0
+      while si_g < shgs.size && g_ok
+        sg = shgs[si_g]
+        g_ok = false if sg[0].shape != sg[1]
+        si_g += 1
+    if g_ok
+      js_arena_enter(ri[0])
+      use_arena = true
+      prom_cells = ri.size >= 4 ? ri[3] : nil
   JS_CALL_DEPTH[0] = d
   prev = JS_CUR_ACT[0]
   act = wk_act(code.node, f, nil, this, 0)
@@ -11201,43 +25710,24 @@ OSR_RETURN = 2
   begin
     res = wvalue_from_bits(jit_raw_call8(code.jit_fp ## i64, wvalue_bits(f) ## i64, wvalue_bits(this) ## i64, argc ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, wvalue_bits(more) ## i64))
   rescue ex
+    js_arena_leave(prom_cells) if use_arena
     JS_CALL_DEPTH[0] = d - 1
     JS_CUR_ACT[0] = prev
     wk_release(act)
     raise ex
+  js_arena_leave(prom_cells) if use_arena
   JS_CALL_DEPTH[0] = d - 1
   JS_CUR_ACT[0] = prev
   wk_release(act)
-  return wk_call_tier0(f, this, argc, a0, a1, a2, a3, more) if js_is_slow_bits(wvalue_bits(res) ## i64) != 0
+  if js_is_slow_bits(wvalue_bits(res) ## i64) != 0
+    JS_NEW_TARGET[0] = nt
+    return wk_call_tier0(f, this, argc, a0, a1, a2, a3, more)
   res
 
-# Compile & run an OSR loop directly from `wk_for` / `wk_while`.
-# Returns OSR_DONE (0), OSR_DEOPT (1), or OSR_RETURN (2).
--> jit_try_osr(s, act)
-  return OSR_DEOPT if !JIT_ENABLED[0] || !jit_mem_ready?()
-  key = js_gc_key(wvalue_bits(s) ## i64)
-  ent = JIT_OSR_CACHE[key]
-  if ent == nil
-    if !jit_eligible_osr_loop?(s, act)
-      JIT_OSR_CACHE[key] = false
-      return OSR_DEOPT
-    an = JS:JitAnalyzer.new(act.f, true, s)
-    info = an.analyze(act)
-    an.release
-    comp = JS:JitCompiler.new(info)
-    fp = comp.compile_osr(act)
-    comp.release
-    if fp == 0
-      info.release
-      JIT_OSR_CACHE[key] = false
-      return OSR_DEOPT
-    ccall("w_eputs", "\[js-jit] OSR loop compiled in " + act.f.name.to_s + " (sra_obj=" + info.sra_objs.size.to_s + " sra_clos=" + info.sra_clos.size.to_s + " ta=" + info.ta_invariants.size.to_s + ")") if JIT_DEBUG[0]
-    info.release
-    ent = fp
-    JIT_OSR_CACHE[key] = ent
-  return OSR_DEOPT if ent == false
-  fp = ent
-  # Ensure locals array has an extra slot at index nlocals for OSR_RETURN value
+-> jit_osr_compiled?(s)
+  s.osr_fp > 0
+
+-> jit_run_osr_fp(fp, act)
   locs = act.locals
   nloc = act.f.nlocals
   locs.push(nil) if locs.size <= nloc
@@ -11247,3 +25737,29 @@ OSR_RETURN = 2
     act.rv = locs[nloc]
     act.sig = WK_RETURN
   rc
+
+# Compile & run an OSR loop directly from `wk_for` / `wk_while`.
+# Returns OSR_DONE (0), OSR_DEOPT (1), or OSR_RETURN (2).
+-> jit_try_osr(s, act)
+  return OSR_DEOPT if !JIT_ENABLED[0] || !jit_mem_ready?()
+  fp = s.osr_fp
+  if fp < 0
+    return OSR_DEOPT
+  if fp == 0
+    if !jit_eligible_osr_loop?(s, act)
+      s.osr_fp = -1
+      return OSR_DEOPT
+    an = JS:JitAnalyzer.new(act.f, true, s)
+    info = an.analyze(act)
+    an.release
+    comp = JS:JitCompiler.new(info)
+    fp = comp.compile_osr(act)
+    comp.release
+    if fp == 0
+      info.release
+      s.osr_fp = -1
+      return OSR_DEOPT
+    ccall("w_eputs", "\[js-jit] OSR loop compiled in " + act.f.name.to_s + " (sra_obj=" + info.sra_objs.size.to_s + " sra_clos=" + info.sra_clos.size.to_s + " ta=" + info.ta_invariants.size.to_s + ")") if JIT_DEBUG[0]
+    info.release
+    s.osr_fp = fp
+  jit_run_osr_fp(fp, act)

@@ -26,7 +26,7 @@ CODE_ASYNC = 128       # async function
 CODE_NONT = 256        # compiled code that never reads new.target (js_new leaves it unset)
 
 + Code
-  rw :name, :nparams, :index, :flags, :url, :start, :fin, :node, :entry, :jit_fp, :jit_hits, :jit_fast_fp, :jit_repeat_fp, :jit_fast_sig, :jit_state, :sm_code, :realm, :src_text, :jst_desc, :jst_state
+  rw :name, :nparams, :index, :flags, :url, :start, :fin, :node, :entry, :jit_fp, :jit_hits, :jit_fast_fp, :jit_repeat_fp, :jit_fast_sig, :jit_state, :sm_code, :realm, :src_text, :jst_desc, :jst_state, :warm_args, :jit_vs_fp, :jit_vs_sig, :region_info, :ctor_rsh
 
   # node: tier 0's form of the function (its analysed JaFunc), when it has one.
   # entry: its compiled entry in a loaded unit, a closure (runtime/units.w; unit code
@@ -49,6 +49,11 @@ CODE_NONT = 256        # compiled code that never reads new.target (js_new leave
     @src_text = nil
     @jst_desc = nil
     @jst_state = 0
+    @warm_args = nil
+    @jit_vs_fp = 0
+    @jit_vs_sig = nil
+    @region_info = nil
+    @ctor_rsh = nil
 
 FN_IBASE = 4
 FN_INLINE = 4

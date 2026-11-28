@@ -212,6 +212,63 @@ in JS
             js_sm_async_resume(a, b, fl, q)
             cur_kind = 0
             cur_a = nil
+          elsif k == JOB_ALL_SETTLE
+            cur_kind = 0
+            cur_a = nil
+            js_prom_all_settle(a, fl >> 1, b, fl & 1, q)
+          elsif k == JOB_ASYNC_CHAIN
+            cur_kind = 1
+            cur_a = a
+            js_prom_async_chain_step(a, b, c, fl, q)
+            cur_kind = 0
+            cur_a = nil
+          elsif k == JOB_ASYNC_PIPE
+            if fl == 3
+              collapsed = false
+              if !JS_MULTI_REALM[0] && js_promise_pristine?(self) && a.is_a?(JS:Promise) && a.state == :pending && a.rx_kind == 5
+                st = a.rx_target
+                if st.is_a?(JS:PromiseAllState) && !st.settled && st.rem > 0 && q.size == st.rem - 1
+                  fn2 = b.value
+                  if fn2.is_a?(JS:Function) && fn2.code != nil && fn2.code.sm_code != nil
+                    sc2 = fn2.code.sm_code
+                    if sc2.fast_kind == 1 && sc2.fast_pure && sc2.fast_b.value == @promise_ctor && sc2.fast_a.jit_fp != 0
+                      js_prom_offs_init(q) if JS_PROM_OFFS[0] == 0
+                      if JS_PROM_OFFS[0] > 0 && JS_PROM_OFFS[5] > 0
+                        pa = JS_PIPE_ARGS
+                        pa[0] = wvalue_bits(a) ## i64
+                        pa[1] = wvalue_bits(c) ## i64
+                        pa[2] = wvalue_bits(st) ## i64
+                        pa[3] = wvalue_bits(b) ## i64
+                        pa[4] = sc2.fast_a.jit_fp ## i64
+                        pa[5] = wvalue_bits(fn2) ## i64
+                        pa[6] = wvalue_bits(:pending) ## i64
+                        pa[7] = wvalue_bits(:fulfilled) ## i64
+                        pa[8] = jit_arr_slots_ptr(wvalue_bits(st.values) ## i64)
+                        pa[9] = jit_i64_ptr(JS_PROM_OFFS)
+                        pa[10] = jit_i64_ptr(q.kinds)
+                        pa[11] = jit_i64_ptr(q.flags)
+                        pa[12] = jit_arr_slots_ptr(wvalue_bits(q.qa) ## i64)
+                        pa[13] = jit_arr_slots_ptr(wvalue_bits(q.qb) ## i64)
+                        pa[14] = jit_arr_slots_ptr(wvalue_bits(q.qc) ## i64)
+                        pa[15] = q.head ## i64
+                        pa[16] = q.mask ## i64
+                        pa[17] = st.rem ## i64
+                        pa[18] = wvalue_bits(5) ## i64
+                        pa[19] = wvalue_bits(0) ## i64
+                        if js_drain_async_pipe_all_ll(jit_i64_ptr(pa)) == 1
+                          q.head = q.tail
+                          st.rem = 0
+                          st.settled = true
+                          js_promise_fulfill_fast(st.target, adopt_array(st.values), q)
+                          collapsed = true
+              if !collapsed
+                q.push_async_pipe(a, b, c, 2)
+            else
+              cur_kind = 1
+              cur_a = a
+              js_prom_async_chain_step(a, b.value, c, 0, q)
+              cur_kind = 0
+              cur_a = nil
           elsif k == JOB_LAMBDA
             cur_kind = 0
             cur_a = nil
@@ -256,12 +313,15 @@ in JS
       @symbol_registry[key] = sy
     sy
 
-JOB_LAMBDA   = 0
-JOB_RX_PROM  = 1
-JOB_RX_CAP   = 2
-JOB_ASYNC    = 3
-JOB_ADOPT    = 4
-JOB_THENABLE = 5
+JOB_LAMBDA      = 0
+JOB_RX_PROM     = 1
+JOB_RX_CAP      = 2
+JOB_ASYNC       = 3
+JOB_ADOPT       = 4
+JOB_THENABLE    = 5
+JOB_ALL_SETTLE  = 6
+JOB_ASYNC_CHAIN = 7
+JOB_ASYNC_PIPE  = 8
 
 # Flat power-of-2 ring-buffer microtask queue (ZERO closure allocations per microtask!).
 + JobQueue
@@ -362,6 +422,42 @@ JOB_THENABLE = 5
     @qa[t] = target
     @qb[t] = src
     @qc[t] = nil
+    @tail = (t + 1) & @mask
+    nil
+
+  -> push_all_settle(st, idx, val, is_rej)
+    nt = (@tail + 1) & @mask
+    grow() if nt == @head
+    t = @tail
+    @kinds[t] = JOB_ALL_SETTLE
+    @flags[t] = (idx << 1) | is_rej
+    @qa[t] = st
+    @qb[t] = val
+    @qc[t] = nil
+    @tail = (t + 1) & @mask
+    nil
+
+  -> push_async_chain(target, fn2, val, is_rej)
+    nt = (@tail + 1) & @mask
+    grow() if nt == @head
+    t = @tail
+    @kinds[t] = JOB_ASYNC_CHAIN
+    @flags[t] = is_rej
+    @qa[t] = target
+    @qb[t] = fn2
+    @qc[t] = val
+    @tail = (t + 1) & @mask
+    nil
+
+  -> push_async_pipe(target, fn2_cell, val, ticks)
+    nt = (@tail + 1) & @mask
+    grow() if nt == @head
+    t = @tail
+    @kinds[t] = JOB_ASYNC_PIPE
+    @flags[t] = ticks
+    @qa[t] = target
+    @qb[t] = fn2_cell
+    @qc[t] = val
     @tail = (t + 1) & @mask
     nil
 
@@ -645,7 +741,7 @@ fn jsr_is_notplain(b) (i64) i64
 -> js_gget(c)
   cb = wvalue_bits(c) ## i64
   v = jsr_gcell_fast(cb)
-  return wvalue_from_bits(v) if v != JSR_SLOW
+  return wvalue_from_bits(v) if v != (6 ## i64)
   js_gget_slow(c)
 
 # A cell's value while it is plain, else JSR_SLOW. (Raw bits are compared only inside
@@ -682,7 +778,7 @@ fn jsr_gcell_fast(cb) (i64) i64
 # A global write. strict: an undeclared name is a ReferenceError.
 -> js_gset(c, v, strict)
   cb = wvalue_bits(c) ## i64
-  if jsr_gcell_fast(cb) != JSR_SLOW
+  if jsr_gcell_fast(cb) != (6 ## i64)
     ccall("w_ivar_set_idx", c, 0, v)
     return v
   g = js_realm().global

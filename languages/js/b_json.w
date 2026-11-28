@@ -281,6 +281,392 @@ fn js_s7_probe_bits(src_ptr, st, len, keys_p, vals_p) (i64 i64 i64 i64 i64) i64
     ret i64 0
   IR
 
+# General 16..31-byte ASCII string intern cache (4096 sets x 2 ways = 8192 slots, 4 qwords per key).
+# Key layout: [w0 (0..7), w1 (8..15), w2 (16..23), w3 (24..30 | len<<56)]. w3 != 0 for all valid entries!
+JS_S31_KEYS = i64[32768]
+JS_S31_VALS = Array.new(8192, nil)
+JS_S31_FILL = i64[1]
+JS_S64_HASH = i64[4096]
+JS_S64_VALS = Array.new(4096, nil)
+JS_S64_FILL = i64[1]
+JS_S31_PTRS = i64[6]   # [s7_kp, s7_vp, s31_kp, s31_vp, s64_hp, s64_vp]
+JS_S31_PTRS_P = i64[1]
+
+fn js_i64_at_ll(arr_b, idx) (i64 i64) i64
+  ll <<~IR
+    %ap_i = and i64 %arr_b, 140737488355312
+    %ap = inttoptr i64 %ap_i to ptr
+    %slp = getelementptr i8, ptr %ap, i64 16
+    %sl = load ptr, ptr %slp, align 8
+    %ep = getelementptr i64, ptr %sl, i64 %idx
+    %v = load i64, ptr %ep, align 8
+    ret i64 %v
+  IR
+
+-> js_s_cache_init_p(dummy) (i64) i64
+  p = js_i64_at_ll(wvalue_bits(JS_S31_PTRS_P) ## i64, 0)
+  return p if p != 0
+  JS_S31_PTRS[0] = jit_arr_slots_ptr(wvalue_bits(JS_S7_KEYS) ## i64)
+  JS_S31_PTRS[1] = jit_arr_slots_ptr(wvalue_bits(JS_S7_VALS) ## i64)
+  JS_S31_PTRS[2] = jit_arr_slots_ptr(wvalue_bits(JS_S31_KEYS) ## i64)
+  JS_S31_PTRS[3] = jit_arr_slots_ptr(wvalue_bits(JS_S31_VALS) ## i64)
+  JS_S31_PTRS[4] = jit_arr_slots_ptr(wvalue_bits(JS_S64_HASH) ## i64)
+  JS_S31_PTRS[5] = jit_arr_slots_ptr(wvalue_bits(JS_S64_VALS) ## i64)
+  p = jit_arr_slots_ptr(wvalue_bits(JS_S31_PTRS) ## i64)
+  JS_S31_PTRS_P[0] = p
+  p
+
+-> js_s7_probe_fast(sp, ai, sl) (i64 i64 i64) i64
+  p = js_s_cache_init_p(0)
+  js_s7_probe_bits(sp, ai, sl, jb_ld_i64(p), jb_ld_i64(p + 8))
+
+-> js_s31_probe_fast(sp, ai, sl) (i64 i64 i64) i64
+  p = js_s_cache_init_p(0)
+  js_s31_probe_bits(sp, ai, sl, jb_ld_i64(p + 16), jb_ld_i64(p + 24))
+
+# Pure-LLVM 64-bit word hash for 16..64-byte ASCII slices (returns non-zero hash with bit 0 set).
+fn js_s64_hash_raw(src_ptr, st, len) (i64 i64 i64) i64
+  ll <<~IR
+    %p0 = add i64 %src_ptr, %st
+    %q = inttoptr i64 %p0 to ptr
+    %lim = sub i64 %len, 8
+    br label %lp
+  lp:
+    %i = phi i64 [ 0, %0 ], [ %ni, %bd ]
+    %h = phi i64 [ %len, %0 ], [ %nh, %bd ]
+    %more = icmp slt i64 %i, %lim
+    br i1 %more, label %bd, label %tail
+  bd:
+    %ep = getelementptr i8, ptr %q, i64 %i
+    %w = load i64, ptr %ep, align 1
+    %xh = xor i64 %h, %w
+    %nh = mul i64 %xh, -7046029254386353131
+    %ni = add i64 %i, 8
+    br label %lp
+  tail:
+    %tp = getelementptr i8, ptr %q, i64 %lim
+    %wt = load i64, ptr %tp, align 1
+    %h1 = xor i64 %h, %wt
+    %h2 = mul i64 %h1, -4658895280553007687
+    %h3 = lshr i64 %h2, 32
+    %h4 = xor i64 %h2, %h3
+    %h5 = mul i64 %h4, -7046029254386353131
+    %res = or i64 %h5, 1
+    ret i64 %res
+  IR
+
+# Pure-LLVM byte equality between raw ASCII buffer [src_p, len>=16) and flat ASCII WString `sv_bits` (mode 6 or 7).
+fn js_s64_eq_str(src_p, len, sv_bits, slab_base) (i64 i64 i64 i64) i64
+  ll <<~IR
+    %tg = and i64 %sv_bits, u0xFFFF00000000000F
+    %is7 = icmp eq i64 %tg, u0xFFF900000000000E
+    br i1 %is7, label %m7, label %chk6
+  m7:
+    %wsi = and i64 %sv_bits, u0x0000FFFFFFFFFFF0
+    %ws = inttoptr i64 %wsi to ptr
+    %lfp = getelementptr i8, ptr %ws, i64 8
+    %lf = load i32, ptr %lfp, align 4
+    %asc7 = icmp slt i32 %lf, 0
+    br i1 %asc7, label %m7_len, label %no
+  m7_len:
+    %l32 = and i32 %lf, 2147483647
+    %l7 = zext i32 %l32 to i64
+    %eq7 = icmp eq i64 %l7, %len
+    br i1 %eq7, label %m7_ptr, label %no
+  m7_ptr:
+    %vp7 = getelementptr i8, ptr %ws, i64 16
+    br label %cmp
+  chk6:
+    %is6 = icmp eq i64 %tg, u0xFFF900000000000C
+    %hsb = icmp ne i64 %slab_base, 0
+    %ok6 = and i1 %is6, %hsb
+    br i1 %ok6, label %m6, label %no
+  m6:
+    %s1 = lshr i64 %sv_bits, 4
+    %sidx = and i64 %s1, 16777215
+    %soff = shl i64 %sidx, 5
+    %saddr = add i64 %slab_base, %soff
+    %sp = inttoptr i64 %saddr to ptr
+    %sf = load i8, ptr %sp, align 1
+    %sfa = and i8 %sf, 9
+    %sfok = icmp eq i8 %sfa, 9
+    br i1 %sfok, label %m6_len, label %no
+  m6_len:
+    %slp = getelementptr i8, ptr %sp, i64 1
+    %sl8 = load i8, ptr %slp, align 1
+    %l6 = zext i8 %sl8 to i64
+    %eq6 = icmp eq i64 %l6, %len
+    br i1 %eq6, label %m6_ptr, label %no
+  m6_ptr:
+    %vp6 = getelementptr i8, ptr %sp, i64 2
+    br label %cmp
+  cmp:
+    %vp = phi ptr [ %vp7, %m7_ptr ], [ %vp6, %m6_ptr ]
+    %qp = inttoptr i64 %src_p to ptr
+    %lim = sub i64 %len, 8
+    br label %clp
+  clp:
+    %i = phi i64 [ 0, %cmp ], [ %ni, %cbd ]
+    %more = icmp slt i64 %i, %lim
+    br i1 %more, label %cbd, label %ctail
+  cbd:
+    %ap = getelementptr i8, ptr %qp, i64 %i
+    %bp = getelementptr i8, ptr %vp, i64 %i
+    %aw = load i64, ptr %ap, align 1
+    %bw = load i64, ptr %bp, align 1
+    %weq = icmp eq i64 %aw, %bw
+    %ni = add i64 %i, 8
+    br i1 %weq, label %clp, label %no
+  ctail:
+    %atp = getelementptr i8, ptr %qp, i64 %lim
+    %btp = getelementptr i8, ptr %vp, i64 %lim
+    %atw = load i64, ptr %atp, align 1
+    %btw = load i64, ptr %btp, align 1
+    %teq = icmp eq i64 %atw, %btw
+    %r = zext i1 %teq to i64
+    ret i64 %r
+  no:
+    ret i64 0
+  IR
+
+-> js_s64_probe_fast(sp, ai, sl, slb) (i64 i64 i64 i64) i64
+  p = js_s_cache_init_p(0)
+  hp = jb_ld_i64(p + 32)
+  vp = jb_ld_i64(p + 40)
+  h = js_s64_hash_raw(sp, ai, sl)
+  slot0 = ((h >> 48) & 2047) << 1
+  if jb_ld_i64(hp + slot0 * 8) == h
+    v0 = jb_ld_i64(vp + slot0 * 8)
+    return v0 if v0 != 0 && js_s64_eq_str(sp + ai, sl, v0, slb) != 0
+  slot1 = slot0 | 1
+  if jb_ld_i64(hp + slot1 * 8) == h
+    v1 = jb_ld_i64(vp + slot1 * 8)
+    return v1 if v1 != 0 && js_s64_eq_str(sp + ai, sl, v1, slb) != 0
+  0
+
+-> js_s64_cache_set(sp, ai, sl, res)
+  h = js_s64_hash_raw(sp, ai, sl)
+  slot0 = ((h >> 48) & 2047) << 1
+  slot = JS_S64_HASH[slot0] == 0 ? slot0 : (JS_S64_HASH[slot0 | 1] == 0 ? (slot0 | 1) : -1)
+  if slot >= 0
+    JS_S64_VALS[slot] = res
+    JS_S64_HASH[slot] = h
+    JS_S64_FILL[0] = JS_S64_FILL[0] + 1
+  nil
+
+fn js_s31_probe_bits(src_ptr, st, len, keys_p, vals_p) (i64 i64 i64 i64 i64) i64
+  ll <<~IR
+    %p0 = add i64 %src_ptr, %st
+    %q = inttoptr i64 %p0 to ptr
+    %w0 = load i64, ptr %q, align 1
+    %q1 = getelementptr i8, ptr %q, i64 8
+    %w1 = load i64, ptr %q1, align 1
+    %is16 = icmp eq i64 %len, 16
+    br i1 %is16, label %b16, label %gt16
+  b16:
+    %h16 = shl i64 16, 56
+    br label %hash
+  gt16:
+    %lt24 = icmp ult i64 %len, 24
+    br i1 %lt24, label %b17_23, label %ge24
+  b17_23:
+    %o2 = sub i64 %len, 8
+    %qp2 = getelementptr i8, ptr %q, i64 %o2
+    %r2 = load i64, ptr %qp2, align 1
+    %rem2 = sub i64 24, %len
+    %sh2 = shl i64 %rem2, 3
+    %w2_a = lshr i64 %r2, %sh2
+    %w3_a = shl i64 %len, 56
+    br label %hash
+  ge24:
+    %q2 = getelementptr i8, ptr %q, i64 16
+    %w2_b = load i64, ptr %q2, align 1
+    %is24 = icmp eq i64 %len, 24
+    br i1 %is24, label %b24, label %b25_31
+  b24:
+    %w3_b = shl i64 24, 56
+    br label %hash
+  b25_31:
+    %o3 = sub i64 %len, 8
+    %qp3 = getelementptr i8, ptr %q, i64 %o3
+    %r3 = load i64, ptr %qp3, align 1
+    %rem3 = sub i64 32, %len
+    %sh3 = shl i64 %rem3, 3
+    %s3 = lshr i64 %r3, %sh3
+    %ls3 = shl i64 %len, 56
+    %w3_c = or i64 %s3, %ls3
+    br label %hash
+  hash:
+    %w2 = phi i64 [ 0, %b16 ], [ %w2_a, %b17_23 ], [ %w2_b, %b24 ], [ %w2_b, %b25_31 ]
+    %w3 = phi i64 [ %h16, %b16 ], [ %w3_a, %b17_23 ], [ %w3_b, %b24 ], [ %w3_c, %b25_31 ]
+    %m1 = mul i64 %w1, -4658895280553007687
+    %m2 = mul i64 %w2, -7046029254386353131
+    %m3 = mul i64 %w3, -4658895280553007687
+    %x0 = xor i64 %w0, %m1
+    %x1 = xor i64 %x0, %m2
+    %x2 = xor i64 %x1, %m3
+    %x3 = lshr i64 %x2, 32
+    %x4 = xor i64 %x2, %x3
+    %hm = mul i64 %x4, -7046029254386353131
+    %hs = lshr i64 %hm, 52
+    %set = and i64 %hs, 4095
+    %slot0 = shl i64 %set, 1
+    %koff0 = shl i64 %slot0, 2
+    %kp0 = inttoptr i64 %keys_p to ptr
+    %p0_0 = getelementptr i64, ptr %kp0, i64 %koff0
+    %e0_0 = load i64, ptr %p0_0, align 8
+    %eq0_0 = icmp eq i64 %e0_0, %w0
+    br i1 %eq0_0, label %c0_1, label %way1
+  c0_1:
+    %p0_1 = getelementptr i64, ptr %p0_0, i64 1
+    %e0_1 = load i64, ptr %p0_1, align 8
+    %eq0_1 = icmp eq i64 %e0_1, %w1
+    br i1 %eq0_1, label %c0_2, label %way1
+  c0_2:
+    %p0_2 = getelementptr i64, ptr %p0_0, i64 2
+    %e0_2 = load i64, ptr %p0_2, align 8
+    %eq0_2 = icmp eq i64 %e0_2, %w2
+    br i1 %eq0_2, label %c0_3, label %way1
+  c0_3:
+    %p0_3 = getelementptr i64, ptr %p0_0, i64 3
+    %e0_3 = load i64, ptr %p0_3, align 8
+    %eq0_3 = icmp eq i64 %e0_3, %w3
+    br i1 %eq0_3, label %hit0, label %way1
+  hit0:
+    %vp0 = inttoptr i64 %vals_p to ptr
+    %vp_0 = getelementptr i64, ptr %vp0, i64 %slot0
+    %v0 = load i64, ptr %vp_0, align 8
+    ret i64 %v0
+  way1:
+    %p1_0 = getelementptr i64, ptr %p0_0, i64 4
+    %e1_0 = load i64, ptr %p1_0, align 8
+    %eq1_0 = icmp eq i64 %e1_0, %w0
+    br i1 %eq1_0, label %c1_1, label %miss
+  c1_1:
+    %p1_1 = getelementptr i64, ptr %p0_0, i64 5
+    %e1_1 = load i64, ptr %p1_1, align 8
+    %eq1_1 = icmp eq i64 %e1_1, %w1
+    br i1 %eq1_1, label %c1_2, label %miss
+  c1_2:
+    %p1_2 = getelementptr i64, ptr %p0_0, i64 6
+    %e1_2 = load i64, ptr %p1_2, align 8
+    %eq1_2 = icmp eq i64 %e1_2, %w2
+    br i1 %eq1_2, label %c1_3, label %miss
+  c1_3:
+    %p1_3 = getelementptr i64, ptr %p0_0, i64 7
+    %e1_3 = load i64, ptr %p1_3, align 8
+    %eq1_3 = icmp eq i64 %e1_3, %w3
+    br i1 %eq1_3, label %hit1, label %miss
+  hit1:
+    %slot1 = or i64 %slot0, 1
+    %vp1 = inttoptr i64 %vals_p to ptr
+    %vp_1 = getelementptr i64, ptr %vp1, i64 %slot1
+    %v1 = load i64, ptr %vp_1, align 8
+    ret i64 %v1
+  miss:
+    ret i64 0
+  IR
+
+fn js_s31_commit_ll(src_ptr, st, len, keys_p) (i64 i64 i64 i64) i64
+  ll <<~IR
+    %p0 = add i64 %src_ptr, %st
+    %q = inttoptr i64 %p0 to ptr
+    %w0 = load i64, ptr %q, align 1
+    %q1 = getelementptr i8, ptr %q, i64 8
+    %w1 = load i64, ptr %q1, align 1
+    %is16 = icmp eq i64 %len, 16
+    br i1 %is16, label %b16, label %gt16
+  b16:
+    %h16 = shl i64 16, 56
+    br label %hash
+  gt16:
+    %lt24 = icmp ult i64 %len, 24
+    br i1 %lt24, label %b17_23, label %ge24
+  b17_23:
+    %o2 = sub i64 %len, 8
+    %qp2 = getelementptr i8, ptr %q, i64 %o2
+    %r2 = load i64, ptr %qp2, align 1
+    %rem2 = sub i64 24, %len
+    %sh2 = shl i64 %rem2, 3
+    %w2_a = lshr i64 %r2, %sh2
+    %w3_a = shl i64 %len, 56
+    br label %hash
+  ge24:
+    %q2 = getelementptr i8, ptr %q, i64 16
+    %w2_b = load i64, ptr %q2, align 1
+    %is24 = icmp eq i64 %len, 24
+    br i1 %is24, label %b24, label %b25_31
+  b24:
+    %w3_b = shl i64 24, 56
+    br label %hash
+  b25_31:
+    %o3 = sub i64 %len, 8
+    %qp3 = getelementptr i8, ptr %q, i64 %o3
+    %r3 = load i64, ptr %qp3, align 1
+    %rem3 = sub i64 32, %len
+    %sh3 = shl i64 %rem3, 3
+    %s3 = lshr i64 %r3, %sh3
+    %ls3 = shl i64 %len, 56
+    %w3_c = or i64 %s3, %ls3
+    br label %hash
+  hash:
+    %w2 = phi i64 [ 0, %b16 ], [ %w2_a, %b17_23 ], [ %w2_b, %b24 ], [ %w2_b, %b25_31 ]
+    %w3 = phi i64 [ %h16, %b16 ], [ %w3_a, %b17_23 ], [ %w3_b, %b24 ], [ %w3_c, %b25_31 ]
+    %m1 = mul i64 %w1, -4658895280553007687
+    %m2 = mul i64 %w2, -7046029254386353131
+    %m3 = mul i64 %w3, -4658895280553007687
+    %x0 = xor i64 %w0, %m1
+    %x1 = xor i64 %x0, %m2
+    %x2 = xor i64 %x1, %m3
+    %x3 = lshr i64 %x2, 32
+    %x4 = xor i64 %x2, %x3
+    %hm = mul i64 %x4, -7046029254386353131
+    %hs = lshr i64 %hm, 52
+    %set = and i64 %hs, 4095
+    %slot0 = shl i64 %set, 1
+    %koff0 = shl i64 %slot0, 2
+    %kp0 = inttoptr i64 %keys_p to ptr
+    %p0_3 = getelementptr i64, ptr %kp0, i64 %koff0
+    %q0_3 = getelementptr i64, ptr %p0_3, i64 3
+    %e0_3 = load i64, ptr %q0_3, align 8
+    %em0 = icmp eq i64 %e0_3, 0
+    br i1 %em0, label %w_slot0, label %chk1
+  chk1:
+    %q1_3 = getelementptr i64, ptr %p0_3, i64 7
+    %e1_3 = load i64, ptr %q1_3, align 8
+    %em1 = icmp eq i64 %e1_3, 0
+    br i1 %em1, label %w_slot1, label %full
+  w_slot0:
+    store i64 %w0, ptr %p0_3, align 8
+    %s0_1 = getelementptr i64, ptr %p0_3, i64 1
+    %s0_2 = getelementptr i64, ptr %p0_3, i64 2
+    store i64 %w1, ptr %s0_1, align 8
+    store i64 %w2, ptr %s0_2, align 8
+    store i64 %w3, ptr %q0_3, align 8
+    ret i64 %slot0
+  w_slot1:
+    %p1_0 = getelementptr i64, ptr %p0_3, i64 4
+    %s1_1 = getelementptr i64, ptr %p0_3, i64 5
+    %s1_2 = getelementptr i64, ptr %p0_3, i64 6
+    store i64 %w0, ptr %p1_0, align 8
+    store i64 %w1, ptr %s1_1, align 8
+    store i64 %w2, ptr %s1_2, align 8
+    store i64 %w3, ptr %q1_3, align 8
+    %slot1 = or i64 %slot0, 1
+    ret i64 %slot1
+  full:
+    ret i64 -1
+  IR
+
+-> js_s31_cache_set(src_ptr, st, len, str_val)
+  return nil if JS_S31_FILL[0] >= 6144
+  p = js_s_cache_init_p(0)
+  sl = js_s31_commit_ll(src_ptr, st, len, jb_ld_i64(p + 16))
+  if sl >= 0
+    JS_S31_VALS[sl] = str_val
+    JS_S31_FILL[0] += 1
+  nil
+
 fn jb_is_slab_str(v) (i64) i64
   ll <<~IR
     %t = and i64 %v, u0xFFFF00000000000F
@@ -1256,23 +1642,18 @@ fn jp_fill_arr_ll(arr_bits, abuf_p, astart, acnt) (i64 i64 i64 i64) i64
     ret i64 0
   IR
 
+fn jp_set_slot_ll(ob, f, vb) (i64 i64 i64) i64
+  ll <<~IR
+    %raw = sub i64 %ob, 4
+    %p = inttoptr i64 %raw to ptr
+    %idx = add i64 %f, 3
+    %sp = getelementptr i64, ptr %p, i64 %idx
+    store i64 %vb, ptr %sp, align 8
+    ret i64 0
+  IR
+
 -> jp_set_inline_slot(o, f, v)
-  if f == 0
-    o.s0 = v
-  elsif f == 1
-    o.s1 = v
-  elsif f == 2
-    o.s2 = v
-  elsif f == 3
-    o.s3 = v
-  elsif f == 4
-    o.s4 = v
-  elsif f == 5
-    o.s5 = v
-  elsif f == 6
-    o.s6 = v
-  else
-    o.s7 = v
+  jp_set_slot_ll(wvalue_bits(o) ## i64, f ## i64, wvalue_bits(v) ## i64)
   nil
 
 # Lock-free 65536-entry (32768 sets x 2 ways) intern cache for 6..15 byte immutable flat strings!
@@ -1296,10 +1677,11 @@ JS_S7_FILL = i64[1]
     JS_S7_FILL[0] = JS_S7_FILL[0] + 1
   s
 
-# Fused whole-object native scanner for schema-predicted inline-slot objects (1..8 properties).
+# Fused whole-object native scanner for schema-predicted inline-slot objects (1..8 properties),
+# with optional 1-level nested inline-slot object sub-plans via `sub_ctx_p = [sub_meta_p, sfvals_p, sftags_p]`.
 # Returns new byte pos after '}' (>= 0) on full match, or -1 on fallback.
 # Uses raw pointers for fvals/ftags/abuf/ameta/out (ZERO bounds checks, ZERO BigInt boxing!).
--> jp_scan_obj_fast(p, i, n, k, kptrs_p, klens_p, vals_p, tags_p, abuf_p, ameta_p, out_p, nb, s7k_p, s7v_p) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
+-> jp_scan_obj_fast(p, i, n, k, kptrs_p, klens_p, vals_p, tags_p, abuf_p, ameta_p, out_p, nb, s7k_p, s7v_p, sub_ctx_p) (i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64 i64) i64
   apos = 0 ## i64
   f = 0 ## i64
   while f < k
@@ -1324,6 +1706,7 @@ JS_S7_FILL = i64[1]
       jb_st_i64_u(tags_p + f * 8, 2)
       i = jb_ld_i64(out_p)
     elsif tag == 3
+      return -1 if ameta_p == 0
       j = jb_ld_i64(out_p)
       if j < n && jb_ld_u8(p + j) <= 32
         j = jp_skip_ws_ptr(p, j, n)
@@ -1354,6 +1737,19 @@ JS_S7_FILL = i64[1]
         jb_st_i64_u(ameta_p + f * 16 + 8, acnt)
         jb_st_i64_u(tags_p + f * 8, 3)
         i = j
+    elsif tag == 4 && sub_ctx_p != 0
+      sm_p = jb_ld_i64(sub_ctx_p)
+      return -1 if sm_p == 0
+      sk = jb_ld_i64(sm_p + f * 8)
+      return -1 if sk <= 0
+      skp = jb_ld_i64(sm_p + (8 + f) * 8)
+      skl = jb_ld_i64(sm_p + (16 + f) * 8)
+      sfv_p = jb_ld_i64(sub_ctx_p + 8) + f * 64
+      sft_p = jb_ld_i64(sub_ctx_p + 16) + f * 64
+      j = jp_scan_obj_fast(p, jb_ld_i64(out_p), n, sk, skp, skl, sfv_p, sft_p, abuf_p, 0, out_p, nb, s7k_p, s7v_p, 0)
+      return -1 if j < 0
+      jb_st_i64_u(tags_p + f * 8, 4)
+      i = j
     else
       return -1
     f += 1
@@ -1388,7 +1784,7 @@ fn jp_view_set(ba_bits, ptr, len) (i64 i64 i64) i64
   res
 
 + JsonParser
-  rw :i, :n, :s, :src_ptr, :bv_keep, :is_ascii, :root_sh, :out, :out_p, :obj_plan, :fvals, :fvals_p, :ftags, :ftags_p, :abuf, :abuf_p, :ameta, :ameta_p
+  rw :i, :n, :s, :src_ptr, :bv_keep, :is_ascii, :root_sh, :out, :out_p, :obj_plan, :fvals, :fvals_p, :ftags, :ftags_p, :abuf, :abuf_p, :ameta, :ameta_p, :sfvals, :sfvals_p, :sftags, :sftags_p, :sub_ctx, :sub_ctx_p
 
   -> new(@s)
     @out = i64[4]
@@ -1401,6 +1797,15 @@ fn jp_view_set(ba_bits, ptr, len) (i64 i64 i64) i64
     @abuf_p = jit_arr_slots_ptr(wvalue_bits(@abuf) ## i64)
     @ameta = i64[16]
     @ameta_p = jit_arr_slots_ptr(wvalue_bits(@ameta) ## i64)
+    @sfvals = i64[64]
+    @sfvals_p = jit_arr_slots_ptr(wvalue_bits(@sfvals) ## i64)
+    @sftags = i64[64]
+    @sftags_p = jit_arr_slots_ptr(wvalue_bits(@sftags) ## i64)
+    @sub_ctx = i64[3]
+    @sub_ctx[0] = 0
+    @sub_ctx[1] = @sfvals_p
+    @sub_ctx[2] = @sftags_p
+    @sub_ctx_p = jit_arr_slots_ptr(wvalue_bits(@sub_ctx) ## i64)
     reset(@s)
 
   -> reset(s)
@@ -1617,8 +2022,12 @@ fn jp_view_set(ba_bits, ptr, len) (i64 i64 i64) i64
   i = jp_skip_ws_ptr(p, i, n) if i < n && jb_ld_u8(p + i) <= 32
   if i < n && jb_ld_u8(p + i) == 93
     out[3] = i + 1
-    return js_mark_array([])
-  arr = []
+    return js_arr0_fast()
+  fast_alloc = !JS_MULTI_REALM[0] && !JS_GC_ON[0]
+  arr = fast_alloc ? wvalue_from_bits(jsr_arr0_raw()) : []
+  cls_b = js_obj_cls_bits()
+  arena_p = JS_ARENA_STATE[0] != 0 ? JS_ARENA_STATE[7] : 0
+  sb = wvalue_bits(s) ## i64
   fvals = parser.fvals
   fvals_p = parser.fvals_p
   ftags = parser.ftags
@@ -1626,61 +2035,129 @@ fn jp_view_set(ba_bits, ptr, len) (i64 i64 i64) i64
   abuf_p = parser.abuf_p
   ameta = parser.ameta
   ameta_p = parser.ameta_p
+  sfvals = parser.sfvals
+  sfvals_p = parser.sfvals_p
+  sftags_p = parser.sftags_p
+  sub_ctx = parser.sub_ctx
+  sub_ctx_p = parser.sub_ctx_p
   out_p = parser.out_p
+  arr_plan = nil
   while true
-    # Ultra-fast hoisted array-of-objects inner loop (zero per-object plan unpacking!)
-    op = parser.obj_plan
+    # Ultra-fast hoisted array-of-objects inner loop (supports nested inline-slot sub-objects too!)
+    op = arr_plan != nil ? arr_plan : parser.obj_plan
     if op != nil
       op_sh = op[0]
+      op_sh_b = wvalue_bits(op_sh) ## i64
       op_k = op[1]
       op_kp = op[2]
       op_kl = op[3]
       op_s7k = op[7]
       op_s7v = op[8]
+      op_subs = op[9]
+      op_sm_p = op[11]
+      sc_p = op_sm_p != 0 ? sub_ctx_p : 0
+      sub_ctx[0] = op_sm_p if sc_p != 0
       done_arr = false
       while true
         i = jp_skip_ws_ptr(p, i, n) if i < n && jb_ld_u8(p + i) <= 32
         break if i >= n || jb_ld_u8(p + i) != 123
-        ni = jp_scan_obj_fast(p, i + 1, n, op_k, op_kp, op_kl, fvals_p, ftags_p, abuf_p, ameta_p, out_p, nb, op_s7k, op_s7v)
+        ni = jp_scan_obj_fast(p, i + 1, n, op_k, op_kp, op_kl, fvals_p, ftags_p, abuf_p, ameta_p, out_p, nb, op_s7k, op_s7v, sc_p)
         break if ni < 0
-        o = JS:Object.new(op_sh)
-        rem = jp_fill_obj_ll(wvalue_bits(o) ## i64, fvals_p, ftags_p, op_k, OBJ_IBASE ## i64)
+        ob_cur = 0 ## i64
+        if arena_p != 0
+          ob_cur = jsr_arena_alloc_obj_raw(arena_p, op_sh_b)
+          if ob_cur != 0
+            o = wvalue_from_bits(ob_cur)
+          else
+            o = js_arena_alloc_obj_slow(op_sh)
+            ob_cur = wvalue_bits(o) ## i64
+        else
+          if fast_alloc
+            ob_cur = jsr_new_obj_raw(cls_b, op_sh_b)
+            o = wvalue_from_bits(ob_cur)
+          else
+            o = js_new_obj_fast(op_sh)
+            ob_cur = wvalue_bits(o) ## i64
+        rem = jp_fill_obj_ll(ob_cur, fvals_p, ftags_p, op_k, OBJ_IBASE ## i64)
         if rem != 0
-          f = 0
+          f = 0 ## i64
           while rem != 0
             if (rem & 1) != 0
-              ft = ftags[f]
+              ft = jb_ld_i64(ftags_p + f * 8)
               fv = nil
               if ft == 2
-                enc = fvals[f]
+                enc = jb_ld_i64(fvals_p + f * 8)
                 st = enc >> 24
                 len = enc & 16777215
-                fv = is_ascii ? s.slice(st, len) : jp_slice_bytes(p, st, len)
-                js_s7_cache_set(p, st, len, fv) if len >= 6 && len <= 15
+                if is_ascii && len >= 16 && len <= 31
+                  hit31 = js_s31_probe_fast(p, st, len)
+                  if hit31 != 0
+                    fv = wvalue_from_bits(hit31)
+                  else
+                    fv = wvalue_from_bits(jsr_str_slice_raw(sb, st, len))
+                    js_s31_cache_set(p, st, len, fv) if JS_S31_FILL[0] < 6144
+                else
+                  fv = is_ascii ? wvalue_from_bits(jsr_str_slice_raw(sb, st, len)) : jp_slice_bytes(p, st, len)
+                  js_s7_cache_set(p, st, len, fv) if len >= 6 && len <= 15
               elsif ft == 3
-                as = ameta[f * 2]
-                ac = ameta[f * 2 + 1]
+                as = jb_ld_i64(ameta_p + f * 16)
+                ac = jb_ld_i64(ameta_p + f * 16 + 8)
                 if ac == 0
-                  fv = js_mark_array([])
+                  fv = fast_alloc ? wvalue_from_bits(jsr_arr0_raw()) : js_arr0_fast()
+                elsif arena_p != 0 && ac <= 8
+                  ab_a = jsr_arena_alloc_arr_raw(arena_p, ac, JS_AF_ARRAY ## i64)
+                  if ab_a != 0
+                    jp_fill_arr_ll(ab_a, abuf_p, as, ac)
+                    fv = wvalue_from_bits(ab_a)
+                  else
+                    fv = wvalue_from_bits(jsr_arr_from_buf_raw(abuf_p, as, ac))
+                elsif fast_alloc
+                  fv = wvalue_from_bits(jsr_arr_from_buf_raw(abuf_p, as, ac))
                 else
                   sub = Array.new(ac, nil)
-                  jp_fill_arr_ll(wvalue_bits(sub) ## i64, abuf_p, as ## i64, ac ## i64)
+                  jp_fill_arr_ll(wvalue_bits(sub) ## i64, abuf_p, as, ac)
                   fv = js_mark_array(sub)
+              elsif ft == 4
+                sp = op_subs[f]
+                sp_sh = sp[0]
+                sp_sh_b = wvalue_bits(sp_sh) ## i64
+                sob_cur = 0 ## i64
+                so = nil
+                if arena_p != 0
+                  sob_cur = jsr_arena_alloc_obj_raw(arena_p, sp_sh_b)
+                  if sob_cur != 0
+                    so = wvalue_from_bits(sob_cur)
+                  else
+                    so = js_arena_alloc_obj_slow(sp_sh)
+                    sob_cur = wvalue_bits(so) ## i64
+                else
+                  if fast_alloc
+                    sob_cur = jsr_new_obj_raw(cls_b, sp_sh_b)
+                    so = wvalue_from_bits(sob_cur)
+                  else
+                    so = js_new_obj_fast(sp_sh)
+                    sob_cur = wvalue_bits(so) ## i64
+                f64 = f * 64
+                srem = jp_fill_obj_ll(sob_cur, sfvals_p + f64, sftags_p + f64, sp[1], OBJ_IBASE ## i64)
+                if srem != 0
+                  sf = 0 ## i64
+                  while srem != 0
+                    if (srem & 1) != 0
+                      senc = jb_ld_i64(sfvals_p + f64 + sf * 8)
+                      sst = senc >> 24
+                      slen = senc & 16777215
+                      sfv = is_ascii ? wvalue_from_bits(jsr_str_slice_raw(sb, sst, slen)) : jp_slice_bytes(p, sst, slen)
+                      js_s7_cache_set(p, sst, slen, sfv) if slen >= 6 && slen <= 15
+                      jp_set_slot_ll(sob_cur, sf, wvalue_bits(sfv) ## i64)
+                    srem = srem >> 1
+                    sf += 1
+                fv = so
               else
                 fv = jp_decode_field(s, is_ascii, p, f, fvals, ftags, abuf_p, ameta)
-              if f == 0
-                o.s0 = fv
-              elsif f == 1
-                o.s1 = fv
-              elsif f == 2
-                o.s2 = fv
-              elsif f == 3
-                o.s3 = fv
-              else
-                jp_set_inline_slot(o, f, fv)
+              jp_set_slot_ll(ob_cur, f, wvalue_bits(fv) ## i64)
             rem = rem >> 1
             f += 1
-        arr.push(o)
+        ccall("w_array_push", arr, o)
         i = ni
         i = jp_skip_ws_ptr(p, i, n) if i < n && jb_ld_u8(p + i) <= 32
         if i >= n
@@ -1696,22 +2173,27 @@ fn jp_view_set(ba_bits, ptr, len) (i64 i64 i64) i64
           parser.fail("Expected ',' or ']' after array element")
       break if done_arr
     tag = jp_scan_prim(p, i, n, out, nb)
+    el = nil
     if tag == 1
-      arr.push(wvalue_from_bits(out[1]))
+      el = wvalue_from_bits(out[1])
       i = out[0]
     elsif tag == 2
-      arr.push(is_ascii ? s.slice(out[1], out[2]) : jp_slice_bytes(p, out[1], out[2]))
+      el = is_ascii ? wvalue_from_bits(jsr_str_slice_raw(sb, out[1], out[2])) : jp_slice_bytes(p, out[1], out[2])
       i = out[0]
     elsif tag == 3
-      arr.push(jp_parse_arr(parser, s, is_ascii, p, out[0], n, root_sh, out, nb))
+      el = jp_parse_arr(parser, s, is_ascii, p, out[0], n, root_sh, out, nb)
       i = out[3]
     elsif tag == 4
-      arr.push(jp_parse_obj(parser, s, is_ascii, p, out[0], n, root_sh, out, nb))
+      el = jp_parse_obj(parser, s, is_ascii, p, out[0], n, root_sh, out, nb)
       i = out[3]
     else
       parser.i = i
-      arr.push(parser.j_value_slow())
+      el = parser.j_value_slow()
       i = parser.i ## i64
+    arr.push(el)
+    if arr_plan == nil && arr.size == 1 && el.is_a?(JS:Object) && !el.shape.dict && el.shape.count >= 1 && el.shape.count <= OBJ_INLINE
+      arr_plan = jp_build_obj_plan(root_sh, el.shape, el.shape.count)
+      jp_plan_learn_subs(arr_plan, root_sh, el) if arr_plan != nil
     i = jp_skip_ws_ptr(p, i, n) if i < n && jb_ld_u8(p + i) <= 32
     if i >= n
       parser.i = i
@@ -1723,10 +2205,10 @@ fn jp_view_set(ba_bits, ptr, len) (i64 i64 i64) i64
       parser.i = i - 1
       parser.fail("Expected ',' or ']' after array element")
   out[3] = i
-  js_mark_array(arr)
+  fast_alloc ? arr : js_mark_array(arr)
 
 -> jp_materialize(sh, cnt, v0, v1, v2, v3, v4, v5, v6, v7)
-  o = JS:Object.new(sh)
+  o = js_new_obj_fast(sh)
   o.s0 = v0 if cnt >= 1
   o.s1 = v1 if cnt >= 2
   o.s2 = v2 if cnt >= 3
@@ -1744,12 +2226,14 @@ fn jp_view_set(ba_bits, ptr, len) (i64 i64 i64) i64
     enc = fvals[f]
     st = enc >> 24
     len = enc & 16777215
-    str = is_ascii ? s.slice(st, len) : jp_slice_bytes(p, st, len)
+    str = is_ascii ? wvalue_from_bits(jsr_str_slice_raw(wvalue_bits(s) ## i64, st, len)) : jp_slice_bytes(p, st, len)
     js_s7_cache_set(p, st, len, str) if len >= 6 && len <= 15
     return str
   as = ameta[f * 2]
   ac = ameta[f * 2 + 1]
-  return js_mark_array([]) if ac == 0
+  return js_arr0_fast() if ac == 0
+  if !JS_MULTI_REALM[0] && !JS_GC_ON[0]
+    return wvalue_from_bits(jsr_arr_from_buf_raw(abuf_p, as ## i64, ac ## i64))
   arr = Array.new(ac, nil)
   jp_fill_arr_ll(wvalue_bits(arr) ## i64, abuf_p, as ## i64, ac ## i64)
   js_mark_array(arr)
@@ -1777,9 +2261,34 @@ JS_JSON_PARSE_PLANS = {}
     f += 1
   s7k_p = jit_arr_slots_ptr(wvalue_bits(JS_S7_KEYS) ## i64)
   s7v_p = jit_arr_slots_ptr(wvalue_bits(JS_S7_VALS) ## i64)
-  plan = [final_sh, cnt ## i64, jit_arr_slots_ptr(wvalue_bits(kptrs) ## i64), jit_arr_slots_ptr(wvalue_bits(klens) ## i64), kptrs, klens, keep, s7k_p, s7v_p]
+  # [9]=sub_plans(Array|nil), [10]=sub_meta(i64[24]|nil), [11]=sub_meta_p(i64)
+  plan = [final_sh, cnt ## i64, jit_arr_slots_ptr(wvalue_bits(kptrs) ## i64), jit_arr_slots_ptr(wvalue_bits(klens) ## i64), kptrs, klens, keep, s7k_p, s7v_p, nil, nil, 0 ## i64]
   JS_JSON_PARSE_PLANS[final_sh] = plan if JS_JSON_PARSE_PLANS.size < 256
   plan
+
+-> jp_plan_learn_subs(plan, root_sh, sample_obj)
+  cnt = plan[1]
+  f = 0
+  while f < cnt
+    v = sample_obj.slot_get(f)
+    if v.is_a?(JS:Object) && !v.shape.dict && v.shape.count >= 1 && v.shape.count <= OBJ_INLINE
+      sp = jp_build_obj_plan(root_sh, v.shape, v.shape.count)
+      if sp != nil
+        subs = plan[9]
+        if subs == nil
+          subs = Array.new(8, nil)
+          sm = i64[24]
+          plan[9] = subs
+          plan[10] = sm
+          plan[11] = jit_arr_slots_ptr(wvalue_bits(sm) ## i64)
+        if subs[f] == nil
+          subs[f] = sp
+          sm = plan[10]
+          sm[f] = sp[1]
+          sm[8 + f] = sp[2]
+          sm[16 + f] = sp[3]
+    f += 1
+  nil
 
 -> jp_parse_obj(parser, s, is_ascii, p, i, n, root_sh, out, nb)
   # Ultra-fast whole-object schema scan (ONE native call for all fields + closing '}'!)
@@ -1792,10 +2301,10 @@ JS_JSON_PARSE_PLANS = {}
     abuf_p = parser.abuf_p
     ameta = parser.ameta
     k = op[1]
-    ni = jp_scan_obj_fast(p, i, n, k, op[2], op[3], fvals_p, ftags_p, abuf_p, parser.ameta_p, parser.out_p, nb, op[7], op[8])
+    ni = jp_scan_obj_fast(p, i, n, k, op[2], op[3], fvals_p, ftags_p, abuf_p, parser.ameta_p, parser.out_p, nb, op[7], op[8], 0)
     if ni >= 0
       out[3] = ni
-      o = JS:Object.new(op[0])
+      o = js_new_obj_fast(op[0])
       rem = jp_fill_obj_ll(wvalue_bits(o) ## i64, fvals_p, ftags_p, k, OBJ_IBASE ## i64)
       if rem != 0
         f = 0
@@ -1808,7 +2317,7 @@ JS_JSON_PARSE_PLANS = {}
   i = jp_skip_ws_ptr(p, i, n) if i < n && jb_ld_u8(p + i) <= 32
   if i < n && jb_ld_u8(p + i) == 125
     out[3] = i + 1
-    return JS:Object.new(root_sh)
+    return js_new_obj_fast(root_sh)
   sh = root_sh
   cnt = 0
   v0 = nil; v1 = nil; v2 = nil; v3 = nil; v4 = nil; v5 = nil; v6 = nil; v7 = nil

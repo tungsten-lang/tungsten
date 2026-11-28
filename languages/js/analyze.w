@@ -20,6 +20,9 @@
 
 use parser
 
+JA_EMPTY_HASH = {}
+JA_EMPTY_ARR = []
+
 + JaBinding
   rw :name, :kind, :scope, :slot, :local, :captured, :writes, :reads, :value_uses, :callee_uses, :fnode, :tdz, :decl_pos, :early_read, :init_before_fns, :id, :lidx, :cell, :decl_const
 
@@ -81,7 +84,7 @@ use parser
     @env_count > 0 || @is_with || @has_dyn
 
 + JaFunc
-  rw :node, :parent, :index, :scope, :strict, :arrow, :uses_this, :uses_args, :dynamic, :free, :fclass, :single, :inner, :binding, :self_binding, :self_scope, :unsupported, :name, :def_scope, :nparams, :params, :this_binding, :body_scope, :script, :nlocals, :code, :scopes, :analysis, :in_if, :single_ref, :annexb, :unsupported0, :simple, :args_binding, :mapped_args, :param_nodes, :param_copies, :method_kind, :is_static, :home, :class_ctor, :derived, :default_ctor, :field_init, :class_node, :nt_binding, :fo_binding, :eval_dyn_vars, :has_tail, :has_dispose, :mod_rec
+  rw :node, :parent, :index, :scope, :strict, :arrow, :uses_this, :uses_args, :dynamic, :free, :fclass, :single, :inner, :binding, :self_binding, :self_scope, :unsupported, :name, :def_scope, :nparams, :params, :this_binding, :body_scope, :script, :nlocals, :code, :scopes, :analysis, :in_if, :single_ref, :annexb, :unsupported0, :simple, :args_binding, :mapped_args, :param_nodes, :param_copies, :method_kind, :is_static, :home, :class_ctor, :derived, :default_ctor, :field_init, :class_node, :nt_binding, :fo_binding, :eval_dyn_vars, :has_tail, :has_dispose, :mod_rec, :one_shot
 
   -> new(@node, @parent, @index)
     @scope = nil
@@ -118,6 +121,7 @@ use parser
     @mapped_args = false
     @param_nodes = []
     @param_copies = []
+    @one_shot = false
     @method_kind = nil
     @is_static = false
     @home = false
@@ -156,6 +160,7 @@ use parser
     @unsupported_counts = {}
     @fnmap = {}
     @scopemap = {}
+    @loop_depth = 0
 
   # Direct eval code (tier 0): the program as an arrow-like function defined at the
   # caller's scope outer (another analysis, already finished), so the code reads and
@@ -693,15 +698,21 @@ use parser
           walk_stmt(s.a, fs)
         else
           walk_expr(s.a, fs)
+      @loop_depth += 1
       walk_expr(s.b, fs) if s.b != nil
       walk_expr(s.c, fs) if s.c != nil
       walk_stmt(s.d, fs)
+      @loop_depth -= 1
     elsif k == :while
+      @loop_depth += 1
       walk_expr(s.a, sc)
       walk_stmt(s.b, sc)
+      @loop_depth -= 1
     elsif k == :do_while
+      @loop_depth += 1
       walk_stmt(s.a, sc)
       walk_expr(s.b, sc)
+      @loop_depth -= 1
     elsif k == :return
       walk_expr(s.a, sc) if s.a != nil
     elsif k == :break || k == :continue
@@ -788,7 +799,9 @@ use parser
         walk_expr(a.list[0].b, fs) if a.list[0].b != nil
       else
         walk_pattern(a, fs, false)
+      @loop_depth += 1
       walk_stmt(s.d, fs)
+      @loop_depth -= 1
     elsif k == :import_decl || k == :export_all
       nil
     elsif k == :export_named
@@ -953,7 +966,14 @@ use parser
       elsif (c.kind == :function || c.kind == :arrow) && !c.has?(F_ASYNC) && !c.has?(F_GENERATOR)
         walk_function(c, sc, nil)
         jf = fn_of(c)
-        jf.fclass = :iife if jf != nil
+        if jf != nil
+          jf.fclass = :iife
+          jf.one_shot = true if (f.script || f.one_shot) && @loop_depth == 0
+      elsif c.kind == :member && !c.has?(F_COMPUTED) && (c.b.str == "call" || c.b.str == "apply") && (c.a.kind == :function || c.a.kind == :arrow) && !c.a.has?(F_ASYNC) && !c.a.has?(F_GENERATOR)
+        walk_function(c.a, sc, nil)
+        jf = fn_of(c.a)
+        if jf != nil && (f.script || f.one_shot) && @loop_depth == 0 && (c.a.fin - c.a.pos >= 4096)
+          jf.one_shot = true
       else
         walk_expr(c, sc)
       walk_args(e.list, sc)
@@ -1144,7 +1164,6 @@ use parser
     pf.inner.push(jf)
     jf.def_scope = sc
     jf.binding = binding
-    jf.binding.fnode = jf if binding != nil
     jf.arrow = n.kind == :arrow
     jf.strict = pf.strict || n.has?(F_STRICT)
     jf.name = n.str == nil ? "" : n.str
@@ -1622,7 +1641,18 @@ use parser
             tb.push(b)
           q += 1
         sc.tdz_bindings = tb
+        sc.node = nil
+        if !f.dynamic && !sc.has_dyn && sc.kind != :catch && sc.kind != :class && sc.kind != :module
+          sc.names = nil
+        sc.order = JA_EMPTY_ARR if sc.order.size == 0
         j += 1
+      if f.one_shot && (f.dynamic || f.self_binding != nil || (!f.strict && f.uses_args) || f.class_ctor || f.node == nil || f.node.has?(F_ASYNC) || f.node.has?(F_GENERATOR))
+        f.one_shot = false
+      f.free = JA_EMPTY_HASH if f.free.size == 0
+      f.params = JA_EMPTY_ARR if f.params.size == 0
+      f.param_nodes = JA_EMPTY_ARR if f.param_nodes != nil && f.param_nodes.size == 0
+      f.param_copies = JA_EMPTY_ARR if f.param_copies.size == 0
+      f.inner = nil
       i += 1
     ccall("w_value_free_w", @fnmap) if @fnmap != nil
     @fnmap = {}
@@ -1632,7 +1662,7 @@ use parser
 
   # Release AST nodes and scope/function analysis tables when a Realm/Page is closed.
   -> free_once(seen, x)
-    return nil if x == nil
+    return nil if x == nil || x == JA_EMPTY_HASH || x == JA_EMPTY_ARR
     k = (wvalue_bits(x) ## i64) & 140737488355312
     return nil if k == 0 || seen.has_key?(k)
     seen[k] = true

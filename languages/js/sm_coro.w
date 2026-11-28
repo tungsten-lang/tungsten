@@ -250,9 +250,10 @@ SM_DISP_ADD              = 99  # a=is_async: add top of vs to disps.last (leaves
 SM_DISP_ENTER            = 100 # a=fin_pc: normal exit into dispose step
 SM_DISP_STEP             = 101 # step disposing cap in temps.last (may suspend :await)
 SM_IMPORT_CALL           = 102 # a=phase_str_or_nil, b=has_opts_bool: pop opts(if b), spec -> push Promise
+SM_AWAIT_PROMISE_ALL     = 103 # a=arr_lidx, b=prom_cell, c=orig_arg_expr
 
 + SmCode
-  rw :ops, :a, :b, :c, :d, :len, :is_async, :is_gen, :has_try
+  rw :ops, :a, :b, :c, :d, :len, :is_async, :is_gen, :has_try, :fast_kind, :fast_a, :fast_b, :fast_jf, :fast_pure, :fast_cache
   -> new(@is_async, @is_gen)
     @ops = i64[32]
     @a = []
@@ -261,6 +262,12 @@ SM_IMPORT_CALL           = 102 # a=phase_str_or_nil, b=has_opts_bool: pop opts(i
     @d = []
     @len = 0
     @has_try = false
+    @fast_kind = 0
+    @fast_a = nil
+    @fast_b = nil
+    @fast_jf = nil
+    @fast_pure = false
+    @fast_cache = nil
 
   -> emit(op, a = nil, b = nil, c = nil, d = nil)
     if @len >= @ops.size
@@ -337,6 +344,15 @@ SM_IMPORT_CALL           = 102 # a=phase_str_or_nil, b=has_opts_bool: pop opts(i
   return nil if e == nil || e.kind != :call || e.list.size != 1
   c = e.a
   return nil if c.kind != :member || c.has?(F_COMPUTED) || c.b.str != "resolve"
+  return nil if c.a.kind != :ident || c.a.str != "Promise" || c.a.x == nil
+  b = c.a.x.binding
+  return nil if b == nil || !b.global? || b.writes > 0
+  [wk_cell(b), e.list[0]]
+
+-> sm_match_prom_all(e)
+  return nil if e == nil || e.kind != :call || e.list.size != 1
+  c = e.a
+  return nil if c.kind != :member || c.has?(F_COMPUTED) || c.b.str != "all"
   return nil if c.a.kind != :ident || c.a.str != "Promise" || c.a.x == nil
   b = c.a.x.binding
   return nil if b == nil || !b.global? || b.writes > 0
@@ -1016,6 +1032,13 @@ SM_IMPORT_CALL           = 102 # a=phase_str_or_nil, b=has_opts_bool: pop opts(i
         if li >= 0
           @code.emit(SM_AWAIT_RESOLVE_LOCAL, li, pm[0], e.a)
           return nil
+      # Peephole: `await Promise.all(local_arr)` -> zero-overhead SM_AWAIT_PROMISE_ALL!
+      pa = sm_match_prom_all(e.a)
+      if pa != nil && !sm_has_suspend?(pa[1])
+        li = sm_local_idx(pa[1], @jf)
+        if li >= 0
+          @code.emit(SM_AWAIT_PROMISE_ALL, li, pa[0], e.a)
+          return nil
       compile_expr(e.a)
       @code.emit(SM_AWAIT)
       return nil
@@ -1479,11 +1502,130 @@ SM_IMPORT_CALL           = 102 # a=phase_str_or_nil, b=has_opts_bool: pop opts(i
     @code.emit(SM_TEMP_POP)
     nil
 
+-> sm_expr_pure?(e, jf)
+  return true if e == nil
+  k = e.kind
+  return true if k == :num || k == :string || k == :true || k == :false || k == :null
+  if k == :ident
+    return false if e.x == nil || e.x.binding == nil
+    b = e.x.binding
+    return !b.global? && b.slot < 0 && b.scope.func == jf
+  if k == :unary
+    op = e.str
+    return (op == "-" || op == "+" || op == "~" || op == "!" || op == "typeof" || op == "void") && sm_expr_pure?(e.a, jf)
+  if k == :binary
+    op = e.str
+    return op != "in" && op != "instanceof" && sm_expr_pure?(e.a, jf) && sm_expr_pure?(e.b, jf)
+  if k == :logical
+    return sm_expr_pure?(e.a, jf) && sm_expr_pure?(e.b, jf)
+  if k == :cond
+    return sm_expr_pure?(e.a, jf) && sm_expr_pure?(e.b, jf) && sm_expr_pure?(e.c, jf)
+  false
+
+-> js_sm_detect_fast(jf, sc)
+  return nil if !sc.is_async || sc.is_gen || !jf.simple || jf.dynamic || jf.mapped_args || jf.args_binding != nil || jf.free.size > 0 || jf.uses_this || jf.self_binding != nil || jf.params.size > 4
+  return nil if jf.scope.has_env? || (jf.body_scope != nil && jf.body_scope.has_env?)
+  stmts = jf.node.b
+  return nil if !stmts.is_a?(Array)
+  # Case 1: `async function f(p0..p3) { return await Promise.resolve(sync_expr); }` -> JIT-compiled sync helper!
+  if stmts.size == 1 && stmts[0].kind == :return && stmts[0].a != nil && stmts[0].a.kind == :await
+    aw = stmts[0].a.a
+    if aw != nil && aw.kind == :call && aw.list.size == 1 && aw.a != nil && aw.a.kind == :member && !aw.a.has?(F_COMPUTED) && aw.a.b.str == "resolve" && aw.a.a != nil && aw.a.a.kind == :ident && aw.a.a.str == "Promise" && aw.a.a.x != nil && aw.a.a.x.binding != nil && aw.a.a.x.binding.global?
+      expr = aw.list[0]
+      if !sm_has_suspend?(expr)
+        ret_n = JsNode.new(:return, 0, 0, "", expr, nil, nil, nil, 0)
+        sn = JsNode.new(:function, jf.node.pos, jf.node.fin, jf.node.str, jf.node.a, [ret_n], jf.node.c, jf.node.list, jf.node.flags & (F_ASYNC ^ -1))
+        sjf = JaFunc.new(sn, jf.parent, jf.index)
+        sjf.scope = jf.scope
+        sjf.body_scope = jf.body_scope
+        sjf.strict = jf.strict
+        sjf.arrow = false
+        sjf.simple = true
+        sjf.name = jf.name + "$sync"
+        sjf.nparams = jf.nparams
+        sjf.params = jf.params
+        sjf.nlocals = jf.nlocals
+        sjf.analysis = jf.analysis
+        sjf.scopes = jf.scopes
+        jf.scope.func = sjf
+        jf.body_scope.func = sjf if jf.body_scope != nil
+        elig = jit_eligible_fn?(sjf)
+        jf.scope.func = jf
+        jf.body_scope.func = jf if jf.body_scope != nil
+        if elig
+          scd = JS:Code.new(sjf.name, sjf.nparams, -1, sjf.strict ? CODE_STRICT : 0)
+          scd.node = sjf
+          scd.realm = js_realm()
+          sc.fast_kind = 1
+          sc.fast_a = scd
+          sc.fast_b = wk_cell(aw.a.a.x.binding)
+          sc.fast_jf = jf
+          sc.fast_pure = sm_expr_pure?(expr, jf)
+          return nil
+  # Case 2: `async function f(x) { var a = await g1(x); return await g2(a); }` -> zero-frame Promise chain!
+  if stmts.size == 2 && jf.params.size == 1
+    s0 = stmts[0]
+    s1 = stmts[1]
+    if s0.kind == :var_decl && s0.list.size == 1 && s1.kind == :return && s1.a != nil && s1.a.kind == :await
+      d0 = s0.list[0]
+      ab = (d0.a != nil && d0.a.x != nil) ? d0.a.x.binding : nil
+      if ab != nil && !ab.global? && ab.slot < 0 && d0.b != nil && d0.b.kind == :await
+        c1 = d0.b.a
+        c2 = s1.a.a
+        if c1 != nil && c1.kind == :call && c1.list.size == 1 && c1.a != nil && c1.a.kind == :ident && c1.a.x != nil && c1.a.x.binding != nil && c1.a.x.binding.global? && c1.list[0].kind == :ident && c1.list[0].x != nil && c1.list[0].x.binding == jf.params[0]
+          if c2 != nil && c2.kind == :call && c2.list.size == 1 && c2.a != nil && c2.a.kind == :ident && c2.a.x != nil && c2.a.x.binding != nil && c2.a.x.binding.global? && c2.list[0].kind == :ident && c2.list[0].x != nil && c2.list[0].x.binding == ab
+            sc.fast_kind = 2
+            sc.fast_a = wk_cell(c1.a.x.binding)
+            sc.fast_b = wk_cell(c2.a.x.binding)
+  nil
+
+-> js_sm_fast1_call(sc, f, argc, a0, a1, a2, a3, r)
+  return nil if argc > 4 || !js_promise_pristine?(r) || sc.fast_b.value != r.promise_ctor
+  cd = sc.fast_a
+  fp = cd.jit_fp
+  if fp == 0 && cd.jit_state == 0
+    hc = cd.jit_hits + 1
+    cd.jit_hits = hc
+    return nil if hc < WK_JIT_FN_THRESH
+    jf = sc.fast_jf
+    sjf = cd.node
+    wa = argc == 0 ? [] : (argc == 1 ? [a0] : (argc == 2 ? [a0, a1] : (argc == 3 ? [a0, a1, a2] : [a0, a1, a2, a3])))
+    jf.scope.func = sjf
+    jf.body_scope.func = sjf if jf.body_scope != nil
+    begin
+      jit_compile_and_install(cd, wa)
+    ensure
+      jf.scope.func = jf
+      jf.body_scope.func = jf if jf.body_scope != nil
+    fp = cd.jit_fp
+  return nil if fp == 0
+  prom = JS:Promise.new(r.promise_shape)
+  val = nil
+  begin
+    val = wvalue_from_bits(jit_raw_call8(fp ## i64, wvalue_bits(f) ## i64, 0, argc ## i64, wvalue_bits(a0) ## i64, wvalue_bits(a1) ## i64, wvalue_bits(a2) ## i64, wvalue_bits(a3) ## i64, 0))
+  rescue ex
+    js_promise_reject_fast(prom, js_error_value(ex), r.jobs)
+    return prom
+  return nil if js_is_slow_bits(wvalue_bits(val) ## i64) != 0
+  if !js_object?(val)
+    r.jobs.push_rx_prom(prom, nil, val, 0)
+  else
+    begin
+      p_in = js_promise_resolve_value(val)
+      if js_promise?(p_in) && p_in.shape == r.promise_shape && js_promise_then_pristine?()
+        js_promise_adopt(prom, p_in)
+      else
+        js_promise_resolve_with(prom, p_in)
+    rescue ex2
+      js_promise_reject_fast(prom, js_error_value(ex2), r.jobs)
+  prom
+
 -> js_sm_compile(jf)
   c = wk_code(jf)
   sc = c.sm_code
   if sc == nil
     sc = JS:SmCompiler.new(jf).compile
+    js_sm_detect_fast(jf, sc)
     c.sm_code = sc
   sc
 
@@ -1823,6 +1965,55 @@ SM_IMPORT_CALL           = 102 # a=phase_str_or_nil, b=has_opts_bool: pop opts(i
             frame.result_val = js_promise_resolve_value(v)
             return nil
           # Slow fallback (Promise or Promise.resolve was monkey-patched!)
+          v = wk_ev(cc[pc], act)
+          JS_CUR_ACT[0] = act.caller
+          frame.result_kind = :await
+          frame.result_val = v
+          return nil
+        elsif op == SM_AWAIT_PROMISE_ALL
+          r = js_realm()
+          cell = cb[pc]
+          arr = locs[ca[pc]]
+          if q != nil && !JS_MULTI_REALM[0] && js_promise_pristine?(r) && cell.value == r.promise_ctor && js_array?(arr) && (js_array_flags(arr) & 15) == JS_AF_ARRAY && js_array_iter_pristine?(arr)
+            n = js_arr_len(arr)
+            if is_resumed && n > 0 && q.size == n && jb_arr_start(wvalue_bits(arr) ## i64) == 0
+              h0 = q.head
+              if q.kinds[h0] == JOB_ASYNC_PIPE && q.flags[h0] == 3
+                cell2 = q.qb[h0]
+                fn2 = cell2.value
+                if fn2.is_a?(JS:Function) && fn2.code != nil && fn2.code.sm_code != nil
+                  sc2 = fn2.code.sm_code
+                  if sc2.fast_kind == 1 && sc2.fast_pure && sc2.fast_b.value == r.promise_ctor && sc2.fast_a.jit_fp != 0
+                    js_prom_offs_init(q) if JS_PROM_OFFS[0] == 0
+                    if JS_PROM_OFFS[0] > 0 && JS_PROM_OFFS[2] > 0
+                      vals_pa = Array.new(n, nil)
+                      pa_b = JS_PIPE_ARGS
+                      pa_b[0] = jit_arr_slots_ptr(wvalue_bits(arr) ## i64)
+                      pa_b[1] = wvalue_bits(cell2) ## i64
+                      pa_b[2] = sc2.fast_a.jit_fp ## i64
+                      pa_b[3] = wvalue_bits(fn2) ## i64
+                      pa_b[4] = wvalue_bits(:pending) ## i64
+                      pa_b[5] = wvalue_bits(:fulfilled) ## i64
+                      pa_b[6] = jit_arr_slots_ptr(wvalue_bits(vals_pa) ## i64)
+                      pa_b[7] = jit_i64_ptr(JS_PROM_OFFS)
+                      pa_b[8] = jit_i64_ptr(q.kinds)
+                      pa_b[9] = jit_i64_ptr(q.flags)
+                      pa_b[10] = jit_arr_slots_ptr(wvalue_bits(q.qa) ## i64)
+                      pa_b[11] = jit_arr_slots_ptr(wvalue_bits(q.qb) ## i64)
+                      pa_b[12] = jit_arr_slots_ptr(wvalue_bits(q.qc) ## i64)
+                      pa_b[13] = h0 ## i64
+                      pa_b[14] = q.mask ## i64
+                      pa_b[15] = n ## i64
+                      pa_b[16] = wvalue_bits(0) ## i64
+                      pa_b[17] = wvalue_bits(r.promise_shape) ## i64
+                      if js_drain_async_pipe_arr_ll(jit_i64_ptr(pa_b)) == 1
+                        q.head = q.tail
+                        vs.push(r.adopt_array(vals_pa))
+                        next
+            JS_CUR_ACT[0] = act.caller
+            frame.result_kind = :await
+            frame.result_val = js_promise_combinator(r.promise_ctor, arr, :all)
+            return nil
           v = wk_ev(cc[pc], act)
           JS_CUR_ACT[0] = act.caller
           frame.result_kind = :await
@@ -2894,16 +3085,175 @@ SM_IMPORT_CALL           = 102 # a=phase_str_or_nil, b=has_opts_bool: pop opts(i
   frame.pc = target_pc
   nil
 
+-> js_sm_ensure_fast1_fp(sc, x0)
+  cd = sc.fast_a
+  fp = cd.jit_fp
+  if fp == 0 && cd.jit_state == 0
+    hc = cd.jit_hits + 1
+    cd.jit_hits = hc
+    return 0 if hc < WK_JIT_FN_THRESH
+    jf = sc.fast_jf
+    sjf = cd.node
+    jf.scope.func = sjf
+    jf.body_scope.func = sjf if jf.body_scope != nil
+    begin
+      jit_compile_and_install(cd, [x0])
+    ensure
+      jf.scope.func = jf
+      jf.body_scope.func = jf if jf.body_scope != nil
+    fp = cd.jit_fp
+  fp
+
+# Direct single-hop pure-LLVM entry for `RT_SM_FAST2` (zero `w_method_call_cached_*` on hot loop!).
+-> js_sm_fast2_direct(sc, f, x0)
+  fc = sc.fast_cache
+  if fc != nil && !JS_MULTI_REALM[0]
+    prom = JS:Promise.new(JS_REALM[0].promise_shape)
+    return prom if js_sm_fast2_enq_ll(jit_i64_ptr(fc), wvalue_bits(prom) ## i64, wvalue_bits(x0) ## i64) == 1
+    sc.fast_cache = nil
+  res = js_sm_call_fast2(sc, f, x0)
+  return res if res != nil
+  js_call(f, nil, 1, x0, nil, nil, nil, nil)
+
+# Zero-`begin/rescue` (zero closure cells, zero setjmp!) hot path for 2-await async chains with pure compiled stage1!
+-> js_sm_call_fast2(sc, f, x0)
+  r = js_realm()
+  return nil if !js_promise_pristine?(r)
+  fn1 = sc.fast_a.value
+  fn2 = sc.fast_b.value
+  return nil if !fn1.is_a?(JS:Function) || !fn2.is_a?(JS:Function)
+  if !JS_MULTI_REALM[0] && fn1.code != nil && fn1.code.sm_code != nil
+    sc1 = fn1.code.sm_code
+    if sc1.fast_kind == 1 && sc1.fast_pure && sc1.fast_b.value == r.promise_ctor && js_is_prim_num_or_small(wvalue_bits(x0) ## i64) != 0
+      fp1 = sc1.fast_a.jit_fp
+      fp1 = js_sm_ensure_fast1_fp(sc1, x0) if fp1 == 0 && sc1.fast_a.jit_state == 0
+      if fp1 != 0
+        val_b = jit_raw_call8(fp1 ## i64, wvalue_bits(fn1) ## i64, 0, 1, wvalue_bits(x0) ## i64, 0, 0, 0, 0)
+        if js_is_slow_bits(val_b) == 0 && js_is_prim_num_or_small(val_b) != 0
+          val = wvalue_from_bits(val_b)
+          fn2_ready = false
+          if fn2.code != nil && fn2.code.sm_code != nil && fn2.code.sm_code.fast_kind == 1
+            if fn2.code.sm_code.fast_a.jit_fp == 0 && fn2.code.sm_code.fast_a.jit_state == 0
+              js_sm_ensure_fast1_fp(fn2.code.sm_code, val)
+            fn2_ready = fn2.code.sm_code.fast_a.jit_fp != 0
+          q = r.jobs
+          if fn2_ready
+            js_prom_offs_init(q) if JS_PROM_OFFS[0] == 0
+            if JS_PROM_OFFS[6] > 0 && JS_PROM_OFFS[8] > 0
+              fc = i64[17]
+              fc[0] = jit_i64_ptr(JS_EPOCH)
+              fc[1] = JS_EPOCH[0]
+              fc[2] = (wvalue_bits(sc.fast_a) ## i64) - 4
+              fc[3] = wvalue_bits(fn1) ## i64
+              fc[4] = wvalue_bits(sc.fast_b) ## i64
+              fc[5] = fp1 ## i64
+              fc[6] = (wvalue_bits(q) ## i64) - 4
+              fc[7] = JS_PROM_OFFS[6]
+              fc[8] = JS_PROM_OFFS[7]
+              fc[9] = q.mask ## i64
+              fc[10] = jit_i64_ptr(q.kinds)
+              fc[11] = jit_i64_ptr(q.flags)
+              fc[12] = jit_arr_slots_ptr(wvalue_bits(q.qa) ## i64)
+              fc[13] = jit_arr_slots_ptr(wvalue_bits(q.qb) ## i64)
+              fc[14] = jit_arr_slots_ptr(wvalue_bits(q.qc) ## i64)
+              fc[15] = wvalue_bits(0) ## i64
+              fc[16] = JS_PROM_OFFS[8]
+              sc.fast_cache = fc
+          prom = JS:Promise.new(r.promise_shape)
+          q.push_async_pipe(prom, sc.fast_b, val, 3)
+          return prom
+  js_sm_call_fast2_slow(sc, f, x0, r, fn1, fn2)
+
+-> js_sm_call_fast2_slow(sc, f, x0, r, fn1, fn2)
+  q = r.jobs
+  if !JS_MULTI_REALM[0] && fn1.code != nil && fn1.code.sm_code != nil
+    sc1 = fn1.code.sm_code
+    if sc1.fast_kind == 1 && sc1.fast_b.value == r.promise_ctor
+      fp1 = js_sm_ensure_fast1_fp(sc1, x0)
+      if fp1 != 0
+        val = nil
+        begin
+          val = wvalue_from_bits(jit_raw_call8(fp1 ## i64, wvalue_bits(fn1) ## i64, 0, 1, wvalue_bits(x0) ## i64, 0, 0, 0, 0))
+        rescue ex
+          prom_e = JS:Promise.new(r.promise_shape)
+          js_promise_reject_fast(prom_e, js_error_value(ex), q)
+          return prom_e
+        if js_is_slow_bits(wvalue_bits(val) ## i64) == 0 && !js_object?(val)
+          if fn2.code != nil && fn2.code.sm_code != nil && fn2.code.sm_code.fast_kind == 1 && fn2.code.sm_code.fast_a.jit_fp == 0 && fn2.code.sm_code.fast_a.jit_state == 0
+            js_sm_ensure_fast1_fp(fn2.code.sm_code, val)
+          prom = JS:Promise.new(r.promise_shape)
+          q.push_async_pipe(prom, sc.fast_b, val, 3)
+          return prom
+  prom = JS:Promise.new(r.promise_shape)
+  p1 = nil
+  begin
+    if !JS_MULTI_REALM[0] && fn1.code != nil && fn1.code.sm_code != nil && fn1.code.sm_code.fast_kind == 1
+      p1 = js_sm_fast1_call(fn1.code.sm_code, fn1, 1, x0, nil, nil, nil, r)
+    p1 = js_call(fn1, nil, 1, x0, nil, nil, nil, nil) if p1 == nil
+  rescue ex
+    js_promise_reject_fast(prom, js_error_value(ex), q)
+    return prom
+  if js_promise?(p1) && p1.shape == r.promise_shape
+    p1st = p1.state
+    if p1st == :pending
+      js_promise_attach_raw(p1, 6, prom, fn2, nil)
+      p1.handled = true
+      return prom
+    if p1st == :fulfilled
+      p1.handled = true
+      q.push_async_chain(prom, fn2, p1.value, 0)
+      return prom
+    if !p1.handled
+      ui = JS_UNHANDLED.index(p1)
+      JS_UNHANDLED.delete_at(ui) if ui != nil
+    p1.handled = true
+    q.push_async_chain(prom, nil, p1.value, 1)
+    return prom
+  if !js_object?(p1)
+    q.push_async_chain(prom, fn2, p1, 0)
+    return prom
+  begin
+    p1r = js_promise_resolve_value(p1)
+    if js_promise?(p1r) && p1r.shape == r.promise_shape && js_promise_then_pristine?()
+      p1st = p1r.state
+      if p1st == :pending
+        js_promise_attach_raw(p1r, 6, prom, fn2, nil)
+        p1r.handled = true
+      elsif p1st == :fulfilled
+        p1r.handled = true
+        q.push_async_chain(prom, fn2, p1r.value, 0)
+      else
+        if !p1r.handled
+          ui = JS_UNHANDLED.index(p1r)
+          JS_UNHANDLED.delete_at(ui) if ui != nil
+        p1r.handled = true
+        q.push_async_chain(prom, nil, p1r.value, 1)
+    else
+      a_rx = JS:Reaction.new(nil, :fulfill, ->(v) js_prom_async_chain_step(prom, fn2, v, 0, js_realm().jobs))
+      b_rx = JS:Reaction.new(nil, :reject, ->(v) js_prom_async_chain_step(prom, nil, v, 1, js_realm().jobs))
+      js_perform_then(p1r, a_rx, b_rx)
+  rescue ex2
+    js_promise_reject_fast(prom, js_error_value(ex2), q)
+  prom
+
 # ---- Public Entry Points for Async Functions, Generators, and Async Generators ----
 
 -> js_sm_call_suspendable(jf, f, this, argc, a0, a1, a2, a3, more)
-  act = WkAct.new(jf, f, js_fenv(f), this, jf.nlocals)
-  act.argc = argc
-  act.args = more
   n = jf.node
   gen = n.has?(F_GENERATOR)
   asy = n.has?(F_ASYNC)
   sc = js_sm_compile(jf)
+  if asy && !gen && sc.fast_kind != 0
+    r = js_realm()
+    if sc.fast_kind == 1
+      fp1 = js_sm_fast1_call(sc, f, argc, a0, a1, a2, a3, r)
+      return fp1 if fp1 != nil
+    elsif sc.fast_kind == 2 && argc <= 4
+      fp2 = js_sm_call_fast2(sc, f, argc >= 1 ? a0 : nil)
+      return fp2 if fp2 != nil
+  act = WkAct.new(jf, f, js_fenv(f), this, jf.nlocals)
+  act.argc = argc
+  act.args = more
   if asy && !gen
     r = js_realm()
     prom = JS:Promise.new(r.promise_shape)

@@ -195,3 +195,4 @@ import tested_denominators
 #axioms cfield_aut.det_frame_compression
 #axioms cmat.frame_compression_arch_det_le
 #axioms cfield_aut.abs_det_frame_compression_le
+#axioms cmat.frame_compression_det_identity

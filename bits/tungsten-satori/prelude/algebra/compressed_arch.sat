@@ -139,6 +139,27 @@ import algebra.field_aut
   have hlt : complex.re z < complex.abs z := by linarith
   nlinarith
 
+-- The determinant identity with a metric (`det_compressedGramOp` with `adjoint_comp_eq_conj_smul`,
+-- `New/Rows/LiftVolumeHeight.lean:33-41`): if `U^* H G = gam A`, the Gram determinant of the frame
+-- times the compressed Gram determinant is `(k |gam|^2)^d det(A A^*)`.
++ cmat.frame_compression_det_identity (N M d : ℕ) (k : ℝ) (gam : ℂ) (H U G A : ℕ → ℕ → ℂ)
+    (hH : cmat.is_psd N H) (hGu : cmat.det d (cmat.cross_gram N H U U) ≠ complex.zero)
+    (hcomp : ∀ i < d, ∀ a < M, cmat.cross_gram N H U G i a = complex.mul gam (A i a)) :
+    complex.mul (cmat.det d (cmat.cross_gram N H U U)) (cmat.det d (cmat.frame_compression N d H U (cmat.compressed_image N M k H U G))) = complex.mul (complex.of_real ((k * complex.norm_sq gam) ^ d)) (cmat.det d (cmat.mul M A (cmat.adj A)))
+  obtain ⟨L, hHL⟩ := cmat.psd_exists_factor N H hH
+  have e1 : cmat.gram_cols N (cmat.mul N L U) = cmat.cross_gram N H U U
+    funext a; funext b; unfold cmat.gram_cols; exact cmat.cross_factor N H L U U hHL a b
+  have hdet : cmat.det d (cmat.frame_compression N d H U (cmat.compressed_image N M k H U G)) = cmat.det d (cmat.compressed_gram N M d k (cmat.mul N L U) (cmat.mul N L G))
+    apply cmat.det_congr; intro i _ j _
+    exact cmat.frame_compression_eq_compressed_gram N M d k H L U G hH.1 hHL i j
+  have hGu' : cmat.det d (cmat.gram_cols N (cmat.mul N L U)) ≠ complex.zero := by rw [e1]; exact hGu
+  have hcomp' : ∀ i < d, ∀ a < M, cmat.mul N (cmat.adj (cmat.mul N L U)) (cmat.mul N L G) i a = complex.mul gam (A i a)
+    intro i hi a ha
+    rw [cmat.cross_factor N H L U G hHL i a]; exact hcomp i hi a ha
+  have hid := cmat.compressed_gram_det_identity N M d k gam (cmat.mul N L U) (cmat.mul N L G) A hGu' hcomp'
+  rw [e1] at hid
+  rw [hdet]; exact hid
+
 -- ====================================================================================
 -- THE BOUND AT EVERY AUTOMORPHISM OF ℂ
 -- ====================================================================================
@@ -180,3 +201,4 @@ import algebra.field_aut
 
 #axioms cmat.frame_compression_arch_det_le
 #axioms cfield_aut.abs_det_frame_compression_le
+#axioms cmat.frame_compression_det_identity
